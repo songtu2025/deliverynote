@@ -18,10 +18,11 @@ git log -3 --oneline --decorate
 
 正常情况下应位于 `master`，工作区干净。接着完整阅读：
 
-1. `README.md`
-2. `HANDOFF_WEB_UPGRADE.md`
-3. `compose.yaml`
-4. `.env.example`
+1. `AGENTS.md`
+2. `README.md`
+3. `HANDOFF_WEB_UPGRADE.md`
+4. `compose.yaml`
+5. `.env.example`
 
 不要从旧方案重新搭项目。前后端、Worker 和部署配置已经实现，应从当前代码和测试结果继续。
 
@@ -43,7 +44,7 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 39/39 passed
+Python unittest: 41/41 passed
 Frontend Vitest: 1/1 passed
 Frontend production build: passed
 pip check: passed
@@ -67,6 +68,8 @@ Windows 开发机没有安装 Docker，因此尚未完成 Linux 上的真实容�
 | `delivery_note/worker.py` | 计算、导出、任务租约和超时恢复 |
 | `frontend/src/` | 登录、批次、审阅拆分和管理员页面 |
 | `tests/` | Python 单元、API 和 Worker 端到端测试 |
+| `scripts/generate_acceptance_data.py` | 生成五类输入和双文件共享余额验收数据 |
+| `tests/fixtures/` | 不含业务信息的最小测试 fixture |
 | `compose.yaml` | PostgreSQL、API、Worker 和 Web 服务 |
 
 Web 和 CLI 必须继续调用同一套核心业务函数，不要复制一套仅供 API 使用的采购匹配逻辑。
@@ -110,9 +113,26 @@ Web 和 CLI 必须继续调用同一套核心业务函数，不要复制一套�
 交货备注
 ```
 
-业务 Excel、`.env`、数据库和导出结果都不在 Git 仓库中。
+业务 Excel、`.env`、数据库和导出结果都不在 Git 仓库中。需要完整验收数据时运行：
 
-## 6. Linux 部署验收
+```bash
+python scripts/generate_acceptance_data.py --output-dir acceptance_data
+```
+
+该命令生成五类输入版本和两份脱敏交货文件，预期共享余额结果为 `160 = 100 + 60`。
+
+## 6. 项目完成标准
+
+`README.md` 的“项目完成标准”是统一验收口径，分为代码、Linux 部署、业务和运维四类门槛。四类全部通过前，不得把项目标记为完成或生产可用。
+
+最低要求：
+
+1. GitHub 全新克隆的 Python、前端测试和生产构建全部通过，不依赖旧机器文件。
+2. Linux 上 PostgreSQL、API、单 Worker 和 Web 四个容器运行正常并通过重启持久化。
+3. 使用脱敏验收数据完成五类版本上传、共享余额、拆分、数量守恒和导出。
+4. HTTPS、数据库与文件卷成对备份、恢复演练和数据库迁移方案可执行。
+
+## 7. Linux 部署验收
 
 先按 `README.md` 创建 `.env` 并启动：
 
@@ -147,7 +167,7 @@ docker compose up -d
 
 不要执行 `docker compose down -v`。该命令会删除数据库和文件卷。
 
-## 7. 当前已知边界
+## 8. 当前已知边界
 
 - Compose 只启动一个 Worker。这是当前确认范围，不要在没有并发测试前直接扩容多个 Worker。
 - Web 只绑定 `127.0.0.1`，正式访问需要外部 HTTPS 反向代理。
@@ -158,7 +178,7 @@ docker compose up -d
 - 前端生产构建存在单包约 1.1 MB 的体积提示，当前不影响功能，不要为了消除提示优先引入复杂拆包。
 - 仓库是公开仓库，禁止提交业务数据、真实密码、Token 或客户文件。
 
-## 8. 测试命令
+## 9. 测试命令
 
 Python：
 
@@ -181,7 +201,7 @@ npm run build
 
 业务逻辑、API、Worker 或模型发生变化后，必须运行全部 Python 测试。前端变更至少运行 `npm run test` 和 `npm run build`。
 
-## 9. Git 和 Codex CLI 工作规则
+## 10. Git 和 Codex CLI 工作规则
 
 - 开始前运行 `git status -sb`，确认没有他人的未提交改动。
 - 不要使用 `git reset --hard`、`git clean` 或批量删除来处理不熟悉的文件。
@@ -199,9 +219,9 @@ codex
 
 建议给 Codex 的首条指令：
 
-> 请先完整阅读 README.md 和 HANDOFF_WEB_UPGRADE.md，然后检查 git status、当前提交、compose.yaml、.env.example 和现有测试。当前第一目标是完成 Linux Docker Compose 实机部署验收：启动 PostgreSQL、API、单 Worker 和 Web，验证健康检查、登录、五类版本上传、双文件共享采购余额、拆分审校、单文件与 ZIP 导出，以及容器重启后的数据持久化。不要从头重建，不要改变已有采购匹配、超量保留、锁仓优先、导出格式和 CLI 行为。发现问题时先给出复现证据，再做最小修复；每完成一个阶段运行相应测试并汇报结果。不要提交 .env、Excel、数据库或输出文件。
+> 请先完整阅读 AGENTS.md、README.md 和 HANDOFF_WEB_UPGRADE.md，然后检查 git status、当前提交、compose.yaml、.env.example 和现有测试，并运行验收数据生成脚本。当前第一目标是完成 Linux Docker Compose 实机部署验收：启动 PostgreSQL、API、单 Worker 和 Web，验证健康检查、登录、五类版本上传、双文件共享采购余额、拆分审校、单文件与 ZIP 导出，以及容器重启后的数据持久化。不要从头重建，不要改变已有采购匹配、超量保留、锁仓优先、导出格式和 CLI 行为。发现问题时先给出复现证据，再做最小修复；每完成一个阶段运行相应测试并汇报结果。不要提交 .env、Excel、数据库或输出文件。
 
-## 10. Linux 验收后的建议顺序
+## 11. Linux 验收后的建议顺序
 
 1. 记录真实 Docker/PostgreSQL 部署中发现的问题并补回归测试。
 2. 验证外部 HTTPS 代理、上传大小和长任务日志。

@@ -33,6 +33,7 @@ compose.yaml            PostgreSQL、API、Worker、Web 编排
 Dockerfile              API 和 Worker 镜像
 .env.example            部署环境变量示例
 HANDOFF_WEB_UPGRADE.md   当前状态和 Codex CLI 续开发交接
+AGENTS.md                Codex CLI 自动读取的项目规则
 ```
 
 ## Linux Docker 部署
@@ -95,6 +96,27 @@ ssh -L 8080:127.0.0.1:8080 用户名@服务器地址
 7. 生成单文件结果和批次 ZIP。
 
 输入文件不会保存在 Git 仓库中，需要在部署后通过管理页面上传。
+
+## 脱敏验收数据
+
+仓库提供一个固定场景生成器，可在任意新环境生成七份脱敏 Excel：
+
+```bash
+source .venv/bin/activate
+python scripts/generate_acceptance_data.py --output-dir acceptance_data
+```
+
+生成内容包括五类输入版本和两份 `KuangBiao` 交货文件。采购未交量为 100，两份交货文件各交货 80。按 A、B 顺序计算时，预期结果是：
+
+```text
+交货总量：160
+可导入总量：100
+待处理总量：60
+第一个文件可导入：80
+第二个文件可导入：20
+```
+
+`acceptance_data/` 仅用于本机验收，不应提交到 Git。
 
 ## 本地开发
 
@@ -162,7 +184,41 @@ npm run test
 npm run build
 ```
 
-当前基线是 Python 39/39 通过、前端 1/1 通过，生产构建成功。
+当前基线是 Python 41/41 通过、前端 1/1 通过，生产构建成功。
+
+## 项目完成标准
+
+只有以下四类门槛全部通过，才能把项目标记为完成或生产可用。
+
+### 代码门槛
+
+- 从 GitHub 全新克隆，不复制旧机器的 `src_data`、虚拟环境或缓存。
+- Python 依赖安装成功，全部测试通过且 `pip check` 无冲突。
+- 前端 `npm ci`、测试和生产构建通过。
+- 测试不依赖未提交的业务文件或绝对路径。
+
+### Linux 部署门槛
+
+- PostgreSQL、API、单 Worker 和 Web 四个容器正常运行。
+- `/health` 返回成功，容器日志没有 traceback。
+- 容器重启后用户、输入版本、批次和上传文件仍存在。
+- 外部 HTTPS 代理能够安全访问 Web，HTTP 不直接暴露到公网。
+
+### 业务验收门槛
+
+- 管理员可以上传并启用五类输入版本。
+- 两份交货文件按界面顺序共享采购余额，预期数量与验收场景一致。
+- 预检、计算、异常拆分、数量守恒、单文件导出和批次 ZIP 全部通过。
+- 原有 CLI、仓库优先级、锁仓匹配和模板 A:G 格式保持兼容。
+
+### 运维门槛
+
+- PostgreSQL 和文件卷有成对备份，并至少完成一次恢复演练。
+- 管理员密码、`.env`、业务 Excel 和导出文件未进入 Git。
+- 数据库改表有可执行的迁移方案。
+- README、交接文档和实际部署命令保持一致。
+
+当前代码门槛可以自动验证；Linux 部署、真实业务和运维门槛仍需要在目标机器完成，完成前不要宣称生产可用。
 
 ## 原有单文件 CLI
 

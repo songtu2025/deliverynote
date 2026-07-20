@@ -11,6 +11,7 @@ __pycache__/
 *.db
 storage/
 outputs/
+acceptance_data/
 output.xlsx
 src_data/
 patch_probe.txt
@@ -18,6 +19,8 @@ patch_probe.txt
 # Local spreadsheets are operational data, not source code
 *.xls
 *.xlsx
+!tests/fixtures/
+!tests/fixtures/*.xls
 
 # Frontend
 frontend/node_modules/

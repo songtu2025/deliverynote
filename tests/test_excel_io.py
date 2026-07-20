@@ -67,7 +67,7 @@ class ExcelInputTests(unittest.TestCase):
         if read_supplier_workbook is None:
             return
 
-        source = next(Path("src_data").glob("供应商资料导出-*.xls"))
+        source = Path(__file__).parent / "fixtures" / "supplier_minimal.xls"
         result = read_supplier_workbook(source)
         zhangdun = result[result["供应商名称"].eq("Zhangdun")].iloc[0]
 
