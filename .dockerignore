@@ -1,0 +1,16 @@
+.git
+.gitignore
+.agents
+.codex
+venv
+.venv
+__pycache__
+.pytest_cache
+storage
+outputs
+src_data
+*.db
+*.xls
+*.xlsx
+frontend/node_modules
+frontend/dist

@@ -1,0 +1,33 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Local runtime and generated files
+.env
+*.db
+storage/
+outputs/
+output.xlsx
+src_data/
+patch_probe.txt
+
+# Local spreadsheets are operational data, not source code
+*.xls
+*.xlsx
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,415 @@
+import json
+from dataclasses import dataclass
+
+import pandas as pd
+
+from .config import PURCHASE_STATUSES, warehouse_sort_key
+
+
+IMPORT_COLUMNS = [
+    "*目的仓",
+    "*供应商编码",
+    "*SKU",
+    "*本次交货量",
+    "*站点",
+    "单据备注",
+    "交货备注",
+]
+
+POSITION_VALUE_COLUMNS = [
+    "规模定位",
+    "备货定位",
+    "已下单可售天数",
+]
+POSITION_SOURCE_COLUMNS = [
+    "店铺-站点",
+    "积加SKU",
+    "MSKU",
+    *POSITION_VALUE_COLUMNS,
+]
+PENDING_COLUMNS = [*IMPORT_COLUMNS, *POSITION_VALUE_COLUMNS]
+
+EXCEPTION_COLUMNS = [
+    "SKU",
+    "原始站点",
+    "完整站点",
+    "目的仓",
+    "交货量",
+    "已自动分配量",
+    "人工处理量",
+    "异常原因",
+]
+
+
+@dataclass(frozen=True)
+class BatchResult:
+    import_rows: pd.DataFrame
+    exception_rows: pd.DataFrame
+    delivery_total: int
+    import_total: int
+    manual_total: int
+
+
+def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> None:
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"{source}缺少必要字段：{', '.join(missing)}")
+
+
+def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
+    """把当前供应商汇总表转换为 SKU、原始站点、交货量明细。"""
+    sku_columns = [
+        column for column in sheet.columns
+        if str(column).strip().upper().endswith("SKU")
+    ]
+    if len(sku_columns) != 1:
+        raise ValueError("交货单汇总表未找到唯一的 SKU 字段")
+    sheet = sheet.rename(columns={sku_columns[0]: "SKU"})
+    site_columns = [column for column in sheet.columns if str(column).endswith("站")]
+    if not site_columns:
+        raise ValueError("交货单汇总表未找到以“站”结尾的站点列")
+
+    data = sheet[["SKU", *site_columns]].copy()
+    data = data.dropna(subset=["SKU"])
+    sku_text = data["SKU"].astype(str).str.strip()
+    data = data[~sku_text.str.fullmatch(r"总计|Grand Total", case=False)]
+
+    result = data.melt(
+        id_vars=["SKU"],
+        value_vars=site_columns,
+        var_name="原始站点",
+        value_name="交货量",
+    )
+    raw_quantities = result["交货量"]
+    quantities = pd.to_numeric(raw_quantities, errors="coerce")
+    invalid = raw_quantities.notna() & quantities.isna()
+    if invalid.any():
+        raise ValueError("交货单存在无法识别的数量")
+
+    result["交货量"] = quantities.fillna(0)
+    positive = result["交货量"] > 0
+    non_integer = positive & (result["交货量"] % 1 != 0)
+    if non_integer.any():
+        raise ValueError("交货量必须为整数")
+
+    result = result[positive].copy()
+    result["SKU"] = result["SKU"].astype(str).str.strip()
+    result["原始站点"] = result["原始站点"].astype(str).str.removesuffix("站")
+    result["交货量"] = result["交货量"].astype(int)
+    return (
+        result.groupby(["SKU", "原始站点"], as_index=False, sort=True)["交货量"]
+        .sum()
+        .sort_values(["SKU", "原始站点"], kind="stable")
+        .reset_index(drop=True)
+    )
+
+
+def _append_exception(
+    exceptions: list[dict],
+    delivery_row: pd.Series,
+    full_site: str | None,
+    destination_warehouse: str | None,
+    allocated: int,
+    manual: int,
+    reason: str,
+) -> None:
+    exceptions.append(
+        {
+            "SKU": delivery_row["SKU"],
+            "原始站点": delivery_row["原始站点"],
+            "完整站点": full_site or "",
+            "目的仓": destination_warehouse or "",
+            "交货量": int(delivery_row["交货量"]),
+            "已自动分配量": allocated,
+            "人工处理量": manual,
+            "异常原因": reason,
+        }
+    )
+
+def build_manual_import_rows(
+    exception_rows: pd.DataFrame,
+    supplier_code: str,
+) -> pd.DataFrame:
+    """把异常数量转换为可补录后再次导入的官方模板字段。"""
+    _require_columns(exception_rows, set(EXCEPTION_COLUMNS), "异常明细")
+    rows: list[dict] = []
+
+    for _, exception in exception_rows.iterrows():
+        reason = str(exception["异常原因"])
+        full_site = (
+            "" if pd.isna(exception["完整站点"]) else str(exception["完整站点"])
+        )
+        original_site = (
+            "" if pd.isna(exception["原始站点"]) else str(exception["原始站点"])
+        )
+        destination_warehouse = (
+            "" if pd.isna(exception["目的仓"]) else exception["目的仓"]
+        )
+        manual_quantity = int(exception["人工处理量"])
+        site = "" if reason == "产品信息站点不唯一" else full_site
+        note = reason
+        if reason == "超出采购未交量":
+            note = f"{reason}：{manual_quantity}"
+        elif reason == "产品信息未匹配" and original_site:
+            note = f"{reason}；原始站点：{original_site}"
+        elif reason == "产品信息站点不唯一" and full_site:
+            note = f"{reason}：{full_site}"
+
+        rows.append(
+            {
+                "*目的仓": destination_warehouse,
+                "*供应商编码": supplier_code,
+                "*SKU": exception["SKU"],
+                "*本次交货量": manual_quantity,
+                "*站点": site,
+                "单据备注": "",
+                "交货备注": note,
+            }
+        )
+
+    return pd.DataFrame(rows, columns=IMPORT_COLUMNS)
+
+
+def _normalize_position_text(value) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().upper()
+
+
+def _normalize_pending_site(value) -> str:
+    site = _normalize_position_text(value)
+    if site.count(":") >= 2:
+        return site.split(":", 1)[1]
+    return site
+
+
+def _position_value(value):
+    if pd.isna(value):
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    value = value.item() if hasattr(value, "item") else value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def enrich_pending_import_rows(
+    pending_rows: pd.DataFrame,
+    position_rows: pd.DataFrame,
+) -> pd.DataFrame:
+    """按店铺站点和积加 SKU 为待处理数据补充定位信息。"""
+    _require_columns(pending_rows, set(IMPORT_COLUMNS), "待处理导入")
+    _require_columns(position_rows, set(POSITION_SOURCE_COLUMNS), "排查表")
+
+    result = pending_rows[IMPORT_COLUMNS].copy()
+    for column in POSITION_VALUE_COLUMNS:
+        result[column] = pd.Series("", index=result.index, dtype=object)
+    if result.empty:
+        return result[PENDING_COLUMNS]
+
+    positions = position_rows[POSITION_SOURCE_COLUMNS].copy()
+    positions["_site_key"] = positions["店铺-站点"].map(_normalize_position_text)
+    positions["_sku_key"] = positions["积加SKU"].map(_normalize_position_text)
+    positions = positions[positions["_site_key"].ne("") & positions["_sku_key"].ne("")]
+    groups = {
+        key: group.copy()
+        for key, group in positions.groupby(["_site_key", "_sku_key"], sort=False)
+    }
+    scale_order = {"短尾": 0, "中尾": 1, "长尾": 2}
+
+    for index, pending in result.iterrows():
+        key = (
+            _normalize_pending_site(pending["*站点"]),
+            _normalize_position_text(pending["*SKU"]),
+        )
+        matches = groups.get(key)
+        if matches is None or matches.empty:
+            continue
+        if len(matches) == 1:
+            for column in POSITION_VALUE_COLUMNS:
+                result.at[index, column] = _position_value(matches.iloc[0][column])
+            continue
+
+        matches["_msku"] = matches["MSKU"].map(_normalize_position_text)
+        if matches["_msku"].eq("").any() or matches["_msku"].duplicated().any():
+            raise ValueError("排查表重复键内的 MSKU 必须非空且唯一")
+        matches["_scale_order"] = matches["规模定位"].map(
+            lambda value: scale_order.get(str(value).strip(), 3)
+        )
+        matches = matches.sort_values(
+            ["_scale_order", "_msku"], kind="stable"
+        )
+        for column in POSITION_VALUE_COLUMNS:
+            mapping = {
+                str(row["MSKU"]).strip(): _position_value(row[column])
+                for _, row in matches.iterrows()
+            }
+            result.at[index, column] = json.dumps(
+                mapping, ensure_ascii=False, separators=(",", ":")
+            )
+
+    return result[PENDING_COLUMNS]
+
+def process_data(
+    delivery_lines: pd.DataFrame,
+    product_info: pd.DataFrame,
+    purchase_rows: pd.DataFrame,
+    supplier_name: str,
+    supplier_code: str | None = None,
+) -> BatchResult:
+    """完成产品映射、采购需求汇总和交货数量分配。"""
+    supplier_code = supplier_code or supplier_name
+    _require_columns(delivery_lines, {"SKU", "原始站点", "交货量"}, "交货明细")
+    _require_columns(
+        product_info, {"SKU", "店铺/站点", "品类A", "锁仓MKSU"}, "产品信息"
+    )
+    _require_columns(
+        purchase_rows,
+        {"单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"},
+        "采购需求",
+    )
+
+    delivery = (
+        delivery_lines.groupby(["SKU", "原始站点"], as_index=False)["交货量"]
+        .sum()
+        .sort_values(["SKU", "原始站点"], kind="stable")
+        .reset_index(drop=True)
+    )
+    delivery["交货量"] = delivery["交货量"].astype(int)
+
+    relevant_skus = set(delivery["SKU"])
+    products = product_info[
+        product_info["SKU"].isin(relevant_skus)
+        & product_info["SKU"].notna()
+        & product_info["店铺/站点"].notna()
+        & product_info["品类A"].notna()
+    ].copy()
+    products["原始站点"] = (
+        products["店铺/站点"].astype(str).str.rsplit(":", n=1).str[-1]
+    )
+    products["完整站点"] = "AMAZON:" + products["店铺/站点"].astype(str)
+    products = products[
+        ["SKU", "原始站点", "完整站点", "锁仓MKSU"]
+    ].drop_duplicates()
+
+    purchases = purchase_rows[
+        purchase_rows["单据状态"].isin(PURCHASE_STATUSES)
+        & purchase_rows["供应商"].eq(supplier_name)
+    ].copy()
+    purchases["未交量"] = pd.to_numeric(purchases["未交量"], errors="coerce").fillna(0)
+    purchases = purchases[purchases["未交量"] > 0]
+    needs = (
+        purchases.groupby(
+            ["SKU", "供应商", "平台站点", "目的仓"], as_index=False
+        )["未交量"]
+        .sum()
+        .reset_index(drop=True)
+    )
+
+    import_rows: list[dict] = []
+    exceptions: list[dict] = []
+
+    for _, delivery_row in delivery.iterrows():
+        product_matches = products[
+            products["SKU"].eq(delivery_row["SKU"])
+            & products["原始站点"].eq(delivery_row["原始站点"])
+        ]
+        full_sites = product_matches["完整站点"].drop_duplicates().tolist()
+        if len(full_sites) > 1:
+            locked_sites = product_matches.loc[
+                product_matches["锁仓MKSU"].astype(str).str.strip().eq("锁"),
+                "完整站点",
+            ].drop_duplicates()
+            if not locked_sites.empty:
+                full_sites = locked_sites.tolist()
+        delivery_quantity = int(delivery_row["交货量"])
+
+        if not full_sites:
+            _append_exception(
+                exceptions,
+                delivery_row,
+                None,
+                None,
+                0,
+                delivery_quantity,
+                "产品信息未匹配",
+            )
+            continue
+        if len(full_sites) > 1:
+            _append_exception(
+                exceptions,
+                delivery_row,
+                "、".join(sorted(full_sites)),
+                None,
+                0,
+                delivery_quantity,
+                "产品信息站点不唯一",
+            )
+            continue
+
+        full_site = full_sites[0]
+        candidate_indexes = needs.index[
+            needs["SKU"].eq(delivery_row["SKU"])
+            & needs["平台站点"].eq(full_site)
+        ].tolist()
+        candidate_indexes.sort(
+            key=lambda index: warehouse_sort_key(str(needs.at[index, "目的仓"]))
+        )
+
+        remaining = delivery_quantity
+        allocated = 0
+        last_destination_warehouse = ""
+        for index in candidate_indexes:
+            available = int(needs.at[index, "未交量"])
+            quantity = min(remaining, available)
+            if quantity <= 0:
+                continue
+            destination_warehouse = needs.at[index, "目的仓"]
+            import_rows.append(
+                {
+                    "*目的仓": destination_warehouse,
+                    "*供应商编码": supplier_code,
+                    "*SKU": delivery_row["SKU"],
+                    "*本次交货量": quantity,
+                    "*站点": full_site,
+                    "单据备注": "",
+                    "交货备注": "",
+                }
+            )
+            needs.at[index, "未交量"] = available - quantity
+            remaining -= quantity
+            allocated += quantity
+            last_destination_warehouse = destination_warehouse
+            if remaining == 0:
+                break
+
+        if remaining > 0:
+            reason = "超出采购未交量" if candidate_indexes else "未找到可交货采购需求"
+            if allocated > 0:
+                import_rows[-1]["交货备注"] = f"{reason}：{remaining}"
+            _append_exception(
+                exceptions,
+                delivery_row,
+                full_site,
+                last_destination_warehouse,
+                allocated,
+                remaining,
+                reason,
+            )
+
+    import_frame = pd.DataFrame(import_rows, columns=IMPORT_COLUMNS)
+    exception_frame = pd.DataFrame(exceptions, columns=EXCEPTION_COLUMNS)
+    delivery_total = int(delivery["交货量"].sum())
+    import_total = int(import_frame["*本次交货量"].sum()) if not import_frame.empty else 0
+    manual_total = int(exception_frame["人工处理量"].sum()) if not exception_frame.empty else 0
+    if delivery_total != import_total + manual_total:
+        raise RuntimeError("数量守恒校验失败")
+
+    return BatchResult(
+        import_rows=import_frame,
+        exception_rows=exception_frame,
+        delivery_total=delivery_total,
+        import_total=import_total,
+        manual_total=manual_total,
+    )

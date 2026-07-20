@@ -1,0 +1,67 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: delivery_note
+      POSTGRES_USER: delivery_note
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U delivery_note -d delivery_note"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
+      STORAGE_ROOT: /data/storage
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+    volumes:
+      - delivery_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "delivery_note.worker"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
+      STORAGE_ROOT: /data/storage
+    volumes:
+      - delivery_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  delivery_data:
