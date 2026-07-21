@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import re
@@ -39,6 +39,7 @@ from ..excel_io import (
 )
 from ..input_inspection import (
     inspect_input_version,
+    position_change_warnings,
     position_diff,
     preview_input_version,
     validate_position_frame,
@@ -65,6 +66,7 @@ from .position_drafts import (
     ROW_FIELDS,
     DraftConflict,
     create_or_resume_draft,
+    draft_diff,
     discard_draft,
     list_draft_rows,
     mutate_draft_row,
@@ -229,12 +231,12 @@ def _position_issue_map(rows: list[PositionDraftRow]) -> tuple[list[dict], dict[
 
 def _issue_summary(issues: list[dict]) -> dict:
     error_count = sum(
-        len(issue["row_numbers"])
+        max(1, len(issue["row_numbers"]))
         for issue in issues
         if issue["severity"] == "error"
     )
     warning_count = sum(
-        len(issue["row_numbers"])
+        max(1, len(issue["row_numbers"]))
         for issue in issues
         if issue["severity"] == "warning"
     )
@@ -249,7 +251,7 @@ def _issue_summary(issues: list[dict]) -> dict:
 def _draft_json(session: Session, draft: InputDraft) -> dict:
     rows = list_draft_rows(session, draft.id)
     active_rows = [row for row in rows if not row.deleted]
-    issue_summary = _issue_summary(validate_position_frame(_position_frame(active_rows)))
+    issue_summary = _issue_summary(validate_draft(session, draft))
     return {
         "id": draft.id,
         "kind": draft.kind,
@@ -262,6 +264,7 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
         "updated_at": draft.updated_at.isoformat(),
         "row_count": len(active_rows),
         "modified_count": sum(row.change_type != "unchanged" for row in rows),
+        "diff": draft_diff(session, draft),
         **issue_summary,
     }
 
@@ -457,12 +460,23 @@ def _safe_filename(filename: str) -> str:
     return safe
 
 
-async def _save_upload(upload: UploadFile, destination: Path) -> None:
+async def _save_upload(
+    upload: UploadFile,
+    destination: Path,
+    max_bytes: int,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+    bytes_written = 0
     try:
         with temporary.open("wb") as output:
             while chunk := await upload.read(1024 * 1024):
+                bytes_written += len(chunk)
+                if bytes_written > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail=f"上传文件不能超过 {max_bytes} 字节",
+                    )
                 output.write(chunk)
         os.replace(temporary, destination)
     finally:
@@ -475,6 +489,8 @@ def create_app(
     database_url: str | None = None,
     storage_root: Path | str | None = None,
     bootstrap_admin: tuple[str, str] | None = None,
+    max_upload_bytes: int | None = None,
+    import_candidate_ttl_seconds: int | None = None,
 ) -> FastAPI:
     database = Database(
         database_url
@@ -483,11 +499,33 @@ def create_app(
     database.create_schema()
     storage = Path(storage_root or os.getenv("STORAGE_ROOT", "storage")).resolve()
     storage.mkdir(parents=True, exist_ok=True)
+    configured_max_upload_bytes = (
+        max_upload_bytes
+        if max_upload_bytes is not None
+        else int(os.getenv("MAX_UPLOAD_BYTES", str(20 * 1024 * 1024)))
+    )
+    if configured_max_upload_bytes <= 0:
+        raise ValueError("MAX_UPLOAD_BYTES 必须大于 0")
+    configured_import_candidate_ttl = (
+        import_candidate_ttl_seconds
+        if import_candidate_ttl_seconds is not None
+        else int(os.getenv("IMPORT_CANDIDATE_TTL_SECONDS", "900"))
+    )
+    if configured_import_candidate_ttl <= 0:
+        raise ValueError("IMPORT_CANDIDATE_TTL_SECONDS 必须大于 0")
     import_candidate_root = storage / "temporary" / "position-imports"
     import_candidate_root.mkdir(parents=True, exist_ok=True)
+    startup_expiry_cutoff = (
+        datetime.now().timestamp() - configured_import_candidate_ttl
+    )
     for stale_candidate in import_candidate_root.iterdir():
-        if stale_candidate.is_file():
+        if (
+            stale_candidate.is_file()
+            and stale_candidate.stat().st_mtime <= startup_expiry_cutoff
+        ):
             stale_candidate.unlink(missing_ok=True)
+    # Tokens are intentionally process-local while Compose runs one API process.
+    # A multi-process deployment must move this registry to shared database state.
     import_candidates: dict[str, dict] = {}
     import_candidates_lock = Lock()
 
@@ -515,6 +553,8 @@ def create_app(
     app = FastAPI(title="供应链交货处理系统", version="1.0.0")
     app.state.database = database
     app.state.storage_root = storage
+    app.state.max_upload_bytes = configured_max_upload_bytes
+    app.state.import_candidate_ttl_seconds = configured_import_candidate_ttl
     app.state.position_import_candidates = import_candidates
     app.add_middleware(
         CORSMiddleware,
@@ -536,6 +576,9 @@ def create_app(
         session = database.SessionLocal()
         try:
             yield session
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 
@@ -616,6 +659,32 @@ def create_app(
             ]
         for token in tokens:
             remove_import_candidate(token)
+
+    def remove_expired_import_candidates() -> None:
+        now = datetime.utcnow()
+        with import_candidates_lock:
+            expired = [
+                (token, import_candidates.pop(token))
+                for token in list(import_candidates)
+                if import_candidates[token]["expires_at"] <= now
+            ]
+        for _token, candidate in expired:
+            Path(candidate["path"]).unlink(missing_ok=True)
+        expiry_cutoff = (
+            datetime.now().timestamp() - app.state.import_candidate_ttl_seconds
+        )
+        with import_candidates_lock:
+            registered_paths = {
+                Path(candidate["path"]).resolve()
+                for candidate in import_candidates.values()
+            }
+        for candidate_path in import_candidate_root.iterdir():
+            if (
+                candidate_path.is_file()
+                and candidate_path.resolve() not in registered_paths
+                and candidate_path.stat().st_mtime <= expiry_cutoff
+            ):
+                candidate_path.unlink(missing_ok=True)
 
     @app.get("/health")
     def health() -> dict:
@@ -757,7 +826,7 @@ def create_app(
         ):
             raise HTTPException(status_code=409, detail="版本名称已存在")
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
-        await _save_upload(file, destination)
+        await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
             _validate_input_version(kind, destination)
         except Exception as error:
@@ -1158,6 +1227,7 @@ def create_app(
         _admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
     ):
+        remove_expired_import_candidates()
         draft = get_draft_or_404(draft_id, session)
         try:
             require_revision(draft, revision)
@@ -1171,11 +1241,14 @@ def create_app(
         token = uuid4().hex
         suffix = Path(original_name).suffix.lower()
         destination = import_candidate_root / f"{draft.id}_{revision}_{token}{suffix}"
-        await _save_upload(file, destination)
+        await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
             candidate_frame = read_position_workbook(destination)
-            issues = validate_position_frame(candidate_frame)
             current_frame = _position_frame(list_draft_rows(session, draft.id))
+            issues = [
+                *validate_position_frame(candidate_frame),
+                *position_change_warnings(current_frame, candidate_frame),
+            ]
             diff = position_diff(current_frame, candidate_frame)
         except Exception as error:
             destination.unlink(missing_ok=True)
@@ -1191,6 +1264,9 @@ def create_app(
                 "draft_id": draft.id,
                 "revision": revision,
                 "path": str(destination),
+                "created_by": _admin.id,
+                "expires_at": datetime.utcnow()
+                + timedelta(seconds=app.state.import_candidate_ttl_seconds),
             }
         return {
             "token": token,
@@ -1208,9 +1284,17 @@ def create_app(
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
+        remove_expired_import_candidates()
         draft = get_draft_or_404(draft_id, session)
         with import_candidates_lock:
             candidate = import_candidates.get(payload.token)
+        if candidate is not None and candidate["created_by"] != admin.id:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(
+                status_code=403,
+                detail="导入预览属于其他管理员",
+            )
         if (
             candidate is None
             or candidate["draft_id"] != draft.id
@@ -1295,6 +1379,7 @@ def create_app(
         return {
             "draft_id": draft.id,
             "revision": draft.revision,
+            "diff": draft_diff(session, draft),
             **_issue_summary(validate_draft(session, draft)),
         }
 
@@ -1340,8 +1425,14 @@ def create_app(
                 status_code=400,
                 detail=f"草稿发布失败：{error}",
             ) from error
+        session.refresh(version)
+        session.refresh(draft)
         remove_draft_import_candidates(draft.id)
-        return _version_json(version)
+        return {
+            **_version_json(version),
+            "draft_revision": draft.revision,
+            "draft_status": draft.status,
+        }
 
     @app.post("/api/input-drafts/{draft_id}/discard")
     def discard_position_draft(
@@ -1443,7 +1534,7 @@ def create_app(
             select(func.max(BatchFile.file_order)).where(BatchFile.batch_id == batch.id)
         ) or 0
         destination = storage / "batches" / str(batch.id) / "inputs" / f"{uuid4().hex}_{original_name}"
-        await _save_upload(file, destination)
+        await _save_upload(file, destination, app.state.max_upload_bytes)
         source = BatchFile(
             batch_id=batch.id,
             original_name=original_name,

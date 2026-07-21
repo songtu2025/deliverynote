@@ -12,6 +12,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import (
+    position_change_warnings,
     position_diff,
     validate_position_frame,
     write_position_workbook,
@@ -408,8 +409,19 @@ def replace_draft_from_frame(
     return diff
 
 
+def draft_diff(session: Session, draft: InputDraft) -> dict[str, int]:
+    return position_diff(
+        _base_frame(session, draft),
+        _frame_from_rows(list_draft_rows(session, draft.id)),
+    )
+
+
 def validate_draft(session: Session, draft: InputDraft) -> list[dict]:
-    return validate_position_frame(_frame_from_rows(list_draft_rows(session, draft.id)))
+    frame = _frame_from_rows(list_draft_rows(session, draft.id))
+    return [
+        *validate_position_frame(frame),
+        *position_change_warnings(_base_frame(session, draft), frame),
+    ]
 
 
 def publish_draft(

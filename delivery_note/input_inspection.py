@@ -193,8 +193,10 @@ def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
     return issues
 
 
-def _position_records(frame: pd.DataFrame) -> dict[tuple[str, str, str], tuple[Any, ...]]:
-    records: dict[tuple[str, str, str], tuple[Any, ...]] = {}
+def _position_records(
+    frame: pd.DataFrame,
+) -> dict[tuple[str, str, str], list[tuple[Any, ...]]]:
+    records: dict[tuple[str, str, str], list[tuple[Any, ...]]] = {}
     normalized_keys = pd.DataFrame(
         {column: _identity_values(frame, column) for column in POSITION_KEY}
     )
@@ -203,26 +205,92 @@ def _position_records(frame: pd.DataFrame) -> dict[tuple[str, str, str], tuple[A
         frame[_POSITION_VALUES].itertuples(index=False, name=None),
     ):
         key = tuple(key_values)
-        values = tuple(_json_safe(value) for value in source_values)
-        records[key] = values
+        values = tuple(_position_comparison_text(value) for value in source_values)
+        records.setdefault(key, []).append(values)
     return records
+
+
+def _position_comparison_text(value: Any) -> str:
+    safe_value = _json_safe(value)
+    if safe_value is None:
+        return ""
+    if isinstance(safe_value, float) and safe_value.is_integer():
+        return str(int(safe_value))
+    return str(safe_value)
 
 
 def position_diff(base: pd.DataFrame, candidate: pd.DataFrame) -> dict[str, int]:
     base_records = _position_records(base)
     candidate_records = _position_records(candidate)
-    base_keys = set(base_records)
-    candidate_keys = set(candidate_records)
-    shared_keys = base_keys & candidate_keys
-    modified = sum(
-        base_records[key] != candidate_records[key] for key in shared_keys
-    )
+    added = 0
+    modified = 0
+    deleted = 0
+    unchanged = 0
+    for key in base_records.keys() | candidate_records.keys():
+        base_remaining = list(base_records.get(key, []))
+        candidate_unmatched = []
+        for candidate_values in candidate_records.get(key, []):
+            try:
+                match_index = base_remaining.index(candidate_values)
+            except ValueError:
+                candidate_unmatched.append(candidate_values)
+            else:
+                unchanged += 1
+                base_remaining.pop(match_index)
+        paired = min(len(base_remaining), len(candidate_unmatched))
+        modified += paired
+        deleted += len(base_remaining) - paired
+        added += len(candidate_unmatched) - paired
     return {
-        "added": len(candidate_keys - base_keys),
+        "added": added,
         "modified": modified,
-        "deleted": len(base_keys - candidate_keys),
-        "unchanged": len(shared_keys) - modified,
+        "deleted": deleted,
+        "unchanged": unchanged,
     }
+
+
+def position_change_warnings(
+    reference: pd.DataFrame,
+    candidate: pd.DataFrame,
+) -> list[dict]:
+    metrics = (
+        ("row_count", "行数", len(reference), len(candidate)),
+        (
+            "sites",
+            "站点数",
+            int(_identity_values(reference, "店铺-站点").replace("", pd.NA).nunique()),
+            int(_identity_values(candidate, "店铺-站点").replace("", pd.NA).nunique()),
+        ),
+        (
+            "skus",
+            "积加 SKU 数",
+            int(_identity_values(reference, "积加SKU").replace("", pd.NA).nunique()),
+            int(_identity_values(candidate, "积加SKU").replace("", pd.NA).nunique()),
+        ),
+    )
+    warnings = []
+    for code, label, before, after in metrics:
+        if before == after:
+            continue
+        if before > 0 and after == 0:
+            issue_code = f"{code}_cleared"
+            message = f"{label}从 {before} 清空为 0"
+        elif before == 0 or abs(after - before) / before >= 0.5:
+            issue_code = f"{code}_changed"
+            message = f"{label}从 {before} 变为 {after}，变化达到或超过 50%"
+        else:
+            continue
+        warnings.append(
+            {
+                "severity": "warning",
+                "code": issue_code,
+                "message": message,
+                "row_numbers": [],
+                "before": before,
+                "after": after,
+            }
+        )
+    return warnings
 
 
 def write_position_workbook(path: Path, frame: pd.DataFrame) -> None:

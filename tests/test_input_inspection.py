@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import (
     inspect_input_version,
+    position_change_warnings,
     position_diff,
     preview_input_version,
     validate_position_frame,
@@ -118,6 +119,65 @@ class InputInspectionTests(unittest.TestCase):
         self.assertEqual(
             position_diff(self.frame, candidate),
             {"added": 0, "modified": 0, "deleted": 0, "unchanged": 1},
+        )
+
+    def test_position_diff_stably_pairs_duplicate_identity_rows(self):
+        base = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "中尾", "备货", 60],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+        candidate = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "长尾", "备货", 90],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "长尾", "备货", 90],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+
+        self.assertEqual(
+            position_diff(base, candidate),
+            {"added": 1, "modified": 1, "deleted": 0, "unchanged": 1},
+        )
+
+    def test_position_change_warnings_cover_empty_and_fifty_percent_changes(self):
+        base = pd.DataFrame(
+            [
+                [f"STORE:{index}", f"SKU-{index}", f"MSKU-{index}", "短尾", "备货", 30]
+                for index in range(4)
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+        empty = pd.DataFrame(columns=POSITION_SOURCE_COLUMNS)
+        half = base.iloc[:2].copy()
+        increased = pd.concat(
+            [
+                base,
+                pd.DataFrame(
+                    [
+                        ["STORE:4", "SKU-4", "MSKU-4", "短尾", "备货", 30],
+                        ["STORE:5", "SKU-5", "MSKU-5", "短尾", "备货", 30],
+                    ],
+                    columns=POSITION_SOURCE_COLUMNS,
+                ),
+            ],
+            ignore_index=True,
+        )
+
+        self.assertEqual(
+            {issue["code"] for issue in position_change_warnings(base, empty)},
+            {"row_count_cleared", "sites_cleared", "skus_cleared"},
+        )
+        self.assertEqual(
+            {issue["code"] for issue in position_change_warnings(base, half)},
+            {"row_count_changed", "sites_changed", "skus_changed"},
+        )
+        self.assertEqual(
+            {issue["code"] for issue in position_change_warnings(base, increased)},
+            {"row_count_changed", "sites_changed", "skus_changed"},
         )
 
     def test_empty_msku_is_an_error_when_site_and_sku_have_multiple_rows(self):
