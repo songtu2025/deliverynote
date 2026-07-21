@@ -91,6 +91,49 @@ class PositionDraftTests(unittest.TestCase):
         )
         return original
 
+    def _assert_nested_publish_rejected(
+        self,
+        *,
+        name: str,
+        commit_savepoint: bool,
+        commit_outer: bool,
+    ):
+        published_path = self.root / f"{name}.xlsx"
+        session = self.database.SessionLocal()
+        try:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            nested = session.begin_nested()
+            with self.assertRaisesRegex(ValueError, "不能在嵌套事务中发布"):
+                publish_draft(
+                    session,
+                    draft,
+                    draft.revision,
+                    self.admin_id,
+                    name=name,
+                    storage_path=published_path,
+                )
+            if commit_savepoint:
+                nested.commit()
+            else:
+                nested.rollback()
+            if commit_outer:
+                session.commit()
+            else:
+                session.rollback()
+        finally:
+            session.close()
+
+        self.assertFalse(published_path.exists())
+        self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+        with self.database.session() as verification_session:
+            versions = verification_session.query(InputVersion).all()
+            self.assertEqual(
+                [(version.id, version.active) for version in versions],
+                [(self.version_id, True)],
+            )
+
     def test_create_or_resume_copies_active_version_once(self):
         with self.database.session() as session:
             created = create_or_resume_draft(
@@ -775,6 +818,27 @@ class PositionDraftTests(unittest.TestCase):
                 [(version.id, version.active) for version in versions],
                 [(self.version_id, True)],
             )
+
+    def test_publish_inside_rolled_back_savepoint_is_rejected_before_outer_commit(self):
+        self._assert_nested_publish_rejected(
+            name="nested-rollback-outer-commit-rejected",
+            commit_savepoint=False,
+            commit_outer=True,
+        )
+
+    def test_publish_inside_committed_savepoint_is_rejected_before_outer_rollback(self):
+        self._assert_nested_publish_rejected(
+            name="nested-commit-outer-rollback-rejected",
+            commit_savepoint=True,
+            commit_outer=False,
+        )
+
+    def test_publish_inside_committed_savepoint_is_rejected_before_outer_commit(self):
+        self._assert_nested_publish_rejected(
+            name="nested-commit-outer-commit-rejected",
+            commit_savepoint=True,
+            commit_outer=True,
+        )
 
     def test_publish_rejects_errors_and_requires_warning_confirmation(self):
         with self.database.session() as session:

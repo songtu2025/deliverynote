@@ -423,6 +423,8 @@ def publish_draft(
     confirm_warnings: bool = False,
     original_name: str | None = None,
 ) -> InputVersion:
+    if session.in_nested_transaction():
+        raise ValueError("不能在嵌套事务中发布")
     require_revision(draft, expected_revision)
     issues = validate_draft(session, draft)
     if any(issue["severity"] == "error" for issue in issues):
