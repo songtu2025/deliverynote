@@ -25,6 +25,8 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      IMPORT_CANDIDATE_TTL_SECONDS: ${IMPORT_CANDIDATE_TTL_SECONDS:-900}
     volumes:
       - delivery_data:/data
     depends_on:

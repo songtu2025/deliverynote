@@ -41,26 +41,40 @@ git log -3 --oneline --decorate
 - React + TypeScript + Ant Design 操作界面。
 - 五步批次工作台、数量守恒摘要、异常筛选和右侧拆分审校。
 - 输入资料就绪门槛、上传校验、用户启停/密码重置和操作记录。
+- 管理员维护 PC 工作区，按“基础资料、用户账号、操作记录”组织入口。
+- 五类资料目录的用途说明、当前版本摘要、预览、下载、替换上传和历史版本。
+- 库位资料的服务端持久化单草稿、行级维护、筛选、Excel 差异确认、校验、发布和丢弃。
 - 计算/导出任务刷新恢复、计算前删除错传文件和登录过期统一处理。
 - Docker Compose、Nginx 和外部 HTTPS 代理接入方式。
 
 最近验证结果：
 
 ```text
-Python unittest: 44/44 passed
-Frontend Vitest: 5/5 passed
+Python unittest: 102/102 passed
+Frontend Vitest: 6 files, 53/53 passed
 Frontend production build: passed
 pip check: passed
 Compose YAML static check: passed
 PostgreSQL DDL compile check: passed
-Chrome desktop/tablet/mobile visual QA: passed
+Existing batch-workbench Chrome desktop/tablet/mobile visual QA: passed
+Administrator-maintenance Chrome PC visual QA: pending
 Linux Docker Compose build and runtime smoke test: passed
 HTTPS health, login, read API and logout smoke test: passed
 ```
 
-本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`，浏览器验收记录见 `design-qa.md`，截图位于 `design/qa/`。桌面、平板和移动视口视觉验收已经完成。
+本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围，新的 PC 截图证据正在 `design/admin-maintenance-qa/` 补齐，不再把平板和移动端作为本轮完成门槛。
 
-2026-07-21 已在 Linux 目标机完成 Compose 重新构建和运行时冒烟验收：四个服务正常，内外网健康检查成功，HTTPS 首页已加载本轮新前端资源，管理员登录和只读接口正常；应用容器重建后现有用户、输入版本、批次和上传文件记录未丢失。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
+2026-07-21 已从 `feature/admin-maintenance` 工作树在 Linux 目标机执行 `docker compose -p deliverynote --env-file /root/deliverynote/.env up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，容器内 Web `/health` 返回成功，部署资源为 `index-C1Vk0rzl.js` 和 `index-DKtrA9Gk.css`。管理员登录、版本列表、当前库位摘要/预览、用户和操作记录只读接口均返回成功；现网没有编辑中的库位草稿，写流程在临时 SQLite/API 存储中复验，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
+
+本次自动化验证实际使用：
+
+```bash
+/root/deliverynote/.venv/bin/python -m unittest discover -s tests -v
+/root/deliverynote/.venv/bin/python -m pip check
+cd frontend && npm run test
+cd frontend && npm run build
+docker compose -p deliverynote --env-file /root/deliverynote/.env config --quiet
+```
 
 ## 3. 代码结构
 
@@ -73,6 +87,8 @@ HTTPS health, login, read API and logout smoke test: passed
 | `delivery_note/cli.py` | 原有单文件 CLI |
 | `delivery_note/web/models.py` | 用户、版本、批次、文件、异常、拆分、任务和审计表 |
 | `delivery_note/web/api.py` | FastAPI 应用和全部接口 |
+| `delivery_note/web/position_drafts.py` | 库位服务端草稿、乐观并发、校验、差异和原子发布 |
+| `delivery_note/input_inspection.py` | 五类资料摘要/预览与库位质量检查 |
 | `delivery_note/worker.py` | 计算、导出、任务租约和超时恢复 |
 | `frontend/src/` | 登录、批次、审阅拆分和管理员页面 |
 | `tests/` | Python 单元、API 和 Worker 端到端测试 |
@@ -184,6 +200,8 @@ docker compose up -d
 - 管理员账号只在数据库不存在同名用户时创建。修改 `.env` 不会重置已有管理员密码。
 - PostgreSQL 已通过 Linux Compose 真实运行、登录和数据读取冒烟验收；完整脱敏业务流程和备份恢复仍未验收。
 - 前端生产构建存在单包约 1.1 MB 的体积提示，当前不影响功能，不要为了消除提示优先引入复杂拆包。
+- 库位 Excel 导入预览 Token 保存在单 API 进程内存中，默认 900 秒过期；当前 Compose 单进程部署成立，扩展多 API 进程前必须改为共享状态并补并发测试。
+- 库位资料最多只有一个 `editing` 草稿；行修改会持久化到服务器，但只有发布后才生成不可变的新输入版本并成为新批次可选的当前版本，已有批次继续使用锁定的旧版本。
 - 仓库是公开仓库，禁止提交业务数据、真实密码、Token 或客户文件。
 
 ## 9. 测试命令
