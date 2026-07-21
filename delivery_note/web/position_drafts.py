@@ -1,9 +1,12 @@
 from collections import defaultdict, deque
+import os
 from pathlib import Path
 from typing import Any, Mapping
+from uuid import uuid4
 
 import pandas as pd
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -34,6 +37,7 @@ ROW_FIELDS = (
 )
 FIELD_TO_COLUMN = dict(zip(ROW_FIELDS, POSITION_SOURCE_COLUMNS))
 IDENTITY_FIELDS = ROW_FIELDS[:3]
+_PENDING_PUBLISH_KEY = "position_draft_pending_publish"
 
 
 class DraftConflict(Exception):
@@ -56,6 +60,39 @@ def _flush_revision(session: Session) -> None:
         session.flush()
     except StaleDataError as error:
         raise DraftConflict from error
+
+
+def _remove_pending_publish_files(state: dict, *, remove_target: bool) -> None:
+    Path(state["temporary_path"]).unlink(missing_ok=True)
+    if remove_target and state.get("promoted"):
+        Path(state["target_path"]).unlink(missing_ok=True)
+
+
+@event.listens_for(Session, "before_commit")
+def _promote_pending_publish_file(session: Session) -> None:
+    state = session.info.get(_PENDING_PUBLISH_KEY)
+    if state is None:
+        return
+    target_path = Path(state["target_path"])
+    if target_path.exists() or target_path.is_symlink():
+        raise ValueError("发布目标文件已存在")
+    os.link(state["temporary_path"], target_path)
+    state["promoted"] = True
+    Path(state["temporary_path"]).unlink()
+
+
+@event.listens_for(Session, "after_commit")
+def _keep_committed_publish_file(session: Session) -> None:
+    state = session.info.pop(_PENDING_PUBLISH_KEY, None)
+    if state is not None:
+        _remove_pending_publish_files(state, remove_target=False)
+
+
+@event.listens_for(Session, "after_rollback")
+def _remove_rolled_back_publish_file(session: Session) -> None:
+    state = session.info.pop(_PENDING_PUBLISH_KEY, None)
+    if state is not None:
+        _remove_pending_publish_files(state, remove_target=True)
 
 
 def _audit(
@@ -163,34 +200,46 @@ def create_or_resume_draft(
     if version.kind != "position" or not version.active:
         raise ValueError("只能从当前启用的库位版本创建草稿")
 
-    draft = InputDraft(
-        kind="position",
-        base_version_id=version.id,
-        created_by=user_id,
-        updated_by=user_id,
-    )
-    session.add(draft)
-    session.flush()
+    try:
+        with session.begin_nested():
+            draft = InputDraft(
+                kind="position",
+                base_version_id=version.id,
+                created_by=user_id,
+                updated_by=user_id,
+            )
+            session.add(draft)
+            session.flush()
 
-    frame = read_position_workbook(Path(version.storage_path))
-    for row_order, record in enumerate(frame.to_dict("records"), start=1):
-        session.add(
-            _make_row(
-                draft_id=draft.id,
-                row_order=row_order,
-                values=_record_values(record),
-                base_row_number=row_order + 1,
-                change_type="unchanged",
+            frame = read_position_workbook(Path(version.storage_path))
+            for row_order, record in enumerate(frame.to_dict("records"), start=1):
+                session.add(
+                    _make_row(
+                        draft_id=draft.id,
+                        row_order=row_order,
+                        values=_record_values(record),
+                        base_row_number=row_order + 1,
+                        change_type="unchanged",
+                    )
+                )
+            _audit(
+                session,
+                user_id,
+                "create_input_draft",
+                draft.id,
+                {"base_version_id": version.id},
+            )
+            session.flush()
+    except IntegrityError as error:
+        winner = session.scalar(
+            select(InputDraft).where(
+                InputDraft.kind == version.kind,
+                InputDraft.status == "editing",
             )
         )
-    _audit(
-        session,
-        user_id,
-        "create_input_draft",
-        draft.id,
-        {"base_version_id": version.id},
-    )
-    session.flush()
+        if winner is None:
+            raise DraftConflict from error
+        return winner
     return draft
 
 
@@ -273,13 +322,6 @@ def mutate_draft_row(
                 )
 
     touch_draft(draft, user_id)
-    _audit(
-        session,
-        user_id,
-        "mutate_input_draft",
-        draft.id,
-        {"row_id": row.id, "deleted": delete},
-    )
     _flush_revision(session)
     return row
 
@@ -293,8 +335,9 @@ def replace_draft_from_frame(
 ) -> dict[str, int]:
     require_revision(draft, expected_revision)
     candidate = frame[POSITION_SOURCE_COLUMNS].copy()
+    current = _frame_from_rows(list_draft_rows(session, draft.id))
     base = _base_frame(session, draft)
-    diff = position_diff(base, candidate)
+    diff = position_diff(current, candidate)
 
     base_rows: dict[tuple[str, str, str], deque[tuple[int, dict[str, str]]]] = (
         defaultdict(deque)
@@ -350,7 +393,7 @@ def replace_draft_from_frame(
     )
     session.add_all(replacement_rows)
     touch_draft(draft, user_id)
-    _audit(session, user_id, "replace_input_draft", draft.id, {"diff": diff})
+    _audit(session, user_id, "import_input_draft", draft.id, {"diff": diff})
     _flush_revision(session)
     return diff
 
@@ -387,12 +430,26 @@ def publish_draft(
         raise ValueError("版本名称已存在")
 
     path = Path(storage_path)
-    existed = path.exists()
-    write_position_workbook(
-        path,
-        _frame_from_rows(list_draft_rows(session, draft.id)),
+    resolved_path = path.resolve()
+    registered_paths = {
+        Path(registered_path).resolve()
+        for registered_path in session.scalars(select(InputVersion.storage_path))
+    }
+    if resolved_path in registered_paths:
+        raise ValueError("发布目标不能使用已注册的正式版本文件")
+    if path.exists() or path.is_symlink():
+        raise ValueError("发布目标文件已存在")
+    if session.info.get(_PENDING_PUBLISH_KEY) is not None:
+        raise ValueError("当前事务已有待提交的发布文件")
+
+    temporary_path = path.with_name(
+        f".{path.name}.{uuid4().hex}.tmp.xlsx"
     )
     try:
+        write_position_workbook(
+            temporary_path,
+            _frame_from_rows(list_draft_rows(session, draft.id)),
+        )
         for current in session.scalars(
             select(InputVersion)
             .where(InputVersion.kind == "position")
@@ -420,10 +477,14 @@ def publish_draft(
             {"version_id": version.id},
         )
         _flush_revision(session)
+        session.info[_PENDING_PUBLISH_KEY] = {
+            "temporary_path": str(temporary_path),
+            "target_path": str(path),
+            "promoted": False,
+        }
         return version
     except Exception:
-        if not existed:
-            path.unlink(missing_ok=True)
+        temporary_path.unlink(missing_ok=True)
         raise
 
 
