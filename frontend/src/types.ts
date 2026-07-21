@@ -110,10 +110,12 @@ export interface InputVersionSummary {
   issues: PositionIssue[];
 }
 
+export type InputVersionPreviewValue = string | number | boolean | null;
+
 export interface InputVersionPreview {
   kind: string;
   columns: string[];
-  rows: Record<string, string | number | null>[];
+  rows: Record<string, InputVersionPreviewValue>[];
   total: number;
   offset: number;
   limit: number;

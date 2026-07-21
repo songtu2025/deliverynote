@@ -26,7 +26,13 @@ import {
 import type { TableProps, UploadProps } from "antd";
 
 import { api, download } from "../../api";
-import type { InputVersion, InputVersionPreview, InputVersionSummary, PositionIssue } from "../../types";
+import type {
+  InputVersion,
+  InputVersionPreview,
+  InputVersionPreviewValue,
+  InputVersionSummary,
+  PositionIssue
+} from "../../types";
 import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
 
@@ -37,7 +43,18 @@ interface InputDataPanelProps {
   onOpenPositionDraft: () => void;
 }
 
-type PreviewRow = Record<string, string | number | null>;
+interface MutationState {
+  kind: InputKind;
+  action: "upload" | "activate";
+  versionId?: number;
+}
+
+interface KindError {
+  kind: InputKind;
+  message: string;
+}
+
+type PreviewRow = Record<string, InputVersionPreviewValue>;
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -49,6 +66,11 @@ function issueCount(issues: PositionIssue[], severity: PositionIssue["severity"]
     (total, issue) => total + (issue.severity === severity ? Math.max(1, issue.row_numbers.length) : 0),
     0
   );
+}
+
+function formatPreviewValue(value: InputVersionPreviewValue): string | number {
+  if (typeof value === "boolean") return value ? "是" : "否";
+  return value ?? "—";
 }
 
 export function InputDataPanel({
@@ -64,9 +86,9 @@ export function InputDataPanel({
   const [inspectionLoading, setInspectionLoading] = useState(false);
   const [inspectionError, setInspectionError] = useState<{ versionId: number; message: string } | null>(null);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [activatingId, setActivatingId] = useState<number | null>(null);
+  const [uploadError, setUploadError] = useState<KindError | null>(null);
+  const [actionError, setActionError] = useState<KindError | null>(null);
+  const [mutation, setMutation] = useState<MutationState | null>(null);
   const [uploadForm] = Form.useForm<{ name: string }>();
 
   const selectedDefinition = INPUT_KIND_BY_VALUE[selectedKind];
@@ -77,11 +99,11 @@ export function InputDataPanel({
     [selectedKind, versions]
   );
   const activeVersion = selectedVersions.find((version) => version.active) ?? null;
+  const mutationBusy = mutation !== null;
+  const uploading = mutation?.action === "upload";
 
   useEffect(() => {
     uploadForm.resetFields();
-    setUploadError(null);
-    setActionError(null);
   }, [selectedKind, uploadForm]);
 
   useEffect(() => {
@@ -127,7 +149,7 @@ export function InputDataPanel({
       key: column,
       ellipsis: true,
       width: Math.max(140, Math.min(240, column.length * 18 + 48)),
-      render: (value: string | number | null) => value ?? "—"
+      render: (value: InputVersionPreviewValue) => formatPreviewValue(value)
     })),
     [preview]
   );
@@ -141,8 +163,13 @@ export function InputDataPanel({
   );
 
   const uploadVersion: NonNullable<UploadProps["customRequest"]> = async (options) => {
+    if (mutationBusy) {
+      options.onError?.(new Error("已有资料操作正在进行"));
+      return;
+    }
     const kind = selectedKind;
     setUploadError(null);
+    setMutation({ kind, action: "upload" });
     try {
       const values = await uploadForm.validateFields();
       const formData = new FormData();
@@ -159,9 +186,11 @@ export function InputDataPanel({
       message.success(`${INPUT_KIND_BY_VALUE[kind].label}已上传并启用，仅影响以后创建的批次`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "上传失败";
-      setUploadError(errorMessage);
+      setUploadError({ kind, message: errorMessage });
       options.onError?.(error instanceof Error ? error : new Error(errorMessage));
       message.error("上传失败，请检查页面提示");
+    } finally {
+      setMutation(null);
     }
   };
 
@@ -171,21 +200,29 @@ export function InputDataPanel({
     try {
       await download(`/api/input-versions/${activeVersion.id}/download`, activeVersion.original_name);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "下载失败");
+      setActionError({
+        kind: selectedKind,
+        message: error instanceof Error ? error.message : "下载失败"
+      });
     }
   };
 
   const activateVersion = async (version: InputVersion) => {
+    if (mutationBusy) return;
+    const kind = selectedKind;
     setActionError(null);
-    setActivatingId(version.id);
+    setMutation({ kind, action: "activate", versionId: version.id });
     try {
       await api<InputVersion>(`/api/input-versions/${version.id}/activate`, { method: "POST" });
       await onVersionsChanged();
       message.success(`${version.name} 已启用，仅影响以后创建的批次`);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "启用失败");
+      setActionError({
+        kind,
+        message: error instanceof Error ? error.message : "启用失败"
+      });
     } finally {
-      setActivatingId(null);
+      setMutation(null);
     }
   };
 
@@ -212,7 +249,9 @@ export function InputDataPanel({
         </Space>
 
         <Divider titlePlacement="start">质量问题</Divider>
-        {summary.issues.length === 0 ? (
+        {selectedKind !== "position" ? (
+          <Alert type="info" showIcon title="文件结构已通过校验，当前未执行内容质量诊断" />
+        ) : summary.issues.length === 0 ? (
           <Alert type="success" showIcon title="未发现资料质量问题" />
         ) : (
           <Space orientation="vertical" size={8} style={{ width: "100%" }}>
@@ -260,8 +299,12 @@ export function InputDataPanel({
             return (
               <Button
                 key={definition.value}
-                aria-label={definition.label}
+                aria-label={current
+                  ? `${definition.label}，已就绪，当前版本 ${current.name}`
+                  : `${definition.label}，未启用，等待上传`}
+                aria-pressed={selected}
                 block
+                disabled={mutationBusy}
                 type={selected ? "primary" : "default"}
                 onClick={() => setSelectedKind(definition.value)}
                 style={{ height: "auto", padding: "11px 12px", whiteSpace: "normal", textAlign: "left" }}
@@ -296,7 +339,7 @@ export function InputDataPanel({
                 aria-label="开始网页维护"
                 type="primary"
                 icon={<ToolOutlined />}
-                disabled={!activeVersion}
+                disabled={!activeVersion || mutationBusy}
                 onClick={onOpenPositionDraft}
               >
                 开始网页维护
@@ -315,7 +358,9 @@ export function InputDataPanel({
           ]}
         />
 
-        {actionError && <Alert type="error" showIcon closable title="操作失败" description={actionError} />}
+        {actionError?.kind === selectedKind && (
+          <Alert type="error" showIcon closable title="操作失败" description={actionError.message} />
+        )}
 
         <Divider titlePlacement="start">当前启用版本</Divider>
         {loading ? (
@@ -358,18 +403,28 @@ export function InputDataPanel({
         <Typography.Paragraph type="secondary">
           当前固定上传为“{selectedDefinition.label}”，文件校验通过后立即启用，仅影响以后创建的批次。
         </Typography.Paragraph>
-        {uploadError && <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError} />}
+        {uploadError?.kind === selectedKind && (
+          <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError.message} />
+        )}
         <Form form={uploadForm} layout="inline">
           <Form.Item
             label="版本名称"
             name="name"
             rules={[{ required: true, message: "请输入版本名称" }]}
           >
-            <Input placeholder={`例如：${selectedKind}-20260721`} style={{ width: 260 }} />
+            <Input disabled={mutationBusy} placeholder={`例如：${selectedKind}-20260721`} style={{ width: 260 }} />
           </Form.Item>
           <Form.Item>
-            <Upload accept=".xls,.xlsx" showUploadList={false} customRequest={uploadVersion}>
-              <Button aria-label="选择 Excel 并上传替换" icon={<UploadOutlined />}>选择 Excel 并上传替换</Button>
+            <Upload disabled={mutationBusy} accept=".xls,.xlsx" showUploadList={false} customRequest={uploadVersion}>
+              <Button
+                aria-label="选择 Excel 并上传替换"
+                aria-busy={uploading}
+                disabled={mutationBusy}
+                loading={uploading}
+                icon={<UploadOutlined />}
+              >
+                选择 Excel 并上传替换
+              </Button>
             </Upload>
           </Form.Item>
         </Form>
@@ -404,7 +459,14 @@ export function InputDataPanel({
                   cancelText="取消"
                   onConfirm={() => activateVersion(version)}
                 >
-                  <Button type="link" loading={activatingId === version.id}>启用</Button>
+                  <Button
+                    type="link"
+                    aria-busy={mutation?.action === "activate" && mutation.versionId === version.id}
+                    disabled={mutationBusy}
+                    loading={mutation?.action === "activate" && mutation.versionId === version.id}
+                  >
+                    启用
+                  </Button>
                 </Popconfirm>
               )
             }
