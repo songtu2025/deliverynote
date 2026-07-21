@@ -85,7 +85,11 @@ def _promote_pending_publish_file(session: Session) -> None:
 @event.listens_for(Session, "after_commit")
 def _mark_root_publish_commit_succeeded(session: Session) -> None:
     state = session.info.get(_PENDING_PUBLISH_KEY)
-    if state is not None and state.get("root_commit_started"):
+    if (
+        state is not None
+        and state.get("root_commit_started")
+        and not session.in_nested_transaction()
+    ):
         state["root_commit_succeeded"] = True
 
 

@@ -738,6 +738,44 @@ class PositionDraftTests(unittest.TestCase):
                 verification_session.get(InputVersion, self.version_id).active
             )
 
+    def test_failed_root_commit_then_nested_commit_then_outer_rollback_cleans_files(self):
+        published_path = self.root / "failed-root-nested-commit-rollback.xlsx"
+        with self.database.session() as session:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            publish_draft(
+                session,
+                draft,
+                draft.revision,
+                self.admin_id,
+                name="failed-root-nested-commit-rollback",
+                storage_path=published_path,
+            )
+
+            def fail_after_promotion(_session):
+                self.assertTrue(published_path.exists())
+                raise RuntimeError("root commit failed after promotion")
+
+            event.listen(session, "before_commit", fail_after_promotion)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "root commit failed"):
+                    session.commit()
+            finally:
+                event.remove(session, "before_commit", fail_after_promotion)
+
+            with session.begin_nested():
+                pass
+            session.rollback()
+
+            self.assertFalse(published_path.exists())
+            self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+            versions = session.query(InputVersion).all()
+            self.assertEqual(
+                [(version.id, version.active) for version in versions],
+                [(self.version_id, True)],
+            )
+
     def test_publish_rejects_errors_and_requires_warning_confirmation(self):
         with self.database.session() as session:
             draft = create_or_resume_draft(
