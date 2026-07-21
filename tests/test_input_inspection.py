@@ -1,0 +1,186 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+import pandas as pd
+from openpyxl import Workbook
+
+from delivery_note.excel_io import read_position_workbook
+from delivery_note.input_inspection import (
+    inspect_input_version,
+    position_diff,
+    preview_input_version,
+    validate_position_frame,
+    write_position_workbook,
+)
+from delivery_note.pipeline import IMPORT_COLUMNS, POSITION_SOURCE_COLUMNS
+
+
+class InputInspectionTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.path = self.root / "position.xlsx"
+        self.frame = pd.DataFrame(
+            [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+
+    def tearDown(self):
+        self.temporary_directory.cleanup()
+
+    def test_position_summary_preview_and_quality_issues(self):
+        frame = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "未知", "", "many"],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+        issues = validate_position_frame(frame)
+        self.assertIn("duplicate_msku", {item["code"] for item in issues})
+        self.assertIn("unknown_scale", {item["code"] for item in issues})
+        self.assertIn("non_numeric_days", {item["code"] for item in issues})
+        duplicate_issue = next(
+            item for item in issues if item["code"] == "duplicate_msku"
+        )
+        self.assertEqual(duplicate_issue["row_numbers"], [2, 3])
+
+        write_position_workbook(self.path, frame)
+        inspection = inspect_input_version("position", self.path)
+        self.assertEqual(inspection["row_count"], 2)
+        self.assertEqual(
+            inspection["metrics"], {"sites": 1, "skus": 1, "mskus": 1}
+        )
+        self.assertEqual(
+            {item["code"] for item in inspection["issues"]},
+            {item["code"] for item in issues},
+        )
+
+        preview = preview_input_version("position", self.path, offset=1, limit=1)
+        self.assertEqual(preview["total"], 2)
+        self.assertEqual(preview["offset"], 1)
+        self.assertEqual(preview["limit"], 1)
+        self.assertEqual(preview["columns"], POSITION_SOURCE_COLUMNS)
+        self.assertEqual(preview["rows"][0]["已下单可售天数"], "many")
+
+    def test_written_position_workbook_round_trips(self):
+        write_position_workbook(self.path, self.frame)
+        self.assertEqual(
+            read_position_workbook(self.path).to_dict("records"),
+            self.frame.to_dict("records"),
+        )
+
+    def test_position_validation_reports_errors_and_warnings(self):
+        frame = pd.DataFrame(
+            [
+                [None, "SKU-A", "MSKU-A", "短尾", "备货", 30],
+                ["SEEKWAY:US", "", "MSKU-B", "中尾", None, 60],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+
+        issues = {item["code"]: item for item in validate_position_frame(frame)}
+
+        self.assertEqual(issues["empty_site"]["severity"], "error")
+        self.assertEqual(issues["empty_sku"]["severity"], "error")
+        self.assertEqual(issues["empty_stocking"]["severity"], "warning")
+        self.assertEqual(issues["empty_site"]["row_numbers"], [2])
+        self.assertEqual(issues["empty_sku"]["row_numbers"], [3])
+
+    def test_position_diff_counts_composite_key_changes(self):
+        base = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
+                ["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货", 60],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+        candidate = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "不备货", 30],
+                ["SEEKWAY:UK", "SKU-C", "MSKU-C", "长尾", "备货", 90],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+
+        self.assertEqual(
+            position_diff(base, candidate),
+            {"added": 1, "modified": 1, "deleted": 1, "unchanged": 0},
+        )
+
+    def test_position_diff_normalizes_identity_keys(self):
+        candidate = self.frame.copy()
+        candidate.loc[0, "店铺-站点"] = " seekway:us "
+        candidate.loc[0, "积加SKU"] = "sku-a"
+        candidate.loc[0, "MSKU"] = "msku-a"
+
+        self.assertEqual(
+            position_diff(self.frame, candidate),
+            {"added": 0, "modified": 0, "deleted": 0, "unchanged": 1},
+        )
+
+    def test_empty_msku_is_an_error_when_site_and_sku_have_multiple_rows(self):
+        frame = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
+                [" seekway:us ", "sku-a", "", "中尾", "备货", 60],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+
+        duplicate_issue = next(
+            item
+            for item in validate_position_frame(frame)
+            if item["code"] == "duplicate_msku"
+        )
+        self.assertEqual(duplicate_issue["severity"], "error")
+        self.assertEqual(duplicate_issue["row_numbers"], [3])
+
+    def test_all_input_kinds_are_read_and_template_uses_second_row_headers(self):
+        sources = {
+            "purchase": pd.DataFrame(
+                [["待交货", "KuangBiao", "SKU-A", "SEEKWAY:US", "广州仓", 10]],
+                columns=["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"],
+            ),
+            "product": pd.DataFrame(
+                [["SKU-A", "SEEKWAY:US", "水鞋", "锁"]],
+                columns=["SKU", "店铺/站点", "品类A", "锁仓MKSU"],
+            ),
+            "supplier": pd.DataFrame(
+                [["GYS-001", "KuangBiao", "启用"]],
+                columns=["供应商编号", "供应商名称", "状态"],
+            ),
+        }
+        for kind, frame in sources.items():
+            with self.subTest(kind=kind):
+                path = self.root / f"{kind}.xlsx"
+                frame.to_excel(path, index=False)
+                inspection = inspect_input_version(kind, path)
+                self.assertEqual(inspection["row_count"], 1)
+                self.assertEqual(inspection["columns"], list(frame.columns))
+                preview = preview_input_version(kind, path, offset=0, limit=10)
+                self.assertEqual(preview["rows"][0][frame.columns[-1]], frame.iloc[0, -1])
+
+        template_path = self.root / "template.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet["A1"] = "模板提示"
+        sheet.append(IMPORT_COLUMNS)
+        sheet.append(["广州仓", "GYS-001", "SKU-A", 10, "SEEKWAY:US", None, None])
+        workbook.save(template_path)
+
+        inspection = inspect_input_version("template", template_path)
+        preview = preview_input_version("template", template_path, offset=0, limit=10)
+        self.assertEqual(inspection["columns"], IMPORT_COLUMNS)
+        self.assertEqual(inspection["row_count"], 1)
+        self.assertEqual(preview["rows"][0]["*本次交货量"], 10)
+        self.assertIsNone(preview["rows"][0]["单据备注"])
+
+    def test_unknown_input_kind_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "不支持的输入资料类型"):
+            inspect_input_version("other", self.path)
+
+
+if __name__ == "__main__":
+    unittest.main()
