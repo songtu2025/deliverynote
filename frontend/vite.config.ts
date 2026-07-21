@@ -14,6 +14,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: "./src/test/setup.ts",
-    css: true
+    css: true,
+    // AntD/jsdom-heavy UI files can exceed wall-clock timeouts when Vitest
+    // runs them concurrently in constrained local and CI environments.
+    fileParallelism: false
   }
 });

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { download } from "../../api";
@@ -77,9 +78,16 @@ let rowsResponse: { rows: Array<Record<string, unknown>>; total: number; offset:
 let validationResponse: Record<string, unknown>;
 let failEntry = false;
 let entryRequest: Deferred<Response> | null = null;
+let metadataRequest: Deferred<Response> | null = null;
+let metadataResponse: Record<string, unknown> | null = null;
 let conflictNextRowWrite = false;
+let localConflictNextRowWrite = false;
 let expireImportApply = false;
+let duplicatePublishNameOnce = false;
 let rowRequestHandler: ((url: string) => Promise<Response> | Response) | null = null;
+let rowWriteRequest: Deferred<Response> | null = null;
+let importApplyRequest: Deferred<Response> | null = null;
+let publishRequest: Deferred<Response> | null = null;
 
 function renderMaintenance(overrides: Partial<{
   onPublished: (published: InputVersion) => void;
@@ -122,10 +130,23 @@ describe("PositionMaintenance", () => {
     };
     failEntry = false;
     entryRequest = null;
+    metadataRequest = null;
+    metadataResponse = null;
     conflictNextRowWrite = false;
+    localConflictNextRowWrite = false;
     expireImportApply = false;
+    duplicatePublishNameOnce = false;
     rowRequestHandler = null;
+    rowWriteRequest = null;
+    importApplyRequest = null;
+    publishRequest = null;
     vi.mocked(download).mockReset();
+    vi.spyOn(message, "success").mockImplementation(() => {
+      const result = (() => undefined) as ReturnType<typeof message.success>;
+      const completed = Promise.resolve(true);
+      result.then = completed.then.bind(completed);
+      return result;
+    });
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -136,16 +157,22 @@ describe("PositionMaintenance", () => {
         return jsonResponse(draftResponse);
       }
       if (url.endsWith("/api/input-drafts/position") && method === "GET") {
-        return jsonResponse(draftResponse);
+        if (metadataRequest) return metadataRequest.promise;
+        return jsonResponse(metadataResponse ?? draftResponse);
       }
       if (url.includes("/api/input-drafts/7/rows?") && method === "GET") {
         if (rowRequestHandler) return rowRequestHandler(url);
         return jsonResponse(rowsResponse);
       }
       if (url.endsWith("/api/input-drafts/7/rows") && method === "POST") {
+        if (rowWriteRequest) return rowWriteRequest.promise;
+        if (localConflictNextRowWrite) {
+          localConflictNextRowWrite = false;
+          return jsonResponse({ detail: "记录当前不可复制，请修正后重试" }, 409);
+        }
         if (conflictNextRowWrite) {
           conflictNextRowWrite = false;
-          return jsonResponse({ detail: "草稿已由其他管理员修改，请刷新后重试" }, 409);
+          return jsonResponse({ detail: "草稿已被其他管理员更新，请刷新后重试" }, 409);
         }
         return jsonResponse({ row: { ...baseRow, id: 102, change_type: "added" }, revision: 4 }, 201);
       }
@@ -172,6 +199,7 @@ describe("PositionMaintenance", () => {
         });
       }
       if (url.endsWith("/api/input-drafts/7/import-apply") && method === "POST") {
+        if (importApplyRequest) return importApplyRequest.promise;
         if (expireImportApply) return jsonResponse({ detail: "导入预览已失效，请重新预览" }, 409);
         return jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 });
       }
@@ -179,6 +207,11 @@ describe("PositionMaintenance", () => {
         return jsonResponse(validationResponse);
       }
       if (url.endsWith("/api/input-drafts/7/publish") && method === "POST") {
+        if (publishRequest) return publishRequest.promise;
+        if (duplicatePublishNameOnce) {
+          duplicatePublishNameOnce = false;
+          return jsonResponse({ detail: "版本名称已存在" }, 409);
+        }
         return jsonResponse({
           ...version,
           id: 32,
@@ -196,7 +229,9 @@ describe("PositionMaintenance", () => {
   });
 
   afterEach(() => {
+    message.destroy();
     cleanup();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -223,15 +258,65 @@ describe("PositionMaintenance", () => {
     renderMaintenance();
     await screen.findByText("SKU-A");
 
-    fireEvent.click(screen.getByRole("button", { name: "编辑 SKU-A" }));
+    fireEvent.click(screen.getByRole("button", { name: "编辑 SEEKWAY:US / SKU-A / MSKU-A" }));
     fireEvent.change(await screen.findByLabelText("备货定位"), { target: { value: "不备货" } });
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
     expect(await screen.findByText("修订号 8")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "复制 SKU-A" }));
+    fireEvent.click(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
     await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
     const copyBody = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
     expect(copyBody.revision).toBe(8);
+  });
+
+  it("merges refreshed metadata only when the summary matches the accepted r4", async () => {
+    metadataResponse = {
+      ...baseDraft,
+      revision: 4,
+      updated_by: 9,
+      updated_at: "2026-07-21T11:00:00",
+      modified_count: 1,
+      diff: { added: 1, modified: 0, deleted: 0, unchanged: 1 }
+    };
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+
+    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
+    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+
+    expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+    expect(await screen.findByText("新增 1")).toBeInTheDocument();
+    expect(screen.getByText("最后编辑人：用户 #9")).toBeInTheDocument();
+  });
+
+  it("treats an r5 metadata summary as a collaboration conflict without mixing it into local r4", async () => {
+    metadataRequest = deferred<Response>();
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+
+    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
+    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+    expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+
+    metadataRequest.resolve(jsonResponse({
+      ...baseDraft,
+      revision: 5,
+      updated_by: 12,
+      updated_at: "2026-07-21T11:05:00",
+      modified_count: 99,
+      diff: { added: 99, modified: 0, deleted: 0, unchanged: 0 }
+    }));
+
+    expect(await screen.findByText("草稿已在其他位置更新")).toBeInTheDocument();
+    expect(screen.getByText("修订号 4")).toBeInTheDocument();
+    expect(screen.getByText("新增 0")).toBeInTheDocument();
+    expect(screen.queryByText("新增 99")).not.toBeInTheDocument();
+    expect(screen.queryByText("最后编辑人：用户 #12")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新增记录" })).toBeDisabled();
   });
 
   it("invalidates local editing after a 409 and offers a server refresh", async () => {
@@ -249,6 +334,30 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
     expect(await screen.findByText("修订号 11")).toBeInTheDocument();
     expect(requests("POST", "/api/input-drafts/position")).toHaveLength(2);
+  });
+
+  it("keeps a non-revision row 409 local without locking the workspace", async () => {
+    localConflictNextRowWrite = true;
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+
+    fireEvent.click(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
+
+    expect(await screen.findByText("记录当前不可复制，请修正后重试")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" })).toBeEnabled();
+  });
+
+  it("confirms and sends a single-row delete with the current revision", async () => {
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+
+    fireEvent.click(screen.getByRole("button", { name: "删除 SEEKWAY:US / SKU-A / MSKU-A" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认删除" }));
+
+    await waitFor(() => expect(requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(1));
+    expect(JSON.parse(String(requests("DELETE", "/api/input-drafts/7/rows/101")[0][1]?.body))).toEqual({ revision: 3 });
+    expect(await screen.findByText("修订号 9")).toBeInTheDocument();
   });
 
   it("sends server filters and pagination, and a late response cannot replace newer rows", async () => {
@@ -351,8 +460,14 @@ describe("PositionMaintenance", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
 
     expect(await screen.findByText("导入预览已失效，请重新预览")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新草稿" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
+
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File(["excel-2"], "retry.xlsx")] }
+    });
+    await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(2));
   });
 
   it("blocks publish when validation returns errors", async () => {
@@ -399,6 +514,25 @@ describe("PositionMaintenance", () => {
     expect(body).toEqual({ revision: 3, name: "position-20260721", confirm_warnings: false });
   });
 
+  it("keeps a duplicate publish name editable and retries in the same dialog", async () => {
+    duplicatePublishNameOnce = true;
+    const onPublished = vi.fn();
+    renderMaintenance({ onPublished });
+    fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
+    const dialog = await dialogByTitle("发布新的库位/排仓版本");
+    fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "duplicate-name" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
+
+    expect(await within(dialog).findByText("版本名称已存在")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("新版本名称")).toHaveValue("duplicate-name");
+    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "unique-name" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /确认发布/ }));
+    await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
+    expect(requests("POST", "/publish")).toHaveLength(2);
+  });
+
   it("downloads the draft, confirms discard, and leaves without warning for server-saved changes", async () => {
     const onBack = vi.fn();
     renderMaintenance({ onBack });
@@ -427,6 +561,89 @@ describe("PositionMaintenance", () => {
     expect(onBack).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "放弃并返回" }));
     expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("cannot leave or close the row drawer while a save request is pending", async () => {
+    rowWriteRequest = deferred<Response>();
+    const onBack = vi.fn();
+    renderMaintenance({ onBack });
+    await screen.findByText("SKU-A");
+    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
+    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
+    const drawer = await dialogByTitle("新增库位记录");
+    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+
+    try {
+      await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+      expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
+      expect(within(drawer).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
+      expect(within(drawer).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
+      fireEvent.click(within(drawer).getByRole("button", { name: /取\s*消/ }));
+      expect(onBack).not.toHaveBeenCalled();
+      expect(screen.getByText("新增库位记录")).toBeInTheDocument();
+    } finally {
+      rowWriteRequest.resolve(jsonResponse({ row: { ...baseRow, id: 102 }, revision: 4 }, 201));
+    }
+    expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+  });
+
+  it("cannot leave or cancel the import dialog while apply is pending", async () => {
+    importApplyRequest = deferred<Response>();
+    const { container } = renderMaintenance();
+    await screen.findByText("SKU-A");
+    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File(["excel"], "replacement.xlsx")] }
+    });
+    const dialog = await dialogByTitle("Excel 整表替换预览");
+    fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
+    await waitFor(() => expect(requests("POST", "/import-apply")).toHaveLength(1));
+
+    try {
+      expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
+      expect(within(dialog).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
+      expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "放弃草稿" })).toBeDisabled();
+      fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
+      expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
+    } finally {
+      importApplyRequest.resolve(jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 }));
+    }
+    expect(await screen.findByText("修订号 6")).toBeInTheDocument();
+  });
+
+  it("cannot leave or cancel the publish dialog while publish is pending", async () => {
+    publishRequest = deferred<Response>();
+    const onBack = vi.fn();
+    const onPublished = vi.fn();
+    renderMaintenance({ onBack, onPublished });
+    fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
+    const dialog = await dialogByTitle("发布新的库位/排仓版本");
+    fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "position-busy" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
+    await waitFor(() => expect(requests("POST", "/publish")).toHaveLength(1));
+
+    try {
+      expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
+      expect(within(dialog).getByRole("button", { name: "继续修改草稿" })).toBeDisabled();
+      expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "放弃草稿" })).toBeDisabled();
+      fireEvent.click(within(dialog).getByRole("button", { name: "继续修改草稿" }));
+      fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
+      expect(onBack).not.toHaveBeenCalled();
+      expect(screen.getByText("发布新的库位/排仓版本")).toBeInTheDocument();
+    } finally {
+      publishRequest.resolve(jsonResponse({
+        ...version,
+        id: 32,
+        name: "position-busy",
+        original_name: "position-busy.xlsx",
+        draft_revision: 4,
+        draft_status: "published"
+      }, 201));
+    }
+    await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
   });
 
   it("shows loading, entry error with retry, and empty row states", async () => {

@@ -74,6 +74,10 @@ type PendingLeave = "close" | "back" | null;
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
 const ROW_PAGE_SIZE = 20;
 const SCALE_OPTIONS = ["短尾", "中尾", "长尾"].map((value) => ({ value }));
+const REVISION_CONFLICT_DETAILS = [
+  "草稿已被其他管理员更新，请刷新后重试",
+  "草稿写入发生并发冲突，请刷新后重试"
+];
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -97,8 +101,22 @@ function rowValues(row: PositionDraftRow): PositionRowValues {
   };
 }
 
+function rowActionLabel(action: string, row: PositionDraftRow): string {
+  return `${action} ${row.store_site} / ${row.jiaji_sku} / ${row.msku || "无 MSKU"}`;
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function hasApiDetail(error: unknown, detail: string): boolean {
+  return error instanceof ApiError && error.status === 409 && error.message.includes(detail);
+}
+
+function isRevisionConflict(error: unknown): boolean {
+  return error instanceof ApiError
+    && error.status === 409
+    && REVISION_CONFLICT_DETAILS.some((detail) => error.message.includes(detail));
 }
 
 function issueRows(issue: PositionIssue): string {
@@ -158,11 +176,15 @@ function RowEditorDrawer({
       size="large"
       open={open}
       destroyOnHidden
+      closable={!saving}
+      keyboard={!saving}
       maskClosable={false}
-      onClose={onClose}
+      onClose={() => {
+        if (!saving) onClose();
+      }}
       footer={(
         <div className="drawer-footer">
-          <Button onClick={onClose}>取消</Button>
+          <Button disabled={saving} onClick={onClose}>取消</Button>
           <Button type="primary" loading={saving} disabled={conflicted} onClick={onSave}>保存到草稿</Button>
         </div>
       )}
@@ -228,9 +250,15 @@ function ImportPreviewDialog({
       okText="应用整表替换"
       cancelText="取消"
       okButtonProps={{ danger: true }}
+      cancelButtonProps={{ disabled: applying }}
       confirmLoading={applying}
+      closable={!applying}
+      keyboard={!applying}
+      mask={{ closable: !applying }}
       onOk={onApply}
-      onCancel={onCancel}
+      onCancel={() => {
+        if (!applying) onCancel();
+      }}
     >
       {preview && (
         <Space orientation="vertical" size={14} style={{ width: "100%" }}>
@@ -252,6 +280,8 @@ function ImportPreviewDialog({
 function PublishDialog({
   validation,
   versionName,
+  nameError,
+  publishError,
   warningsConfirmed,
   publishing,
   blocked,
@@ -262,6 +292,8 @@ function PublishDialog({
 }: {
   validation: PositionDraftValidation | null;
   versionName: string;
+  nameError: string | null;
+  publishError: string | null;
   warningsConfirmed: boolean;
   publishing: boolean;
   blocked: boolean;
@@ -277,9 +309,15 @@ function PublishDialog({
       okText="确认发布"
       cancelText="继续修改草稿"
       okButtonProps={{ disabled: blocked }}
+      cancelButtonProps={{ disabled: publishing }}
       confirmLoading={publishing}
+      closable={!publishing}
+      keyboard={!publishing}
+      mask={{ closable: !publishing }}
       onOk={onPublish}
-      onCancel={onCancel}
+      onCancel={() => {
+        if (!publishing) onCancel();
+      }}
     >
       {validation && (
         <Space orientation="vertical" size={14} style={{ width: "100%" }}>
@@ -290,10 +328,11 @@ function PublishDialog({
             description="发布会创建并启用新的正式版本；已有批次继续使用创建时锁定的旧版本。"
           />
           <Form layout="vertical">
-            <Form.Item label="新版本名称" required>
+            <Form.Item label="新版本名称" required validateStatus={nameError ? "error" : undefined} help={nameError}>
               <Input aria-label="新版本名称" value={versionName} maxLength={200} onChange={(event) => onNameChange(event.target.value)} />
             </Form.Item>
           </Form>
+          {publishError && <Alert type="error" showIcon title="发布未完成" description={publishError} />}
           <DiffTags diff={validation.diff} />
           {validation.error_count > 0 && <Alert type="error" showIcon title={`存在 ${validation.error_count} 个错误，修正后才能发布`} />}
           {validation.warning_count > 0 && <Alert type="warning" showIcon title={`存在 ${validation.warning_count} 个警告，请确认后发布`} />}
@@ -341,6 +380,8 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   const [importError, setImportError] = useState<string | null>(null);
   const [publishValidation, setPublishValidation] = useState<PositionDraftValidation | null>(null);
   const [publishName, setPublishName] = useState("");
+  const [publishNameError, setPublishNameError] = useState<string | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [warningsConfirmed, setWarningsConfirmed] = useState(false);
 
   const entryRequestRef = useRef(0);
@@ -350,9 +391,26 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
 
   const actionsDisabled = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
 
+  const invalidateLocalState = (messageText: string) => {
+    setConflictMessage(messageText);
+    setDrawerOpen(false);
+    setDrawerDirty(false);
+    setEditingRow(null);
+    if (drawerOpen) rowForm.resetFields();
+    setImportPreview(null);
+    setPublishValidation(null);
+    setPublishNameError(null);
+    setPublishError(null);
+  };
+
   const mergeDraftMetadata = (summary: PositionDraft, expectedRevision: number) => {
     if (revisionRef.current !== expectedRevision) return;
-    setDraft((current) => current && current.id === summary.id ? {
+    if (summary.revision > expectedRevision) {
+      invalidateLocalState("草稿已被其他管理员更新，请刷新后重试");
+      return;
+    }
+    if (summary.revision !== expectedRevision) return;
+    setDraft((current) => current && current.id === summary.id && current.revision === expectedRevision ? {
       ...current,
       status: summary.status,
       row_count: summary.row_count,
@@ -452,19 +510,9 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
     void refreshMetadata(revision);
   };
 
-  const invalidateLocalState = (messageText: string) => {
-    setConflictMessage(messageText);
-    setDrawerOpen(false);
-    setDrawerDirty(false);
-    setEditingRow(null);
-    if (drawerOpen) rowForm.resetFields();
-    setImportPreview(null);
-    setPublishValidation(null);
-  };
-
   const handleActionError = (error: unknown, fallback: string) => {
     const messageText = errorMessage(error, fallback);
-    if (error instanceof ApiError && error.status === 409) {
+    if (isRevisionConflict(error)) {
       invalidateLocalState(messageText);
     } else {
       setActionError(messageText);
@@ -514,6 +562,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   };
 
   const requestDrawerClose = () => {
+    if (busyAction !== null) return;
     if (drawerDirty) {
       setPendingLeave("close");
       return;
@@ -524,6 +573,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   };
 
   const requestBack = () => {
+    if (busyAction !== null) return;
     if (drawerOpen && drawerDirty) {
       setPendingLeave("back");
       return;
@@ -532,6 +582,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   };
 
   const confirmLeave = () => {
+    if (busyAction !== null) return;
     const leave = pendingLeave;
     setPendingLeave(null);
     setDrawerDirty(false);
@@ -625,7 +676,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       options.onSuccess?.({});
     } catch (error) {
       const messageText = errorMessage(error, "Excel 预览失败");
-      if (error instanceof ApiError && error.status === 409) invalidateLocalState(messageText);
+      if (isRevisionConflict(error)) invalidateLocalState(messageText);
       else setImportError(messageText);
       options.onError?.(error instanceof Error ? error : new Error(messageText));
     } finally {
@@ -648,8 +699,15 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       message.success("Excel 已完整替换服务器草稿");
     } catch (error) {
       const messageText = errorMessage(error, "应用 Excel 替换失败");
-      if (error instanceof ApiError && error.status === 409) invalidateLocalState(messageText);
-      else setImportError(messageText);
+      if (isRevisionConflict(error)) {
+        invalidateLocalState(messageText);
+      } else {
+        if (hasApiDetail(error, "导入预览已失效，请重新预览")) {
+          setImportPreview(null);
+          setImportFileName("");
+        }
+        setImportError(messageText);
+      }
     } finally {
       setBusyAction(null);
     }
@@ -677,6 +735,8 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       }
       setPublishValidation(validation);
       setPublishName(defaultVersionName());
+      setPublishNameError(null);
+      setPublishError(null);
       setWarningsConfirmed(false);
     } catch (error) {
       handleActionError(error, "发布前校验失败");
@@ -690,6 +750,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
     if (publishValidation.error_count > 0 || (publishValidation.warning_count > 0 && !warningsConfirmed)) return;
     setBusyAction("publish");
     setActionError(null);
+    setPublishError(null);
     try {
       const published = await api<PublishResponse>(`/api/input-drafts/${draft.id}/publish`, {
         method: "POST",
@@ -704,7 +765,14 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       onPublished(published);
       message.success("新库位版本已发布并启用");
     } catch (error) {
-      handleActionError(error, "发布失败");
+      const messageText = errorMessage(error, "发布失败");
+      if (isRevisionConflict(error)) {
+        invalidateLocalState(messageText);
+      } else if (hasApiDetail(error, "版本名称已存在")) {
+        setPublishNameError(messageText);
+      } else {
+        setPublishError(messageText);
+      }
     } finally {
       setBusyAction(null);
     }
@@ -767,7 +835,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
         <Space size={2}>
           <Button
             type="link"
-            aria-label={`编辑 ${row.jiaji_sku}`}
+            aria-label={rowActionLabel("编辑", row)}
             icon={<EditOutlined />}
             disabled={actionsDisabled}
             onClick={() => openEditRow(row)}
@@ -776,7 +844,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
           </Button>
           <Button
             type="link"
-            aria-label={`复制 ${row.jiaji_sku}`}
+            aria-label={rowActionLabel("复制", row)}
             icon={<CopyOutlined />}
             disabled={actionsDisabled}
             loading={busyAction === "copy"}
@@ -794,7 +862,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
             <Button
               type="link"
               danger
-              aria-label={`删除 ${row.jiaji_sku}`}
+              aria-label={rowActionLabel("删除", row)}
               icon={<DeleteOutlined />}
               disabled={actionsDisabled}
               loading={busyAction === "delete"}
@@ -841,7 +909,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
     <div className="position-maintenance">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, marginBottom: 18 }}>
         <div>
-          <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={requestBack}>
+          <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} disabled={busyAction !== null} onClick={requestBack}>
             返回基础资料
           </Button>
           <Typography.Title level={2} style={{ margin: 0 }}>库位/排仓网页维护</Typography.Title>
@@ -1026,9 +1094,12 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
         open={pendingLeave !== null}
         okText={pendingLeave === "back" ? "放弃并返回" : "放弃修改"}
         cancelText="继续编辑"
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, disabled: busyAction !== null }}
+        cancelButtonProps={{ disabled: busyAction !== null }}
         onOk={confirmLeave}
-        onCancel={() => setPendingLeave(null)}
+        onCancel={() => {
+          if (busyAction === null) setPendingLeave(null);
+        }}
       >
         <Typography.Paragraph>右侧编辑面板中的内容尚未保存到服务器，离开后无法恢复。</Typography.Paragraph>
       </Modal>
@@ -1038,19 +1109,31 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
         fileName={importFileName}
         applying={busyAction === "import-apply"}
         onApply={() => void applyImport()}
-        onCancel={() => setImportPreview(null)}
+        onCancel={() => {
+          if (busyAction === null) setImportPreview(null);
+        }}
       />
 
       <PublishDialog
         validation={publishValidation}
         versionName={publishName}
+        nameError={publishNameError}
+        publishError={publishError}
         warningsConfirmed={warningsConfirmed}
         publishing={busyAction === "publish"}
         blocked={publishBlocked}
-        onNameChange={setPublishName}
+        onNameChange={(value) => {
+          setPublishName(value);
+          setPublishNameError(null);
+        }}
         onWarningsChange={setWarningsConfirmed}
         onPublish={() => void publishDraft()}
-        onCancel={() => setPublishValidation(null)}
+        onCancel={() => {
+          if (busyAction !== null) return;
+          setPublishValidation(null);
+          setPublishNameError(null);
+          setPublishError(null);
+        }}
       />
     </div>
   );
