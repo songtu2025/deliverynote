@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -172,8 +172,6 @@ describe("AdminPage", () => {
   });
 
   afterEach(() => {
-    message.destroy();
-    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });

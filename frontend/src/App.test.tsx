@@ -6,6 +6,7 @@ import App from "./App";
 
 describe("App", () => {
   beforeEach(() => {
+    expect(document.body).toBeEmptyDOMElement();
     localStorage.clear();
     vi.stubGlobal(
       "fetch",

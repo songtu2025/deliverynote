@@ -1,4 +1,21 @@
 import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { message } from "antd";
+import { afterEach } from "vitest";
+
+const flushReactScheduler = () => new Promise<void>((resolve) => {
+  const scheduleImmediate = (globalThis as typeof globalThis & {
+    setImmediate: (callback: () => void) => unknown;
+  }).setImmediate;
+  scheduleImmediate(resolve);
+});
+
+afterEach(async () => {
+  cleanup();
+  message.destroy();
+  await Promise.resolve();
+  await flushReactScheduler();
+});
 
 Object.defineProperty(window, "matchMedia", {
   writable: true,

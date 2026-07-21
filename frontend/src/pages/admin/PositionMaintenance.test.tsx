@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -238,8 +238,6 @@ describe("PositionMaintenance", () => {
   });
 
   afterEach(() => {
-    message.destroy();
-    cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
