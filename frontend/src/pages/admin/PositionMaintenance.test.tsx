@@ -86,6 +86,9 @@ let expireImportApply = false;
 let duplicatePublishNameOnce = false;
 let rowRequestHandler: ((url: string) => Promise<Response> | Response) | null = null;
 let rowWriteRequest: Deferred<Response> | null = null;
+let singleDeleteRequest: Deferred<Response> | null = null;
+let bulkDeleteRequest: Deferred<Response> | null = null;
+let discardRequest: Deferred<Response> | null = null;
 let importApplyRequest: Deferred<Response> | null = null;
 let publishRequest: Deferred<Response> | null = null;
 
@@ -138,6 +141,9 @@ describe("PositionMaintenance", () => {
     duplicatePublishNameOnce = false;
     rowRequestHandler = null;
     rowWriteRequest = null;
+    singleDeleteRequest = null;
+    bulkDeleteRequest = null;
+    discardRequest = null;
     importApplyRequest = null;
     publishRequest = null;
     vi.mocked(download).mockReset();
@@ -180,9 +186,11 @@ describe("PositionMaintenance", () => {
         return jsonResponse({ row: { ...baseRow, stocking_position: "不备货", change_type: "modified" }, revision: 8 });
       }
       if (url.endsWith("/api/input-drafts/7/rows/101") && method === "DELETE") {
+        if (singleDeleteRequest) return singleDeleteRequest.promise;
         return jsonResponse({ row_id: 101, revision: 9 });
       }
       if (url.endsWith("/api/input-drafts/7/rows/bulk-delete") && method === "POST") {
+        if (bulkDeleteRequest) return bulkDeleteRequest.promise;
         return jsonResponse({ deleted_ids: [101], revision: 5 });
       }
       if (url.endsWith("/api/input-drafts/7/import-preview") && method === "POST") {
@@ -222,6 +230,7 @@ describe("PositionMaintenance", () => {
         }, 201);
       }
       if (url.endsWith("/api/input-drafts/7/discard") && method === "POST") {
+        if (discardRequest) return discardRequest.promise;
         return jsonResponse({ ...draftResponse, status: "discarded", revision: 4 });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -348,16 +357,35 @@ describe("PositionMaintenance", () => {
     expect(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" })).toBeEnabled();
   });
 
-  it("confirms and sends a single-row delete with the current revision", async () => {
+  it("keeps a single-row delete confirmation open while pending, then restores retry after failure", async () => {
+    singleDeleteRequest = deferred<Response>();
     renderMaintenance();
     await screen.findByText("SKU-A");
 
-    fireEvent.click(screen.getByRole("button", { name: "删除 SEEKWAY:US / SKU-A / MSKU-A" }));
+    const deleteButton = screen.getByRole("button", { name: "删除 SEEKWAY:US / SKU-A / MSKU-A" });
+    fireEvent.click(deleteButton);
+    const title = "删除 SKU-A？";
+    expect(await screen.findByText(title)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "确认删除" }));
 
     await waitFor(() => expect(requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(1));
     expect(JSON.parse(String(requests("DELETE", "/api/input-drafts/7/rows/101")[0][1]?.body))).toEqual({ revision: 3 });
+    expect(screen.getByRole("button", { name: /取\s*消/ })).toBeDisabled();
+    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
+    expect(screen.getByText(title)).toBeInTheDocument();
+
+    singleDeleteRequest.resolve(jsonResponse({ detail: "删除服务暂时不可用" }, 500));
+    expect(await screen.findByText("删除服务暂时不可用")).toBeInTheDocument();
+    expect(screen.getByText(title)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /取\s*消/ })).toBeEnabled();
+
+    singleDeleteRequest = deferred<Response>();
+    fireEvent.click(screen.getByRole("button", { name: /确认删除/ }));
+    await waitFor(() => expect(requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(2));
+    singleDeleteRequest.resolve(jsonResponse({ row_id: 101, revision: 9 }));
     expect(await screen.findByText("修订号 9")).toBeInTheDocument();
+    await waitFor(() => expect(deleteButton).not.toHaveClass("ant-popover-open"));
   });
 
   it("sends server filters and pagination, and a late response cannot replace newer rows", async () => {
@@ -403,13 +431,15 @@ describe("PositionMaintenance", () => {
     });
   });
 
-  it("confirms and sends a bulk delete with the current revision", async () => {
+  it("keeps the bulk-delete confirmation open and uncancellable while pending", async () => {
+    bulkDeleteRequest = deferred<Response>();
     renderMaintenance();
     await screen.findByText("SKU-A");
     const row = screen.getByText("SKU-A").closest("tr");
     expect(row).not.toBeNull();
     fireEvent.click(within(row!).getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "批量删除（1）" }));
+    const bulkDeleteButton = screen.getByRole("button", { name: "批量删除（1）" });
+    fireEvent.click(bulkDeleteButton);
     expect(await screen.findByText("删除选中的 1 条记录？")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
 
@@ -418,7 +448,14 @@ describe("PositionMaintenance", () => {
       revision: 3,
       row_ids: [101]
     });
+    await waitFor(() => expect(screen.getByRole("button", { name: /取\s*消/ })).toBeDisabled());
+    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
+    expect(screen.getByText("删除选中的 1 条记录？")).toBeInTheDocument();
+
+    bulkDeleteRequest.resolve(jsonResponse({ deleted_ids: [101], revision: 5 }));
     expect(await screen.findByText("修订号 5")).toBeInTheDocument();
+    await waitFor(() => expect(bulkDeleteButton).not.toHaveClass("ant-popover-open"));
   });
 
   it("previews every Excel diff count before applying the server token", async () => {
@@ -533,7 +570,8 @@ describe("PositionMaintenance", () => {
     expect(requests("POST", "/publish")).toHaveLength(2);
   });
 
-  it("downloads the draft, confirms discard, and leaves without warning for server-saved changes", async () => {
+  it("downloads the draft and keeps discard confirmation uncancellable until the server accepts it", async () => {
+    discardRequest = deferred<Response>();
     const onBack = vi.fn();
     renderMaintenance({ onBack });
     await screen.findByText("SKU-A");
@@ -546,6 +584,14 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "放弃草稿" }));
     expect(await screen.findByText("确定放弃整个服务器草稿？")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认放弃" }));
+    await waitFor(() => expect(requests("POST", "/discard")).toHaveLength(1));
+    expect(screen.getByRole("button", { name: /取\s*消/ })).toBeDisabled();
+    fireEvent.mouseDown(document.body);
+    fireEvent.click(document.body);
+    expect(screen.getByText("确定放弃整个服务器草稿？")).toBeInTheDocument();
+    expect(onBack).not.toHaveBeenCalled();
+
+    discardRequest.resolve(jsonResponse({ ...draftResponse, status: "discarded", revision: 4 }));
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
   });
 
@@ -659,9 +705,12 @@ describe("PositionMaintenance", () => {
     const failed = renderMaintenance();
     expect(await screen.findByText("无法打开库位草稿")).toBeInTheDocument();
     expect(screen.getByText("草稿服务暂时不可用")).toBeInTheDocument();
+    failEntry = false;
+    fireEvent.click(screen.getByRole("button", { name: /重新尝试/ }));
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+    expect(requests("POST", "/api/input-drafts/position")).toHaveLength(3);
     failed.unmount();
 
-    failEntry = false;
     entryRequest = null;
     rowsResponse = { rows: [], total: 0, offset: 0, limit: 20 };
     renderMaintenance();

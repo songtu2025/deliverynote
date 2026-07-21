@@ -365,6 +365,9 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   const [pageSize, setPageSize] = useState(ROW_PAGE_SIZE);
   const [refreshRowsKey, setRefreshRowsKey] = useState(0);
   const [selectedRowIds, setSelectedRowIds] = useState<number[]>([]);
+  const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
@@ -388,6 +391,9 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   const rowsRequestRef = useRef(0);
   const metadataRequestRef = useRef(0);
   const revisionRef = useRef(0);
+  const keepDeleteConfirmOpenRef = useRef<number | null>(null);
+  const keepBulkDeleteConfirmOpenRef = useRef(false);
+  const keepDiscardConfirmOpenRef = useRef(false);
 
   const actionsDisabled = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
 
@@ -401,6 +407,9 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
     setPublishValidation(null);
     setPublishNameError(null);
     setPublishError(null);
+    setDeleteConfirmRowId(null);
+    setBulkDeleteConfirmOpen(false);
+    setDiscardConfirmOpen(false);
   };
 
   const mergeDraftMetadata = (summary: PositionDraft, expectedRevision: number) => {
@@ -447,6 +456,9 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       setConflictMessage(null);
       setImportError(null);
       setSelectedRowIds([]);
+      setDeleteConfirmRowId(null);
+      setBulkDeleteConfirmOpen(false);
+      setDiscardConfirmOpen(false);
       setRefreshRowsKey((value) => value + 1);
     } catch (error) {
       if (request === entryRequestRef.current) setEntryError(errorMessage(error, "无法打开库位草稿"));
@@ -524,8 +536,8 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
     request: () => Promise<T>,
     successMessage: string,
     afterSuccess?: (result: T) => void
-  ) => {
-    if (actionsDisabled) return;
+  ): Promise<boolean> => {
+    if (actionsDisabled) return false;
     setBusyAction(action);
     setActionError(null);
     try {
@@ -533,8 +545,10 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       acceptRevision(result.revision);
       afterSuccess?.(result);
       message.success(successMessage);
+      return true;
     } catch (error) {
       handleActionError(error, `${successMessage}失败`);
+      return false;
     } finally {
       setBusyAction(null);
     }
@@ -632,26 +646,28 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   };
 
   const deleteRow = async (row: PositionDraftRow) => {
-    if (!draft) return;
-    await runRevisionMutation(
+    if (!draft) return false;
+    return runRevisionMutation(
       "delete",
       () => api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/${row.id}`, {
         method: "DELETE",
         body: JSON.stringify({ revision: revisionRef.current })
       }),
-      "记录已从服务器草稿删除"
+      "记录已从服务器草稿删除",
+      () => setDeleteConfirmRowId(null)
     );
   };
 
   const bulkDelete = async () => {
-    if (!draft || selectedRowIds.length === 0) return;
-    await runRevisionMutation(
+    if (!draft || selectedRowIds.length === 0) return false;
+    return runRevisionMutation(
       "bulk-delete",
       () => api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/bulk-delete`, {
         method: "POST",
         body: JSON.stringify({ revision: revisionRef.current, row_ids: selectedRowIds })
       }),
-      `已删除 ${selectedRowIds.length} 条草稿记录`
+      `已删除 ${selectedRowIds.length} 条草稿记录`,
+      () => setBulkDeleteConfirmOpen(false)
     );
   };
 
@@ -779,7 +795,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   };
 
   const discardDraft = async () => {
-    if (!draft || actionsDisabled) return;
+    if (!draft || actionsDisabled) return false;
     setBusyAction("discard");
     setActionError(null);
     try {
@@ -787,10 +803,13 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
         method: "POST",
         body: JSON.stringify({ revision: revisionRef.current })
       });
+      setDiscardConfirmOpen(false);
       message.success("服务器草稿已放弃，当前正式版本未改变");
       onBack();
+      return true;
     } catch (error) {
       handleActionError(error, "放弃草稿失败");
+      return false;
     } finally {
       setBusyAction(null);
     }
@@ -853,11 +872,25 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
             复制
           </Button>
           <Popconfirm
+            fresh
+            open={deleteConfirmRowId === row.id}
             title={`删除 ${row.jiaji_sku}？`}
             description="删除会立即保存到服务器草稿，发布前不会影响正式版本。"
             okText="确认删除"
             cancelText="取消"
-            onConfirm={() => deleteRow(row)}
+            cancelButtonProps={{ disabled: busyAction === "delete" && deleteConfirmRowId === row.id }}
+            onOpenChange={(open) => {
+              if (!open && keepDeleteConfirmOpenRef.current === row.id) {
+                keepDeleteConfirmOpenRef.current = null;
+                return;
+              }
+              if (!open && busyAction === "delete") return;
+              setDeleteConfirmRowId(open ? row.id : null);
+            }}
+            onConfirm={async () => {
+              keepDeleteConfirmOpenRef.current = null;
+              if (!await deleteRow(row)) keepDeleteConfirmOpenRef.current = row.id;
+            }}
           >
             <Button
               type="link"
@@ -873,7 +906,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
         </Space>
       )
     }
-  ], [actionsDisabled, busyAction]);
+  ], [actionsDisabled, busyAction, deleteConfirmRowId]);
 
   if (entryLoading && !draft) {
     return (
@@ -928,12 +961,26 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
             </Button>
           </Upload>
           <Popconfirm
+            fresh
+            open={discardConfirmOpen}
             title="确定放弃整个服务器草稿？"
             description="草稿中的所有修改都会丢失，当前正式版本保持不变。"
             okText="确认放弃"
             cancelText="取消"
             okButtonProps={{ danger: true }}
-            onConfirm={discardDraft}
+            cancelButtonProps={{ disabled: busyAction === "discard" }}
+            onOpenChange={(open) => {
+              if (!open && keepDiscardConfirmOpenRef.current) {
+                keepDiscardConfirmOpenRef.current = false;
+                return;
+              }
+              if (!open && busyAction === "discard") return;
+              setDiscardConfirmOpen(open);
+            }}
+            onConfirm={async () => {
+              keepDiscardConfirmOpenRef.current = false;
+              if (!await discardDraft()) keepDiscardConfirmOpenRef.current = true;
+            }}
           >
             <Button danger disabled={actionsDisabled} loading={busyAction === "discard"}>放弃草稿</Button>
           </Popconfirm>
@@ -1025,13 +1072,27 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
             仅看已修改
           </Checkbox>
           <Popconfirm
+            fresh
+            open={bulkDeleteConfirmOpen}
             title={`删除选中的 ${selectedRowIds.length} 条记录？`}
             description="删除会立即保存到服务器草稿，发布前不影响正式版本。"
             okText="确认删除"
             cancelText="取消"
             okButtonProps={{ danger: true }}
+            cancelButtonProps={{ disabled: busyAction === "bulk-delete" }}
             disabled={selectedRowIds.length === 0 || actionsDisabled}
-            onConfirm={bulkDelete}
+            onOpenChange={(open) => {
+              if (!open && keepBulkDeleteConfirmOpenRef.current) {
+                keepBulkDeleteConfirmOpenRef.current = false;
+                return;
+              }
+              if (!open && busyAction === "bulk-delete") return;
+              setBulkDeleteConfirmOpen(open);
+            }}
+            onConfirm={async () => {
+              keepBulkDeleteConfirmOpenRef.current = false;
+              if (!await bulkDelete()) keepBulkDeleteConfirmOpenRef.current = true;
+            }}
           >
             <Button danger disabled={selectedRowIds.length === 0 || actionsDisabled} loading={busyAction === "bulk-delete"}>
               批量删除（{selectedRowIds.length}）
