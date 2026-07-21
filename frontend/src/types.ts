@@ -93,6 +93,32 @@ export interface InputVersion {
   created_at: string;
 }
 
+export interface PositionIssue {
+  severity: "error" | "warning";
+  code: string;
+  message: string;
+  row_numbers: number[];
+  before?: number;
+  after?: number;
+}
+
+export interface InputVersionSummary {
+  kind: string;
+  row_count: number;
+  columns: string[];
+  metrics: Record<string, number>;
+  issues: PositionIssue[];
+}
+
+export interface InputVersionPreview {
+  kind: string;
+  columns: string[];
+  rows: Record<string, string | number | null>[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
 export interface AuditLog {
   id: number;
   user_id: number | null;
