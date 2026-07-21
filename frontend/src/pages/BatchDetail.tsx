@@ -1,19 +1,23 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
   Card,
   Descriptions,
-  Divider,
+  Drawer,
+  Empty,
   Form,
   Input,
   InputNumber,
-  Modal,
   Popconfirm,
+  Select,
   Space,
-  Statistic,
+  Spin,
+  Steps,
   Switch,
   Table,
+  Tag,
+  Tooltip,
   Typography,
   Upload,
   message
@@ -23,12 +27,15 @@ import {
   ArrowDownOutlined,
   ArrowLeftOutlined,
   ArrowUpOutlined,
+  CheckCircleFilled,
   CloudUploadOutlined,
+  DeleteOutlined,
   DownloadOutlined,
   ExportOutlined,
   PlayCircleOutlined,
   PlusOutlined,
-  SafetyCertificateOutlined
+  SafetyCertificateOutlined,
+  SearchOutlined
 } from "@ant-design/icons";
 
 import { api, download } from "../api";
@@ -42,11 +49,17 @@ import type {
 import { StatusTag } from "./BatchesPage";
 
 const VERSION_LABELS: Record<string, string> = {
-  purchase: "采购",
-  product: "商品",
-  supplier: "供应商",
+  purchase: "采购需求",
+  product: "商品信息",
+  supplier: "供应商资料",
   position: "库位/排仓",
   template: "导出模板"
+};
+
+const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
+  pending: { label: "未处理", color: "warning" },
+  partial: { label: "部分处理", color: "processing" },
+  resolved: { label: "已处理", color: "success" }
 };
 
 type SplitFormValues = { parts: SplitPart[] };
@@ -55,17 +68,31 @@ function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function isActiveJob(job: Job | undefined): job is Job {
+  return Boolean(job && (job.status === "queued" || job.status === "running"));
+}
+
+function ExceptionStatusTag({ status }: { status: string }) {
+  const item = EXCEPTION_STATUS[status] ?? { label: status, color: "default" };
+  return <Tag color={item.color}>{item.label}</Tag>;
+}
+
 export default function BatchDetail({ batchId, onBack }: { batchId: number; onBack: () => void }) {
   const [batch, setBatch] = useState<Batch | null>(null);
   const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>();
+  const [reasonFilter, setReasonFilter] = useState<string>();
   const [splitForm] = Form.useForm<SplitFormValues>();
   const splitParts = Form.useWatch("parts", splitForm) ?? [];
+  const pollingJob = useRef<number | null>(null);
+  const announcedJobs = useRef(new Set<number>());
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [batchResult, exceptionRows] = await Promise.all([
         api<Batch>(`/api/batches/${batchId}`),
@@ -76,7 +103,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取批次失败");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -84,41 +111,78 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     void load();
   }, [batchId]);
 
-  const totals = useMemo(() => {
-    if (batch?.summary) {
-      return {
-        delivery: batch.summary.delivery_total,
-        imported: batch.summary.import_total,
-        manual: batch.summary.manual_total
-      };
-    }
-    const files = batch?.files ?? [];
-    return files.reduce(
-      (sum, file) => ({
-        delivery: sum.delivery + file.delivery_total,
-        imported: sum.imported + file.import_total,
-        manual: sum.manual + file.manual_total
-      }),
-      { delivery: 0, imported: 0, manual: 0 }
-    );
+  const activeJob = useMemo(() => {
+    const jobs = batch?.jobs;
+    if (isActiveJob(jobs?.compute)) return jobs.compute;
+    if (isActiveJob(jobs?.export)) return jobs.export;
+    return undefined;
+  }, [batch?.jobs]);
+
+  useEffect(() => {
+    if (!activeJob || pollingJob.current === activeJob.id) return;
+    let cancelled = false;
+    pollingJob.current = activeJob.id;
+
+    const poll = async () => {
+      try {
+        const job = await api<Job>(`/api/jobs/${activeJob.id}`);
+        if (cancelled) return;
+        if (job.status === "succeeded" || job.status === "failed") {
+          pollingJob.current = null;
+          await load(true);
+          if (!announcedJobs.current.has(job.id)) {
+            announcedJobs.current.add(job.id);
+            if (job.status === "succeeded") {
+              message.success(job.kind === "compute" ? "批次计算完成" : "导出文件已生成");
+            } else {
+              message.error(job.error_message ?? "后台任务失败");
+            }
+          }
+          return;
+        }
+        await wait(1500);
+        if (!cancelled) void poll();
+      } catch (error) {
+        pollingJob.current = null;
+        if (!cancelled) {
+          message.error(error instanceof Error ? error.message : "读取任务状态失败");
+        }
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (pollingJob.current === activeJob.id) pollingJob.current = null;
+    };
+  }, [activeJob?.id, activeJob?.status]);
+
+  const totals = useMemo(() => batch?.summary ?? {
+    delivery_total: 0,
+    import_total: 0,
+    manual_total: 0,
+    conserved: true
   }, [batch]);
 
-  const pollJob = async (jobId: number) => {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      const job = await api<Job>(`/api/jobs/${jobId}`);
-      if (job.status === "succeeded") {
-        await load();
-        message.success(job.kind === "compute" ? "批次计算完成" : "导出完成");
-        return;
-      }
-      if (job.status === "failed") {
-        await load();
-        throw new Error(job.error_message ?? "任务失败");
-      }
-      await wait(1500);
-    }
-    throw new Error("任务仍在运行，请稍后刷新")
-  };
+  const files = batch?.files ?? [];
+  const fileById = useMemo(
+    () => Object.fromEntries(files.map((file) => [file.id, file])),
+    [files]
+  );
+  const reasonOptions = useMemo(
+    () => Array.from(new Set(exceptions.map((item) => item.reason))).map((reason) => ({ value: reason, label: reason })),
+    [exceptions]
+  );
+  const filteredExceptions = useMemo(() => {
+    const keyword = query.trim().toLocaleLowerCase("zh-CN");
+    return exceptions.filter((item) => {
+      const source = fileById[item.batch_file_id]?.original_name ?? "";
+      const haystack = `${source} ${item.sku} ${item.full_site} ${item.destination}`.toLocaleLowerCase("zh-CN");
+      return (!keyword || haystack.includes(keyword))
+        && (!statusFilter || item.status === statusFilter)
+        && (!reasonFilter || item.reason === reasonFilter);
+    });
+  }, [exceptions, fileById, query, reasonFilter, statusFilter]);
 
   const runAction = async (name: string, operation: () => Promise<void>) => {
     setAction(name);
@@ -140,13 +204,21 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         body: formData
       });
       options.onSuccess?.({});
-      await load();
+      await load(true);
+      message.success("交货文件已上传，预检状态已更新");
+    });
+  };
+
+  const removeFile = async (file: BatchFile) => {
+    await runAction("delete", async () => {
+      await api<Batch>(`/api/batches/${batchId}/files/${file.id}`, { method: "DELETE" });
+      await load(true);
+      message.success(`${file.original_name} 已删除，其余文件已自动重排`);
     });
   };
 
   const move = async (fileId: number, offset: number) => {
-    if (!batch?.files) return;
-    const ids = batch.files.map((file) => file.id);
+    const ids = files.map((file) => file.id);
     const index = ids.indexOf(fileId);
     const next = index + offset;
     if (index < 0 || next < 0 || next >= ids.length) return;
@@ -156,25 +228,27 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         method: "PUT",
         body: JSON.stringify({ file_ids: ids })
       });
-      await load();
+      await load(true);
+      message.info("处理顺序已更新，需要重新预检");
     });
   };
 
   const preflight = () => runAction("preflight", async () => {
     await api<Batch>(`/api/batches/${batchId}/preflight`, { method: "POST" });
-    await load();
-    message.success("预检通过，可以启动计算");
+    await load(true);
+    message.success("所有基础资料和交货文件均已通过预检");
   });
 
   const compute = () => runAction("compute", async () => {
-    const job = await api<Job>(`/api/batches/${batchId}/compute`, { method: "POST" });
-    await load();
-    await pollJob(job.id);
+    await api<Job>(`/api/batches/${batchId}/compute`, { method: "POST" });
+    await load(true);
+    message.info("计算任务已提交，可以离开页面，返回后状态会自动恢复");
   });
 
   const startExport = () => runAction("export", async () => {
-    const job = await api<Job>(`/api/batches/${batchId}/export`, { method: "POST" });
-    await pollJob(job.id);
+    await api<Job>(`/api/batches/${batchId}/export`, { method: "POST" });
+    await load(true);
+    message.info("正在生成导出文件");
   });
 
   const openSplit = (record: DeliveryException) => {
@@ -196,8 +270,17 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     });
   };
 
+  const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
+  const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
+  const splitValid = Boolean(
+    splitTarget
+    && splitParts.length
+    && splitRemaining === 0
+    && splitParts.every((part) => Number(part?.quantity ?? 0) > 0)
+  );
+
   const saveSplit = async () => {
-    if (!splitTarget) return;
+    if (!splitTarget || !splitValid) return;
     const values = await splitForm.validateFields();
     await runAction("split", async () => {
       await api<DeliveryException>(`/api/exceptions/${splitTarget.id}/split`, {
@@ -206,8 +289,8 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       });
       setSplitTarget(null);
       splitForm.resetFields();
-      await load();
-      message.success("拆分已保存，数量总额未改变");
+      await load(true);
+      message.success("拆分已保存，批次数量保持守恒");
     });
   };
 
@@ -215,72 +298,120 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     return <Card loading={loading} />;
   }
 
-  const files = batch.files ?? [];
-  const conserved = totals.delivery === totals.imported + totals.manual;
-  const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
+  const canEditFiles = ["draft", "preflight_ready", "failed"].includes(batch.status);
+  const computed = batch.status === "succeeded" || batch.download_ready;
+  const exportJob = batch.jobs?.export;
+  const reviewStarted = exceptions.some((item) => item.status !== "pending");
+  const showFileActions = canEditFiles || files.some((file) => file.download_ready);
+  const currentStep = batch.download_ready
+    ? 4
+    : batch.status === "succeeded"
+      ? totals.manual_total <= 0 ? 4 : reviewStarted ? 3 : 2
+      : batch.status === "queued" || batch.status === "running"
+        ? 2
+        : batch.status === "preflight_ready"
+          ? 1
+          : 0;
+
+  const workflowItems = [
+    { title: "准备文件", content: files.length ? `${files.length} 个文件` : "等待上传" },
+    { title: "预检", content: currentStep > 1 || batch.status === "preflight_ready" ? "检查通过" : "检查格式与供应商" },
+    { title: "计算结果", content: computed ? "计算完成" : activeJob?.kind === "compute" ? "后台处理中" : "等待计算" },
+    { title: "异常审校", content: computed ? `${totals.manual_total} 待处理` : "计算后开始" },
+    { title: "导出下载", content: batch.download_ready ? "文件已生成" : "等待生成" }
+  ];
 
   return (
-    <div className="page-shell">
-      <div className="page-heading">
+    <div className="page-shell batch-workbench">
+      <div className="batch-heading">
         <div>
-          <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} style={{ paddingLeft: 0 }}>
+          <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} className="back-link">
             返回批次列表
           </Button>
-          <Typography.Title level={2}>{batch.name}</Typography.Title>
-          <Space><StatusTag status={batch.status} /><span className="muted">批次 #{batch.id}</span></Space>
+          <div className="batch-title-row">
+            <Typography.Title level={2}>{batch.name}</Typography.Title>
+            <StatusTag status={batch.status} />
+          </div>
+          <Typography.Text type="secondary">批次 #{batch.id} · 更新于 {new Date(batch.updated_at).toLocaleString("zh-CN")}</Typography.Text>
         </div>
-        <Space wrap>
-          <Upload accept=".xls,.xlsx" showUploadList={false} customRequest={uploadFile}>
-            <Button icon={<CloudUploadOutlined />} loading={action === "upload"}>上传交货文件</Button>
-          </Upload>
-          <Button
-            icon={<SafetyCertificateOutlined />}
-            disabled={batch.status !== "draft" && batch.status !== "failed"}
-            onClick={() => void preflight()}
-            loading={action === "preflight"}
-          >
-            预检
-          </Button>
-          <Button
-            type="primary"
-            icon={<PlayCircleOutlined />}
-            disabled={batch.status !== "preflight_ready" && batch.status !== "failed"}
-            loading={action === "compute"}
-            onClick={() => void compute()}
-          >
-            启动计算
-          </Button>
+        <Space wrap className="batch-primary-actions">
+          {canEditFiles && (
+            <Upload accept=".xls,.xlsx" multiple showUploadList={false} customRequest={uploadFile}>
+              <Button icon={<CloudUploadOutlined />} loading={action === "upload"}>上传交货文件</Button>
+            </Upload>
+          )}
+          {(batch.status === "draft" || batch.status === "failed") && (
+            <Button
+              icon={<SafetyCertificateOutlined />}
+              disabled={!files.length}
+              loading={action === "preflight"}
+              onClick={() => void preflight()}
+            >
+              执行预检
+            </Button>
+          )}
+          {(batch.status === "preflight_ready" || batch.status === "failed") && (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              loading={action === "compute"}
+              onClick={() => void compute()}
+            >
+              {batch.status === "failed" ? "重新计算" : "启动计算"}
+            </Button>
+          )}
+          {activeJob && <span className="job-indicator"><Spin size="small" /> {activeJob.kind === "compute" ? "正在计算" : "正在导出"}</span>}
         </Space>
       </div>
 
-      {batch.error_message && <Alert type="error" showIcon message="任务失败" description={batch.error_message} className="section-card" />}
-
-      <div className="summary-grid">
-        <Card><Statistic title="交货总量" value={totals.delivery} /></Card>
-        <Card><Statistic title="可导入总量" value={totals.imported} /></Card>
-        <Card><Statistic title="待处理量" value={totals.manual} /></Card>
-        <Card>
-          <Statistic title="数量守恒" value={conserved ? "通过" : "异常"} />
-          <div className={conserved ? "conservation-ok" : "conservation-bad"}>
-            {totals.delivery} = {totals.imported} + {totals.manual}
-          </div>
-        </Card>
+      <div className="workflow-surface">
+        <Steps current={currentStep} status={batch.status === "failed" ? "error" : "process"} responsive={false} items={workflowItems} />
       </div>
 
-      <Card title="本批次锁定输入版本" className="section-card">
-        <Descriptions size="small" column={{ xs: 2, sm: 3, lg: 5 }}>
-          {Object.entries(batch.version_ids).map(([kind, id]) => (
-            <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>#{id}</Descriptions.Item>
-          ))}
-        </Descriptions>
-      </Card>
+      {batch.error_message && (
+        <Alert
+          type="error"
+          showIcon
+          title="任务执行失败"
+          description={batch.error_message}
+          className="section-card"
+        />
+      )}
 
-      <Card title="来源文件与处理顺序" className="section-card">
+      <div className={`summary-strip ${computed ? "" : "summary-pending"}`}>
+        <div className="summary-metric"><span>交货总量</span><strong>{computed ? totals.delivery_total : "—"}</strong></div>
+        <div className="summary-metric import"><span>可导入</span><strong>{computed ? totals.import_total : "—"}</strong></div>
+        <div className="summary-metric pending"><span>待处理</span><strong>{computed ? totals.manual_total : "—"}</strong></div>
+        <div className="summary-equation">
+          <span>数量守恒</span>
+          {computed ? (
+            <strong className={totals.conserved ? "conservation-ok" : "conservation-bad"}>
+              {totals.delivery_total} = {totals.import_total} + {totals.manual_total}
+            </strong>
+          ) : <strong>尚未计算</strong>}
+        </div>
+      </div>
+
+      <Card
+        title="来源文件与处理顺序"
+        className="section-card file-order-card"
+        extra={<span className="order-hint">序号越小，越先扣减采购余额</span>}
+      >
+        {canEditFiles && files.length > 1 && (
+          <Alert
+            className="inline-alert"
+            type="info"
+            showIcon
+            title="调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
+          />
+        )}
         <Table<BatchFile>
           rowKey="id"
           loading={loading}
           dataSource={files}
           pagination={false}
+          scroll={{ x: 900 }}
+          locale={{ emptyText: <Empty description="请先上传一个或多个交货 Excel" /> }}
           columns={[
             {
               title: "顺序",
@@ -288,18 +419,52 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               width: 80,
               render: (value: number) => <span className="file-order">{String(value).padStart(2, "0")}</span>
             },
-            { title: "来源文件", dataIndex: "original_name" },
-            { title: "供应商", dataIndex: "supplier_name", width: 140 },
-            { title: "交货", dataIndex: "delivery_total", width: 90 },
-            { title: "导入", dataIndex: "import_total", width: 90 },
-            { title: "待处理", dataIndex: "manual_total", width: 90 },
+            { title: "来源文件", dataIndex: "original_name", ellipsis: true },
             {
+              title: "供应商",
+              dataIndex: "supplier_name",
+              width: 150,
+              render: (value: string) => value || <span className="muted">预检后识别</span>
+            },
+            {
+              title: "交货",
+              dataIndex: "delivery_total",
+              width: 90,
+              render: (value: number) => computed ? value : "—"
+            },
+            {
+              title: "可导入",
+              dataIndex: "import_total",
+              width: 90,
+              render: (value: number) => computed ? <span className="import-value">{value}</span> : "—"
+            },
+            {
+              title: "待处理",
+              dataIndex: "manual_total",
+              width: 100,
+              render: (value: number) => computed ? <span className={value ? "pending-value" : ""}>{value}</span> : "—"
+            },
+            ...(showFileActions ? [{
               title: "操作",
-              width: 230,
-              render: (_, file, index) => (
+              width: canEditFiles ? 210 : 130,
+              fixed: "right" as const,
+              render: (_: unknown, file: BatchFile, index: number) => (
                 <Space>
-                  <Button size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
-                  <Button size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
+                  {canEditFiles && (
+                    <>
+                      <Tooltip title="上移，提前扣减采购余额">
+                        <Button aria-label={`上移 ${file.original_name}`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
+                      </Tooltip>
+                      <Tooltip title="下移，延后扣减采购余额">
+                        <Button aria-label={`下移 ${file.original_name}`} size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
+                      </Tooltip>
+                      <Popconfirm title="删除此交货文件？" description="其余文件会自动重新编号。" onConfirm={() => void removeFile(file)}>
+                        <Tooltip title="删除错传文件">
+                          <Button aria-label={`删除 ${file.original_name}`} danger size="small" icon={<DeleteOutlined />} />
+                        </Tooltip>
+                      </Popconfirm>
+                    </>
+                  )}
                   {file.download_ready && (
                     <Button
                       size="small"
@@ -311,107 +476,256 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                   )}
                 </Space>
               )
-            }
+            }] : [])
           ]}
         />
       </Card>
 
-      <Card
-        title="待处理审校与拆分"
-        className="section-card"
-        extra={
-          <Space>
-            <Button
-              icon={<ExportOutlined />}
-              disabled={batch.status !== "succeeded"}
-              loading={action === "export"}
-              onClick={() => void startExport()}
-            >
-              生成导出
-            </Button>
-            {batch.download_ready && (
+      <Card title="本批次锁定的基础资料" className="section-card compact-card">
+        <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 5 }}>
+          {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
+            <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
+              <Tooltip title={version.original_name}>{version.name}</Tooltip>
+            </Descriptions.Item>
+          ))}
+        </Descriptions>
+      </Card>
+
+      {computed && (
+        <Card title="待处理审校" className="section-card">
+          <div className="table-toolbar exception-toolbar">
+            <Input
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="搜索来源文件、SKU、站点或目的仓"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              style={{ width: 320 }}
+            />
+            <Select
+              allowClear
+              placeholder="全部原因"
+              options={reasonOptions}
+              value={reasonFilter}
+              onChange={setReasonFilter}
+              style={{ minWidth: 180 }}
+            />
+            <Select
+              allowClear
+              placeholder="全部状态"
+              options={Object.entries(EXCEPTION_STATUS).map(([value, item]) => ({ value, label: item.label }))}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              style={{ width: 140 }}
+            />
+            <span className="toolbar-count">共 {exceptions.length} 条，当前显示 {filteredExceptions.length} 条</span>
+          </div>
+          <Table<DeliveryException>
+            rowKey="id"
+            dataSource={filteredExceptions}
+            scroll={{ x: 1050 }}
+            locale={{ emptyText: <Empty description={exceptions.length ? "没有匹配的待处理记录" : "本批次没有待处理记录"} /> }}
+            columns={[
+              {
+                title: "来源文件",
+                dataIndex: "batch_file_id",
+                width: 220,
+                ellipsis: true,
+                render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
+              },
+              { title: "SKU", dataIndex: "sku", width: 130 },
+              { title: "站点", dataIndex: "full_site", width: 210, ellipsis: true },
+              { title: "目的仓", dataIndex: "destination", width: 160, ellipsis: true },
+              {
+                title: "待处理量",
+                dataIndex: "manual_quantity",
+                width: 110,
+                render: (value: number) => <strong className="pending-value">{value}</strong>
+              },
+              { title: "原因", dataIndex: "reason", width: 180, ellipsis: true },
+              {
+                title: "状态",
+                dataIndex: "status",
+                width: 110,
+                render: (value: string) => <ExceptionStatusTag status={value} />
+              },
+              {
+                title: "操作",
+                width: 110,
+                fixed: "right",
+                render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>拆分审校</Button>
+              }
+            ]}
+          />
+        </Card>
+      )}
+
+      {computed && (
+        <Card title="导出下载" className="section-card export-card">
+          <div className="export-content">
+            <div>
+              <Typography.Title level={4}>每个来源文件独立生成结果，并同时打包批次 ZIP</Typography.Title>
+              <Typography.Paragraph type="secondary">
+                可导入数量写入“交货导入”，仍待处理数量写入“待处理导入”；两者之和始终等于交货总量。
+              </Typography.Paragraph>
+              {totals.manual_total > 0 && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title={`仍有 ${totals.manual_total} 件待处理，可保留在待处理工作表中导出。`}
+                />
+              )}
+              {exportJob?.status === "stale" && (
+                <Alert className="export-stale-alert" type="info" showIcon title="拆分已修改，原导出已失效，请重新生成。" />
+              )}
+            </div>
+            <Space orientation="vertical" align="end">
               <Button
-                type="primary"
-                icon={<DownloadOutlined />}
-                onClick={() => void download(`/api/batches/${batch.id}/download`, `${batch.name}.zip`)}
+                icon={<ExportOutlined />}
+                disabled={Boolean(activeJob)}
+                loading={action === "export" || activeJob?.kind === "export"}
+                onClick={() => void startExport()}
               >
-                下载批次 ZIP
+                {exportJob?.status === "stale" ? "重新生成导出" : "生成导出"}
               </Button>
-            )}
-          </Space>
-        }
-      >
-        <Table<DeliveryException>
-          rowKey="id"
-          dataSource={exceptions}
-          columns={[
-            { title: "SKU", dataIndex: "sku" },
-            { title: "站点", dataIndex: "full_site" },
-            { title: "目的仓", dataIndex: "destination" },
-            { title: "待处理量", dataIndex: "manual_quantity", width: 110 },
-            { title: "原因", dataIndex: "reason" },
-            { title: "审校状态", dataIndex: "status", width: 110 },
-            {
-              title: "操作",
-              width: 100,
-              render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>拆分审校</Button>
-            }
-          ]}
-        />
-      </Card>
-
-      <Modal
-        title={`拆分审校 · ${splitTarget?.sku ?? ""}`}
-        width={900}
-        open={splitTarget !== null}
-        onCancel={() => setSplitTarget(null)}
-        onOk={() => void saveSplit()}
-        okText="保存拆分"
-        confirmLoading={action === "split"}
-      >
-        <div className="split-total">
-          原待处理量：<strong>{splitTarget?.manual_quantity ?? 0}</strong>；当前拆分合计：
-          <strong className={splitTotal === splitTarget?.manual_quantity ? "conservation-ok" : "conservation-bad"}>{splitTotal}</strong>
-        </div>
-        <Form form={splitForm} layout="vertical">
-          <Form.List name="parts">
-            {(fields, { add, remove }) => (
-              <Space direction="vertical" style={{ width: "100%" }}>
-                {fields.map((field, index) => (
-                  <Card key={field.key} size="small" title={`拆分 ${index + 1}`} extra={fields.length > 1 ? <Popconfirm title="删除此拆分？" onConfirm={() => remove(field.name)}><Button danger type="link">删除</Button></Popconfirm> : null}>
-                    <Space wrap align="start">
-                      <Form.Item name={[field.name, "quantity"]} label="数量" rules={[{ required: true }]}>
-                        <InputNumber min={1} precision={0} />
-                      </Form.Item>
-                      <Form.Item name={[field.name, "destination"]} label="目的仓">
-                        <Input style={{ width: 180 }} />
-                      </Form.Item>
-                      <Form.Item name={[field.name, "site"]} label="完整站点">
-                        <Input style={{ width: 220 }} />
-                      </Form.Item>
-                      <Form.Item name={[field.name, "sku"]} label="SKU">
-                        <Input style={{ width: 150 }} />
-                      </Form.Item>
-                      <Form.Item name={[field.name, "supplier_code"]} label="供应商编码">
-                        <Input style={{ width: 150 }} />
-                      </Form.Item>
-                      <Form.Item name={[field.name, "resolved"]} label="可正式导入" valuePropName="checked">
-                        <Switch />
-                      </Form.Item>
-                    </Space>
-                    <Form.Item name={[field.name, "delivery_note"]} label="交货备注">
-                      <Input />
-                    </Form.Item>
-                  </Card>
-                ))}
-                <Button block type="dashed" icon={<PlusOutlined />} onClick={() => add({ quantity: 1, resolved: false })}>
-                  增加拆分
+              {batch.download_ready && (
+                <Button
+                  type="primary"
+                  icon={<DownloadOutlined />}
+                  onClick={() => void download(`/api/batches/${batch.id}/download`, `${batch.name}.zip`)}
+                >
+                  下载批次 ZIP
                 </Button>
-              </Space>
-            )}
-          </Form.List>
-        </Form>
-      </Modal>
+              )}
+            </Space>
+          </div>
+        </Card>
+      )}
+
+      <Drawer
+        title={`拆分审校 · ${splitTarget?.sku ?? ""}`}
+        size={520}
+        open={splitTarget !== null}
+        onClose={() => setSplitTarget(null)}
+        extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
+        footer={(
+          <div className="drawer-footer">
+            <Button onClick={() => setSplitTarget(null)}>取消</Button>
+            <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+              <Button type="primary" disabled={!splitValid} loading={action === "split"} onClick={() => void saveSplit()}>
+                保存拆分
+              </Button>
+            </Tooltip>
+          </div>
+        )}
+      >
+        {splitTarget && (
+          <>
+            <Descriptions className="split-source" size="small" column={1}>
+              <Descriptions.Item label="来源文件">{fileById[splitTarget.batch_file_id]?.original_name}</Descriptions.Item>
+              <Descriptions.Item label="站点">{splitTarget.full_site || "—"}</Descriptions.Item>
+              <Descriptions.Item label="目的仓">{splitTarget.destination || "—"}</Descriptions.Item>
+              <Descriptions.Item label="异常原因"><Tag color="warning">{splitTarget.reason}</Tag></Descriptions.Item>
+            </Descriptions>
+
+            <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
+              <div>
+                <span>原待处理</span>
+                <strong>{splitTarget.manual_quantity}</strong>
+              </div>
+              <div>
+                <span>已拆分</span>
+                <strong>{splitTotal}</strong>
+              </div>
+              <div>
+                <span>剩余</span>
+                <strong>{splitRemaining}</strong>
+              </div>
+              {splitValid && <CheckCircleFilled aria-label="数量守恒通过" />}
+            </div>
+
+            <Form form={splitForm} layout="vertical">
+              <Form.List name="parts">
+                {(fields, { add, remove }) => (
+                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                    {fields.map((field, index) => (
+                      <div className="split-part" key={field.key}>
+                        <div className="split-part-heading">
+                          <strong>拆分 {index + 1}</strong>
+                          {fields.length > 1 && (
+                            <Button danger type="link" size="small" onClick={() => remove(field.name)}>删除</Button>
+                          )}
+                        </div>
+                        <div className="split-fields-row">
+                          <Form.Item
+                            name={[field.name, "quantity"]}
+                            label="数量"
+                            rules={[{ required: true, type: "number", min: 1, message: "数量必须大于 0" }]}
+                          >
+                            <InputNumber min={1} precision={0} style={{ width: 130 }} />
+                          </Form.Item>
+                          <Form.Item name={[field.name, "resolved"]} label="处理结果" valuePropName="checked">
+                            <Switch checkedChildren="可正式导入" unCheckedChildren="继续待处理" />
+                          </Form.Item>
+                        </div>
+                        <Form.Item
+                          name={[field.name, "destination"]}
+                          label="目的仓"
+                          rules={[{
+                            validator: (_, value) => splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
+                              ? Promise.reject(new Error("可正式导入部分必须填写目的仓"))
+                              : Promise.resolve()
+                          }]}
+                        >
+                          <Input />
+                        </Form.Item>
+                        <Form.Item
+                          name={[field.name, "site"]}
+                          label="完整站点"
+                          rules={[{
+                            validator: (_, value) => splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
+                              ? Promise.reject(new Error("可正式导入部分必须填写完整站点"))
+                              : Promise.resolve()
+                          }]}
+                        >
+                          <Input />
+                        </Form.Item>
+                        <div className="split-fields-row">
+                          <Form.Item name={[field.name, "sku"]} label="SKU">
+                            <Input />
+                          </Form.Item>
+                          <Form.Item name={[field.name, "supplier_code"]} label="供应商编码">
+                            <Input placeholder="默认沿用来源文件" />
+                          </Form.Item>
+                        </div>
+                        <Form.Item name={[field.name, "delivery_note"]} label="交货备注">
+                          <Input />
+                        </Form.Item>
+                      </div>
+                    ))}
+                    <Button
+                      block
+                      type="dashed"
+                      icon={<PlusOutlined />}
+                      onClick={() => add({
+                        quantity: splitRemaining > 0 ? splitRemaining : 1,
+                        destination: splitTarget.destination,
+                        site: splitTarget.full_site.includes("、") ? "" : splitTarget.full_site,
+                        supplier_code: "",
+                        sku: splitTarget.sku,
+                        delivery_note: splitTarget.reason,
+                        resolved: false
+                      })}
+                    >
+                      增加拆分{splitRemaining > 0 ? `并填入剩余 ${splitRemaining}` : ""}
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+            </Form>
+          </>
+        )}
+      </Drawer>
     </div>
   );
 }

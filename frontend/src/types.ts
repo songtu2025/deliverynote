@@ -31,7 +31,10 @@ export interface Batch {
   download_ready: boolean;
   created_at: string;
   updated_at: string;
+  file_count: number;
   files?: BatchFile[];
+  versions?: Record<string, InputVersion>;
+  jobs?: Partial<Record<"compute" | "export", Job>>;
   summary?: {
     delivery_total: number;
     import_total: number;
@@ -48,6 +51,10 @@ export interface Job {
   attempts: number;
   error_message: string | null;
   download_ready: boolean;
+  created_at: string;
+  claimed_at: string | null;
+  heartbeat_at: string | null;
+  finished_at: string | null;
 }
 
 export interface SplitPart {
@@ -83,5 +90,15 @@ export interface InputVersion {
   original_name: string;
   active: boolean;
   created_by: number;
+  created_at: string;
+}
+
+export interface AuditLog {
+  id: number;
+  user_id: number | null;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  details: Record<string, unknown>;
   created_at: string;
 }

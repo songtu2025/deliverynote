@@ -26,6 +26,12 @@ describe("App", () => {
             headers: { "Content-Type": "application/json" }
           });
         }
+        if (url.endsWith("/api/input-versions")) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
         throw new Error(`Unexpected request: ${url}`);
       })
     );
@@ -49,6 +55,27 @@ describe("App", () => {
     await screen.findByText("交货批次");
     expect(screen.getByText("管理员维护")).toBeInTheDocument();
     expect(localStorage.getItem("delivery-note-token")).toBe("token-1");
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  });
+
+  it("returns to login when a stored session expires", async () => {
+    localStorage.setItem("delivery-note-token", "expired-token");
+    localStorage.setItem("delivery-note-user", JSON.stringify({
+      id: 1,
+      username: "admin",
+      role: "admin",
+      active: true
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ detail: "未登录" }),
+      { status: 401, headers: { "Content-Type": "application/json" } }
+    )));
+
+    render(<App />);
+
+    await screen.findByRole("button", { name: /登\s*录/ });
+    expect(localStorage.getItem("delivery-note-token")).toBeNull();
+    expect(localStorage.getItem("delivery-note-user")).toBeNull();
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   });
 });

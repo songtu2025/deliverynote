@@ -3,10 +3,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from tests.asgi_client import SyncASGIClient
 
 try:
     from delivery_note.web.api import create_app
@@ -33,7 +33,7 @@ class WebApiTests(unittest.TestCase):
             storage_root=root / "storage",
             bootstrap_admin=("admin", "admin-pass"),
         )
-        self.client = TestClient(self.app)
+        self.client = SyncASGIClient(self.app)
 
     def tearDown(self):
         if hasattr(self, "client"):
@@ -182,6 +182,69 @@ class WebApiTests(unittest.TestCase):
         ]
         self.assertEqual(active_ids, [created_ids[1]])
 
+    def test_invalid_input_version_is_rejected_before_activation(self):
+        admin_headers = self.login("admin", "admin-pass")
+        response = self.client.post(
+            "/api/input-versions/purchase",
+            headers=admin_headers,
+            data={"name": "broken-purchase", "activate": "true"},
+            files={"file": ("broken.xlsx", BytesIO(b"not-an-excel-file"))},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("输入版本校验失败", response.json()["detail"])
+        versions = self.client.get(
+            "/api/input-versions", headers=admin_headers
+        ).json()
+        self.assertEqual(versions, [])
+
+    def test_admin_can_disable_and_reset_operator_password(self):
+        admin_headers = self.login("admin", "admin-pass")
+        operator = self.create_operator(admin_headers)
+
+        disabled = self.client.put(
+            f"/api/users/{operator['id']}/status",
+            headers=admin_headers,
+            json={"active": False},
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertFalse(disabled.json()["active"])
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/login",
+                json={"username": "operator", "password": "operator-pass"},
+            ).status_code,
+            401,
+        )
+
+        self_deactivate = self.client.put(
+            "/api/users/1/status",
+            headers=admin_headers,
+            json={"active": False},
+        )
+        self.assertEqual(self_deactivate.status_code, 409)
+
+        enabled = self.client.put(
+            f"/api/users/{operator['id']}/status",
+            headers=admin_headers,
+            json={"active": True},
+        )
+        self.assertTrue(enabled.json()["active"])
+        reset = self.client.put(
+            f"/api/users/{operator['id']}/password",
+            headers=admin_headers,
+            json={"password": "operator-new-pass"},
+        )
+        self.assertEqual(reset.status_code, 204, reset.text)
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/login",
+                json={"username": "operator", "password": "operator-pass"},
+            ).status_code,
+            401,
+        )
+        self.login("operator", "operator-new-pass")
+
     def test_versions_batch_order_preflight_and_compute_job(self):
         admin_headers = self.login("admin", "admin-pass")
         self.create_operator(admin_headers)
@@ -196,6 +259,11 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 201, created.text)
         batch = created.json()
         self.assertEqual(batch["version_ids"], version_ids)
+        self.assertEqual(
+            {kind: item["name"] for kind, item in batch["versions"].items()},
+            {kind: f"{kind}-v1" for kind in INPUT_KINDS},
+        )
+        self.assertEqual(batch["jobs"], {})
         batch_id = batch["id"]
 
         first = self.client.post(
@@ -253,6 +321,59 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(job.status_code, 200, job.text)
         self.assertEqual(job.json()["kind"], "compute")
+        refreshed = self.client.get(
+            f"/api/batches/{batch_id}", headers=operator_headers
+        ).json()
+        self.assertEqual(refreshed["jobs"]["compute"]["id"], job.json()["id"])
+        self.assertEqual(refreshed["jobs"]["compute"]["status"], "queued")
+
+    def test_delivery_file_can_be_deleted_before_compute(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "文件纠错测试"},
+        ).json()["id"]
+        first = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=admin_headers,
+            files={"file": ("260717-狂飙-A交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        ).json()
+        second = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=admin_headers,
+            files={"file": ("260717-狂飙-B交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        ).json()
+        with self.app.state.database.session() as session:
+            removed_path = Path(session.get(BatchFile, second["id"]).storage_path)
+        self.assertTrue(removed_path.is_file())
+
+        deleted = self.client.request(
+            "DELETE",
+            f"/api/batches/{batch_id}/files/{second['id']}",
+            headers=admin_headers,
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["status"], "draft")
+        self.assertEqual(
+            [(item["id"], item["file_order"]) for item in deleted.json()["files"]],
+            [(first["id"], 1)],
+        )
+        self.assertFalse(removed_path.exists())
+
+        self.client.post(
+            f"/api/batches/{batch_id}/preflight", headers=admin_headers
+        )
+        self.client.post(
+            f"/api/batches/{batch_id}/compute", headers=admin_headers
+        )
+        blocked = self.client.request(
+            "DELETE",
+            f"/api/batches/{batch_id}/files/{first['id']}",
+            headers=admin_headers,
+        )
+        self.assertEqual(blocked.status_code, 409)
 
     def test_preflight_rejects_invalid_excel_content(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -348,12 +469,20 @@ class WebApiTests(unittest.TestCase):
             [part["quantity"] for part in valid.json()["parts"]],
             [25, 15],
         )
-        summary = self.client.get(
+        batch_after_split = self.client.get(
             f"/api/batches/{batch_id}", headers=operator_headers
-        ).json()["summary"]
+        ).json()
+        summary = batch_after_split["summary"]
         self.assertEqual(
             (summary["delivery_total"], summary["import_total"], summary["manual_total"]),
             (40, 25, 15),
+        )
+        self.assertEqual(
+            (
+                batch_after_split["files"][0]["import_total"],
+                batch_after_split["files"][0]["manual_total"],
+            ),
+            (25, 15),
         )
 
         export = self.client.post(

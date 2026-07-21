@@ -1,6 +1,6 @@
 # 供应链交货处理系统 Linux/Codex CLI 交接
 
-- 更新时间：2026-07-20
+- 更新时间：2026-07-21
 - 仓库：`https://github.com/songtu2025/deliverynote.git`
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
@@ -39,20 +39,28 @@ git log -3 --oneline --decorate
 - 独立 Worker、任务租约、心跳、超时回收和失败重试。
 - 每个来源文件单独导出及批次 ZIP。
 - React + TypeScript + Ant Design 操作界面。
+- 五步批次工作台、数量守恒摘要、异常筛选和右侧拆分审校。
+- 输入资料就绪门槛、上传校验、用户启停/密码重置和操作记录。
+- 计算/导出任务刷新恢复、计算前删除错传文件和登录过期统一处理。
 - Docker Compose、Nginx 和外部 HTTPS 代理接入方式。
 
 最近验证结果：
 
 ```text
-Python unittest: 41/41 passed
-Frontend Vitest: 1/1 passed
+Python unittest: 44/44 passed
+Frontend Vitest: 5/5 passed
 Frontend production build: passed
 pip check: passed
 Compose YAML static check: passed
 PostgreSQL DDL compile check: passed
+Chrome desktop/tablet/mobile visual QA: passed
+Linux Docker Compose build and runtime smoke test: passed
+HTTPS health, login, read API and logout smoke test: passed
 ```
 
-Windows 开发机没有安装 Docker，因此尚未完成 Linux 上的真实容器启动和 PostgreSQL 运行时验收。这是接手后的第一项任务。
+本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`，浏览器验收记录见 `design-qa.md`，截图位于 `design/qa/`。桌面、平板和移动视口视觉验收已经完成。
+
+2026-07-21 已在 Linux 目标机完成 Compose 重新构建和运行时冒烟验收：四个服务正常，内外网健康检查成功，HTTPS 首页已加载本轮新前端资源，管理员登录和只读接口正常；应用容器重建后现有用户、输入版本、批次和上传文件记录未丢失。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
 
 ## 3. 代码结构
 
@@ -174,7 +182,7 @@ docker compose up -d
 - 数据库目前通过 SQLAlchemy `create_all()` 建表，没有正式迁移工具。首次部署可以使用；后续改表前应先引入最小迁移流程。
 - 自动文件过期清理、数据库定时备份和文件卷备份尚未实现。
 - 管理员账号只在数据库不存在同名用户时创建。修改 `.env` 不会重置已有管理员密码。
-- PostgreSQL DDL 已做离线编译检查，但真实 PostgreSQL 端到端运行需要在 Linux 部署中验证。
+- PostgreSQL 已通过 Linux Compose 真实运行、登录和数据读取冒烟验收；完整脱敏业务流程和备份恢复仍未验收。
 - 前端生产构建存在单包约 1.1 MB 的体积提示，当前不影响功能，不要为了消除提示优先引入复杂拆包。
 - 仓库是公开仓库，禁止提交业务数据、真实密码、Token 或客户文件。
 
@@ -229,4 +237,4 @@ codex
 4. 在确实需要改表时引入简单的数据库迁移方案。
 5. 根据实际操作反馈补前端关键流程测试，不做无业务依据的界面重构。
 
-完成 Linux 实测前，不要把项目状态标记为生产可用。
+完成剩余业务验收和运维门槛前，不要把项目状态标记为生产可用。

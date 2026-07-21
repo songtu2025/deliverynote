@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   App as AntApp,
   Button,
@@ -20,7 +20,7 @@ import {
   UserOutlined
 } from "@ant-design/icons";
 
-import { api, setToken } from "./api";
+import { api, AUTH_EXPIRED_EVENT, getToken, setToken } from "./api";
 import AdminPage from "./pages/AdminPage";
 import BatchDetail from "./pages/BatchDetail";
 import BatchesPage from "./pages/BatchesPage";
@@ -31,6 +31,10 @@ const USER_KEY = "delivery-note-user";
 type LoginResponse = { token: string; user: User };
 
 function readStoredUser(): User | null {
+  if (!getToken()) {
+    localStorage.removeItem(USER_KEY);
+    return null;
+  }
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
@@ -125,7 +129,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           {batchId !== null ? (
             <BatchDetail batchId={batchId} onBack={() => setBatchId(null)} />
           ) : page === "admin" && user.role === "admin" ? (
-            <AdminPage />
+            <AdminPage currentUser={user} />
           ) : (
             <BatchesPage onOpen={setBatchId} />
           )}
@@ -137,6 +141,17 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(() => readStoredUser());
+
+  useEffect(() => {
+    const handleExpired = (event: Event) => {
+      localStorage.removeItem(USER_KEY);
+      setUser(null);
+      const detail = (event as CustomEvent<{ message?: string }>).detail;
+      message.warning(detail?.message ?? "登录已过期，请重新登录");
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+  }, []);
 
   const logout = async () => {
     try {

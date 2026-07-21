@@ -33,6 +33,7 @@ compose.yaml            PostgreSQL、API、Worker、Web 编排
 Dockerfile              API 和 Worker 镜像
 .env.example            部署环境变量示例
 HANDOFF_WEB_UPGRADE.md   当前状态和 Codex CLI 续开发交接
+UI_UX_OPTIMIZATION_PLAN.md 操作流程与 UI 优化方案及实施状态
 AGENTS.md                Codex CLI 自动读取的项目规则
 ```
 
@@ -94,6 +95,8 @@ ssh -L 8080:127.0.0.1:8080 用户名@服务器地址
 5. 启动计算，等待 Worker 完成任务。
 6. 审阅待处理记录，按需拆分。
 7. 生成单文件结果和批次 ZIP。
+
+新版界面把上述操作组织为“准备文件 → 预检 → 计算结果 → 异常审校 → 导出下载”五步工作台。完整方案和实施状态见 [UI_UX_OPTIMIZATION_PLAN.md](UI_UX_OPTIMIZATION_PLAN.md)。
 
 输入文件不会保存在 Git 仓库中，需要在部署后通过管理页面上传。
 
@@ -184,7 +187,7 @@ npm run test
 npm run build
 ```
 
-当前基线是 Python 41/41 通过、前端 1/1 通过，生产构建成功。
+当前基线是 Python 44/44 通过、前端 5/5 通过，生产构建成功。
 
 ## 项目完成标准
 
@@ -218,7 +221,7 @@ npm run build
 - 数据库改表有可执行的迁移方案。
 - README、交接文档和实际部署命令保持一致。
 
-当前代码门槛可以自动验证；Linux 部署、真实业务和运维门槛仍需要在目标机器完成，完成前不要宣称生产可用。
+当前代码门槛已通过自动化验证；Linux 目标机已完成 Compose 构建、四服务运行、内外网健康检查、HTTPS 新资源、登录和只读 API 冒烟验收，应用容器重建后现有数据仍在。完整脱敏业务场景以及备份恢复等运维门槛仍需完成，完成前不要宣称生产可用。
 
 ## 原有单文件 CLI
 

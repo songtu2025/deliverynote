@@ -1,29 +1,36 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   Button,
   Empty,
   Form,
   Input,
   Modal,
+  Select,
   Space,
   Table,
   Tag,
   Typography,
   message
 } from "antd";
-import { PlusOutlined, RightOutlined } from "@ant-design/icons";
+import {
+  CheckCircleFilled,
+  PlusOutlined,
+  RightOutlined,
+  SearchOutlined
+} from "@ant-design/icons";
 
 import { api } from "../api";
-import type { Batch } from "../types";
+import type { Batch, InputVersion } from "../types";
 
-const STATUS_LABELS: Record<string, string> = {
-  draft: "草稿",
+export const STATUS_LABELS: Record<string, string> = {
+  draft: "准备文件",
   preflight_ready: "预检通过",
   queued: "等待计算",
-  running: "计算中",
-  succeeded: "计算成功",
-  failed: "失败",
-  expired: "已过期"
+  running: "正在计算",
+  succeeded: "计算完成",
+  failed: "处理失败",
+  expired: "任务已过期"
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -33,8 +40,41 @@ const STATUS_COLORS: Record<string, string> = {
   running: "processing",
   succeeded: "success",
   failed: "error",
-  expired: "default"
+  expired: "warning"
 };
+
+const VERSION_KINDS = [
+  { value: "purchase", label: "采购需求" },
+  { value: "product", label: "商品信息" },
+  { value: "supplier", label: "供应商资料" },
+  { value: "position", label: "库位/排仓" },
+  { value: "template", label: "导出模板" }
+];
+
+const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({
+  value,
+  label
+}));
+
+function nextAction(batch: Batch): string {
+  if (batch.status === "draft") return batch.file_count ? "执行预检" : "上传交货文件";
+  if (batch.status === "preflight_ready") return "启动计算";
+  if (batch.status === "queued" || batch.status === "running") return "等待后台任务";
+  if (batch.status === "failed" || batch.status === "expired") return "查看原因并重试";
+  if (batch.download_ready) return "下载结果";
+  if ((batch.summary?.manual_total ?? 0) > 0) return "审校待处理";
+  return "生成导出";
+}
+
+function todayBatchName(): string {
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} 交货批次`;
+}
 
 export function StatusTag({ status }: { status: string }) {
   return <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status] ?? status}</Tag>;
@@ -42,14 +82,22 @@ export function StatusTag({ status }: { status: string }) {
 
 export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }) {
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [versions, setVersions] = useState<InputVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>();
   const [form] = Form.useForm<{ name: string }>();
 
   const load = async () => {
     setLoading(true);
     try {
-      setBatches(await api<Batch[]>("/api/batches"));
+      const [batchRows, versionRows] = await Promise.all([
+        api<Batch[]>("/api/batches"),
+        api<InputVersion[]>("/api/input-versions")
+      ]);
+      setBatches(batchRows);
+      setVersions(versionRows);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取批次失败");
     } finally {
@@ -60,6 +108,21 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
   useEffect(() => {
     void load();
   }, []);
+
+  const activeVersions = useMemo(
+    () => Object.fromEntries(versions.filter((version) => version.active).map((version) => [version.kind, version])),
+    [versions]
+  );
+  const missingKinds = VERSION_KINDS.filter((kind) => !activeVersions[kind.value]);
+  const ready = missingKinds.length === 0;
+
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toLocaleLowerCase("zh-CN");
+    return batches.filter((batch) => {
+      const matchesQuery = !keyword || batch.name.toLocaleLowerCase("zh-CN").includes(keyword);
+      return matchesQuery && (!statusFilter || batch.status === statusFilter);
+    });
+  }, [batches, query, statusFilter]);
 
   const create = async () => {
     const values = await form.validateFields();
@@ -76,26 +139,89 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
     }
   };
 
+  const openCreate = () => {
+    form.setFieldsValue({ name: todayBatchName() });
+    setCreating(true);
+  };
+
   return (
     <div className="page-shell">
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>交货批次</Typography.Title>
           <Typography.Text type="secondary">
-            每个批次独立锁定五类输入版本，并按文件顺序共享采购余额。
+            按文件顺序共享采购余额，每个批次独立锁定基础资料版本。
           </Typography.Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreating(true)}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          disabled={!ready}
+          title={ready ? "新建交货批次" : "请先补齐五类启用版本"}
+          onClick={openCreate}
+        >
           新建批次
         </Button>
       </div>
+
+      {ready ? (
+        <div className="readiness-strip" aria-label="基础资料已就绪">
+          <div className="readiness-title">
+            <CheckCircleFilled /> 基础资料已就绪
+          </div>
+          {VERSION_KINDS.map((kind) => (
+            <div className="readiness-item" key={kind.value}>
+              <span>{kind.label}</span>
+              <strong>{activeVersions[kind.value]?.name}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <Alert
+          className="section-card"
+          type="warning"
+          showIcon
+          title="暂时不能创建批次"
+          description={`缺少启用的基础资料：${missingKinds.map((kind) => kind.label).join("、")}。请联系管理员补齐。`}
+        />
+      )}
+
+      <div className="table-toolbar">
+        <Input
+          allowClear
+          prefix={<SearchOutlined />}
+          placeholder="搜索批次名称"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          style={{ width: 280 }}
+        />
+        <Select
+          allowClear
+          placeholder="全部状态"
+          options={STATUS_OPTIONS}
+          value={statusFilter}
+          onChange={setStatusFilter}
+          style={{ width: 160 }}
+        />
+      </div>
+
       <Table<Batch>
         rowKey="id"
         loading={loading}
-        dataSource={batches}
-        locale={{ emptyText: <Empty description="暂无批次" /> }}
+        dataSource={filtered}
+        locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "暂无批次"} /> }}
+        pagination={{ pageSize: 12, showSizeChanger: false }}
+        scroll={{ x: 920 }}
         columns={[
-          { title: "批次", dataIndex: "name" },
+          {
+            title: "批次",
+            dataIndex: "name",
+            render: (value: string, batch) => (
+              <Button className="batch-name-link" type="link" onClick={() => onOpen(batch.id)}>
+                {value}
+              </Button>
+            )
+          },
           {
             title: "状态",
             dataIndex: "status",
@@ -103,14 +229,31 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
             render: (value: string) => <StatusTag status={value} />
           },
           {
-            title: "创建时间",
-            dataIndex: "created_at",
+            title: "文件 / 数量",
+            width: 190,
+            render: (_, batch) => (
+              <span className="batch-volume">
+                {batch.file_count} 个文件
+                {batch.summary && batch.summary.delivery_total > 0
+                  ? ` · 交货 ${batch.summary.delivery_total}`
+                  : ""}
+              </span>
+            )
+          },
+          {
+            title: "下一步",
+            width: 170,
+            render: (_, batch) => <span className="next-action">{nextAction(batch)}</span>
+          },
+          {
+            title: "更新时间",
+            dataIndex: "updated_at",
             width: 190,
             render: (value: string) => new Date(value).toLocaleString("zh-CN")
           },
           {
             title: "操作",
-            width: 120,
+            width: 100,
             render: (_, batch) => (
               <Button type="link" onClick={() => onOpen(batch.id)}>
                 <Space size={4}>打开<RightOutlined /></Space>
@@ -119,12 +262,13 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
           }
         ]}
       />
+
       <Modal
         title="新建交货批次"
         open={creating}
         onCancel={() => setCreating(false)}
         onOk={() => void create()}
-        okText="创建"
+        okText="创建并上传文件"
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -132,9 +276,18 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
             name="name"
             rules={[{ required: true, message: "请输入批次名称" }]}
           >
-            <Input placeholder="例如：2026-07-20 交货批次" />
+            <Input placeholder="例如：2026-07-21 交货批次" />
           </Form.Item>
         </Form>
+        <div className="locked-version-preview">
+          <Typography.Text strong>本批次将锁定以下版本</Typography.Text>
+          {VERSION_KINDS.map((kind) => (
+            <div key={kind.value}>
+              <span>{kind.label}</span>
+              <strong>{activeVersions[kind.value]?.name ?? "未启用"}</strong>
+            </div>
+          ))}
+        </div>
       </Modal>
     </div>
   );

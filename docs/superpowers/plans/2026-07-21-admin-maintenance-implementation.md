@@ -143,21 +143,21 @@ git commit -m "feat: inspect and validate input workbooks"
 - [ ] **Step 1: Write failing model/lifecycle tests**
 
 ```python
-def test_draft_copies_active_version_and_survives_new_login(self):
-    created = self.client.post("/api/input-drafts/position", headers=self.admin_headers)
-    self.assertEqual(created.status_code, 201, created.text)
-    second_headers = self.login("admin", "admin-pass")
-    resumed = self.client.post("/api/input-drafts/position", headers=second_headers)
-    self.assertEqual(resumed.json()["id"], created.json()["id"])
-    self.assertEqual(resumed.json()["row_count"], 1)
+def test_create_or_resume_copies_active_version_once(self):
+    with self.database.session() as session:
+        created = create_or_resume_draft(session, self.version, self.admin.id)
+        resumed = create_or_resume_draft(session, self.version, self.admin.id)
+        rows = list_draft_rows(session, created.id)
+        self.assertEqual(resumed.id, created.id)
+        self.assertEqual(len(rows), 1)
 
 def test_stale_revision_is_rejected(self):
-    draft = self.create_draft()
-    payload = {"revision": draft["revision"], **self.valid_row}
-    first = self.client.post(f"/api/input-drafts/{draft['id']}/rows", headers=self.admin_headers, json=payload)
-    stale = self.client.post(f"/api/input-drafts/{draft['id']}/rows", headers=self.admin_headers, json=payload)
-    self.assertEqual(first.status_code, 201)
-    self.assertEqual(stale.status_code, 409)
+    with self.database.session() as session:
+        draft = create_or_resume_draft(session, self.version, self.admin.id)
+        original_revision = draft.revision
+        mutate_draft_row(session, draft, original_revision, self.admin.id, self.valid_row)
+        with self.assertRaises(DraftConflict):
+            mutate_draft_row(session, draft, original_revision, self.admin.id, self.valid_row)
 ```
 
 - [ ] **Step 2: Run the focused tests and confirm missing endpoints/models**
@@ -224,7 +224,7 @@ Copy the active workbook into rows on first creation. Keep `base_row_number` for
 
 Run: `.venv/bin/python -m unittest tests.test_position_drafts -v`
 
-Expected: lifecycle and revision tests PASS; endpoint-only tests may remain skipped until Task 3 only if explicitly decorated for that boundary.
+Expected: all pure lifecycle and revision tests PASS.
 
 - [ ] **Step 6: Commit model and service paths when safe**
 

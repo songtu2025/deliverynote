@@ -5,10 +5,10 @@ from tempfile import TemporaryDirectory
 import unittest
 from zipfile import ZipFile
 
-from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from tests.asgi_client import SyncASGIClient
 from delivery_note.web.api import create_app
 from delivery_note.web.models import Batch, BatchFile, ExceptionRecord, Job
 
@@ -35,7 +35,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             storage_root=self.storage_root,
             bootstrap_admin=("admin", "admin-pass"),
         )
-        self.client = TestClient(self.app)
+        self.client = SyncASGIClient(self.app)
         login = self.client.post(
             "/api/auth/login",
             json={"username": "admin", "password": "admin-pass"},

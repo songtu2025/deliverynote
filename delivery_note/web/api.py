@@ -80,6 +80,14 @@ class UserPayload(BaseModel):
     role: str = "operator"
 
 
+class UserStatusPayload(BaseModel):
+    active: bool
+
+
+class PasswordResetPayload(BaseModel):
+    password: str = Field(min_length=8, max_length=200)
+
+
 class BatchPayload(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
@@ -123,7 +131,28 @@ def _version_json(version: InputVersion) -> dict:
     }
 
 
-def _file_json(source: BatchFile) -> dict:
+def _file_totals(source: BatchFile, session: Session | None = None) -> tuple[int, int]:
+    if session is None:
+        return source.import_total, source.manual_total
+    import_total = source.import_total
+    manual_total = 0
+    exceptions = session.scalars(
+        select(ExceptionRecord).where(ExceptionRecord.batch_file_id == source.id)
+    ).all()
+    for exception in exceptions:
+        parts = session.scalars(
+            select(SplitRecord).where(SplitRecord.exception_id == exception.id)
+        ).all()
+        if not parts:
+            manual_total += exception.manual_quantity
+            continue
+        import_total += sum(part.quantity for part in parts if part.resolved)
+        manual_total += sum(part.quantity for part in parts if not part.resolved)
+    return import_total, manual_total
+
+
+def _file_json(source: BatchFile, session: Session | None = None) -> dict:
+    import_total, manual_total = _file_totals(source, session)
     return {
         "id": source.id,
         "batch_id": source.batch_id,
@@ -133,8 +162,8 @@ def _file_json(source: BatchFile) -> dict:
         "supplier_code": source.supplier_code,
         "document_note": source.document_note,
         "delivery_total": source.delivery_total,
-        "import_total": source.import_total,
-        "manual_total": source.manual_total,
+        "import_total": import_total,
+        "manual_total": manual_total,
         "download_ready": bool(source.result_path),
     }
 
@@ -166,6 +195,11 @@ def _batch_summary(batch: Batch, session: Session, sources: list[BatchFile]) -> 
 
 
 def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
+    sources = session.scalars(
+        select(BatchFile)
+        .where(BatchFile.batch_id == batch.id)
+        .order_by(BatchFile.file_order)
+    ).all()
     result = {
         "id": batch.id,
         "name": batch.name,
@@ -179,15 +213,22 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         "download_ready": bool(batch.zip_path),
         "created_at": batch.created_at.isoformat(),
         "updated_at": batch.updated_at.isoformat(),
+        "file_count": len(sources),
+        "summary": _batch_summary(batch, session, sources),
     }
     if include_files:
-        sources = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-            .order_by(BatchFile.file_order)
-        ).all()
-        result["files"] = [_file_json(source) for source in sources]
-        result["summary"] = _batch_summary(batch, session, sources)
+        result["files"] = [_file_json(source, session) for source in sources]
+        result["versions"] = {
+            kind: _version_json(version)
+            for kind, field in VERSION_FIELDS.items()
+            if (version := session.get(InputVersion, getattr(batch, field))) is not None
+        }
+        result["jobs"] = {
+            job.kind: _job_json(job)
+            for job in session.scalars(
+                select(Job).where(Job.batch_id == batch.id).order_by(Job.id)
+            ).all()
+        }
     return result
 
 
@@ -200,7 +241,24 @@ def _job_json(job: Job) -> dict:
         "attempts": job.attempts,
         "error_message": job.error_message,
         "download_ready": bool(job.output_path),
+        "created_at": job.created_at.isoformat(),
+        "claimed_at": job.claimed_at.isoformat() if job.claimed_at else None,
+        "heartbeat_at": job.heartbeat_at.isoformat() if job.heartbeat_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
     }
+
+
+def _validate_input_version(kind: str, path: Path) -> None:
+    if kind == "purchase":
+        read_purchase_workbook(path)
+    elif kind == "product":
+        read_product_workbook(path)
+    elif kind == "supplier":
+        read_supplier_workbook(path)
+    elif kind == "position":
+        read_position_workbook(path)
+    else:
+        validate_template_workbook(path)
 
 
 def _exception_json(exception: ExceptionRecord, session: Session) -> dict:
@@ -440,6 +498,51 @@ def create_app(
     ):
         return [_user_json(user) for user in session.scalars(select(User).order_by(User.id))]
 
+    @app.put("/api/users/{user_id}/status")
+    def update_user_status(
+        user_id: int,
+        payload: UserStatusPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        user = session.get(User, user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        if user.id == admin.id and not payload.active:
+            raise HTTPException(status_code=409, detail="不能停用当前登录账号")
+        user.active = payload.active
+        if not payload.active:
+            session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+        _audit(
+            session,
+            admin.id,
+            "update_user_status",
+            "user",
+            user.id,
+            {"active": payload.active},
+        )
+        session.commit()
+        return _user_json(user)
+
+    @app.put(
+        "/api/users/{user_id}/password",
+        status_code=status.HTTP_204_NO_CONTENT,
+    )
+    def reset_user_password(
+        user_id: int,
+        payload: PasswordResetPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        user = session.get(User, user_id)
+        if user is None:
+            raise HTTPException(status_code=404, detail="用户不存在")
+        user.password_hash = hash_password(payload.password)
+        session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
+        _audit(session, admin.id, "reset_user_password", "user", user.id)
+        session.commit()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.post(
         "/api/input-versions/{kind}",
         status_code=status.HTTP_201_CREATED,
@@ -466,6 +569,14 @@ def create_app(
             raise HTTPException(status_code=409, detail="版本名称已存在")
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination)
+        try:
+            _validate_input_version(kind, destination)
+        except Exception as error:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"输入版本校验失败：{error}",
+            ) from error
         version = InputVersion(
             kind=kind,
             name=name,
@@ -652,6 +763,66 @@ def create_app(
                 detail="文件上传发生并发冲突，请刷新后重试",
             ) from error
         return _file_json(source)
+
+    @app.delete("/api/batches/{batch_id}/files/{file_id}")
+    def delete_batch_file(
+        batch_id: int,
+        file_id: int,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        batch = get_batch_or_404(batch_id, session)
+        if batch.status not in {"draft", "preflight_ready", "failed"}:
+            raise HTTPException(status_code=409, detail="当前批次状态不可删除文件")
+        source = session.scalar(
+            select(BatchFile).where(
+                BatchFile.id == file_id,
+                BatchFile.batch_id == batch.id,
+            )
+        )
+        if source is None:
+            raise HTTPException(status_code=404, detail="交货文件不存在")
+        storage_path = Path(source.storage_path)
+        exception_ids = session.scalars(
+            select(ExceptionRecord.id).where(
+                ExceptionRecord.batch_file_id == source.id
+            )
+        ).all()
+        if exception_ids:
+            session.execute(
+                delete(SplitRecord).where(
+                    SplitRecord.exception_id.in_(exception_ids)
+                )
+            )
+            session.execute(
+                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
+            )
+        session.delete(source)
+        session.flush()
+        remaining = session.scalars(
+            select(BatchFile)
+            .where(BatchFile.batch_id == batch.id)
+            .order_by(BatchFile.file_order)
+        ).all()
+        for item in remaining:
+            item.file_order = -item.id
+        session.flush()
+        for file_order, item in enumerate(remaining, start=1):
+            item.file_order = file_order
+        batch.status = "draft"
+        batch.error_message = None
+        batch.zip_path = None
+        _audit(
+            session,
+            user.id,
+            "delete_batch_file",
+            "batch_file",
+            source.id,
+            {"batch_id": batch.id, "original_name": source.original_name},
+        )
+        session.commit()
+        storage_path.unlink(missing_ok=True)
+        return _batch_json(batch, session)
 
     @app.put("/api/batches/{batch_id}/files/order")
     def reorder_batch_files(
