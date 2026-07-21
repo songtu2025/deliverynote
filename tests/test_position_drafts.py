@@ -1,14 +1,19 @@
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
 import pandas as pd
+from openpyxl import Workbook
 from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
 from delivery_note.pipeline import POSITION_SOURCE_COLUMNS
+from delivery_note.web.api import create_app
 from delivery_note.web.database import Database, sqlite_url
 from delivery_note.web.models import AuditLog, InputDraft, InputVersion, User
 from delivery_note.web.position_drafts import (
@@ -21,6 +26,7 @@ from delivery_note.web.position_drafts import (
     replace_draft_from_frame,
     validate_draft,
 )
+from tests.asgi_client import SyncASGIClient
 
 
 class PositionDraftTests(unittest.TestCase):
@@ -913,6 +919,620 @@ class PositionDraftTests(unittest.TestCase):
                     self.admin_id,
                     self.valid_row,
                 )
+
+
+class PositionDraftApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = TemporaryDirectory()
+        self.root = Path(self.temporary_directory.name)
+        self.storage = self.root / "storage"
+        self.app = create_app(
+            database_url=sqlite_url(self.root / "api.db"),
+            storage_root=self.storage,
+            bootstrap_admin=("admin", "admin-pass"),
+        )
+        self.client = SyncASGIClient(self.app)
+        self.admin_headers = self.login("admin", "admin-pass")
+        operator = self.client.post(
+            "/api/users",
+            headers=self.admin_headers,
+            json={
+                "username": "operator",
+                "password": "operator-pass",
+                "role": "operator",
+            },
+        )
+        self.assertEqual(operator.status_code, 201, operator.text)
+        self.operator_headers = self.login("operator", "operator-pass")
+        self.version = self.upload_position()
+        self.valid_row = {
+            "store_site": "SEEKWAY:CA",
+            "jiaji_sku": "SKU-B",
+            "msku": "MSKU-B",
+            "scale_position": "中尾",
+            "stocking_position": "备货",
+            "ordered_days": "60",
+        }
+
+    def tearDown(self):
+        self.client.close()
+        self.app.state.database.dispose()
+        self.temporary_directory.cleanup()
+
+    def login(self, username: str, password: str) -> dict[str, str]:
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": username, "password": password},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return {"Authorization": f"Bearer {response.json()['token']}"}
+
+    @staticmethod
+    def position_bytes(rows: list[list] | None = None) -> bytes:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "MSKU_视图"
+        sheet.append(POSITION_SOURCE_COLUMNS)
+        for row in rows or [
+            ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]
+        ]:
+            sheet.append(row)
+        output = BytesIO()
+        workbook.save(output)
+        return output.getvalue()
+
+    def upload_position(self, name: str = "position-v1") -> dict:
+        response = self.client.post(
+            "/api/input-versions/position",
+            headers=self.admin_headers,
+            data={"name": name, "activate": "true"},
+            files={
+                "file": (
+                    f"{name}.xlsx",
+                    BytesIO(self.position_bytes()),
+                )
+            },
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        return response.json()
+
+    def create_draft(self) -> dict:
+        response = self.client.post(
+            "/api/input-drafts/position",
+            headers=self.admin_headers,
+        )
+        self.assertIn(response.status_code, {200, 201}, response.text)
+        return response.json()
+
+    def list_rows(self, draft_id: int, **params) -> dict:
+        response = self.client.get(
+            f"/api/input-drafts/{draft_id}/rows",
+            headers=self.admin_headers,
+            params=params,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_version_summary_preview_and_download(self):
+        version_id = self.version["id"]
+        summary = self.client.get(
+            f"/api/input-versions/{version_id}/summary",
+            headers=self.admin_headers,
+        )
+        preview = self.client.get(
+            f"/api/input-versions/{version_id}/preview?limit=20",
+            headers=self.admin_headers,
+        )
+        download = self.client.get(
+            f"/api/input-versions/{version_id}/download",
+            headers=self.admin_headers,
+        )
+
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["metrics"]["sites"], 1)
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(preview.json()["rows"][0]["积加SKU"], "SKU-A")
+        self.assertEqual(preview.json()["total"], 1)
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertIn("position-v1.xlsx", download.headers["content-disposition"])
+        self.assertGreater(len(download.content), 0)
+
+        for query in ("offset=-1", "limit=0", "limit=201"):
+            invalid = self.client.get(
+                f"/api/input-versions/{version_id}/preview?{query}",
+                headers=self.admin_headers,
+            )
+            self.assertEqual(invalid.status_code, 422, invalid.text)
+
+    def test_missing_inspection_and_draft_resources_return_404(self):
+        for suffix in ("summary", "preview", "download"):
+            response = self.client.get(
+                f"/api/input-versions/999/{suffix}",
+                headers=self.admin_headers,
+            )
+            self.assertEqual(response.status_code, 404, response.text)
+
+        no_draft = self.client.get(
+            "/api/input-drafts/position",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(no_draft.status_code, 404, no_draft.text)
+
+        missing_requests = (
+            ("GET", "/api/input-drafts/999/rows", {}),
+            ("POST", "/api/input-drafts/999/rows", {"json": {"revision": 1, **self.valid_row}}),
+            ("PUT", "/api/input-drafts/999/rows/999", {"json": {"revision": 1, **self.valid_row}}),
+            ("DELETE", "/api/input-drafts/999/rows/999", {"json": {"revision": 1}}),
+            ("POST", "/api/input-drafts/999/rows/bulk-delete", {"json": {"revision": 1, "row_ids": [999]}}),
+            ("POST", "/api/input-drafts/999/import-apply", {"json": {"revision": 1, "token": "missing"}}),
+            ("GET", "/api/input-drafts/999/download", {}),
+            ("POST", "/api/input-drafts/999/validate", {}),
+            ("POST", "/api/input-drafts/999/publish", {"json": {"revision": 1, "name": "missing", "confirm_warnings": True}}),
+            ("POST", "/api/input-drafts/999/discard", {"json": {"revision": 1}}),
+        )
+        for method, url, kwargs in missing_requests:
+            response = self.client.request(
+                method,
+                url,
+                headers=self.admin_headers,
+                **kwargs,
+            )
+            self.assertEqual(response.status_code, 404, f"{url}: {response.text}")
+
+        missing_import = self.client.post(
+            "/api/input-drafts/999/import-preview",
+            headers=self.admin_headers,
+            data={"revision": "1"},
+            files={"file": ("position.xlsx", BytesIO(self.position_bytes()))},
+        )
+        self.assertEqual(missing_import.status_code, 404, missing_import.text)
+
+    def test_all_inspection_and_draft_routes_require_admin(self):
+        draft = self.create_draft()
+        row_id = self.list_rows(draft["id"])["rows"][0]["id"]
+        forbidden_requests = (
+            ("GET", f"/api/input-versions/{self.version['id']}/summary", {}),
+            ("GET", f"/api/input-versions/{self.version['id']}/preview", {}),
+            ("GET", f"/api/input-versions/{self.version['id']}/download", {}),
+            ("POST", "/api/input-drafts/position", {}),
+            ("GET", "/api/input-drafts/position", {}),
+            ("GET", f"/api/input-drafts/{draft['id']}/rows", {}),
+            ("POST", f"/api/input-drafts/{draft['id']}/rows", {"json": {"revision": draft["revision"], **self.valid_row}}),
+            ("PUT", f"/api/input-drafts/{draft['id']}/rows/{row_id}", {"json": {"revision": draft["revision"], **self.valid_row}}),
+            ("DELETE", f"/api/input-drafts/{draft['id']}/rows/{row_id}", {"json": {"revision": draft["revision"]}}),
+            ("POST", f"/api/input-drafts/{draft['id']}/rows/bulk-delete", {"json": {"revision": draft["revision"], "row_ids": [row_id]}}),
+            ("POST", f"/api/input-drafts/{draft['id']}/import-apply", {"json": {"revision": draft["revision"], "token": "missing"}}),
+            ("GET", f"/api/input-drafts/{draft['id']}/download", {}),
+            ("POST", f"/api/input-drafts/{draft['id']}/validate", {}),
+            ("POST", f"/api/input-drafts/{draft['id']}/publish", {"json": {"revision": draft["revision"], "name": "forbidden", "confirm_warnings": True}}),
+            ("POST", f"/api/input-drafts/{draft['id']}/discard", {"json": {"revision": draft["revision"]}}),
+        )
+        for method, url, kwargs in forbidden_requests:
+            response = self.client.request(
+                method,
+                url,
+                headers=self.operator_headers,
+                **kwargs,
+            )
+            self.assertEqual(response.status_code, 403, f"{url}: {response.text}")
+
+        forbidden_import = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-preview",
+            headers=self.operator_headers,
+            data={"revision": str(draft["revision"])},
+            files={"file": ("position.xlsx", BytesIO(self.position_bytes()))},
+        )
+        self.assertEqual(forbidden_import.status_code, 403, forbidden_import.text)
+
+    def test_draft_persists_across_requests_logout_and_relogin(self):
+        created = self.create_draft()
+        resumed = self.create_draft()
+        self.assertEqual(resumed["id"], created["id"])
+        self.assertEqual(resumed["revision"], created["revision"])
+
+        logout = self.client.post(
+            "/api/auth/logout",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(logout.status_code, 204, logout.text)
+        self.admin_headers = self.login("admin", "admin-pass")
+        persisted = self.client.get(
+            "/api/input-drafts/position",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(persisted.status_code, 200, persisted.text)
+        self.assertEqual(persisted.json()["id"], created["id"])
+        self.assertEqual(persisted.json()["row_count"], 1)
+
+    def test_row_crud_pagination_search_and_filters(self):
+        draft = self.create_draft()
+        listed = self.list_rows(draft["id"], offset=0, limit=1)
+        self.assertEqual(listed["total"], 1)
+        self.assertEqual(listed["rows"][0]["change_type"], "unchanged")
+
+        added = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], **self.valid_row},
+        )
+        self.assertEqual(added.status_code, 201, added.text)
+        self.assertGreater(added.json()["revision"], draft["revision"])
+        row_id = added.json()["row"]["id"]
+        revision = added.json()["revision"]
+
+        for params in (
+            {"search": "sku-b"},
+            {"site": "SEEKWAY:CA"},
+            {"scale_position": "中尾"},
+            {"only_modified": "true"},
+        ):
+            filtered = self.list_rows(draft["id"], **params)
+            self.assertEqual(filtered["total"], 1, params)
+            self.assertEqual(filtered["rows"][0]["id"], row_id)
+
+        updated = self.client.put(
+            f"/api/input-drafts/{draft['id']}/rows/{row_id}",
+            headers=self.admin_headers,
+            json={"revision": revision, **dict(self.valid_row, ordered_days="61")},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(updated.json()["row"]["ordered_days"], "61")
+        revision = updated.json()["revision"]
+
+        deleted = self.client.delete(
+            f"/api/input-drafts/{draft['id']}/rows/{row_id}",
+            headers=self.admin_headers,
+            json={"revision": revision},
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["row_id"], row_id)
+        self.assertEqual(self.list_rows(draft["id"])["total"], 1)
+
+        missing_update = self.client.put(
+            f"/api/input-drafts/{draft['id']}/rows/999",
+            headers=self.admin_headers,
+            json={"revision": deleted.json()["revision"], **self.valid_row},
+        )
+        self.assertEqual(missing_update.status_code, 404, missing_update.text)
+
+    def test_only_errors_filter_and_bulk_delete_are_atomic(self):
+        draft = self.create_draft()
+        invalid = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], **dict(self.valid_row, store_site=" ")},
+        )
+        self.assertEqual(invalid.status_code, 201, invalid.text)
+        invalid_id = invalid.json()["row"]["id"]
+        errors = self.list_rows(draft["id"], only_errors="true")
+        self.assertEqual(errors["total"], 1)
+        self.assertEqual(errors["rows"][0]["id"], invalid_id)
+        self.assertEqual(errors["rows"][0]["issues"][0]["code"], "empty_site")
+
+        failed = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows/bulk-delete",
+            headers=self.admin_headers,
+            json={
+                "revision": invalid.json()["revision"],
+                "row_ids": [invalid_id, 999],
+            },
+        )
+        self.assertEqual(failed.status_code, 404, failed.text)
+        self.assertEqual(self.list_rows(draft["id"], only_errors="true")["total"], 1)
+
+        deleted = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows/bulk-delete",
+            headers=self.admin_headers,
+            json={
+                "revision": invalid.json()["revision"],
+                "row_ids": [invalid_id],
+            },
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["deleted_ids"], [invalid_id])
+        self.assertEqual(self.list_rows(draft["id"], only_errors="true")["total"], 0)
+
+    def test_stale_revision_returns_409_without_partial_changes(self):
+        draft = self.create_draft()
+        first = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], **self.valid_row},
+        )
+        self.assertEqual(first.status_code, 201, first.text)
+        stale = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], **dict(self.valid_row, jiaji_sku="SKU-C")},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertIn("刷新", stale.json()["detail"])
+        self.assertEqual(self.list_rows(draft["id"])["total"], 2)
+
+    def test_import_preview_apply_uses_single_use_server_token(self):
+        draft = self.create_draft()
+        candidate = self.position_bytes(
+            [["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货", 60]]
+        )
+        preview = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-preview",
+            headers=self.admin_headers,
+            data={"revision": str(draft["revision"])},
+            files={"file": ("replacement.xlsx", BytesIO(candidate))},
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(
+            preview.json()["diff"],
+            {"added": 1, "modified": 0, "deleted": 1, "unchanged": 0},
+        )
+        token = preview.json()["token"]
+        temporary_files = list(
+            (self.storage / "temporary" / "position-imports").glob("*.xlsx")
+        )
+        self.assertEqual(len(temporary_files), 1)
+
+        applied = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-apply",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], "token": token},
+        )
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(applied.json()["diff"], preview.json()["diff"])
+        self.assertGreater(applied.json()["revision"], draft["revision"])
+        rows = self.list_rows(draft["id"])
+        self.assertEqual(rows["total"], 1)
+        self.assertEqual(rows["rows"][0]["jiaji_sku"], "SKU-B")
+        self.assertEqual(
+            list((self.storage / "temporary" / "position-imports").glob("*.xlsx")),
+            [],
+        )
+
+        reused = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-apply",
+            headers=self.admin_headers,
+            json={"revision": applied.json()["revision"], "token": token},
+        )
+        self.assertEqual(reused.status_code, 409, reused.text)
+
+    def test_import_token_is_bound_to_revision_and_stale_file_is_removed(self):
+        draft = self.create_draft()
+        preview = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-preview",
+            headers=self.admin_headers,
+            data={"revision": str(draft["revision"])},
+            files={"file": ("replacement.xlsx", BytesIO(self.position_bytes()))},
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        token = preview.json()["token"]
+
+        changed = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], **self.valid_row},
+        )
+        self.assertEqual(changed.status_code, 201, changed.text)
+        self.assertEqual(
+            list((self.storage / "temporary" / "position-imports").glob("*.xlsx")),
+            [],
+        )
+        stale = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-apply",
+            headers=self.admin_headers,
+            json={"revision": changed.json()["revision"], "token": token},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(self.list_rows(draft["id"])["total"], 2)
+
+    def test_invalid_import_returns_400_without_changing_draft_or_leaking_file(self):
+        draft = self.create_draft()
+        invalid = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-preview",
+            headers=self.admin_headers,
+            data={"revision": str(draft["revision"])},
+            files={"file": ("broken.xlsx", BytesIO(b"not-an-excel-file"))},
+        )
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+        self.assertIn("导入文件校验失败", invalid.json()["detail"])
+        current = self.client.get(
+            "/api/input-drafts/position",
+            headers=self.admin_headers,
+        ).json()
+        self.assertEqual(current["revision"], draft["revision"])
+        self.assertEqual(self.list_rows(draft["id"])["total"], 1)
+        self.assertEqual(
+            list((self.storage / "temporary").rglob("*.xlsx")),
+            [],
+        )
+
+    def test_download_validate_publish_and_duplicate_name_conflict(self):
+        with self.app.state.database.session() as session:
+            base_path = Path(
+                session.get(InputVersion, self.version["id"]).storage_path
+            )
+        base_bytes = base_path.read_bytes()
+        draft = self.create_draft()
+
+        download = self.client.get(
+            f"/api/input-drafts/{draft['id']}/download",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(download.status_code, 200, download.text)
+        self.assertGreater(len(download.content), 0)
+        self.assertEqual(
+            list((self.storage / "temporary" / "draft-downloads").glob("*.xlsx")),
+            [],
+        )
+        validation = self.client.post(
+            f"/api/input-drafts/{draft['id']}/validate",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(validation.status_code, 200, validation.text)
+        self.assertTrue(validation.json()["valid"])
+        self.assertEqual(validation.json()["error_count"], 0)
+
+        published = self.client.post(
+            f"/api/input-drafts/{draft['id']}/publish",
+            headers=self.admin_headers,
+            json={
+                "revision": draft["revision"],
+                "name": "position-v2",
+                "confirm_warnings": True,
+            },
+        )
+        self.assertEqual(published.status_code, 201, published.text)
+        self.assertNotEqual(published.json()["id"], draft["base_version_id"])
+        self.assertTrue(published.json()["active"])
+        self.assertEqual(base_path.read_bytes(), base_bytes)
+
+        next_draft = self.create_draft()
+        duplicate = self.client.post(
+            f"/api/input-drafts/{next_draft['id']}/publish",
+            headers=self.admin_headers,
+            json={
+                "revision": next_draft["revision"],
+                "name": "position-v2",
+                "confirm_warnings": True,
+            },
+        )
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+
+    def test_publish_validation_and_generation_errors_return_400(self):
+        draft = self.create_draft()
+        row = self.list_rows(draft["id"])["rows"][0]
+        invalid = self.client.put(
+            f"/api/input-drafts/{draft['id']}/rows/{row['id']}",
+            headers=self.admin_headers,
+            json={
+                "revision": draft["revision"],
+                "store_site": " ",
+                "jiaji_sku": row["jiaji_sku"],
+                "msku": row["msku"],
+                "scale_position": row["scale_position"],
+                "stocking_position": row["stocking_position"],
+                "ordered_days": row["ordered_days"],
+            },
+        )
+        self.assertEqual(invalid.status_code, 200, invalid.text)
+        rejected = self.client.post(
+            f"/api/input-drafts/{draft['id']}/publish",
+            headers=self.admin_headers,
+            json={
+                "revision": invalid.json()["revision"],
+                "name": "invalid-position",
+                "confirm_warnings": True,
+            },
+        )
+        self.assertEqual(rejected.status_code, 400, rejected.text)
+        self.assertIn("不能发布", rejected.json()["detail"])
+
+        with patch(
+            "delivery_note.web.api.publish_draft",
+            side_effect=OSError("writer failed"),
+            create=True,
+        ):
+            generation = self.client.post(
+                f"/api/input-drafts/{draft['id']}/publish",
+                headers=self.admin_headers,
+                json={
+                    "revision": invalid.json()["revision"],
+                    "name": "writer-failure",
+                    "confirm_warnings": True,
+                },
+            )
+        self.assertEqual(generation.status_code, 400, generation.text)
+        self.assertIn("发布失败", generation.json()["detail"])
+
+    def test_discard_cleans_import_candidate_and_blocks_further_changes(self):
+        draft = self.create_draft()
+        preview = self.client.post(
+            f"/api/input-drafts/{draft['id']}/import-preview",
+            headers=self.admin_headers,
+            data={"revision": str(draft["revision"])},
+            files={"file": ("replacement.xlsx", BytesIO(self.position_bytes()))},
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        discarded = self.client.post(
+            f"/api/input-drafts/{draft['id']}/discard",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"]},
+        )
+        self.assertEqual(discarded.status_code, 200, discarded.text)
+        self.assertEqual(discarded.json()["status"], "discarded")
+        self.assertEqual(
+            list((self.storage / "temporary" / "position-imports").glob("*.xlsx")),
+            [],
+        )
+        blocked = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={"revision": discarded.json()["revision"], **self.valid_row},
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+
+    def test_successful_row_write_commits_once(self):
+        draft = self.create_draft()
+        commits = []
+
+        def record_commit(session):
+            if session.bind is self.app.state.database.engine:
+                commits.append(session)
+
+        event.listen(Session, "after_commit", record_commit)
+        try:
+            response = self.client.post(
+                f"/api/input-drafts/{draft['id']}/rows",
+                headers=self.admin_headers,
+                json={"revision": draft["revision"], **self.valid_row},
+            )
+        finally:
+            event.remove(Session, "after_commit", record_commit)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(len(commits), 1)
+
+    def test_commit_failure_and_integrity_error_explicitly_roll_back(self):
+        draft = self.create_draft()
+        rollbacks = []
+
+        def fail_commit(session):
+            if session.bind is self.app.state.database.engine:
+                raise RuntimeError("commit failed")
+
+        def record_rollback(session):
+            if session.bind is self.app.state.database.engine:
+                rollbacks.append(session)
+
+        event.listen(Session, "before_commit", fail_commit)
+        event.listen(Session, "after_rollback", record_rollback)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+                self.client.post(
+                    f"/api/input-drafts/{draft['id']}/rows",
+                    headers=self.admin_headers,
+                    json={"revision": draft["revision"], **self.valid_row},
+                )
+        finally:
+            event.remove(Session, "before_commit", fail_commit)
+            event.remove(Session, "after_rollback", record_rollback)
+        self.assertEqual(len(rollbacks), 1)
+        self.assertEqual(self.list_rows(draft["id"])["total"], 1)
+
+        rollbacks.clear()
+        event.listen(Session, "after_rollback", record_rollback)
+        try:
+            with patch(
+                "delivery_note.web.api.mutate_draft_row",
+                side_effect=IntegrityError("insert", {}, RuntimeError("duplicate")),
+                create=True,
+            ):
+                conflict = self.client.post(
+                    f"/api/input-drafts/{draft['id']}/rows",
+                    headers=self.admin_headers,
+                    json={"revision": draft["revision"], **self.valid_row},
+                )
+        finally:
+            event.remove(Session, "after_rollback", record_rollback)
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+        self.assertEqual(len(rollbacks), 1)
 
 
 if __name__ == "__main__":

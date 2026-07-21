@@ -41,5 +41,8 @@ class SyncASGIClient:
     def put(self, url: str, **kwargs) -> Response:
         return self.request("PUT", url, **kwargs)
 
+    def delete(self, url: str, **kwargs) -> Response:
+        return self.request("DELETE", url, **kwargs)
+
     def close(self) -> None:
         pass

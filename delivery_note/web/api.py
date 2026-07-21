@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import re
+from threading import Lock
 from typing import Annotated
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     Response,
     UploadFile,
     status,
@@ -23,6 +25,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from ..application import SplitPart, project_split
 from ..config import resolve_supplier
@@ -34,6 +37,14 @@ from ..excel_io import (
     read_supplier_workbook,
     validate_template_workbook,
 )
+from ..input_inspection import (
+    inspect_input_version,
+    position_diff,
+    preview_input_version,
+    validate_position_frame,
+    write_position_workbook,
+)
+from ..pipeline import POSITION_SOURCE_COLUMNS
 from .auth import hash_password, hash_token, new_session_token, verify_password
 from .database import Database
 from .models import (
@@ -42,10 +53,25 @@ from .models import (
     Batch,
     BatchFile,
     ExceptionRecord,
+    InputDraft,
     InputVersion,
     Job,
+    PositionDraftRow,
     SplitRecord,
     User,
+)
+from .position_drafts import (
+    FIELD_TO_COLUMN,
+    ROW_FIELDS,
+    DraftConflict,
+    create_or_resume_draft,
+    discard_draft,
+    list_draft_rows,
+    mutate_draft_row,
+    publish_draft,
+    replace_draft_from_frame,
+    require_revision,
+    validate_draft,
 )
 
 
@@ -110,6 +136,32 @@ class SplitPayload(BaseModel):
     parts: list[SplitPartPayload]
 
 
+class DraftMutationPayload(BaseModel):
+    revision: int = Field(ge=1)
+
+
+class PositionRowPayload(DraftMutationPayload):
+    store_site: str = Field(min_length=1)
+    jiaji_sku: str = Field(min_length=1)
+    msku: str = ""
+    scale_position: str = ""
+    stocking_position: str = ""
+    ordered_days: str = ""
+
+
+class BulkDeletePayload(DraftMutationPayload):
+    row_ids: list[int] = Field(min_length=1)
+
+
+class ImportApplyPayload(DraftMutationPayload):
+    token: str = Field(min_length=1)
+
+
+class PublishDraftPayload(DraftMutationPayload):
+    name: str = Field(min_length=1, max_length=200)
+    confirm_warnings: bool = False
+
+
 def _user_json(user: User) -> dict:
     return {
         "id": user.id,
@@ -128,6 +180,89 @@ def _version_json(version: InputVersion) -> dict:
         "active": version.active,
         "created_by": version.created_by,
         "created_at": version.created_at.isoformat(),
+    }
+
+
+def _position_row_json(
+    row: PositionDraftRow,
+    issues: list[dict] | None = None,
+) -> dict:
+    return {
+        "id": row.id,
+        "draft_id": row.draft_id,
+        "row_order": row.row_order,
+        "store_site": row.store_site,
+        "jiaji_sku": row.jiaji_sku,
+        "msku": row.msku,
+        "scale_position": row.scale_position,
+        "stocking_position": row.stocking_position,
+        "ordered_days": row.ordered_days,
+        "change_type": row.change_type,
+        "deleted": row.deleted,
+        "issues": issues or [],
+    }
+
+
+def _position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
+    records = [
+        {
+            FIELD_TO_COLUMN[field]: getattr(row, field)
+            for field in ROW_FIELDS
+        }
+        for row in rows
+        if not row.deleted
+    ]
+    return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
+
+
+def _position_issue_map(rows: list[PositionDraftRow]) -> tuple[list[dict], dict[int, list[dict]]]:
+    active_rows = [row for row in rows if not row.deleted]
+    issues = validate_position_frame(_position_frame(active_rows))
+    by_row_id: dict[int, list[dict]] = {row.id: [] for row in active_rows}
+    for issue in issues:
+        for row_number in issue["row_numbers"]:
+            offset = row_number - 2
+            if 0 <= offset < len(active_rows):
+                by_row_id[active_rows[offset].id].append(issue)
+    return issues, by_row_id
+
+
+def _issue_summary(issues: list[dict]) -> dict:
+    error_count = sum(
+        len(issue["row_numbers"])
+        for issue in issues
+        if issue["severity"] == "error"
+    )
+    warning_count = sum(
+        len(issue["row_numbers"])
+        for issue in issues
+        if issue["severity"] == "warning"
+    )
+    return {
+        "issues": issues,
+        "error_count": error_count,
+        "warning_count": warning_count,
+        "valid": error_count == 0,
+    }
+
+
+def _draft_json(session: Session, draft: InputDraft) -> dict:
+    rows = list_draft_rows(session, draft.id)
+    active_rows = [row for row in rows if not row.deleted]
+    issue_summary = _issue_summary(validate_position_frame(_position_frame(active_rows)))
+    return {
+        "id": draft.id,
+        "kind": draft.kind,
+        "base_version_id": draft.base_version_id,
+        "status": draft.status,
+        "revision": draft.revision,
+        "created_by": draft.created_by,
+        "updated_by": draft.updated_by,
+        "created_at": draft.created_at.isoformat(),
+        "updated_at": draft.updated_at.isoformat(),
+        "row_count": len(active_rows),
+        "modified_count": sum(row.change_type != "unchanged" for row in rows),
+        **issue_summary,
     }
 
 
@@ -348,6 +483,13 @@ def create_app(
     database.create_schema()
     storage = Path(storage_root or os.getenv("STORAGE_ROOT", "storage")).resolve()
     storage.mkdir(parents=True, exist_ok=True)
+    import_candidate_root = storage / "temporary" / "position-imports"
+    import_candidate_root.mkdir(parents=True, exist_ok=True)
+    for stale_candidate in import_candidate_root.iterdir():
+        if stale_candidate.is_file():
+            stale_candidate.unlink(missing_ok=True)
+    import_candidates: dict[str, dict] = {}
+    import_candidates_lock = Lock()
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -373,6 +515,7 @@ def create_app(
     app = FastAPI(title="供应链交货处理系统", version="1.0.0")
     app.state.database = database
     app.state.storage_root = storage
+    app.state.position_import_candidates = import_candidates
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -427,6 +570,52 @@ def create_app(
         if batch is None:
             raise HTTPException(status_code=404, detail="批次不存在")
         return batch
+
+    def get_draft_or_404(draft_id: int, session: Session) -> InputDraft:
+        draft = session.get(InputDraft, draft_id)
+        if draft is None or draft.kind != "position":
+            raise HTTPException(status_code=404, detail="库位草稿不存在")
+        return draft
+
+    def commit_once(session: Session) -> None:
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+    def rollback_draft_conflict(session: Session, error: Exception) -> None:
+        if session.in_transaction():
+            session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="草稿已被其他管理员更新，请刷新后重试",
+        ) from error
+
+    def rollback_integrity_conflict(session: Session, error: Exception) -> None:
+        if session.in_transaction():
+            session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="草稿写入发生并发冲突，请刷新后重试",
+        ) from error
+
+    def remove_import_candidate(token: str) -> dict | None:
+        with import_candidates_lock:
+            candidate = import_candidates.pop(token, None)
+        if candidate is not None:
+            Path(candidate["path"]).unlink(missing_ok=True)
+        return candidate
+
+    def remove_draft_import_candidates(draft_id: int) -> None:
+        with import_candidates_lock:
+            tokens = [
+                token
+                for token, candidate in import_candidates.items()
+                if candidate["draft_id"] == draft_id
+            ]
+        for token in tokens:
+            remove_import_candidate(token)
 
     @app.get("/health")
     def health() -> dict:
@@ -624,6 +813,61 @@ def create_app(
         ).all()
         return [_version_json(version) for version in versions]
 
+    @app.get("/api/input-versions/{version_id}/summary")
+    def input_version_summary(
+        version_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        version = session.get(InputVersion, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="输入版本不存在")
+        try:
+            return inspect_input_version(version.kind, Path(version.storage_path))
+        except Exception as error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"输入版本读取失败：{error}",
+            ) from error
+
+    @app.get("/api/input-versions/{version_id}/preview")
+    def input_version_preview(
+        version_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        version = session.get(InputVersion, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="输入版本不存在")
+        try:
+            return preview_input_version(
+                version.kind,
+                Path(version.storage_path),
+                offset,
+                limit,
+            )
+        except Exception as error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"输入版本读取失败：{error}",
+            ) from error
+
+    @app.get("/api/input-versions/{version_id}/download")
+    def download_input_version(
+        version_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        version = session.get(InputVersion, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="输入版本不存在")
+        path = Path(version.storage_path)
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="输入版本文件不存在")
+        return FileResponse(path, filename=version.original_name)
+
     @app.post("/api/input-versions/{version_id}/activate")
     def activate_input_version(
         version_id: int,
@@ -657,6 +901,471 @@ def create_app(
                 detail="输入版本发生并发冲突，请刷新后重试",
             ) from error
         return _version_json(version)
+
+    @app.post(
+        "/api/input-drafts/position",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_position_draft(
+        response: Response,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        existing = session.scalar(
+            select(InputDraft).where(
+                InputDraft.kind == "position",
+                InputDraft.status == "editing",
+            )
+        )
+        if existing is not None:
+            version = session.get(InputVersion, existing.base_version_id)
+        else:
+            version = session.scalar(
+                select(InputVersion).where(
+                    InputVersion.kind == "position",
+                    InputVersion.active.is_(True),
+                )
+            )
+        if version is None:
+            raise HTTPException(status_code=404, detail="当前启用的库位版本不存在")
+        try:
+            draft = create_or_resume_draft(session, version, admin.id)
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except ValueError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        session.refresh(draft)
+        if existing is not None:
+            response.status_code = status.HTTP_200_OK
+        return _draft_json(session, draft)
+
+    @app.get("/api/input-drafts/position")
+    def get_position_draft(
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = session.scalar(
+            select(InputDraft).where(
+                InputDraft.kind == "position",
+                InputDraft.status == "editing",
+            )
+        )
+        if draft is None:
+            raise HTTPException(status_code=404, detail="当前没有进行中的库位草稿")
+        return _draft_json(session, draft)
+
+    @app.get("/api/input-drafts/{draft_id}/rows")
+    def get_position_draft_rows(
+        draft_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        search: str = "",
+        site: str = "",
+        scale_position: str = "",
+        only_errors: bool = False,
+        only_modified: bool = False,
+    ):
+        get_draft_or_404(draft_id, session)
+        rows = [row for row in list_draft_rows(session, draft_id) if not row.deleted]
+        _issues, issues_by_row = _position_issue_map(rows)
+        search_value = search.strip().casefold()
+        site_value = site.strip().casefold()
+        scale_value = scale_position.strip().casefold()
+        filtered = []
+        for row in rows:
+            values = [str(getattr(row, field) or "") for field in ROW_FIELDS]
+            if search_value and not any(
+                search_value in value.casefold() for value in values
+            ):
+                continue
+            if site_value and row.store_site.strip().casefold() != site_value:
+                continue
+            if scale_value and row.scale_position.strip().casefold() != scale_value:
+                continue
+            if only_modified and row.change_type == "unchanged":
+                continue
+            if only_errors and not any(
+                issue["severity"] == "error"
+                for issue in issues_by_row.get(row.id, [])
+            ):
+                continue
+            filtered.append(row)
+        page = filtered[offset : offset + limit]
+        return {
+            "rows": [
+                _position_row_json(row, issues_by_row.get(row.id))
+                for row in page
+            ],
+            "total": len(filtered),
+            "offset": offset,
+            "limit": limit,
+        }
+
+    @app.post(
+        "/api/input-drafts/{draft_id}/rows",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def create_position_draft_row(
+        draft_id: int,
+        payload: PositionRowPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        try:
+            row = mutate_draft_row(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+                payload.model_dump(exclude={"revision"}),
+            )
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except ValueError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        session.refresh(draft)
+        session.refresh(row)
+        remove_draft_import_candidates(draft.id)
+        return {"row": _position_row_json(row), "revision": draft.revision}
+
+    @app.put("/api/input-drafts/{draft_id}/rows/{row_id}")
+    def update_position_draft_row(
+        draft_id: int,
+        row_id: int,
+        payload: PositionRowPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        existing_row = session.get(PositionDraftRow, row_id)
+        if existing_row is None or existing_row.draft_id != draft.id:
+            raise HTTPException(status_code=404, detail="草稿行不存在")
+        try:
+            row = mutate_draft_row(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+                payload.model_dump(exclude={"revision"}),
+                row_id=row_id,
+            )
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except ValueError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        session.refresh(draft)
+        session.refresh(row)
+        remove_draft_import_candidates(draft.id)
+        return {"row": _position_row_json(row), "revision": draft.revision}
+
+    @app.delete("/api/input-drafts/{draft_id}/rows/{row_id}")
+    def delete_position_draft_row(
+        draft_id: int,
+        row_id: int,
+        payload: DraftMutationPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        existing_row = session.get(PositionDraftRow, row_id)
+        if existing_row is None or existing_row.draft_id != draft.id:
+            raise HTTPException(status_code=404, detail="草稿行不存在")
+        try:
+            mutate_draft_row(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+                {},
+                row_id=row_id,
+                delete=True,
+            )
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except ValueError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        session.refresh(draft)
+        remove_draft_import_candidates(draft.id)
+        return {"row_id": row_id, "revision": draft.revision}
+
+    @app.post("/api/input-drafts/{draft_id}/rows/bulk-delete")
+    def bulk_delete_position_draft_rows(
+        draft_id: int,
+        payload: BulkDeletePayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        if len(payload.row_ids) != len(set(payload.row_ids)):
+            raise HTTPException(status_code=400, detail="批量删除行不可重复")
+        rows = [session.get(PositionDraftRow, row_id) for row_id in payload.row_ids]
+        if any(row is None or row.draft_id != draft.id for row in rows):
+            raise HTTPException(status_code=404, detail="草稿行不存在")
+        try:
+            expected_revision = payload.revision
+            for row_id in payload.row_ids:
+                mutate_draft_row(
+                    session,
+                    draft,
+                    expected_revision,
+                    admin.id,
+                    {},
+                    row_id=row_id,
+                    delete=True,
+                )
+                expected_revision = draft.revision
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except ValueError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        session.refresh(draft)
+        remove_draft_import_candidates(draft.id)
+        return {"deleted_ids": payload.row_ids, "revision": draft.revision}
+
+    @app.post("/api/input-drafts/{draft_id}/import-preview")
+    async def preview_position_draft_import(
+        draft_id: int,
+        revision: Annotated[int, Form(ge=1)],
+        file: UploadFile = File(...),
+        _admin: User = Depends(admin_user),
+        session: Session = Depends(get_session),
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        try:
+            require_revision(draft, revision)
+        except DraftConflict as error:
+            await file.close()
+            rollback_draft_conflict(session, error)
+        original_name = _safe_filename(file.filename or "")
+        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
+            await file.close()
+            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+        token = uuid4().hex
+        suffix = Path(original_name).suffix.lower()
+        destination = import_candidate_root / f"{draft.id}_{revision}_{token}{suffix}"
+        await _save_upload(file, destination)
+        try:
+            candidate_frame = read_position_workbook(destination)
+            issues = validate_position_frame(candidate_frame)
+            current_frame = _position_frame(list_draft_rows(session, draft.id))
+            diff = position_diff(current_frame, candidate_frame)
+        except Exception as error:
+            destination.unlink(missing_ok=True)
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=f"导入文件校验失败：{error}",
+            ) from error
+        remove_draft_import_candidates(draft.id)
+        with import_candidates_lock:
+            import_candidates[token] = {
+                "draft_id": draft.id,
+                "revision": revision,
+                "path": str(destination),
+            }
+        return {
+            "token": token,
+            "draft_id": draft.id,
+            "revision": revision,
+            "row_count": len(candidate_frame),
+            "diff": diff,
+            **_issue_summary(issues),
+        }
+
+    @app.post("/api/input-drafts/{draft_id}/import-apply")
+    def apply_position_draft_import(
+        draft_id: int,
+        payload: ImportApplyPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        with import_candidates_lock:
+            candidate = import_candidates.get(payload.token)
+        if (
+            candidate is None
+            or candidate["draft_id"] != draft.id
+            or candidate["revision"] != payload.revision
+        ):
+            remove_import_candidate(payload.token)
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=409, detail="导入预览已失效，请重新预览")
+        try:
+            require_revision(draft, payload.revision)
+        except DraftConflict as error:
+            remove_import_candidate(payload.token)
+            rollback_draft_conflict(session, error)
+        with import_candidates_lock:
+            candidate = import_candidates.pop(payload.token, None)
+        if candidate is None:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(status_code=409, detail="导入预览已失效，请重新预览")
+        candidate_path = Path(candidate["path"])
+        try:
+            candidate_frame = read_position_workbook(candidate_path)
+            diff = replace_draft_from_frame(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+                candidate_frame,
+            )
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except Exception as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=f"导入草稿失败：{error}",
+            ) from error
+        finally:
+            candidate_path.unlink(missing_ok=True)
+        session.refresh(draft)
+        remove_draft_import_candidates(draft.id)
+        return {"diff": diff, "revision": draft.revision}
+
+    @app.get("/api/input-drafts/{draft_id}/download")
+    def download_position_draft(
+        draft_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        download_root = storage / "temporary" / "draft-downloads"
+        download_path = download_root / f"{uuid4().hex}.xlsx"
+        try:
+            write_position_workbook(
+                download_path,
+                _position_frame(list_draft_rows(session, draft.id)),
+            )
+        except Exception as error:
+            download_path.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"草稿下载文件生成失败：{error}",
+            ) from error
+        return FileResponse(
+            download_path,
+            filename=f"position-draft-{draft.id}-r{draft.revision}.xlsx",
+            background=BackgroundTask(download_path.unlink, missing_ok=True),
+        )
+
+    @app.post("/api/input-drafts/{draft_id}/validate")
+    def validate_position_draft(
+        draft_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        return {
+            "draft_id": draft.id,
+            "revision": draft.revision,
+            **_issue_summary(validate_draft(session, draft)),
+        }
+
+    @app.post(
+        "/api/input-drafts/{draft_id}/publish",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def publish_position_draft(
+        draft_id: int,
+        payload: PublishDraftPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        original_name = _safe_filename(f"{payload.name}.xlsx")
+        destination = storage / "master" / "position" / f"{uuid4().hex}_{original_name}"
+        try:
+            version = publish_draft(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+                name=payload.name,
+                storage_path=destination,
+                confirm_warnings=payload.confirm_warnings,
+                original_name=original_name,
+            )
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        except ValueError as error:
+            if session.in_transaction():
+                session.rollback()
+            if "版本名称已存在" in str(error):
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            raise HTTPException(status_code=400, detail=str(error)) from error
+        except OSError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(
+                status_code=400,
+                detail=f"草稿发布失败：{error}",
+            ) from error
+        remove_draft_import_candidates(draft.id)
+        return _version_json(version)
+
+    @app.post("/api/input-drafts/{draft_id}/discard")
+    def discard_position_draft(
+        draft_id: int,
+        payload: DraftMutationPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        draft = get_draft_or_404(draft_id, session)
+        try:
+            discard_draft(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+            )
+            commit_once(session)
+        except DraftConflict as error:
+            rollback_draft_conflict(session, error)
+        except IntegrityError as error:
+            rollback_integrity_conflict(session, error)
+        session.refresh(draft)
+        remove_draft_import_candidates(draft.id)
+        return _draft_json(session, draft)
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
     def create_batch(
