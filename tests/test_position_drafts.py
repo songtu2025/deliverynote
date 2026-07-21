@@ -388,7 +388,7 @@ class PositionDraftTests(unittest.TestCase):
             )
 
             actions = [log.action for log in session.query(AuditLog).all()]
-            self.assertNotIn("mutate_input_draft", actions)
+            self.assertEqual(actions, ["create_input_draft"])
 
     def test_validation_excludes_soft_deleted_rows(self):
         with self.database.session() as session:
@@ -628,6 +628,115 @@ class PositionDraftTests(unittest.TestCase):
             self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
             self.assertEqual(session.query(InputVersion).count(), 1)
             self.assertTrue(session.get(InputVersion, self.version_id).active)
+
+    def test_nested_commit_then_outer_rollback_removes_publish_files(self):
+        published_path = self.root / "nested-commit-outer-rollback.xlsx"
+        with self.database.session() as session:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            publish_draft(
+                session,
+                draft,
+                draft.revision,
+                self.admin_id,
+                name="nested-commit-outer-rollback",
+                storage_path=published_path,
+            )
+
+            with session.begin_nested():
+                pass
+            session.rollback()
+
+            self.assertFalse(published_path.exists())
+            self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+            self.assertEqual(session.query(InputVersion).count(), 1)
+            self.assertTrue(session.get(InputVersion, self.version_id).active)
+
+    def test_nested_rollback_then_outer_commit_keeps_version_and_file(self):
+        published_path = self.root / "nested-rollback-outer-commit.xlsx"
+        with self.database.session() as session:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            published = publish_draft(
+                session,
+                draft,
+                draft.revision,
+                self.admin_id,
+                name="nested-rollback-outer-commit",
+                storage_path=published_path,
+            )
+
+            nested = session.begin_nested()
+            nested.rollback()
+            session.commit()
+
+            self.assertTrue(published_path.exists())
+            self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+            self.assertTrue(session.get(InputVersion, published.id).active)
+            self.assertFalse(session.get(InputVersion, self.version_id).active)
+
+    def test_publish_then_session_close_removes_temporary_file(self):
+        published_path = self.root / "close-without-commit.xlsx"
+        session = self.database.SessionLocal()
+        try:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            publish_draft(
+                session,
+                draft,
+                draft.revision,
+                self.admin_id,
+                name="close-without-commit",
+                storage_path=published_path,
+            )
+        finally:
+            session.close()
+
+        self.assertFalse(published_path.exists())
+        self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+        with self.database.session() as verification_session:
+            self.assertEqual(verification_session.query(InputVersion).count(), 1)
+            self.assertTrue(
+                verification_session.get(InputVersion, self.version_id).active
+            )
+
+    def test_commit_hook_failure_then_close_removes_promoted_target(self):
+        published_path = self.root / "commit-failure-close.xlsx"
+        session = self.database.SessionLocal()
+        draft = create_or_resume_draft(
+            session, self._version(session), self.admin_id
+        )
+        publish_draft(
+            session,
+            draft,
+            draft.revision,
+            self.admin_id,
+            name="commit-failure-close",
+            storage_path=published_path,
+        )
+
+        def fail_after_promotion(_session):
+            self.assertTrue(published_path.exists())
+            raise RuntimeError("commit failed after promotion")
+
+        event.listen(session, "before_commit", fail_after_promotion)
+        try:
+            with self.assertRaisesRegex(RuntimeError, "after promotion"):
+                session.commit()
+        finally:
+            event.remove(session, "before_commit", fail_after_promotion)
+            session.close()
+
+        self.assertFalse(published_path.exists())
+        self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+        with self.database.session() as verification_session:
+            self.assertEqual(verification_session.query(InputVersion).count(), 1)
+            self.assertTrue(
+                verification_session.get(InputVersion, self.version_id).active
+            )
 
     def test_publish_rejects_errors_and_requires_warning_confirmation(self):
         with self.database.session() as session:

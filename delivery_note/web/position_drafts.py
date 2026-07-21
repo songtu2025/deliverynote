@@ -71,8 +71,9 @@ def _remove_pending_publish_files(state: dict, *, remove_target: bool) -> None:
 @event.listens_for(Session, "before_commit")
 def _promote_pending_publish_file(session: Session) -> None:
     state = session.info.get(_PENDING_PUBLISH_KEY)
-    if state is None:
+    if state is None or session.in_nested_transaction():
         return
+    state["root_commit_started"] = True
     target_path = Path(state["target_path"])
     if target_path.exists() or target_path.is_symlink():
         raise ValueError("发布目标文件已存在")
@@ -82,17 +83,22 @@ def _promote_pending_publish_file(session: Session) -> None:
 
 
 @event.listens_for(Session, "after_commit")
-def _keep_committed_publish_file(session: Session) -> None:
-    state = session.info.pop(_PENDING_PUBLISH_KEY, None)
-    if state is not None:
-        _remove_pending_publish_files(state, remove_target=False)
+def _mark_root_publish_commit_succeeded(session: Session) -> None:
+    state = session.info.get(_PENDING_PUBLISH_KEY)
+    if state is not None and state.get("root_commit_started"):
+        state["root_commit_succeeded"] = True
 
 
-@event.listens_for(Session, "after_rollback")
-def _remove_rolled_back_publish_file(session: Session) -> None:
+@event.listens_for(Session, "after_transaction_end")
+def _finish_pending_publish_file(session: Session, transaction) -> None:
+    if transaction.parent is not None:
+        return
     state = session.info.pop(_PENDING_PUBLISH_KEY, None)
     if state is not None:
-        _remove_pending_publish_files(state, remove_target=True)
+        _remove_pending_publish_files(
+            state,
+            remove_target=not state.get("root_commit_succeeded", False),
+        )
 
 
 def _audit(
@@ -481,6 +487,8 @@ def publish_draft(
             "temporary_path": str(temporary_path),
             "target_path": str(path),
             "promoted": False,
+            "root_commit_started": False,
+            "root_commit_succeeded": False,
         }
         return version
     except Exception:
