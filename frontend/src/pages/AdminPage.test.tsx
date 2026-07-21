@@ -1,7 +1,9 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as apiModule from "../api";
 import type { AuditLog, InputVersion, User } from "../types";
 import AdminPage from "./AdminPage";
 import { AuditLogPanel } from "./admin/AuditLogPanel";
@@ -11,6 +13,19 @@ const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.strin
   status,
   headers: { "Content-Type": "application/json" }
 });
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
 
 const admin: User = { id: 1, username: "admin", role: "admin", active: true };
 const operator: User = { id: 2, username: "operator", role: "operator", active: true };
@@ -28,6 +43,7 @@ let users: User[];
 let versions: InputVersion[];
 let auditLogs: AuditLog[];
 let positionFlow: boolean;
+let positionEntryRequest: Deferred<Response> | null;
 
 function requestCount(method: string, suffix: string): number {
   return vi.mocked(fetch).mock.calls.filter(([input, init]) =>
@@ -49,6 +65,7 @@ describe("AdminPage", () => {
       created_at: "2026-07-21T09:00:00"
     }];
     positionFlow = false;
+    positionEntryRequest = null;
     vi.spyOn(message, "success").mockImplementation(() => {
       const result = (() => undefined) as ReturnType<typeof message.success>;
       const completed = Promise.resolve(true);
@@ -103,6 +120,7 @@ describe("AdminPage", () => {
       }
 
       if (positionFlow && url.endsWith("/api/input-drafts/position") && method === "POST") {
+        if (positionEntryRequest) return positionEntryRequest.promise;
         return jsonResponse({
           id: 7,
           kind: "position",
@@ -174,6 +192,90 @@ describe("AdminPage", () => {
     expect(requestCount("GET", "/api/audit-logs")).toBe(1);
   });
 
+  it("keeps only the latest StrictMode load results when earlier requests settle last", async () => {
+    const staleUsers = deferred<Response>();
+    const freshUsers = deferred<Response>();
+    const staleVersions = deferred<Response>();
+    const freshVersions = deferred<Response>();
+    const staleAudit = deferred<Response>();
+    const freshAudit = deferred<Response>();
+    const freshPosition = { ...positionVersion, name: "position-fresh" };
+    const responses = {
+      "/api/users": [staleUsers, freshUsers],
+      "/api/input-versions": [staleVersions, freshVersions],
+      "/api/audit-logs": [staleAudit, freshAudit]
+    };
+
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      const queue = responses[url.pathname as keyof typeof responses];
+      const request = queue?.shift();
+      if (!request) throw new Error(`Unexpected request: GET ${url.pathname}`);
+      return request.promise;
+    }));
+
+    render(<StrictMode><AdminPage currentUser={admin} /></StrictMode>);
+    await waitFor(() => {
+      expect(requestCount("GET", "/api/users")).toBe(2);
+      expect(requestCount("GET", "/api/input-versions")).toBe(2);
+      expect(requestCount("GET", "/api/audit-logs")).toBe(2);
+    });
+    freshUsers.resolve(jsonResponse([admin, { ...operator, username: "fresh-user" }]));
+    freshVersions.resolve(jsonResponse([freshPosition]));
+    freshAudit.resolve(jsonResponse([{
+      id: 9,
+      user_id: 1,
+      action: "create_user",
+      entity_type: "user",
+      entity_id: "2",
+      details: {},
+      created_at: "2026-07-21T10:00:00"
+    }]));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    staleUsers.resolve(jsonResponse([admin, { ...operator, username: "stale-user" }]));
+    staleVersions.resolve(jsonResponse([{ ...positionVersion, name: "position-stale" }]));
+    staleAudit.resolve(jsonResponse({ detail: "stale audit failure" }, 503));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    await waitFor(() => expect(document.body).toHaveTextContent("position-fresh"));
+    expect(document.body).not.toHaveTextContent("position-stale");
+    fireEvent.click(screen.getByText("用户账号"));
+    expect(await screen.findByText("fresh-user")).toBeInTheDocument();
+    expect(screen.queryByText("stale-user")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("操作记录"));
+    await waitFor(() => expect(screen.getAllByText("创建用户").some((element) => element.tagName === "TD")).toBe(true));
+    expect(screen.queryByText("无法读取操作记录")).not.toBeInTheDocument();
+  });
+
+  it("ignores deferred administrator responses after unmount", async () => {
+    const pendingUsers = deferred<Response>();
+    const pendingVersions = deferred<Response>();
+    const pendingAudit = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/users") return pendingUsers.promise;
+      if (url.pathname === "/api/input-versions") return pendingVersions.promise;
+      if (url.pathname === "/api/audit-logs") return pendingAudit.promise;
+      throw new Error(`Unexpected request: GET ${url.pathname}`);
+    }));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const view = render(<AdminPage currentUser={admin} />);
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3));
+    view.unmount();
+    const errorsBeforeSettling = consoleError.mock.calls.length;
+
+    await act(async () => {
+      pendingUsers.resolve(jsonResponse([admin]));
+      pendingVersions.resolve(jsonResponse([positionVersion]));
+      pendingAudit.resolve(jsonResponse([]));
+      await Promise.resolve();
+    });
+
+    expect(consoleError.mock.calls).toHaveLength(errorsBeforeSettling);
+  });
+
   it("opens position maintenance in place and returns focus to the input catalog", async () => {
     versions = [positionVersion];
     positionFlow = true;
@@ -190,6 +292,27 @@ describe("AdminPage", () => {
     await waitFor(() => expect(screen.queryByText("库位/排仓网页维护")).not.toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "基础资料目录" })).toHaveFocus();
   }, 30_000);
+
+  it("returns from position entry loading and restores focus to the input catalog", async () => {
+    versions = [positionVersion];
+    positionFlow = true;
+    positionEntryRequest = deferred<Response>();
+    const view = render(<AdminPage currentUser={admin} />);
+
+    try {
+      await screen.findByText("基础资料目录");
+      fireEvent.click(screen.getByRole("button", { name: /^库位\/排仓数据/ }));
+      fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
+      expect(await screen.findByText("正在创建或恢复服务器草稿")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toHaveFocus());
+
+      fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
+      await waitFor(() => expect(screen.getByRole("heading", { name: "基础资料目录" })).toHaveFocus());
+    } finally {
+      view.unmount();
+      positionEntryRequest?.resolve(jsonResponse({}));
+    }
+  });
 
   it("refreshes only versions and returns to the catalog after position publish", async () => {
     versions = [positionVersion];
@@ -223,7 +346,7 @@ describe("AdminPage", () => {
 
     const adminRow = screen.getByText("admin").closest("tr");
     expect(adminRow).not.toBeNull();
-    expect(within(adminRow!).getByRole("button", { name: "停用" })).toBeDisabled();
+    expect(within(adminRow!).getByRole("button", { name: "停用 admin" })).toBeDisabled();
     expect(within(adminRow!).getByText("当前账号不可停用")).toBeInTheDocument();
   });
 
@@ -269,7 +392,7 @@ describe("AdminPage", () => {
     );
 
     const operatorRow = screen.getByText("operator").closest("tr")!;
-    fireEvent.click(within(operatorRow).getByRole("button", { name: "停用" }));
+    fireEvent.click(within(operatorRow).getByRole("button", { name: "停用 operator" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认停用" }));
     await waitFor(() => expect(requestCount("PUT", "/api/users/2/status")).toBe(1));
     expect(JSON.parse(String(vi.mocked(fetch).mock.calls.find(([input]) =>
@@ -290,7 +413,7 @@ describe("AdminPage", () => {
       />
     );
 
-    fireEvent.click(within(screen.getByText("operator").closest("tr")!).getByRole("button", { name: "重置密码" }));
+    fireEvent.click(within(screen.getByText("operator").closest("tr")!).getByRole("button", { name: "重置密码 operator" }));
     const dialog = await screen.findByRole("dialog", { name: "重置密码 · operator" });
     fireEvent.change(within(dialog).getByLabelText("新密码"), { target: { value: "operator-new-pass" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "重置密码" }));
@@ -299,6 +422,29 @@ describe("AdminPage", () => {
     expect(JSON.parse(String(request?.[1]?.body))).toEqual({ password: "operator-new-pass" });
     expect(onDataChanged).toHaveBeenCalledOnce();
   }, 30_000);
+
+  it("expires the current session after resetting the current administrator password", async () => {
+    const onDataChanged = vi.fn();
+    const expireSession = vi.spyOn(apiModule, "expireSession").mockImplementation(() => undefined);
+    render(
+      <UserManagementPanel
+        currentUser={admin}
+        users={users}
+        loading={false}
+        error={null}
+        onDataChanged={onDataChanged}
+      />
+    );
+
+    fireEvent.click(within(screen.getByText("admin").closest("tr")!).getByRole("button", { name: "重置密码 admin" }));
+    const dialog = await screen.findByRole("dialog", { name: "重置密码 · admin" });
+    fireEvent.change(within(dialog).getByLabelText("新密码"), { target: { value: "admin-new-pass" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "重置密码" }));
+
+    await waitFor(() => expect(requestCount("PUT", "/api/users/1/password")).toBe(1));
+    expect(expireSession).toHaveBeenCalledWith("密码已重置，请使用新密码重新登录");
+    expect(onDataChanged).not.toHaveBeenCalled();
+  });
 
   it("shows only the real draft audit labels and resolves operator names", async () => {
     auditLogs = [

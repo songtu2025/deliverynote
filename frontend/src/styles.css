@@ -392,7 +392,11 @@ button, input { font: inherit; }
 }
 
 .admin-section-heading h4 { margin: 0 0 3px !important; }
-.admin-section-heading [tabindex="-1"]:focus-visible { outline: none; }
+.admin-section-heading [tabindex="-1"]:focus-visible {
+  outline: 3px solid rgba(24, 144, 255, 0.42);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
 .input-workspace,
 .input-data-view,
 .input-data-layout,

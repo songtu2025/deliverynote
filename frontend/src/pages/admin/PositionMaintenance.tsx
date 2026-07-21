@@ -910,23 +910,33 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
 
   if (entryLoading && !draft) {
     return (
-      <div style={{ minHeight: 360, display: "grid", placeItems: "center" }}>
-        <Spin size="large" description="正在创建或恢复服务器草稿" />
+      <div>
+        <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
+          返回基础资料
+        </Button>
+        <div style={{ minHeight: 360, display: "grid", placeItems: "center" }}>
+          <Spin size="large" description="正在创建或恢复服务器草稿" />
+        </div>
       </div>
     );
   }
 
   if (entryError && !draft) {
     return (
-      <Card>
-        <Alert
-          type="error"
-          showIcon
-          title="无法打开库位草稿"
-          description={entryError}
-          action={<Button icon={<ReloadOutlined />} onClick={() => void loadDraft()}>重新尝试</Button>}
-        />
-      </Card>
+      <div>
+        <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
+          返回基础资料
+        </Button>
+        <Card>
+          <Alert
+            type="error"
+            showIcon
+            title="无法打开库位草稿"
+            description={entryError}
+            action={<Button icon={<ReloadOutlined />} onClick={() => void loadDraft()}>重新尝试</Button>}
+          />
+        </Card>
+      </div>
     );
   }
 

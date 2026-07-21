@@ -169,7 +169,7 @@ export function UserManagementPanel({
               return (
                 <Space>
                   <Button
-                    aria-label="重置密码"
+                    aria-label={`重置密码 ${user.username}`}
                     icon={<KeyOutlined />}
                     disabled={action !== null}
                     onClick={() => setPasswordTarget(user)}
@@ -190,7 +190,7 @@ export function UserManagementPanel({
                     onConfirm={() => updateStatus(user)}
                   >
                     <Button
-                      aria-label={user.active ? "停用" : "启用"}
+                      aria-label={`${user.active ? "停用" : "启用"} ${user.username}`}
                       disabled={isSelf || action !== null}
                       danger={user.active}
                     >

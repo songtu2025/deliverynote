@@ -17,7 +17,14 @@ interface LoadErrors {
   audit: string | null;
 }
 
+interface LoadingState {
+  users: boolean;
+  versions: boolean;
+  audit: boolean;
+}
+
 const EMPTY_ERRORS: LoadErrors = { users: null, versions: null, audit: null };
+const INITIAL_LOADING: LoadingState = { users: true, versions: true, audit: true };
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
@@ -27,15 +34,23 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [versions, setVersions] = useState<InputVersion[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [versionsLoading, setVersionsLoading] = useState(false);
+  const [loading, setLoading] = useState<LoadingState>(INITIAL_LOADING);
   const [errors, setErrors] = useState<LoadErrors>(EMPTY_ERRORS);
   const [inputView, setInputView] = useState<InputView>("catalog");
   const inputWorkspaceRef = useRef<HTMLDivElement>(null);
   const focusInputViewRef = useRef(false);
+  const mountedRef = useRef(false);
+  const usersRequestRef = useRef(0);
+  const versionsRequestRef = useRef(0);
+  const auditRequestRef = useRef(0);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const usersRequestId = ++usersRequestRef.current;
+    const versionsRequestId = ++versionsRequestRef.current;
+    const auditRequestId = ++auditRequestRef.current;
+    if (!mountedRef.current) return;
+
+    setLoading(INITIAL_LOADING);
     setErrors(EMPTY_ERRORS);
     const [userResult, versionResult, auditResult] = await Promise.allSettled([
       api<User[]>("/api/users"),
@@ -43,34 +58,74 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
       api<AuditLog[]>("/api/audit-logs")
     ]);
 
-    const nextErrors: LoadErrors = { ...EMPTY_ERRORS };
-    if (userResult.status === "fulfilled") setUsers(userResult.value);
-    else nextErrors.users = errorMessage(userResult.reason, "读取用户账号失败");
-    if (versionResult.status === "fulfilled") setVersions(versionResult.value);
-    else nextErrors.versions = errorMessage(versionResult.reason, "读取基础资料失败");
-    if (auditResult.status === "fulfilled") setAuditLogs(auditResult.value);
-    else nextErrors.audit = errorMessage(auditResult.reason, "读取操作记录失败");
-    setErrors(nextErrors);
-    setLoading(false);
+    if (mountedRef.current && usersRequestRef.current === usersRequestId) {
+      if (userResult.status === "fulfilled") setUsers(userResult.value);
+      else {
+        setErrors((current) => ({
+          ...current,
+          users: errorMessage(userResult.reason, "读取用户账号失败")
+        }));
+      }
+      setLoading((current) => ({ ...current, users: false }));
+    }
+
+    if (mountedRef.current && versionsRequestRef.current === versionsRequestId) {
+      if (versionResult.status === "fulfilled") setVersions(versionResult.value);
+      else {
+        setErrors((current) => ({
+          ...current,
+          versions: errorMessage(versionResult.reason, "读取基础资料失败")
+        }));
+      }
+      setLoading((current) => ({ ...current, versions: false }));
+    }
+
+    if (mountedRef.current && auditRequestRef.current === auditRequestId) {
+      if (auditResult.status === "fulfilled") setAuditLogs(auditResult.value);
+      else {
+        setErrors((current) => ({
+          ...current,
+          audit: errorMessage(auditResult.reason, "读取操作记录失败")
+        }));
+      }
+      setLoading((current) => ({ ...current, audit: false }));
+    }
   }, []);
 
   const refreshVersions = useCallback(async () => {
-    setVersionsLoading(true);
+    const requestId = ++versionsRequestRef.current;
+    if (!mountedRef.current) return;
+
+    setLoading((current) => ({ ...current, versions: true }));
     setErrors((current) => ({ ...current, versions: null }));
     try {
-      setVersions(await api<InputVersion[]>("/api/input-versions"));
+      const nextVersions = await api<InputVersion[]>("/api/input-versions");
+      if (mountedRef.current && versionsRequestRef.current === requestId) {
+        setVersions(nextVersions);
+      }
     } catch (error) {
-      setErrors((current) => ({
-        ...current,
-        versions: errorMessage(error, "读取基础资料失败")
-      }));
+      if (mountedRef.current && versionsRequestRef.current === requestId) {
+        setErrors((current) => ({
+          ...current,
+          versions: errorMessage(error, "读取基础资料失败")
+        }));
+      }
     } finally {
-      setVersionsLoading(false);
+      if (mountedRef.current && versionsRequestRef.current === requestId) {
+        setLoading((current) => ({ ...current, versions: false }));
+      }
     }
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     void load();
+    return () => {
+      mountedRef.current = false;
+      usersRequestRef.current += 1;
+      versionsRequestRef.current += 1;
+      auditRequestRef.current += 1;
+    };
   }, [load]);
 
   useEffect(() => {
@@ -144,7 +199,7 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
                     <div className="input-data-layout">
                       <InputDataPanel
                         versions={versions}
-                        loading={loading || versionsLoading}
+                        loading={loading.versions}
                         onVersionsChanged={refreshVersions}
                         onOpenPositionDraft={openPosition}
                       />
@@ -169,7 +224,7 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
               <UserManagementPanel
                 currentUser={currentUser}
                 users={users}
-                loading={loading}
+                loading={loading.users}
                 error={errors.users}
                 onDataChanged={load}
               />
@@ -182,7 +237,7 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
               <AuditLogPanel
                 auditLogs={auditLogs}
                 users={users}
-                loading={loading}
+                loading={loading.audit}
                 error={errors.audit}
                 onRetry={load}
               />

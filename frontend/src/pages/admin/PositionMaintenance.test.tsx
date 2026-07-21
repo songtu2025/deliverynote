@@ -692,6 +692,31 @@ describe("PositionMaintenance", () => {
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
   });
 
+  it("can return to the input catalog while the draft entry request is loading", () => {
+    entryRequest = deferred<Response>();
+    const onBack = vi.fn();
+    const view = renderMaintenance({ onBack });
+
+    try {
+      expect(screen.getByText("正在创建或恢复服务器草稿")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
+      expect(onBack).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      entryRequest.resolve(jsonResponse(draftResponse));
+    }
+  });
+
+  it("can return to the input catalog after the draft entry request fails", async () => {
+    failEntry = true;
+    const onBack = vi.fn();
+    renderMaintenance({ onBack });
+
+    expect(await screen.findByText("无法打开库位草稿")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it("shows loading, entry error with retry, and empty row states", async () => {
     entryRequest = deferred<Response>();
     const first = renderMaintenance();
