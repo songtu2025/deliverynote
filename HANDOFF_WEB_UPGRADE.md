@@ -51,20 +51,20 @@ git log -3 --oneline --decorate
 
 ```text
 Python unittest: 102/102 passed
-Frontend Vitest: 6 files, 53/53 passed
+Frontend Vitest: 6 files, 54/54 passed
 Frontend production build: passed
 pip check: passed
 Compose YAML static check: passed
 PostgreSQL DDL compile check: passed
 Existing batch-workbench Chrome desktop/tablet/mobile visual QA: passed
-Administrator-maintenance Chrome PC visual QA: pending
+Administrator-maintenance Chrome PC visual QA: passed after publish-dialog viewport fix
 Linux Docker Compose build and runtime smoke test: passed
 HTTPS health, login, read API and logout smoke test: passed
 ```
 
-本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围，新的 PC 截图证据正在 `design/admin-maintenance-qa/` 补齐，不再把平板和移动端作为本轮完成门槛。
+本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1440×900 全流程和 1920×1080 主界面验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；不再把平板和移动端作为本轮完成门槛。
 
-2026-07-21 已从 `feature/admin-maintenance` 工作树在 Linux 目标机执行 `docker compose -p deliverynote --env-file /root/deliverynote/.env up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，容器内 Web `/health` 返回成功，部署资源为 `index-C1Vk0rzl.js` 和 `index-DKtrA9Gk.css`。管理员登录、版本列表、当前库位摘要/预览、用户和操作记录只读接口均返回成功；现网没有编辑中的库位草稿，写流程在临时 SQLite/API 存储中复验，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
+2026-07-21 已从 `feature/admin-maintenance` 工作树在 Linux 目标机执行 `docker compose -p deliverynote --env-file /root/deliverynote/.env up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，容器内 Web `/health` 返回成功；视觉修复后的前端资源为 `index-DHi1_OIo.js` 和 `index-DKtrA9Gk.css`。管理员登录、版本列表、当前库位摘要/预览、用户和操作记录只读接口均返回成功；现网没有编辑中的库位草稿，写流程在临时 SQLite/API 存储中复验，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
 
 本次自动化验证实际使用：
 

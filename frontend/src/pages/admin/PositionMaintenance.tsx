@@ -306,6 +306,7 @@ function PublishDialog({
     <Modal
       title="发布新的库位/排仓版本"
       open={validation !== null}
+      styles={{ body: { maxHeight: "calc(100vh - 300px)", overflowY: "auto" } }}
       okText="确认发布"
       cancelText="继续修改草稿"
       okButtonProps={{ disabled: blocked }}

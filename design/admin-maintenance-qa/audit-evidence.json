@@ -1,0 +1,114 @@
+{
+  "audit_date": "2026-07-21",
+  "browser": "Google Chrome 146.0.7680.71",
+  "scope": "管理员维护 PC 端：基础资料、库位网页草稿、发布校验、用户账号和操作记录",
+  "environment": "隔离 Docker Compose QA 项目，使用脱敏数据",
+  "viewports": [
+    "1440x900",
+    "1920x1080"
+  ],
+  "result": "accepted_after_fix",
+  "safety": {
+    "production_data_mutated": false,
+    "qa_active_version_preserved": true,
+    "qa_draft_discarded": true,
+    "page_horizontal_overflow_px": 0
+  },
+  "fixed_during_audit": [
+    {
+      "surface": "发布新的库位/排仓版本",
+      "problem": "多条警告使 1440x900 首屏看不到弹窗底部操作",
+      "resolution": "限制弹窗内容区高度并在内容区滚动，头部与底部操作保持可达",
+      "verified_by": "07-publish-errors-1440x900.png, 08-publish-warnings-1440x900.png"
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "name": "基础资料目录与当前库位内容",
+      "health": "healthy",
+      "screenshots": [
+        "01-base-data-catalog-1440x900.png",
+        "02-base-data-catalog-1920x1080.png"
+      ],
+      "evidence": "五类资料目的和状态可见；当前版本、摘要、质量问题、预览及维护入口层级清楚。"
+    },
+    {
+      "step": 2,
+      "name": "服务器草稿工作台",
+      "health": "healthy",
+      "screenshots": [
+        "03-draft-workspace-1440x900.png"
+      ],
+      "evidence": "自动保存、修订号、相对正式版差异、筛选和表格操作在同一工作区可见。"
+    },
+    {
+      "step": 3,
+      "name": "新增记录抽屉",
+      "health": "healthy",
+      "screenshots": [
+        "04-create-drawer-1440x900.png"
+      ],
+      "evidence": "必填字段、用途说明和保存到服务器草稿的结果说明完整，底部操作可见。"
+    },
+    {
+      "step": 4,
+      "name": "编辑记录抽屉",
+      "health": "healthy",
+      "screenshots": [
+        "05-edit-drawer-1440x900.png"
+      ],
+      "evidence": "现有值与字段说明并置，编辑对象在标题中明确。"
+    },
+    {
+      "step": 5,
+      "name": "Excel 整表替换预览",
+      "health": "healthy",
+      "screenshots": [
+        "06-excel-diff-1440x900.png"
+      ],
+      "evidence": "替换影响、增改删统计、错误和警告在应用前展示，操作按钮使用中文。"
+    },
+    {
+      "step": 6,
+      "name": "发布错误阻断",
+      "health": "healthy",
+      "screenshots": [
+        "07-publish-errors-1440x900.png"
+      ],
+      "evidence": "重复键错误明确定位到行，确认发布保持禁用，底部操作固定可达。"
+    },
+    {
+      "step": 7,
+      "name": "发布警告确认",
+      "health": "healthy_after_fix",
+      "screenshots": [
+        "08-publish-warnings-1440x900.png"
+      ],
+      "evidence": "警告列表可滚动，显式确认框和启用后的确认发布按钮同时可见。"
+    },
+    {
+      "step": 8,
+      "name": "用户账号",
+      "health": "healthy",
+      "screenshots": [
+        "09-user-accounts-1440x900.png"
+      ],
+      "evidence": "角色、状态、重置密码和当前账号不可停用规则清楚。"
+    },
+    {
+      "step": 9,
+      "name": "操作记录",
+      "health": "healthy",
+      "screenshots": [
+        "10-audit-log-1440x900.png"
+      ],
+      "evidence": "草稿创建、放弃、登录和版本上传记录按时间倒序可追溯。"
+    }
+  ],
+  "evidence_limits": [
+    "截图不能证明完整 WCAG 合规。",
+    "本轮未使用屏幕阅读器，也未完成全流程键盘遍历和自动对比度测量。",
+    "截图使用脱敏 QA 数据，不包含真实业务文件或生产数据。"
+  ]
+}

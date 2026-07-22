@@ -535,6 +535,32 @@ describe("PositionMaintenance", () => {
     expect(screen.getByRole("button", { name: "确认发布" })).toBeEnabled();
   });
 
+  it("keeps publish actions reachable when validation lists many issues", async () => {
+    validationResponse = {
+      ...validationResponse,
+      warning_count: 4,
+      issues: [
+        { severity: "warning", code: "custom_scale", message: "规模定位必须为短尾、中尾或长尾", row_numbers: [3] },
+        { severity: "warning", code: "empty_stocking", message: "备货定位不能为空", row_numbers: [3] },
+        { severity: "warning", code: "invalid_days", message: "已下单可售天数必须为数值", row_numbers: [3] },
+        { severity: "warning", code: "row_count_changed", message: "行数变化达到或超过 50%", row_numbers: [] }
+      ]
+    };
+    renderMaintenance();
+    fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
+
+    const dialog = await dialogByTitle("发布新的库位/排仓版本");
+    const body = dialog.querySelector<HTMLElement>(".ant-modal-body");
+    expect(body).toHaveStyle({
+      maxHeight: "calc(100vh - 300px)",
+      overflowY: "auto"
+    });
+    const footer = dialog.querySelector<HTMLElement>(".ant-modal-footer");
+    expect(footer).toContainElement(within(dialog).getByRole("button", { name: "继续修改草稿" }));
+    expect(footer).toContainElement(within(dialog).getByRole("button", { name: "确认发布" }));
+    expect(body).not.toContainElement(within(dialog).getByRole("button", { name: "确认发布" }));
+  });
+
   it("publishes a named version and reports success to the parent", async () => {
     const onPublished = vi.fn();
     renderMaintenance({ onPublished });
