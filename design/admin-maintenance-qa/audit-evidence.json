@@ -14,6 +14,7 @@
     "qa_active_version_preserved": true,
     "qa_draft_discarded": true,
     "qa_replacement_conflict_verified": true,
+    "qa_concurrency_race_iterations": 24,
     "page_horizontal_overflow_px": 0
   },
   "fixed_during_audit": [

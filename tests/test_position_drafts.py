@@ -175,6 +175,63 @@ class PositionDraftTests(unittest.TestCase):
                 0,
             )
 
+    def test_create_uses_fresh_active_version_instead_of_cached_prelock_state(self):
+        replacement_path = self.root / "position-v2-create.xlsx"
+        write_position_workbook(replacement_path, self.base_frame)
+        with self.database.session() as session:
+            stale_version = self._version(session)
+            session.execute(
+                InputVersion.__table__.update()
+                .where(InputVersion.id == self.version_id)
+                .values(active=False)
+            )
+            replacement = InputVersion(
+                kind="position",
+                name="position-v2-create",
+                original_name="position-v2-create.xlsx",
+                storage_path=str(replacement_path),
+                active=True,
+                created_by=self.admin_id,
+            )
+            session.add(replacement)
+            session.flush()
+
+            self.assertTrue(stale_version.active)
+            created = create_or_resume_draft(
+                session, stale_version, self.admin_id
+            )
+
+            self.assertEqual(created.base_version_id, replacement.id)
+
+    def test_create_or_resume_locks_versions_before_reading_the_draft(self):
+        with self.database.session() as session:
+            version = self._version(session)
+            calls: list[str] = []
+            original_scalar = session.scalar
+            original_scalars = session.scalars
+
+            def record_scalar(statement, *args, **kwargs):
+                calls.append(str(statement))
+                return original_scalar(statement, *args, **kwargs)
+
+            def record_scalars(statement, *args, **kwargs):
+                calls.append(str(statement))
+                return original_scalars(statement, *args, **kwargs)
+
+            with (
+                patch.object(session, "scalar", side_effect=record_scalar),
+                patch.object(session, "scalars", side_effect=record_scalars),
+            ):
+                create_or_resume_draft(session, version, self.admin_id)
+
+            relevant_calls = [
+                statement
+                for statement in calls
+                if "input_versions" in statement or "input_drafts" in statement
+            ]
+            self.assertIn("input_versions", relevant_calls[0])
+            self.assertIn("input_drafts", relevant_calls[1])
+
     def test_publish_rejects_a_draft_when_its_base_is_no_longer_active(self):
         with self.database.session() as session:
             draft = create_or_resume_draft(
@@ -1294,6 +1351,35 @@ class PositionDraftApiTests(unittest.TestCase):
             persisted.json()["diff"],
             {"added": 0, "modified": 0, "deleted": 0, "unchanged": 1},
         )
+
+    def test_draft_endpoint_locks_versions_before_its_first_draft_lookup(self):
+        calls: list[str] = []
+        original_scalar = Session.scalar
+        original_scalars = Session.scalars
+
+        def record_scalar(session, statement, *args, **kwargs):
+            text = str(statement)
+            if "input_versions" in text or "input_drafts" in text:
+                calls.append(text)
+            return original_scalar(session, statement, *args, **kwargs)
+
+        def record_scalars(session, statement, *args, **kwargs):
+            text = str(statement)
+            if "input_versions" in text or "input_drafts" in text:
+                calls.append(text)
+            return original_scalars(session, statement, *args, **kwargs)
+
+        with (
+            patch.object(Session, "scalar", new=record_scalar),
+            patch.object(Session, "scalars", new=record_scalars),
+        ):
+            response = self.client.post(
+                "/api/input-drafts/position", headers=self.admin_headers
+            )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertIn("input_versions", calls[0])
+        self.assertIn("input_drafts", calls[1])
 
     def test_active_position_replacement_is_blocked_while_draft_is_editing(self):
         self.create_draft()

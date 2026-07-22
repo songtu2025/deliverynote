@@ -199,17 +199,39 @@ def create_or_resume_draft(
     version: InputVersion,
     user_id: int,
 ) -> InputDraft:
+    if version.kind != "position":
+        raise ValueError("只能从当前启用的库位版本创建草稿")
+    list(
+        session.scalars(
+            select(InputVersion.id)
+            .where(InputVersion.kind == "position")
+            .with_for_update()
+        )
+    )
     existing = session.scalar(
         select(InputDraft)
         .where(
-            InputDraft.kind == version.kind,
+            InputDraft.kind == "position",
             InputDraft.status == "editing",
         )
         .with_for_update()
     )
     if existing is not None:
         return existing
-    if version.kind != "position" or not version.active:
+    active_version_id = session.scalar(
+        select(InputVersion.id).where(
+            InputVersion.kind == "position",
+            InputVersion.active.is_(True),
+        )
+    )
+    if active_version_id is None:
+        raise ValueError("只能从当前启用的库位版本创建草稿")
+    version = session.get(
+        InputVersion,
+        active_version_id,
+        populate_existing=True,
+    )
+    if version is None:
         raise ValueError("只能从当前启用的库位版本创建草稿")
 
     try:
@@ -245,7 +267,7 @@ def create_or_resume_draft(
     except IntegrityError as error:
         winner = session.scalar(
             select(InputDraft).where(
-                InputDraft.kind == version.kind,
+                InputDraft.kind == "position",
                 InputDraft.status == "editing",
             )
         )

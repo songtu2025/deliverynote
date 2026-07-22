@@ -194,7 +194,7 @@ npm run test
 npm run build
 ```
 
-2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 105/105 通过、前端 6 个测试文件共 55/55 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。
+2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 108/108 通过、前端 6 个测试文件共 55/55 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。
 
 ## 项目完成标准
 
@@ -228,7 +228,7 @@ npm run build
 - 数据库改表有可执行的迁移方案。
 - README、交接文档和实际部署命令保持一致。
 
-当前代码门槛已通过自动化验证；Linux 目标机已从 `feature/admin-maintenance` 工作树完成 Compose 重建，数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS 健康接口均返回 `{"status":"ok"}`，登录后的版本列表只读接口成功，新前端资源哈希已生效。管理员维护 PC 端 Chrome 验收已通过，过程中发现的发布警告弹窗首屏操作不可达问题和库位草稿基线漂移风险均已修复并复验。现网没有编辑中的库位草稿，因此完整写流程使用隔离 PostgreSQL QA 和临时 SQLite 数据库验收，没有向生产库写入测试草稿。完整脱敏业务场景以及数据库/文件卷成对备份恢复等运维门槛仍需完成，完成前不要宣称生产可用。
+当前代码门槛已通过自动化验证；Linux 目标机已从 `feature/admin-maintenance` 工作树完成 Compose 重建，数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS 健康接口均返回 `{"status":"ok"}`，登录后的版本列表只读接口成功，新前端资源哈希已生效。管理员维护 PC 端 Chrome 验收已通过，过程中发现的发布警告弹窗首屏操作不可达问题和库位草稿基线漂移风险均已修复并复验。现网没有编辑中的库位草稿，因此完整写流程使用隔离 PostgreSQL QA 和临时 SQLite 数据库验收；PostgreSQL 另完成 12 轮草稿打开/版本启用竞争和 12 轮草稿打开/发布竞争验收，没有向生产库写入测试草稿。完整脱敏业务场景以及数据库/文件卷成对备份恢复等运维门槛仍需完成，完成前不要宣称生产可用。
 
 ## 原有单文件 CLI
 

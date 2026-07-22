@@ -1021,25 +1021,42 @@ def create_app(
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
+        list(
+            session.scalars(
+                select(InputVersion.id)
+                .where(InputVersion.kind == "position")
+                .with_for_update()
+            )
+        )
         existing = session.scalar(
-            select(InputDraft).where(
+            select(InputDraft)
+            .where(
                 InputDraft.kind == "position",
                 InputDraft.status == "editing",
             )
+            .with_for_update()
         )
         if existing is not None:
-            version = session.get(InputVersion, existing.base_version_id)
+            version = session.get(
+                InputVersion,
+                existing.base_version_id,
+                populate_existing=True,
+            )
         else:
-            position_versions = list(
-                session.scalars(
-                    select(InputVersion)
-                    .where(InputVersion.kind == "position")
-                    .with_for_update()
+            active_version_id = session.scalar(
+                select(InputVersion.id).where(
+                    InputVersion.kind == "position",
+                    InputVersion.active.is_(True),
                 )
             )
-            version = next(
-                (current for current in position_versions if current.active),
-                None,
+            version = (
+                session.get(
+                    InputVersion,
+                    active_version_id,
+                    populate_existing=True,
+                )
+                if active_version_id is not None
+                else None
             )
         if version is None:
             raise HTTPException(status_code=404, detail="当前启用的库位版本不存在")
