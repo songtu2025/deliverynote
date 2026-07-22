@@ -234,7 +234,9 @@ npm run build
 - 数据库改表有可执行的迁移方案。
 - README、交接文档和实际部署命令保持一致。
 
-当前代码门槛已通过自动化验证；Linux 目标机已从 `feature/admin-maintenance` 工作树的较早源码完成 Compose 重建，数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS 健康接口均返回 `{"status":"ok"}`。管理员维护和超收规则 PC 端 Chrome 验收、脱敏双文件业务场景均已通过。2026-07-22 已在业务静止窗口内对正式 PostgreSQL 与 `delivery_data` 生成成对备份，并恢复到独立 Compose 项目；恢复前后业务表计数一致，50 个文件的路径/内容聚合校验值一致，恢复库迁移两次成功，10 个历史批次保持无规则兼容。恢复演练发现并修复了 Worker 不响应容器 SIGTERM 的问题，进程测试和 Compose 退出码均为 0。批次并发上传、草稿恢复审计和本次超收规则仍尚未部署到正式环境；现网前端仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`，本地最新构建为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`。本次备份仅保存在同机 `/tmp`，正式部署前应复制到持久、受控的备份位置；定时和异机备份也仍未建立，因此不要把当前分支写成已经正式上线。
+当前代码门槛已通过自动化验证；管理员维护和超收规则 PC 端 Chrome 验收、脱敏双文件业务场景均已通过。2026-07-22 已在业务静止窗口内对正式 PostgreSQL 与 `delivery_data` 生成成对备份并恢复到独立 Compose 项目；恢复前后业务表计数一致，50 个文件的路径/内容聚合校验值一致，恢复库迁移两次成功，10 个历史批次保持无规则兼容。恢复演练发现并修复了 Worker 不响应容器 SIGTERM 的问题，进程测试和 Compose 退出码均为 0。成对备份已复制到受控目录 `/root/backups/deliverynote/20260722-160803` 并再次通过 SHA-256 校验。
+
+2026-07-22 16:43（Asia/Shanghai）已从 `feature/admin-maintenance` 提交 `9624c3d` 时的代码状态完成正式超收表迁移和 Compose 重建，批次并发上传、草稿恢复审计、超收规则及 Worker 停机修复均已部署。数据库容器和 `deliverynote_postgres_data` 卷保持原实例；PostgreSQL、API、单 Worker 和 Web 正常运行，本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`。线上前端资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`；真实 HTTPS Chrome 验证了管理员菜单、空规则页、发布表单和 10 个历史批次，控制台零错误。部署后有 10 个历史批次、14 个批次文件、0 个规则版本、0 个批次规则绑定和 0 个活动任务，因此尚不会自动超收。首条真实规则及规则批次仍待业务操作，定时和异机成对备份也尚未建立；本次版本已上线不等于整个项目已完整生产可用。
 
 ## 原有单文件 CLI
 

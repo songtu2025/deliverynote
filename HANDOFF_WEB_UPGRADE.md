@@ -5,7 +5,7 @@
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 16:35 最新接续状态（新会话先看）
+## 0. 2026-07-22 16:47 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -18,10 +18,10 @@ git diff --check
 ```
 
 - 分支：`feature/admin-maintenance`
-- 当前超收功能提交：`66b44e3 feat: add versioned overreceipt rules`；Worker SIGTERM 修复提交：`e410a7e fix: stop worker gracefully`。
+- 当前超收功能提交：`66b44e3 feat: add versioned overreceipt rules`；Worker SIGTERM 修复提交：`e410a7e fix: stop worker gracefully`；备份恢复记录提交：`9624c3d docs: record backup restore verification`。
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
 - 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。本交接文档提交后工作树应保持干净。
-- 正式环境仍是 14:37 左右由旧的未提交源码构建的版本；`455b759` 与 `66b44e3` 均尚未部署。不要把“代码已验证”写成“线上已更新”。
+- 2026-07-22 16:43 已从本工作树提交 `9624c3d` 的代码状态完成正式迁移和 Compose 重建，`455b759`、`66b44e3`、`e410a7e` 已上线；线上资源已更新为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`。首条超收规则尚未发布，当前新批次不会自动超收。
 - 用户已要求停用 Superpowers 插件；后续会话不要调用 `superpowers:*` 技能。
 
 ### 0.2 本轮已完成的代码工作
@@ -71,28 +71,30 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 ```
 
 最近前端构建仍有单包大于 500 kB 的 Vite 提示，不是构建失败，暂不应优先引入复杂拆包。
-本地最新构建资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`；这不是当前线上资源。
+本地和线上当前构建资源均为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`。
 
 ### 0.4 正式环境状态
 
 - 正式地址：`https://deliverynote.seekwaygroup.com/`
-- 最近部署时间：约 2026-07-22 14:37（Asia/Shanghai）。
-- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 在 14:37 左右的旧源码状态，不包含 `455b759` 和 `66b44e3`。
-- 当前线上前端资源：`/assets/index-BVNBHU_E.js`、`/assets/index-BfjwUI3X.css`。
-- 本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`；`db`、`api`、`worker`、`web` 均运行，API 健康，日志未发现 traceback 或启动错误。
-- 已验证线上资源包含“全部站点”“全部规模定位”“全部备货定位”。此前只读生产 API 抽查到一个含 14 条待处理记录的批次，14 条均返回新增定位字段且有定位值，登录/列表/读取/退出分别返回 200/200/200/204。
-- 部署没有删除或重建数据库卷；数据库容器延续运行。不要执行 `docker compose down -v`。
+- 最近部署时间：2026-07-22 16:43（Asia/Shanghai）。
+- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 提交 `9624c3d` 时的代码状态；生产数据库先执行了幂等超收规则迁移，再重建 API、Worker 和 Web。
+- 当前线上前端资源：`/assets/index-2g7-gWL5.js`、`/assets/index-gXYtaLj0.css`。
+- 本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`；`db`、`api`、`worker`、`web` 均运行，API 健康。部署稳定后的日志没有 traceback、异常或失败请求。
+- 真实 HTTPS Chrome 验收已通过：管理员菜单为“批次处理 / 超收规则 / 管理员维护”，规则页显示未发布状态和发布表单，批次页显示 10 个历史批次，新资源加载成功且控制台零错误。生产 API 另逐一读取 10 个批次并下载 1 个历史输入文件，全部成功。
+- 部署后生产库为 10 个批次、14 个批次文件、0 个超收规则版本、0 个批次规则绑定、0 个 queued/running 任务；10 个历史批次继续按无规则逻辑运行。验收登录/退出产生的审计日志符合预期。
+- 数据库容器保持部署前 ID `c85a2cffddd88ee98e2518d880659aa7b26d563f91390212aad3d15805c1459c`，继续挂载 `deliverynote_postgres_data`；部署没有删除或重建数据库卷。不要执行 `docker compose down -v`。
+- 成对备份已从临时目录复制到持久受控目录 `/root/backups/deliverynote/20260722-160803`，目录权限为 `0700`、文件权限为 `0600`，`database.dump` 和 `delivery_data.tar.gz` 的 SHA-256 已再次验证。源临时备份和恢复 QA 数据卷也仍保留。
 
 ### 0.5 尚未完成与优先级
 
-1. **P0：正式部署前把同机 `/tmp` 成对备份复制到持久受控位置。** 当前可恢复备份目录是 `/tmp/deliverynote-production-backup-20260722-OiF5u4`，恢复证据和 SHA-256 在目录内；该目录含真实数据库与文件，不得加入 Git。独立恢复卷 `deliverynoterestoreqa_postgres_data`、`deliverynoterestoreqa_delivery_data` 已保留。
-2. **P0：决定并执行正式迁移/部署。** 确认生产无 queued/running 任务后，在现有数据库执行 `python -m delivery_note.migrations.overreceipt_rules`，再重建 API/Worker/Web；部署前后核对资源哈希、健康检查、日志、规则表为空且唯一启用约束可用、10 个旧批次无规则兼容，不删除数据卷。
-3. **P1：建立定时与异机成对备份。** 本次同机备份/恢复演练已通过，但尚未形成长期备份策略。
+1. **P0：由业务确认并发布首条超收规则，或明确继续保持关闭。** 当前规则表为空，所以系统不会自动超收；发布前应再次确认短/中/长尾额度和目的仓精确白名单，通常不要选择“供应链成品仓”。不要为了验收向生产发布虚拟规则。
+2. **P1：观察首个使用规则的真实批次。** 核对批次锁定版本、共享额度、文件顺序、待处理数量、A:G 导出和审计记录；现有自动化与隔离业务 QA 已通过，但生产尚无规则批次。
+3. **P1：建立定时与异机成对备份。** 本次持久同机备份和独立恢复演练已通过，但尚未形成长期、异机备份策略。
 4. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，Worker SIGTERM 修复为 `e410a7e`；超收规则隔离业务/浏览器 QA、生产数据库与文件卷同机成对备份恢复、旧批次兼容和 Worker 停机均已通过。后端 122/122、前端 61/61、pip check、build、Compose config、diff check 通过。备份仍位于 `/tmp/deliverynote-production-backup-20260722-OiF5u4`，含真实数据且不可提交，正式部署前先复制到持久受控位置。新功能尚未部署，线上仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，Worker SIGTERM 修复为 `e410a7e`；后端 122/122、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 16:43 已完成正式迁移和部署，线上资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`，HTTPS API/Chrome 验收通过；生产当前有 10 个历史批次、14 个文件、0 个规则版本和 0 个活动任务。持久备份位于 `/root/backups/deliverynote/20260722-160803`，源临时备份及恢复卷仍保留。下一步应由业务决定是否发布首条真实规则，并建立定时异机成对备份。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
 
 ## 1. 接手时先做什么
 
@@ -158,7 +160,7 @@ HTTPS health, login, read API and logout smoke test: passed
 
 本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1280×800、1440×900 和 1920×1080 PC 验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；最终复审又补上了库位草稿基线保护，维护期间不再允许替换当前库位版本，发布时会再次校验基线，创建/恢复草稿也统一按“版本行 → 草稿行”加锁并在等待后重新读取当前版本。不再把平板和移动端作为本轮完成门槛。
 
-2026-07-22 14:37 左右已从 `feature/admin-maintenance` 工作树的未提交源码执行 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS `/health` 均返回成功；当前前端资源为 `index-BVNBHU_E.js` 和 `index-BfjwUI3X.css`，且已验证资源包含待处理审校的站点、规模定位和备货定位筛选。管理员登录、版本列表只读接口和退出均返回成功；现网没有编辑中的库位草稿，库位写流程及维护期间阻止版本替换已在隔离 PostgreSQL QA 和临时 SQLite 中复验，PostgreSQL 另完成 24 轮双向并发竞争验收，未向生产库写入验收草稿。脱敏双文件场景和同机成对备份恢复随后已在独立项目通过，但新规则和并发/审计修复仍未部署到生产；当前不能把本分支状态写成已经上线。
+2026-07-22 16:43 已从 `feature/admin-maintenance` 工作树提交 `9624c3d` 时的代码状态执行生产超收表迁移和 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库容器和卷保持原实例，API、Worker、Web 完成重建；本机和外部 HTTPS `/health` 均成功，线上资源更新为 `index-2g7-gWL5.js` 和 `index-gXYtaLj0.css`。真实 HTTPS Chrome 验证了管理员菜单、空规则页、发布表单和 10 个历史批次，控制台零错误；只读 API 验证了全部历史批次及一个 1,685,688 字节的输入文件下载。部署后规则版本和批次绑定均为 0，活动任务为 0，因此不会自动超收。生产部署和当前发布已验证，但首条真实规则及规则批次仍待业务操作，定时异机备份也未建立，不能据此宣称整个项目已完整生产可用。
 
 本次自动化验证实际使用：
 
@@ -353,4 +355,4 @@ codex
 4. 把本次专用迁移逐步扩展为有版本登记的通用迁移方案。
 5. 根据实际操作反馈补前端关键流程测试，不做无业务依据的界面重构。
 
-当前新功能仍未正式部署；完成持久备份复制、生产迁移和部署后验收前，不要把本分支状态写成已经上线。
+当前新功能已正式部署并通过上述有限生产验收；首条真实规则、真实规则批次观察以及定时异机成对备份仍未完成，不要把“本次版本已上线”扩大表述为“整个项目已完整生产可用”。
