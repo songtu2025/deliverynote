@@ -4,9 +4,9 @@ import argparse
 from datetime import datetime, timedelta
 import os
 from pathlib import Path
+import signal
 import shutil
 from threading import Event, Thread
-import time
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -673,29 +673,41 @@ def _watch_stale_jobs(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    recover_stale_jobs(
-        args.database_url,
-        stale_after=timedelta(minutes=args.stale_minutes),
-    )
-    if args.once:
-        run_once(args.database_url, args.storage_root)
-        return 0
-    stale_after = timedelta(minutes=args.stale_minutes)
     stop_event = Event()
-    watcher = Thread(
-        target=_watch_stale_jobs,
-        args=(args.database_url, stale_after, stop_event),
-        name="delivery-note-stale-job-watcher",
-        daemon=True,
-    )
-    watcher.start()
-    try:
-        while True:
-            if run_once(args.database_url, args.storage_root) is None:
-                time.sleep(args.poll_interval)
-    finally:
+    previous_handlers = {}
+
+    def request_stop(_signum, _frame) -> None:
         stop_event.set()
-        watcher.join(timeout=5)
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous_handlers[signum] = signal.signal(signum, request_stop)
+    try:
+        recover_stale_jobs(
+            args.database_url,
+            stale_after=timedelta(minutes=args.stale_minutes),
+        )
+        if args.once:
+            run_once(args.database_url, args.storage_root)
+            return 0
+        stale_after = timedelta(minutes=args.stale_minutes)
+        watcher = Thread(
+            target=_watch_stale_jobs,
+            args=(args.database_url, stale_after, stop_event),
+            name="delivery-note-stale-job-watcher",
+            daemon=True,
+        )
+        watcher.start()
+        try:
+            while not stop_event.is_set():
+                if run_once(args.database_url, args.storage_root) is None:
+                    stop_event.wait(args.poll_interval)
+        finally:
+            stop_event.set()
+            watcher.join(timeout=5)
+        return 0
+    finally:
+        for signum, previous_handler in previous_handlers.items():
+            signal.signal(signum, previous_handler)
 
 
 if __name__ == "__main__":

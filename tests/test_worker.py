@@ -1,7 +1,10 @@
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
+import time
 import unittest
 from zipfile import ZipFile
 
@@ -10,6 +13,7 @@ from openpyxl import Workbook, load_workbook
 from delivery_note.pipeline import IMPORT_COLUMNS
 from tests.asgi_client import SyncASGIClient
 from delivery_note.web.api import create_app
+from delivery_note.web.database import Database
 from delivery_note.web.models import Batch, BatchFile, ExceptionRecord, Job
 
 try:
@@ -401,6 +405,45 @@ class WorkerIntegrationTests(unittest.TestCase):
             self.assertEqual(job.claim_token, "new-claim")
             self.assertIsNone(job.error_message)
             self.assertEqual(batch.status, "running")
+
+
+class WorkerProcessLifecycleTests(unittest.TestCase):
+    def test_worker_exits_cleanly_on_sigterm(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database_url = f"sqlite+pysqlite:///{root / 'worker.db'}"
+            database = Database(database_url)
+            database.create_schema()
+            database.dispose()
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "delivery_note.worker",
+                    "--database-url",
+                    database_url,
+                    "--storage-root",
+                    str(root / "storage"),
+                    "--poll-interval",
+                    "0.05",
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                time.sleep(2)
+                self.assertIsNone(process.poll(), "Worker 在收到信号前意外退出")
+                process.terminate()
+                returncode = process.wait(timeout=5)
+                stdout, stderr = process.communicate()
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+        self.assertEqual(returncode, 0, f"stdout={stdout}\nstderr={stderr}")
 
 
 if __name__ == "__main__":
