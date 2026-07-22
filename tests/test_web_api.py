@@ -1,7 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier
 import unittest
+from unittest.mock import patch
 
 from openpyxl import Workbook
 
@@ -9,9 +12,11 @@ from delivery_note.pipeline import IMPORT_COLUMNS
 from tests.asgi_client import SyncASGIClient
 
 try:
+    import delivery_note.web.api as web_api_module
     from delivery_note.web.api import create_app
     from delivery_note.web.models import Batch, BatchFile, ExceptionRecord
 except ImportError:
+    web_api_module = None
     create_app = None
     Batch = None
     BatchFile = None
@@ -344,6 +349,56 @@ class WebApiTests(unittest.TestCase):
         ).json()
         self.assertEqual(refreshed["jobs"]["compute"]["id"], job.json()["id"])
         self.assertEqual(refreshed["jobs"]["compute"]["status"], "queued")
+
+    def test_concurrent_batch_uploads_get_distinct_contiguous_orders(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "并发上传排序测试"},
+        ).json()["id"]
+        saved_uploads = Barrier(2)
+        original_save_upload = web_api_module._save_upload
+
+        async def synchronized_save_upload(*args, **kwargs):
+            await original_save_upload(*args, **kwargs)
+            saved_uploads.wait(timeout=5)
+
+        def upload(filename: str):
+            return self.client.post(
+                f"/api/batches/{batch_id}/files",
+                headers=admin_headers,
+                files={"file": (filename, BytesIO(self.delivery_bytes()))},
+            )
+
+        filenames = ("KuangBiao-A.xlsx", "KuangBiao-B.xlsx")
+        with (
+            patch.object(
+                web_api_module,
+                "_save_upload",
+                new=synchronized_save_upload,
+            ),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            responses = list(executor.map(upload, filenames))
+
+        self.assertEqual(
+            [response.status_code for response in responses],
+            [201, 201],
+            [response.text for response in responses],
+        )
+        batch = self.client.get(
+            f"/api/batches/{batch_id}", headers=admin_headers
+        ).json()
+        self.assertEqual(
+            [item["file_order"] for item in batch["files"]],
+            [1, 2],
+        )
+        self.assertEqual(
+            {item["original_name"] for item in batch["files"]},
+            set(filenames),
+        )
 
     def test_delivery_file_can_be_deleted_before_compute(self):
         admin_headers = self.login("admin", "admin-pass")

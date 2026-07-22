@@ -11,6 +11,7 @@ const AUDIT_LABELS: Record<string, string> = {
   upload_input_version: "上传输入版本",
   activate_input_version: "启用输入版本",
   create_input_draft: "创建库位草稿",
+  resume_input_draft: "继续库位草稿",
   import_input_draft: "导入库位草稿",
   discard_input_draft: "放弃库位草稿",
   publish_input_draft: "发布库位版本",

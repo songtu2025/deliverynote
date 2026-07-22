@@ -1404,6 +1404,32 @@ class PositionDraftApiTests(unittest.TestCase):
             {"added": 0, "modified": 0, "deleted": 0, "unchanged": 1},
         )
 
+    def test_resuming_existing_draft_records_the_admin_action(self):
+        created = self.create_draft()
+
+        resumed = self.client.post(
+            "/api/input-drafts/position",
+            headers=self.admin_headers,
+        )
+
+        self.assertEqual(resumed.status_code, 200, resumed.text)
+        self.assertEqual(resumed.json()["id"], created["id"])
+        audit_logs = self.client.get(
+            "/api/audit-logs",
+            headers=self.admin_headers,
+        ).json()
+        resume_logs = [
+            log for log in audit_logs if log["action"] == "resume_input_draft"
+        ]
+        self.assertEqual(len(resume_logs), 1)
+        self.assertEqual(resume_logs[0]["user_id"], created["created_by"])
+        self.assertEqual(resume_logs[0]["entity_type"], "input_draft")
+        self.assertEqual(resume_logs[0]["entity_id"], str(created["id"]))
+        self.assertEqual(
+            resume_logs[0]["details"],
+            {"base_version_id": created["base_version_id"]},
+        )
+
     def test_draft_endpoint_locks_versions_before_its_first_draft_lookup(self):
         calls: list[str] = []
         original_scalar = Session.scalar

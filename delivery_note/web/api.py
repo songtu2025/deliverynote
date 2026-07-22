@@ -613,6 +613,7 @@ def create_app(
     # A multi-process deployment must move this registry to shared database state.
     import_candidates: dict[str, dict] = {}
     import_candidates_lock = Lock()
+    batch_file_upload_lock = Lock()
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -1147,6 +1148,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="当前启用的库位版本不存在")
         try:
             draft = create_or_resume_draft(session, version, admin.id)
+            if existing is not None:
+                _audit(
+                    session,
+                    admin.id,
+                    "resume_input_draft",
+                    "input_draft",
+                    draft.id,
+                    {"base_version_id": draft.base_version_id},
+                )
             commit_once(session)
         except DraftConflict as error:
             rollback_draft_conflict(session, error)
@@ -1678,31 +1688,62 @@ def create_app(
         )
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="同一批次不可上传同名文件")
-        current_max = session.scalar(
-            select(func.max(BatchFile.file_order)).where(BatchFile.batch_id == batch.id)
-        ) or 0
         destination = storage / "batches" / str(batch.id) / "inputs" / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
-        source = BatchFile(
-            batch_id=batch.id,
-            original_name=original_name,
-            storage_path=str(destination),
-            file_order=current_max + 1,
-        )
-        session.add(source)
-        batch.status = "draft"
-        batch.error_message = None
         try:
-            session.flush()
-            _audit(
-                session,
-                user.id,
-                "upload_batch_file",
-                "batch_file",
-                source.id,
-                {"batch_id": batch.id},
-            )
-            session.commit()
+            with batch_file_upload_lock:
+                batch = session.scalar(
+                    select(Batch)
+                    .where(Batch.id == batch_id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+                if batch is None:
+                    raise HTTPException(status_code=404, detail="批次不存在")
+                if batch.status not in {"draft", "preflight_ready", "failed"}:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="当前批次状态不可修改文件",
+                    )
+                duplicate = session.scalar(
+                    select(BatchFile).where(
+                        BatchFile.batch_id == batch.id,
+                        BatchFile.original_name == original_name,
+                    )
+                )
+                if duplicate is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="同一批次不可上传同名文件",
+                    )
+                current_max = session.scalar(
+                    select(func.max(BatchFile.file_order)).where(
+                        BatchFile.batch_id == batch.id
+                    )
+                ) or 0
+                source = BatchFile(
+                    batch_id=batch.id,
+                    original_name=original_name,
+                    storage_path=str(destination),
+                    file_order=current_max + 1,
+                )
+                session.add(source)
+                batch.status = "draft"
+                batch.error_message = None
+                session.flush()
+                _audit(
+                    session,
+                    user.id,
+                    "upload_batch_file",
+                    "batch_file",
+                    source.id,
+                    {"batch_id": batch.id},
+                )
+                session.commit()
+        except HTTPException:
+            session.rollback()
+            destination.unlink(missing_ok=True)
+            raise
         except IntegrityError as error:
             session.rollback()
             destination.unlink(missing_ok=True)

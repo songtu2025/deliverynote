@@ -447,7 +447,7 @@ describe("AdminPage", () => {
     expect(onDataChanged).not.toHaveBeenCalled();
   });
 
-  it("shows only the real draft audit labels and resolves operator names", async () => {
+  it("shows draft audit labels and resolves operator names", async () => {
     auditLogs = [
       { id: 6, user_id: 1, action: "activate_input_version", entity_type: "input_version", entity_id: "32", details: {}, created_at: "2026-07-21T09:05:00" },
       { id: 5, user_id: 1, action: "publish_input_draft", entity_type: "input_draft", entity_id: "7", details: {}, created_at: "2026-07-21T09:04:00" },
@@ -463,8 +463,8 @@ describe("AdminPage", () => {
     expect(screen.getByText("放弃库位草稿")).toBeInTheDocument();
     expect(screen.getByText("发布库位版本")).toBeInTheDocument();
     expect(screen.getByText("启用输入版本")).toBeInTheDocument();
-    expect(screen.getByText("resume_input_draft")).toBeInTheDocument();
-    expect(screen.queryByText("继续库位草稿")).not.toBeInTheDocument();
+    expect(screen.getByText("继续库位草稿")).toBeInTheDocument();
+    expect(screen.queryByText("resume_input_draft")).not.toBeInTheDocument();
     expect(screen.getAllByText("operator").length).toBeGreaterThan(0);
   });
 
