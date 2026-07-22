@@ -5,7 +5,7 @@
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 15:04 最新接续状态（新会话先看）
+## 0. 2026-07-22 15:38 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -18,10 +18,10 @@ git diff --check
 ```
 
 - 分支：`feature/admin-maintenance`
-- 当前功能提交：`455b759 fix: serialize uploads and audit draft resumes`（其后仅有本交接文档更新）
+- 当前功能提交：`66b44e3 feat: add versioned overreceipt rules`
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
-- 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`。本交接文档提交后工作树应保持干净。
-- 正式环境仍是 14:37 左右由旧的未提交源码构建的版本；`455b759` 尚未部署。不要把“代码已验证”写成“线上已更新”。
+- 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。本交接文档提交后工作树应保持干净。
+- 正式环境仍是 14:37 左右由旧的未提交源码构建的版本；`455b759` 与 `66b44e3` 均尚未部署。不要把“代码已验证”写成“线上已更新”。
 - 用户已要求停用 Superpowers 插件；后续会话不要调用 `superpowers:*` 技能。
 
 ### 0.2 本轮已完成的代码工作
@@ -34,17 +34,23 @@ git diff --check
 6. 导出 Excel 的保护策略已在提交 `37339da` 中调整：用户打开导出表后可以自行修改列宽、行高等格式，同时保持业务单元格保护约束。
 7. 批次多文件并发上传的排序竞争已用 API 屏障测试稳定复现：修复前两个请求返回 `[201, 409]`；修复后 SQLite 与临时 PostgreSQL 17 均返回 `[201, 201]`，文件顺序连续为 `[1, 2]`。实现只在文件保存后的短事务内分配顺序，使用当前单 API 进程锁并对 PostgreSQL 批次行执行 `FOR UPDATE`。
 8. POST 恢复已有库位草稿现在会记录 `resume_input_draft`，包含操作人、草稿 ID 和基线版本；操作记录页面显示“继续库位草稿”。GET 只读草稿不会产生审计噪音。
+9. 超收规则已实现为不可变版本。所有现有 `operator` 与 `admin` 都能发布新版本和重新启用历史版本；每次发布/启用都有审计记录。新批次锁定当时唯一启用的规则，后续发布不会改变旧批次。
+10. 规则按短尾/中尾/长尾配置绝对超收数量和目的仓精确白名单。仓库列表可为空，表示全部禁止；通常不勾选“供应链成品仓”。规模定位为空、未知或同一 SKU/站点下多个 MSKU 定位冲突时不自动超收。
+11. 同一批次按 `供应商 + SKU + 站点` 共享一次超收额度，继续遵循用户文件顺序。先扣采购余额，再扣超收额度；只使用规则允许且原采购快照中真实存在的仓库，剩余超量进入待处理，保持数量守恒。
+12. Worker、批次详情和 A:G 导出已接入锁定规则。脱敏场景在短尾额度 50 时由原 `160 = 100 + 60` 变为 `160 = 150 + 10`，第二个文件导出为 70 可导入、10 待处理，备注为“超出允许超收量：10”。无规则时 CLI 和 Web 原行为不变。
+13. 已新增专用幂等迁移 `python -m delivery_note.migrations.overreceipt_rules`，只创建规则版本表和批次绑定表，不修改既有批次表。
 
 ### 0.3 最近一次完整验证证据
 
 ```text
-Python unittest: 113/113 passed
+Python unittest: 121/121 passed
 Python pip check: passed
-Frontend Vitest: 6 files, 59/59 passed
+Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
 git diff --check: passed
 Docker Compose config: passed
 Temporary PostgreSQL concurrent upload: passed (`[201, 201]`, orders `[1, 2]`)
+Temporary PostgreSQL overreceipt migration/version lock: passed (one active rule; batch remained on V1 after V2 publish)
 ```
 
 实际命令：
@@ -59,13 +65,13 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 ```
 
 最近前端构建仍有单包大于 500 kB 的 Vite 提示，不是构建失败，暂不应优先引入复杂拆包。
-本地最新构建资源为 `index-Cor7HKfT.js` / `index-BfjwUI3X.css`；这不是当前线上资源。
+本地最新构建资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`；这不是当前线上资源。
 
 ### 0.4 正式环境状态
 
 - 正式地址：`https://deliverynote.seekwaygroup.com/`
 - 最近部署时间：约 2026-07-22 14:37（Asia/Shanghai）。
-- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 在 14:37 左右的旧源码状态，不包含 `455b759`。
+- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 在 14:37 左右的旧源码状态，不包含 `455b759` 和 `66b44e3`。
 - 当前线上前端资源：`/assets/index-BVNBHU_E.js`、`/assets/index-BfjwUI3X.css`。
 - 本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`；`db`、`api`、`worker`、`web` 均运行，API 健康，日志未发现 traceback 或启动错误。
 - 已验证线上资源包含“全部站点”“全部规模定位”“全部备货定位”。此前只读生产 API 抽查到一个含 14 条待处理记录的批次，14 条均返回新增定位字段且有定位值，登录/列表/读取/退出分别返回 200/200/200/204。
@@ -73,15 +79,15 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.5 尚未完成与优先级
 
-1. **P0：明确并实现“超收规则”需求。** 用户希望按 SKU 的规模定位设置绝对超收上限，例如短尾 50、中尾 20、长尾 10，规模定位为空时为 0；还要由业务员配置允许超收的仓库，通常“供应链成品仓”不允许。推荐同一批次按 `SKU + 站点` 共享一次超收额度，跨文件连续扣减，并只分配到规则允许且真实存在采购行的仓库。实现前仍需确认多 MSKU 规模定位不一致时的取值、仓库采用白名单还是黑名单、业务员对应现有 `operator` 还是新增权限，以及规则是否按批次锁定版本。
-2. **P0：决定并执行 `455b759` 的 QA/正式部署。** 当前代码和临时 PostgreSQL 验证已通过，但正式环境尚未包含并发上传与恢复草稿审计修复；部署前后应核对资源哈希、健康检查和日志，不删除数据卷。
-3. **P1：完成脱敏双文件全流程业务验收。** 覆盖五类资料、共享余额 `160 = 100 + 60`、待处理、拆分守恒、单文件和 ZIP 导出，并核对 Excel 表头、样式、备注和可调列宽/行高。
+1. **P0：对 `455b759` 与 `66b44e3` 做隔离 QA，再决定正式部署。** 正式部署前先成对备份 PostgreSQL 和文件卷，在现有数据库执行 `python -m delivery_note.migrations.overreceipt_rules`，再重建 API/Worker/Web；部署前后核对资源哈希、健康检查、日志、唯一启用规则和旧批次无规则兼容，不删除数据卷。
+2. **P1：完成脱敏双文件完整业务验收。** 同时覆盖无规则 `160 = 100 + 60` 与短尾 50 规则 `160 = 150 + 10`、规则发布/批次锁定、待处理、拆分守恒、单文件和 ZIP 导出，并人工核对 Excel 表头、样式、备注和可调列宽/行高。
+3. **P1：完成超收规则 PC 浏览器人工验收。** 自动化测试和构建已通过，但新规则页面尚未做本轮 Chrome 视觉/交互证据采集。
 4. **P1：完成数据库与文件卷成对备份和恢复演练。** 在此之前不得宣称项目完整生产可用。
-5. **P2：建立最小数据库迁移方案。** 当前仍依赖 SQLAlchemy `create_all()`；超收规则若增加表或批次外键，必须同时给出已有 PostgreSQL 的可执行迁移方案。
+5. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。当前代码提交为 `455b759`；后端 113/113、前端 59/59、pip check、build、Compose config、diff check 和临时 PostgreSQL 并发上传验收已通过，但该提交尚未部署，线上仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`。下一目标是先确认超收规则的业务维度和权限，再测试先行实现：短尾/中尾/长尾绝对超收上限、空定位不超收、仓库允许规则、同批次跨文件共享额度和规则版本锁定。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除部署数据卷。完整业务验收与备份恢复完成前，不要宣称项目完整生产可用。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。当前功能提交为 `66b44e3`；后端 121/121、前端 61/61、pip check、build、Compose config、diff check，以及临时 PostgreSQL 的超收迁移、operator 发布、唯一启用版本和批次锁定均已通过，但新提交尚未部署，线上仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`。下一目标是先做隔离 QA 和成对备份，再执行专用迁移并决定正式部署；同时完成无规则与短尾 50 规则的双场景业务验收。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除部署数据卷。完整业务验收与备份恢复完成前，不要宣称项目完整生产可用。
 
 ## 1. 接手时先做什么
 
@@ -119,6 +125,8 @@ git log -3 --oneline --decorate
 - React + TypeScript + Ant Design 操作界面。
 - 五步批次工作台、数量守恒摘要、异常筛选和右侧拆分审校。
 - 输入资料就绪门槛、上传校验、用户启停/密码重置和操作记录。
+- operator/admin 共用的超收规则维护页、不可变规则版本、历史启用和审计记录。
+- 批次级超收规则锁定、按规模定位的绝对额度、目的仓白名单和跨文件顺序共享。
 - 管理员维护 PC 工作区，按“基础资料、用户账号、操作记录”组织入口。
 - 五类资料目录的用途说明、当前版本摘要、预览、下载、替换上传和历史版本。
 - 库位资料的服务端持久化单草稿、行级维护、筛选、Excel 差异确认、校验、发布和丢弃。
@@ -128,8 +136,8 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 113/113 passed
-Frontend Vitest: 6 files, 59/59 passed
+Python unittest: 121/121 passed
+Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
 pip check: passed
 Compose YAML static check: passed
@@ -166,6 +174,7 @@ docker compose -p deliverynote --env-file /root/deliverynote/.env config --quiet
 | `delivery_note/web/models.py` | 用户、版本、批次、文件、异常、拆分、任务和审计表 |
 | `delivery_note/web/api.py` | FastAPI 应用和全部接口 |
 | `delivery_note/web/position_drafts.py` | 库位服务端草稿、乐观并发、校验、差异和原子发布 |
+| `delivery_note/migrations/overreceipt_rules.py` | 已有数据库新增超收规则表的幂等迁移 |
 | `delivery_note/input_inspection.py` | 五类资料摘要/预览与库位质量检查 |
 | `delivery_note/worker.py` | 计算、导出、任务租约和超时恢复 |
 | `frontend/src/` | 登录、批次、审阅拆分和管理员页面 |
@@ -188,6 +197,9 @@ Web 和 CLI 必须继续调用同一套核心业务函数，不要复制一套�
 8. 任一文件计算失败时，不得持久化该批次的部分计算结果。
 9. 导出保持现有 A:G 字段、模板样式、交货备注和 CLI 命名兼容。
 10. 不在不同批次间延续采购扣减，不做 ERP 回写。
+11. 超收规则发布后内容不可修改；调整配置必须发布新版本，已有批次继续使用创建时锁定的版本。
+12. 超收额度按同一批次的 `供应商 + SKU + 站点` 共享，并在正常采购余额之后按文件顺序扣减。
+13. 空规模定位、未知定位、多 MSKU 定位冲突、非白名单仓库和超过规则额度的数量都不能自动超收，仍须完整进入待处理。
 
 如果测试样例的中文字段损坏，应修正测试数据，不要修改正式业务逻辑去兼容错误列名。
 
@@ -273,7 +285,7 @@ docker compose up -d
 
 - Compose 只启动一个 Worker。这是当前确认范围，不要在没有并发测试前直接扩容多个 Worker。
 - Web 只绑定 `127.0.0.1`，正式访问需要外部 HTTPS 反向代理。
-- 数据库目前通过 SQLAlchemy `create_all()` 建表，没有正式迁移工具。首次部署可以使用；后续改表前应先引入最小迁移流程。
+- 数据库仍主要通过 SQLAlchemy `create_all()` 建表；本次超收新增表已有 `python -m delivery_note.migrations.overreceipt_rules` 专用幂等迁移，但尚无通用 migration history。
 - 自动文件过期清理、数据库定时备份和文件卷备份尚未实现。
 - 管理员账号只在数据库不存在同名用户时创建。修改 `.env` 不会重置已有管理员密码。
 - PostgreSQL 已通过 Linux Compose 真实运行、登录和数据读取冒烟验收；完整脱敏业务流程和备份恢复仍未验收。
@@ -330,7 +342,7 @@ codex
 1. 记录真实 Docker/PostgreSQL 部署中发现的问题并补回归测试。
 2. 验证外部 HTTPS 代理、上传大小和长任务日志。
 3. 建立 PostgreSQL 与文件卷的成对备份流程。
-4. 在确实需要改表时引入简单的数据库迁移方案。
+4. 把本次专用迁移逐步扩展为有版本登记的通用迁移方案。
 5. 根据实际操作反馈补前端关键流程测试，不做无业务依据的界面重构。
 
 完成剩余业务验收和运维门槛前，不要把项目状态标记为生产可用。
