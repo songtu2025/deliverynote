@@ -189,6 +189,13 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertEqual(workbook.sheetnames, ["交货导入", "待处理导入"])
         self.assertNotIn("运行汇总", workbook.sheetnames)
         self.assertNotIn("异常明细", workbook.sheetnames)
+        for sheet_name in ("交货导入", "待处理导入"):
+            protection = workbook[sheet_name].protection
+            self.assertTrue(protection.sheet)
+            self.assertFalse(protection.formatCells)
+            self.assertFalse(protection.formatColumns)
+            self.assertFalse(protection.formatRows)
+            self.assertFalse(protection.selectLockedCells)
         self.assertEqual(workbook["交货导入"]["A1"].value, "模板提示")
         self.assertEqual(workbook["交货导入"]["A3"].value, "仓A")
         self.assertTrue(workbook["交货导入"].protection.sheet)

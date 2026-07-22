@@ -178,8 +178,12 @@ def _set_default_cells_unlocked(workbook) -> None:
 
 
 def _protect_header_only(sheet) -> None:
-    """启用工作表保护，仅锁定前两行。"""
+    """锁定前两行内容，同时允许用户调整导出文件格式。"""
     sheet.protection.sheet = True
+    sheet.protection.formatCells = False
+    sheet.protection.formatColumns = False
+    sheet.protection.formatRows = False
+    sheet.protection.selectLockedCells = False
     for row in sheet.iter_rows(
         min_row=1, max_row=2, min_col=1, max_col=sheet.max_column
     ):
