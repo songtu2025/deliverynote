@@ -3,17 +3,19 @@ import { cleanup } from "@testing-library/react";
 import { message } from "antd";
 import { afterEach } from "vitest";
 
-const flushReactScheduler = () => new Promise<void>((resolve) => {
+const flushReactScheduler = async () => {
   const scheduleImmediate = (globalThis as typeof globalThis & {
     setImmediate: (callback: () => void) => unknown;
   }).setImmediate;
-  scheduleImmediate(resolve);
-});
+  for (let turn = 0; turn < 4; turn += 1) {
+    await Promise.resolve();
+    await new Promise<void>((resolve) => scheduleImmediate(resolve));
+  }
+};
 
 afterEach(async () => {
   cleanup();
   message.destroy();
-  await Promise.resolve();
   await flushReactScheduler();
 });
 

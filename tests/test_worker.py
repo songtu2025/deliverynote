@@ -182,6 +182,9 @@ class WorkerIntegrationTests(unittest.TestCase):
         ).json()
         self.assertEqual(len(exceptions), 1)
         self.assertEqual(exceptions[0]["manual_quantity"], 60)
+        self.assertEqual(exceptions[0]["scale_position"], "短尾")
+        self.assertEqual(exceptions[0]["stocking_position"], "备货")
+        self.assertEqual(exceptions[0]["ordered_days"], 90)
 
         split = self.client.put(
             f"/api/exceptions/{exceptions[0]['id']}/split",
@@ -194,6 +197,9 @@ class WorkerIntegrationTests(unittest.TestCase):
             },
         )
         self.assertEqual(split.status_code, 200, split.text)
+        self.assertEqual(split.json()["scale_position"], "短尾")
+        self.assertEqual(split.json()["stocking_position"], "备货")
+        self.assertEqual(split.json()["ordered_days"], 90)
         export = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers
         )

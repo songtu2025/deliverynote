@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchDetail from "./BatchDetail";
@@ -68,20 +68,42 @@ describe("BatchDetail", () => {
         }
       ]
     };
-    const exceptions = [{
-      id: 30,
-      batch_file_id: 11,
-      sku: "SKU-A",
-      original_site: "US",
-      full_site: "AMAZON:SEEKWAY:US",
-      destination: "水鞋-广州仓",
-      delivery_quantity: 80,
-      allocated_quantity: 20,
-      manual_quantity: 60,
-      reason: "超出采购未交量",
-      status: "pending",
-      parts: []
-    }];
+    const exceptions = [
+      {
+        id: 30,
+        batch_file_id: 11,
+        sku: "SKU-A",
+        original_site: "US",
+        full_site: "AMAZON:SEEKWAY:US",
+        destination: "水鞋-广州仓",
+        delivery_quantity: 80,
+        allocated_quantity: 20,
+        manual_quantity: 60,
+        reason: "超出采购未交量",
+        status: "pending",
+        scale_position: "短尾",
+        stocking_position: "备货",
+        ordered_days: 90,
+        parts: []
+      },
+      {
+        id: 31,
+        batch_file_id: 11,
+        sku: "SKU-B",
+        original_site: "CA",
+        full_site: "AMAZON:SEEKWAY:CA",
+        destination: "水鞋-东莞仓",
+        delivery_quantity: 20,
+        allocated_quantity: 0,
+        manual_quantity: 20,
+        reason: "未找到可交货采购需求",
+        status: "pending",
+        scale_position: "中尾",
+        stocking_position: "不备货",
+        ordered_days: 60,
+        parts: []
+      }
+    ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/batches/7/exceptions")) return jsonResponse(exceptions);
@@ -100,14 +122,51 @@ describe("BatchDetail", () => {
     await screen.findByText("160 = 100 + 60");
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
     expect(screen.getByText("计算结果").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
-    fireEvent.click(screen.getByRole("button", { name: "拆分审校" }));
+    expect(screen.getByRole("columnheader", { name: "排仓参考" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "备货定位" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "已下单可售天数" })).toBeInTheDocument();
+    expect(screen.getByText("短尾")).toBeInTheDocument();
+    expect(screen.getByText("备货")).toBeInTheDocument();
+    expect(screen.getByText("90")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "拆分审校" })[0]);
 
     await screen.findByText("拆分审校 · SKU-A");
+    const drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("规模定位")).toBeInTheDocument();
+    expect(within(drawer).getByText("短尾")).toBeInTheDocument();
+    expect(within(drawer).getByText("备货定位")).toBeInTheDocument();
+    expect(within(drawer).getByText("备货")).toBeInTheDocument();
+    expect(within(drawer).getByText("已下单可售天数")).toBeInTheDocument();
+    expect(within(drawer).getByText("90")).toBeInTheDocument();
     const saveButton = screen.getByRole("button", { name: "保存拆分" });
     expect(saveButton).toBeEnabled();
     const quantity = screen.getByRole("spinbutton", { name: "数量" });
     fireEvent.change(quantity, { target: { value: "59" } });
     await waitFor(() => expect(saveButton).toBeDisabled());
     expect(screen.getByText("1", { selector: ".split-conservation strong" })).toBeInTheDocument();
+  }, 30_000);
+
+  it("filters pending rows by site, scale position, and stocking position", async () => {
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    await screen.findByText("SKU-A");
+    expect(screen.getByText("SKU-B")).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "站点筛选" }));
+    fireEvent.click(await screen.findByText("AMAZON:SEEKWAY:US", { selector: ".ant-select-item-option-content" }));
+    await waitFor(() => expect(screen.queryByText("SKU-B")).not.toBeInTheDocument());
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
+    fireEvent.click(await screen.findByText("短尾", { selector: ".ant-select-item-option-content" }));
+    expect(screen.getByText("SKU-A")).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "备货定位筛选" }));
+    fireEvent.click(await screen.findByText("备货", { selector: ".ant-select-item-option-content" }));
+    expect(screen.getByText("SKU-A")).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
+    fireEvent.click(await screen.findByText("中尾", { selector: ".ant-select-item-option-content" }));
+    await screen.findByText("没有匹配的待处理记录");
   }, 30_000);
 });

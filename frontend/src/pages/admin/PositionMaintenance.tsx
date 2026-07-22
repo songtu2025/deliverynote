@@ -349,7 +349,7 @@ function PublishDialog({
   );
 }
 
-export function PositionMaintenance({ activeVersion, onPublished, onBack }: PositionMaintenanceProps) {
+export function PositionMaintenance({ onPublished, onBack }: PositionMaintenanceProps) {
   const [draft, setDraft] = useState<PositionDraft | null>(null);
   const [entryLoading, setEntryLoading] = useState(true);
   const [entryError, setEntryError] = useState<string | null>(null);
@@ -397,7 +397,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   const keepDiscardConfirmOpenRef = useRef(false);
 
   const draftUnavailable = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
-  const baseVersionChanged = Boolean(draft && draft.base_version_id !== activeVersion.id);
+  const baseVersionChanged = Boolean(draft && draft.base_version_id !== draft.active_version_id);
   const actionsDisabled = draftUnavailable || baseVersionChanged;
   const discardDisabled = draftUnavailable;
 
@@ -434,7 +434,9 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
       warning_count: summary.warning_count,
       valid: summary.valid,
       updated_by: summary.updated_by,
-      updated_at: summary.updated_at
+      updated_at: summary.updated_at,
+      active_version_id: summary.active_version_id,
+      active_version_name: summary.active_version_name
     } : current);
   };
 
@@ -1025,7 +1027,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
           type="error"
           showIcon
           title="草稿基线已过期"
-          description={`当前正式版本已变为 ${activeVersion.name}。为避免覆盖新版本，请放弃当前草稿后重新开始维护。`}
+          description={`当前正式版本已变为 ${draft.active_version_name ?? "无启用版本"}。为避免覆盖新版本，请放弃当前草稿后重新开始维护。`}
         />
       )}
 

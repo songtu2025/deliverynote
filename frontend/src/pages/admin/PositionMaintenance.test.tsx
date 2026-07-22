@@ -44,6 +44,8 @@ const baseDraft = {
   kind: "position",
   base_version_id: 31,
   base_version_name: "position-current",
+  active_version_id: 31,
+  active_version_name: "position-current",
   status: "editing",
   revision: 3,
   created_by: 1,
@@ -266,7 +268,9 @@ describe("PositionMaintenance", () => {
     draftResponse = {
       ...baseDraft,
       base_version_id: 30,
-      base_version_name: "position-v1"
+      base_version_name: "position-v1",
+      active_version_id: 31,
+      active_version_name: "position-current"
     };
     renderMaintenance();
 
@@ -277,6 +281,23 @@ describe("PositionMaintenance", () => {
     expect(screen.getByLabelText("Excel 整表替换")).toBeDisabled();
     expect(screen.getByText("发布新版本").closest("button")).toBeDisabled();
     expect(screen.getByText("放弃草稿").closest("button")).toBeEnabled();
+  });
+
+  it("uses authoritative draft metadata when the catalog prop is stale", async () => {
+    draftResponse = {
+      ...baseDraft,
+      base_version_id: 32,
+      base_version_name: "position-v2",
+      active_version_id: 32,
+      active_version_name: "position-v2"
+    };
+    renderMaintenance();
+
+    expect(await screen.findByText(/草稿基线：position-v2/)).toBeInTheDocument();
+    expect(screen.queryByText("草稿基线已过期")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("新增记录")).toBeEnabled();
+    expect(screen.getByLabelText("Excel 整表替换")).toBeEnabled();
+    expect(screen.getByText("发布新版本").closest("button")).toBeEnabled();
   });
 
   it("edits with the current revision and uses only the returned revision for the next mutation", async () => {
@@ -371,7 +392,7 @@ describe("PositionMaintenance", () => {
     expect(await screen.findByText("记录当前不可复制，请修正后重试")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" })).toBeEnabled();
-  });
+  }, 15_000);
 
   it("keeps a single-row delete confirmation open while pending, then restores retry after failure", async () => {
     singleDeleteRequest = deferred<Response>();

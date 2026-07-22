@@ -230,7 +230,40 @@ class PositionDraftTests(unittest.TestCase):
                 if "input_versions" in statement or "input_drafts" in statement
             ]
             self.assertIn("input_versions", relevant_calls[0])
+            self.assertIn("ORDER BY input_versions.id", relevant_calls[0])
             self.assertIn("input_drafts", relevant_calls[1])
+
+    def test_publish_locks_position_versions_in_id_order(self):
+        published_path = self.root / "ordered-lock-publish.xlsx"
+        with self.database.session() as session:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            statements: list[str] = []
+            original_scalars = session.scalars
+
+            def record_scalars(statement, *args, **kwargs):
+                statements.append(str(statement))
+                return original_scalars(statement, *args, **kwargs)
+
+            with patch.object(session, "scalars", side_effect=record_scalars):
+                publish_draft(
+                    session,
+                    draft,
+                    draft.revision,
+                    self.admin_id,
+                    name="ordered-lock-publish",
+                    storage_path=published_path,
+                    confirm_warnings=True,
+                )
+
+            lock_statement = next(
+                statement
+                for statement in statements
+                if "FROM input_versions" in statement and "FOR UPDATE" in statement
+            )
+            self.assertIn("ORDER BY input_versions.id", lock_statement)
+            session.rollback()
 
     def test_publish_rejects_a_draft_when_its_base_is_no_longer_active(self):
         with self.database.session() as session:
@@ -1168,29 +1201,48 @@ class PositionDraftApiTests(unittest.TestCase):
             self.assertEqual(invalid.status_code, 422, invalid.text)
 
     def test_shared_upload_limit_accepts_boundary_and_rejects_overflow_without_files(self):
-        payload = self.position_bytes()
-        self.app.state.max_upload_bytes = len(payload)
+        purchase_workbook = Workbook()
+        purchase_sheet = purchase_workbook.active
+        purchase_sheet.append(
+            ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"]
+        )
+        purchase_sheet.append(
+            [
+                "待交货",
+                "KuangBiao",
+                "SKU-A",
+                "AMAZON:SEEKWAY:US",
+                "水鞋-广州仓",
+                100,
+            ]
+        )
+        purchase_output = BytesIO()
+        purchase_workbook.save(purchase_output)
+        purchase_payload = purchase_output.getvalue()
+        self.app.state.max_upload_bytes = len(purchase_payload)
 
         exact_version = self.client.post(
-            "/api/input-versions/position",
+            "/api/input-versions/purchase",
             headers=self.admin_headers,
-            data={"name": "position-limit-exact", "activate": "false"},
-            files={"file": ("exact.xlsx", BytesIO(payload))},
+            data={"name": "purchase-limit-exact", "activate": "false"},
+            files={"file": ("exact.xlsx", BytesIO(purchase_payload))},
         )
         self.assertEqual(exact_version.status_code, 201, exact_version.text)
-        master_files = set((self.storage / "master" / "position").iterdir())
+        master_files = set((self.storage / "master" / "purchase").iterdir())
         oversized_version = self.client.post(
-            "/api/input-versions/position",
+            "/api/input-versions/purchase",
             headers=self.admin_headers,
-            data={"name": "position-limit-over", "activate": "false"},
-            files={"file": ("over.xlsx", BytesIO(payload + b"x"))},
+            data={"name": "purchase-limit-over", "activate": "false"},
+            files={"file": ("over.xlsx", BytesIO(purchase_payload + b"x"))},
         )
         self.assertEqual(oversized_version.status_code, 413, oversized_version.text)
         self.assertEqual(
-            set((self.storage / "master" / "position").iterdir()),
+            set((self.storage / "master" / "purchase").iterdir()),
             master_files,
         )
 
+        payload = self.position_bytes()
+        self.app.state.max_upload_bytes = len(payload)
         draft = self.create_draft()
         exact_import = self.client.post(
             f"/api/input-drafts/{draft['id']}/import-preview",
@@ -1379,11 +1431,55 @@ class PositionDraftApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201, response.text)
         self.assertIn("input_versions", calls[0])
+        self.assertIn("ORDER BY input_versions.id", calls[0])
         self.assertIn("input_drafts", calls[1])
 
-    def test_active_position_replacement_is_blocked_while_draft_is_editing(self):
-        self.create_draft()
-        detail = "存在编辑中的库位草稿，请先发布或放弃草稿再替换当前版本"
+    def test_upload_and_activation_lock_input_versions_in_id_order(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"])
+        sheet.append(["待交货", "KuangBiao", "SKU-A", "AMAZON:SEEKWAY:US", "水鞋-广州仓", 100])
+        output = BytesIO()
+        workbook.save(output)
+        payload = output.getvalue()
+        calls: list[str] = []
+        original_scalars = Session.scalars
+
+        def record_scalars(session, statement, *args, **kwargs):
+            text = str(statement)
+            if "FROM input_versions" in text and "FOR UPDATE" in text:
+                calls.append(text)
+            return original_scalars(session, statement, *args, **kwargs)
+
+        with patch.object(Session, "scalars", new=record_scalars):
+            active = self.client.post(
+                "/api/input-versions/purchase",
+                headers=self.admin_headers,
+                data={"name": "purchase-v1", "activate": "true"},
+                files={"file": ("purchase-v1.xlsx", BytesIO(payload))},
+            )
+            inactive = self.client.post(
+                "/api/input-versions/purchase",
+                headers=self.admin_headers,
+                data={"name": "purchase-v2", "activate": "false"},
+                files={"file": ("purchase-v2.xlsx", BytesIO(payload))},
+            )
+            activated = self.client.post(
+                f"/api/input-versions/{inactive.json()['id']}/activate",
+                headers=self.admin_headers,
+            )
+
+        self.assertEqual(active.status_code, 201, active.text)
+        self.assertEqual(inactive.status_code, 201, inactive.text)
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertEqual(len(calls), 2)
+        for statement in calls:
+            self.assertIn("ORDER BY input_versions.id", statement)
+
+    def test_position_replacement_requires_draft_workflow_even_without_open_draft(self):
+        detail = "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
+        position_directory = self.storage / "master" / "position"
+        files_before = set(position_directory.iterdir())
 
         active_upload = self.client.post(
             "/api/input-versions/position",
@@ -1410,9 +1506,25 @@ class PositionDraftApiTests(unittest.TestCase):
                 )
             },
         )
-        self.assertEqual(inactive_upload.status_code, 201, inactive_upload.text)
+        self.assertEqual(inactive_upload.status_code, 409, inactive_upload.text)
+        self.assertEqual(inactive_upload.json()["detail"], detail)
+
+        historical_path = position_directory / "position-old.xlsx"
+        historical_path.write_bytes(self.position_bytes())
+        with self.app.state.database.session() as session:
+            historical = InputVersion(
+                kind="position",
+                name="position-old",
+                original_name="position-old.xlsx",
+                storage_path=str(historical_path),
+                active=False,
+                created_by=self.version["created_by"],
+            )
+            session.add(historical)
+            session.commit()
+            historical_id = historical.id
         activation = self.client.post(
-            f"/api/input-versions/{inactive_upload.json()['id']}/activate",
+            f"/api/input-versions/{historical_id}/activate",
             headers=self.admin_headers,
         )
         self.assertEqual(activation.status_code, 409, activation.text)
@@ -1422,8 +1534,10 @@ class PositionDraftApiTests(unittest.TestCase):
             "/api/input-versions", headers=self.admin_headers
         ).json()
         self.assertTrue(next(item for item in versions if item["id"] == self.version["id"])["active"])
-        self.assertFalse(next(item for item in versions if item["id"] == inactive_upload.json()["id"])["active"])
+        self.assertFalse(next(item for item in versions if item["id"] == historical_id)["active"])
         self.assertFalse(any(item["name"] == "position-v2-active" for item in versions))
+        self.assertFalse(any(item["name"] == "position-v2-inactive" for item in versions))
+        self.assertEqual(set(position_directory.iterdir()), files_before | {historical_path})
 
     def test_resumed_legacy_draft_reports_its_base_and_cannot_overwrite_new_active(self):
         draft = self.create_draft()
@@ -1449,6 +1563,8 @@ class PositionDraftApiTests(unittest.TestCase):
         self.assertEqual(resumed.status_code, 200, resumed.text)
         self.assertEqual(resumed.json()["base_version_id"], self.version["id"])
         self.assertEqual(resumed.json()["base_version_name"], "position-v1")
+        self.assertEqual(resumed.json()["active_version_id"], replacement_id)
+        self.assertEqual(resumed.json()["active_version_name"], "position-v2")
 
         rejected = self.client.post(
             f"/api/input-drafts/{draft['id']}/publish",

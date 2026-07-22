@@ -5,6 +5,102 @@
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
+## 0. 2026-07-22 14:40 最新接续状态（新会话先看）
+
+### 0.1 唯一正确的继续工作目录
+
+本轮开发必须从以下隔离工作树继续：
+
+```bash
+cd /root/deliverynote/.worktrees/admin-maintenance
+git status -sb
+git diff --check
+```
+
+- 分支：`feature/admin-maintenance`
+- 当前提交：`37339da feat: allow formatting protected exports`
+- `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
+- 交接文档更新前，功能工作树共有 15 个未提交的源码/测试文件；加上本交接文档后，`git status --short` 应看到 16 个修改路径。生产环境已经由这些未提交源码构建，因此“审查并形成可追溯提交”是下一会话的最高优先级。
+- 用户已要求停用 Superpowers 插件；后续会话不要调用 `superpowers:*` 技能。
+
+当前未提交的 15 个源码/测试文件：
+
+```text
+delivery_note/web/api.py
+delivery_note/web/position_drafts.py
+frontend/src/pages/AdminPage.test.tsx
+frontend/src/pages/BatchDetail.test.tsx
+frontend/src/pages/BatchDetail.tsx
+frontend/src/pages/admin/InputDataPanel.test.tsx
+frontend/src/pages/admin/InputDataPanel.tsx
+frontend/src/pages/admin/PositionMaintenance.test.tsx
+frontend/src/pages/admin/PositionMaintenance.tsx
+frontend/src/styles.css
+frontend/src/test/setup.ts
+frontend/src/types.ts
+tests/test_position_drafts.py
+tests/test_web_api.py
+tests/test_worker.py
+```
+
+交接前统计为 15 个文件、约 1275 行新增、329 行删除。不要按统计数字机械判断是否异常，应逐文件检查实际 diff 与测试覆盖。
+
+### 0.2 本轮已完成并上线的产品能力
+
+1. 管理员“基础资料”已按 PC 端重做：左侧资料目录显示就绪状态、版本与更新时间；右侧明确用途、业务影响、必填字段、当前版本、数据摘要、预览、质量与历史版本。
+2. “上传替换”改为先选文件，再明确执行“校验并启用新版本”；库位资料存在当前版本时必须走服务端草稿维护流程，保留“自动保存到服务器”。
+3. 库位草稿补强了基线与并发安全：草稿响应使用服务端权威当前版本、按固定顺序加锁、发布前再次校验基线；库位已有版本时禁止通过普通上传绕过草稿发布。相关改动和测试均在未提交 diff 中，提交前仍需最终代码复审。
+4. “待处理审校”已展示 `规模定位`、`备货定位`、`已下单可售天数`，多 MSKU 定位值以可读格式展示，并纳入全文搜索。
+5. “待处理审校”已增加 `站点`、`规模定位`、`备货定位` 三个下拉筛选，支持组合筛选、搜索、清空；多 MSKU 定位值会拆成独立筛选项。
+6. 导出 Excel 的保护策略已在提交 `37339da` 中调整：用户打开导出表后可以自行修改列宽、行高等格式，同时保持业务单元格保护约束。
+
+### 0.3 最近一次完整验证证据
+
+```text
+Python unittest: 111/111 passed
+Python pip check: passed
+Frontend Vitest: 6 files, 59/59 passed
+Frontend production build: passed
+git diff --check: passed
+Docker Compose config: passed
+```
+
+实际命令：
+
+```bash
+/root/deliverynote/.venv/bin/python -m unittest discover -s tests -v
+/root/deliverynote/.venv/bin/python -m pip check
+cd /root/deliverynote/.worktrees/admin-maintenance/frontend && npm run test
+cd /root/deliverynote/.worktrees/admin-maintenance/frontend && npm run build
+cd /root/deliverynote/.worktrees/admin-maintenance && git diff --check
+WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote config --quiet
+```
+
+最近前端构建仍有单包大于 500 kB 的 Vite 提示，不是构建失败，暂不应优先引入复杂拆包。
+
+### 0.4 正式环境状态
+
+- 正式地址：`https://deliverynote.seekwaygroup.com/`
+- 最近部署时间：约 2026-07-22 14:37（Asia/Shanghai）。
+- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 的当前未提交源码。
+- 当前线上前端资源：`/assets/index-BVNBHU_E.js`、`/assets/index-BfjwUI3X.css`。
+- 本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`；`db`、`api`、`worker`、`web` 均运行，API 健康，日志未发现 traceback 或启动错误。
+- 已验证线上资源包含“全部站点”“全部规模定位”“全部备货定位”。此前只读生产 API 抽查到一个含 14 条待处理记录的批次，14 条均返回新增定位字段且有定位值，登录/列表/读取/退出分别返回 200/200/200/204。
+- 部署没有删除或重建数据库卷；数据库容器延续运行。不要执行 `docker compose down -v`。
+
+### 0.5 尚未完成与优先级
+
+1. **P0：审查并提交当前未提交改动。** 逐文件确认 15 个源码/测试文件，复跑完整验证，使用明确路径暂存，检查 `git diff --cached --name-only` 后再提交；不要把主工作区改动、`.env`、Excel、数据库、日志或输出文件带入提交。
+2. **P0：修复批次多文件并发上传的排序竞争。** 当前并发请求可能同时分配相同或不稳定顺序。先写能稳定复现的 API 测试，再做最小并发控制；必须保持“同一批次按用户指定顺序共享并连续扣减采购余额”。
+3. **P1：复核恢复已有库位草稿时的审计事件。** 确认恢复行为是否缺少应有操作记录；若缺失，先补测试再修复，不改变草稿的单实例与基线规则。
+4. **P1：完成脱敏双文件全流程业务验收。** 覆盖五类资料、共享余额 `160 = 100 + 60`、待处理、拆分守恒、单文件和 ZIP 导出，并核对 Excel 表头、样式、备注和可调列宽/行高。
+5. **P1：完成数据库与文件卷成对备份和恢复演练。** 在此之前不得宣称项目完整生产可用。
+6. **P2：建立最小数据库迁移方案。** 当前仍依赖 SQLAlchemy `create_all()`；仅在确实需要改表时推进。
+
+### 0.6 新会话可直接粘贴的启动指令
+
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。当前 `feature/admin-maintenance` 有 15 个源码/测试文件未提交，加上交接文档共 16 个修改路径，但这些源码已经部署；生产资源为 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`，后端 111/111、前端 59/59、pip check、build 和 diff check 已通过。先审查并整理未提交改动，随后优先用测试复现并修复批次多文件并发上传的排序竞争，再复核恢复库位草稿的审计事件。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除部署数据卷。每阶段只汇报实际验证结果；完整业务验收与备份恢复完成前，不要宣称项目完整生产可用。
+
 ## 1. 接手时先做什么
 
 在 Linux 机器上执行：
@@ -50,8 +146,8 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 108/108 passed
-Frontend Vitest: 6 files, 55/55 passed
+Python unittest: 111/111 passed
+Frontend Vitest: 6 files, 59/59 passed
 Frontend production build: passed
 pip check: passed
 Compose YAML static check: passed
@@ -64,7 +160,7 @@ HTTPS health, login, read API and logout smoke test: passed
 
 本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1280×800、1440×900 和 1920×1080 PC 验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；最终复审又补上了库位草稿基线保护，维护期间不再允许替换当前库位版本，发布时会再次校验基线，创建/恢复草稿也统一按“版本行 → 草稿行”加锁并在等待后重新读取当前版本。不再把平板和移动端作为本轮完成门槛。
 
-2026-07-22 已从 `feature/admin-maintenance` 工作树在 Linux 目标机执行 `docker compose -p deliverynote --env-file /root/deliverynote/.env up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS `/health` 均返回成功；当前前端资源为 `index-CcxgtQ8v.js` 和 `index-DKtrA9Gk.css`。管理员登录、版本列表只读接口和退出均返回成功；现网没有编辑中的库位草稿，库位写流程及维护期间阻止版本替换已在隔离 PostgreSQL QA 和临时 SQLite 中复验，PostgreSQL 另完成 24 轮双向并发竞争验收，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
+2026-07-22 14:37 左右已从 `feature/admin-maintenance` 工作树的未提交源码执行 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS `/health` 均返回成功；当前前端资源为 `index-BVNBHU_E.js` 和 `index-BfjwUI3X.css`，且已验证资源包含待处理审校的站点、规模定位和备货定位筛选。管理员登录、版本列表只读接口和退出均返回成功；现网没有编辑中的库位草稿，库位写流程及维护期间阻止版本替换已在隔离 PostgreSQL QA 和临时 SQLite 中复验，PostgreSQL 另完成 24 轮双向并发竞争验收，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为完整生产可用。
 
 本次自动化验证实际使用：
 

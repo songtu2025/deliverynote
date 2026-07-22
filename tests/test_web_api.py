@@ -182,6 +182,24 @@ class WebApiTests(unittest.TestCase):
         ]
         self.assertEqual(active_ids, [created_ids[1]])
 
+    def test_position_bootstrap_upload_is_allowed(self):
+        admin_headers = self.login("admin", "admin-pass")
+
+        response = self.client.post(
+            "/api/input-versions/position",
+            headers=admin_headers,
+            data={"name": "position-bootstrap", "activate": "true"},
+            files={
+                "file": (
+                    "position-bootstrap.xlsx",
+                    BytesIO(self.workbook_bytes("position")),
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertTrue(response.json()["active"])
+
     def test_invalid_input_version_is_rejected_before_activation(self):
         admin_headers = self.login("admin", "admin-pass")
         response = self.client.post(

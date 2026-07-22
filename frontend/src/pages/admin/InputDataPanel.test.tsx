@@ -154,14 +154,14 @@ describe("InputDataPanel", () => {
           limit: 50
         });
       }
-      if (url.endsWith("/api/input-versions/position") && method === "POST") {
-        if (failUpload) return jsonResponse({ detail: "输入版本校验失败：缺少 MSKU_视图" }, 400);
+      if (url.endsWith("/api/input-versions/purchase") && method === "POST") {
+        if (failUpload) return jsonResponse({ detail: "输入版本校验失败：缺少 未交量" }, 400);
         if (pendingUpload) return pendingUpload.promise;
-        return jsonResponse({ ...versions[2], id: 7, name: "position-replacement" }, 201);
+        return jsonResponse({ ...versions[0], id: 7, name: "purchase-replacement" }, 201);
       }
-      if (url.endsWith("/api/input-versions/4/activate") && method === "POST") {
+      if (url.endsWith("/api/input-versions/2/activate") && method === "POST") {
         if (pendingActivation) return pendingActivation.promise;
-        return jsonResponse({ ...versions[3], active: true });
+        return jsonResponse({ ...versions[1], active: true });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
     }));
@@ -190,6 +190,44 @@ describe("InputDataPanel", () => {
     expect(await screen.findByText("SEEKWAY:US")).toBeInTheDocument();
     expect(screen.getByText("备货定位不能为空")).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
+    expect(onOpenPositionDraft).toHaveBeenCalledOnce();
+  });
+
+  it("separates current data, maintenance, quality, and history into readable regions", async () => {
+    render(
+      <InputDataPanel
+        versions={versions}
+        loading={false}
+        onVersionsChanged={vi.fn()}
+        onOpenPositionDraft={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText("PURCHASE-SKU")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "当前数据" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "维护操作" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "质量检查" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "版本记录" })).toBeInTheDocument();
+  });
+
+  it("routes position replacements and history activation through web maintenance", async () => {
+    const onOpenPositionDraft = vi.fn();
+    render(
+      <InputDataPanel
+        versions={versions}
+        loading={false}
+        onVersionsChanged={vi.fn()}
+        onOpenPositionDraft={onOpenPositionDraft}
+      />
+    );
+
+    fireEvent.click(getCatalogButton("库位/排仓数据"));
+    expect(await screen.findByText("SEEKWAY:US")).toBeInTheDocument();
+    expect(screen.getByText("库位资料已有正式版本")).toBeInTheDocument();
+    expect(screen.getByText(/请使用“开始网页维护”进入草稿流程/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "选择 Excel 并上传替换" })).not.toBeInTheDocument();
+    expect(within(screen.getByText("position-old").closest("tr")!).queryByRole("button", { name: "启用" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
     expect(onOpenPositionDraft).toHaveBeenCalledOnce();
   });
@@ -311,7 +349,7 @@ describe("InputDataPanel", () => {
     expect(requestedUrls.some((url) => url.includes("/5/"))).toBe(false);
   });
 
-  it("uploads a replacement for the selected kind with immediate activation", async () => {
+  it("uploads a replacement only after explicit confirmation", async () => {
     const onVersionsChanged = vi.fn();
     const { container } = render(
       <InputDataPanel
@@ -322,10 +360,9 @@ describe("InputDataPanel", () => {
       />
     );
 
-    fireEvent.click(getCatalogButton("库位/排仓数据"));
-    await screen.findByText("SEEKWAY:US");
-    fireEvent.change(screen.getByPlaceholderText("例如：position-20260721"), {
-      target: { value: "position-replacement" }
+    await screen.findByText("PURCHASE-SKU");
+    fireEvent.change(screen.getByLabelText("新版本名称"), {
+      target: { value: "purchase-replacement" }
     });
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput).not.toBeNull();
@@ -333,15 +370,21 @@ describe("InputDataPanel", () => {
       target: { files: [new File(["excel"], "replacement.xlsx", { type: "application/vnd.ms-excel" })] }
     });
 
+    expect(await screen.findByText("replacement.xlsx")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([input, init]) =>
+      String(input).endsWith("/api/input-versions/purchase") && init?.method === "POST"
+    )).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
+
     await waitFor(() => {
       expect(onVersionsChanged).toHaveBeenCalledOnce();
     });
     const uploadCall = vi.mocked(fetch).mock.calls.find(([input, init]) =>
-      String(input).endsWith("/api/input-versions/position") && init?.method === "POST"
+      String(input).endsWith("/api/input-versions/purchase") && init?.method === "POST"
     );
     expect(uploadCall).toBeDefined();
     const body = uploadCall?.[1]?.body as FormData;
-    expect(body.get("name")).toBe("position-replacement");
+    expect(body.get("name")).toBe("purchase-replacement");
     expect(body.get("activate")).toBe("true");
     expect(body.get("file")).toBeInstanceOf(File);
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
@@ -359,36 +402,37 @@ describe("InputDataPanel", () => {
       />
     );
 
-    fireEvent.click(getCatalogButton("库位/排仓数据"));
-    await screen.findByText("SEEKWAY:US");
-    fireEvent.change(screen.getByPlaceholderText("例如：position-20260721"), {
-      target: { value: "position-slow" }
+    await screen.findByText("PURCHASE-SKU");
+    fireEvent.change(screen.getByLabelText("新版本名称"), {
+      target: { value: "purchase-slow" }
     });
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     fireEvent.change(fileInput, {
       target: { files: [new File(["first"], "first.xlsx", { type: "application/vnd.ms-excel" })] }
     });
+    await screen.findByText("first.xlsx");
+    fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
 
     await waitFor(() => {
       expect(vi.mocked(fetch).mock.calls.filter(([input, init]) =>
-        String(input).endsWith("/api/input-versions/position") && init?.method === "POST"
+        String(input).endsWith("/api/input-versions/purchase") && init?.method === "POST"
       )).toHaveLength(1);
     });
     expect(getCatalogButton("商品信息")).toBeDisabled();
     const currentFileInput = container.querySelector<HTMLInputElement>('input[type="file"]')!;
     expect(currentFileInput).toBeDisabled();
-    expect(screen.getByRole("button", { name: "选择 Excel 并上传替换" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "选择 Excel 并上传替换" })).toHaveAttribute("aria-busy", "true");
-    expect(within(screen.getByText("position-old").closest("tr")!).getByRole("button", { name: "启用" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "校验并启用新版本" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "校验并启用新版本" })).toHaveAttribute("aria-busy", "true");
+    expect(within(screen.getByText("purchase-old").closest("tr")!).getByRole("button", { name: "启用" })).toBeDisabled();
 
     fireEvent.change(currentFileInput, {
       target: { files: [new File(["second"], "second.xlsx", { type: "application/vnd.ms-excel" })] }
     });
     expect(vi.mocked(fetch).mock.calls.filter(([input, init]) =>
-      String(input).endsWith("/api/input-versions/position") && init?.method === "POST"
+      String(input).endsWith("/api/input-versions/purchase") && init?.method === "POST"
     )).toHaveLength(1);
 
-    pendingUpload.resolve(jsonResponse({ ...versions[2], id: 7, name: "position-slow" }, 201));
+    pendingUpload.resolve(jsonResponse({ ...versions[0], id: 7, name: "purchase-slow" }, 201));
     await waitFor(() => expect(onVersionsChanged).toHaveBeenCalledOnce());
     expect(getCatalogButton("商品信息")).toBeEnabled();
   });
@@ -404,22 +448,21 @@ describe("InputDataPanel", () => {
       />
     );
 
-    fireEvent.click(getCatalogButton("库位/排仓数据"));
-    await screen.findByText("SEEKWAY:US");
+    await screen.findByText("PURCHASE-SKU");
     fireEvent.click(screen.getByRole("button", { name: "下载当前文件" }));
     await waitFor(() => {
-      expect(download).toHaveBeenCalledWith("/api/input-versions/3/download", "position.xlsx");
+      expect(download).toHaveBeenCalledWith("/api/input-versions/1/download", "purchase.xlsx");
     });
 
-    const oldVersionRow = screen.getByText("position-old").closest("tr");
+    const oldVersionRow = screen.getByText("purchase-old").closest("tr");
     expect(oldVersionRow).not.toBeNull();
     fireEvent.click(within(oldVersionRow!).getByRole("button", { name: "启用" }));
-    expect(await screen.findByText("启用 position-old？")).toBeInTheDocument();
+    expect(await screen.findByText("启用 purchase-old？")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认启用" }));
 
     await waitFor(() => {
       expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-        "/api/input-versions/4/activate",
+        "/api/input-versions/2/activate",
         expect.objectContaining({ method: "POST" })
       );
       expect(onVersionsChanged).toHaveBeenCalledOnce();
@@ -429,29 +472,32 @@ describe("InputDataPanel", () => {
   it("locks type switching, upload, and other activation actions while activation is pending", async () => {
     pendingActivation = createDeferred<Response>();
     const onVersionsChanged = vi.fn();
-    render(
+    const versionsWithPurchaseHistory = [
+      ...versions,
+      { ...versions[1], id: 8, name: "purchase-older", original_name: "purchase-older.xlsx", created_at: "2026-07-18T08:00:00" }
+    ];
+    const view = render(
       <InputDataPanel
-        versions={versions}
+        versions={versionsWithPurchaseHistory}
         loading={false}
         onVersionsChanged={onVersionsChanged}
         onOpenPositionDraft={vi.fn()}
       />
     );
 
-    fireEvent.click(getCatalogButton("库位/排仓数据"));
-    await screen.findByText("SEEKWAY:US");
-    const oldVersionRow = screen.getByText("position-old").closest("tr")!;
-    const olderVersionRow = screen.getByText("position-older").closest("tr")!;
+    await screen.findByText("PURCHASE-SKU");
+    const oldVersionRow = screen.getByText("purchase-old").closest("tr")!;
+    const olderVersionRow = screen.getByText("purchase-older").closest("tr")!;
     fireEvent.click(within(oldVersionRow).getByRole("button", { name: "启用" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认启用" }));
 
     await waitFor(() => {
       expect(vi.mocked(fetch).mock.calls.filter(([input, init]) =>
-        String(input).endsWith("/api/input-versions/4/activate") && init?.method === "POST"
+        String(input).endsWith("/api/input-versions/2/activate") && init?.method === "POST"
       )).toHaveLength(1);
     });
     expect(getCatalogButton("商品信息")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "选择 Excel 并上传替换" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "校验并启用新版本" })).toBeDisabled();
     expect(within(oldVersionRow).getByRole("button", { name: /启用/ })).toHaveAttribute("aria-busy", "true");
     expect(within(olderVersionRow).getByRole("button", { name: "启用" })).toBeDisabled();
     fireEvent.click(within(olderVersionRow).getByRole("button", { name: "启用" }));
@@ -459,11 +505,12 @@ describe("InputDataPanel", () => {
       String(input).includes("/activate") && init?.method === "POST"
     )).toHaveLength(1);
 
-    pendingActivation.resolve(jsonResponse({ ...versions[3], active: true }));
+    pendingActivation.resolve(jsonResponse({ ...versions[1], active: true }));
     await waitFor(() => expect(onVersionsChanged).toHaveBeenCalledOnce());
     expect(getCatalogButton("商品信息")).toBeEnabled();
     expect(within(olderVersionRow).getByRole("button", { name: "启用" })).toBeEnabled();
-  });
+    view.unmount();
+  }, 15_000);
 
   it("surfaces inspection and upload failures", async () => {
     failInspection = true;
@@ -481,22 +528,22 @@ describe("InputDataPanel", () => {
     expect(screen.getByText("采购文件无法解析")).toBeInTheDocument();
 
     failUpload = true;
-    fireEvent.click(getCatalogButton("库位/排仓数据"));
-    await screen.findByText("SEEKWAY:US");
-    fireEvent.change(screen.getByPlaceholderText("例如：position-20260721"), {
-      target: { value: "broken-position" }
+    fireEvent.change(screen.getByLabelText("新版本名称"), {
+      target: { value: "broken-purchase" }
     });
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(fileInput!, {
       target: { files: [new File(["broken"], "broken.xlsx", { type: "application/vnd.ms-excel" })] }
     });
+    await screen.findByText("broken.xlsx");
+    fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
 
-    expect(await screen.findByText("输入版本校验失败：缺少 MSKU_视图")).toBeInTheDocument();
+    expect(await screen.findByText("输入版本校验失败：缺少 未交量")).toBeInTheDocument();
     expect(onVersionsChanged).not.toHaveBeenCalled();
 
     fireEvent.click(getCatalogButton("供应商资料"));
-    expect(screen.queryByText("输入版本校验失败：缺少 MSKU_视图")).not.toBeInTheDocument();
-    fireEvent.click(getCatalogButton("库位/排仓数据"));
-    expect(screen.getByText("输入版本校验失败：缺少 MSKU_视图")).toBeInTheDocument();
+    expect(screen.queryByText("输入版本校验失败：缺少 未交量")).not.toBeInTheDocument();
+    fireEvent.click(getCatalogButton("采购需求"));
+    expect(screen.getByText("输入版本校验失败：缺少 未交量")).toBeInTheDocument();
   });
 });

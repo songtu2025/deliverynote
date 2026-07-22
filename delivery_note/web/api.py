@@ -45,7 +45,12 @@ from ..input_inspection import (
     validate_position_frame,
     write_position_workbook,
 )
-from ..pipeline import POSITION_SOURCE_COLUMNS
+from ..pipeline import (
+    IMPORT_COLUMNS,
+    POSITION_SOURCE_COLUMNS,
+    POSITION_VALUE_COLUMNS,
+    enrich_pending_import_rows,
+)
 from .auth import hash_password, hash_token, new_session_token, verify_password
 from .database import Database
 from .models import (
@@ -95,8 +100,8 @@ BATCH_STATUSES = {
     "expired",
 }
 ROLES = {"admin", "operator"}
-POSITION_DRAFT_REPLACEMENT_BLOCKED_DETAIL = (
-    "存在编辑中的库位草稿，请先发布或放弃草稿再替换当前版本"
+POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
+    "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
 
 
@@ -255,6 +260,12 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
     rows = list_draft_rows(session, draft.id)
     active_rows = [row for row in rows if not row.deleted]
     base_version = session.get(InputVersion, draft.base_version_id)
+    active_version = session.scalar(
+        select(InputVersion).where(
+            InputVersion.kind == "position",
+            InputVersion.active.is_(True),
+        )
+    )
     issue_summary = _issue_summary(validate_draft(session, draft))
     return {
         "id": draft.id,
@@ -265,6 +276,8 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
             if base_version is not None
             else f"版本 #{draft.base_version_id}"
         ),
+        "active_version_id": active_version.id if active_version is not None else None,
+        "active_version_name": active_version.name if active_version is not None else None,
         "status": draft.status,
         "revision": draft.revision,
         "created_by": draft.created_by,
@@ -408,12 +421,72 @@ def _validate_input_version(kind: str, path: Path) -> None:
         validate_template_workbook(path)
 
 
-def _exception_json(exception: ExceptionRecord, session: Session) -> dict:
+def _exception_position_values(
+    exceptions: list[ExceptionRecord],
+    batch: Batch,
+    session: Session,
+) -> dict[int, dict[str, str | int | float]]:
+    if not exceptions:
+        return {}
+    version = session.get(InputVersion, batch.position_version_id)
+    if version is None:
+        raise HTTPException(status_code=409, detail="批次锁定的库位资料不存在")
+    pending_rows = pd.DataFrame(
+        [
+            {
+                "*目的仓": exception.destination,
+                "*供应商编码": "",
+                "*SKU": exception.sku,
+                "*本次交货量": exception.manual_quantity,
+                "*站点": exception.full_site,
+                "单据备注": "",
+                "交货备注": exception.reason,
+            }
+            for exception in exceptions
+        ],
+        index=[exception.id for exception in exceptions],
+        columns=IMPORT_COLUMNS,
+    )
+    try:
+        enriched = enrich_pending_import_rows(
+            pending_rows,
+            read_position_workbook(Path(version.storage_path)),
+        )
+    except (OSError, ValueError) as error:
+        raise HTTPException(
+            status_code=409,
+            detail=f"批次锁定的库位资料无法读取：{error}",
+        ) from error
+
+    result: dict[int, dict[str, str | int | float]] = {}
+    for exception_id, row in enriched.iterrows():
+        values = {}
+        for column, key in zip(
+            POSITION_VALUE_COLUMNS,
+            ("scale_position", "stocking_position", "ordered_days"),
+            strict=True,
+        ):
+            value = row[column]
+            if pd.isna(value):
+                value = ""
+            elif hasattr(value, "item"):
+                value = value.item()
+            values[key] = value
+        result[int(exception_id)] = values
+    return result
+
+
+def _exception_json(
+    exception: ExceptionRecord,
+    session: Session,
+    position_values: dict[str, str | int | float] | None = None,
+) -> dict:
     parts = session.scalars(
         select(SplitRecord)
         .where(SplitRecord.exception_id == exception.id)
         .order_by(SplitRecord.id)
     ).all()
+    position_values = position_values or {}
     return {
         "id": exception.id,
         "batch_file_id": exception.batch_file_id,
@@ -426,6 +499,9 @@ def _exception_json(exception: ExceptionRecord, session: Session) -> dict:
         "manual_quantity": exception.manual_quantity,
         "reason": exception.reason,
         "status": exception.status,
+        "scale_position": position_values.get("scale_position", ""),
+        "stocking_position": position_values.get("stocking_position", ""),
+        "ordered_days": position_values.get("ordered_days", ""),
         "parts": [
             {
                 "id": part.id,
@@ -644,17 +720,14 @@ def create_app(
             detail=str(error).strip() or "草稿已被其他管理员更新，请刷新后重试",
         ) from error
 
-    def ensure_position_replacement_allowed(session: Session) -> None:
-        editing_draft_id = session.scalar(
-            select(InputDraft.id).where(
-                InputDraft.kind == "position",
-                InputDraft.status == "editing",
-            )
+    def ensure_position_bootstrap_upload_allowed(session: Session) -> None:
+        position_version_id = session.scalar(
+            select(InputVersion.id).where(InputVersion.kind == "position")
         )
-        if editing_draft_id is not None:
+        if position_version_id is not None:
             raise HTTPException(
                 status_code=409,
-                detail=POSITION_DRAFT_REPLACEMENT_BLOCKED_DETAIL,
+                detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
             )
 
     def rollback_integrity_conflict(session: Session, error: Exception) -> None:
@@ -847,8 +920,8 @@ def create_app(
             )
         ):
             raise HTTPException(status_code=409, detail="版本名称已存在")
-        if kind == "position" and activate:
-            ensure_position_replacement_allowed(session)
+        if kind == "position":
+            ensure_position_bootstrap_upload_allowed(session)
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
@@ -873,11 +946,15 @@ def create_app(
                     session.scalars(
                         select(InputVersion)
                         .where(InputVersion.kind == kind)
+                        .order_by(InputVersion.id)
                         .with_for_update()
                     )
                 )
-                if kind == "position":
-                    ensure_position_replacement_allowed(session)
+                if kind == "position" and current_versions:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
+                    )
                 for current in current_versions:
                     current.active = False
                 session.flush()
@@ -984,11 +1061,18 @@ def create_app(
                 session.scalars(
                     select(InputVersion)
                     .where(InputVersion.kind == version.kind)
+                    .order_by(InputVersion.id)
                     .with_for_update()
                 )
             )
-            if version.kind == "position":
-                ensure_position_replacement_allowed(session)
+            if version.kind == "position" and any(
+                current.active and current.id != version.id
+                for current in current_versions
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
+                )
             for current in current_versions:
                 current.active = False
             session.flush()
@@ -1025,6 +1109,7 @@ def create_app(
             session.scalars(
                 select(InputVersion.id)
                 .where(InputVersion.kind == "position")
+                .order_by(InputVersion.id)
                 .with_for_update()
             )
         )
@@ -1824,14 +1909,18 @@ def create_app(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        get_batch_or_404(batch_id, session)
+        batch = get_batch_or_404(batch_id, session)
         exceptions = session.scalars(
             select(ExceptionRecord)
             .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
             .where(BatchFile.batch_id == batch_id)
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         ).all()
-        return [_exception_json(exception, session) for exception in exceptions]
+        position_values = _exception_position_values(exceptions, batch, session)
+        return [
+            _exception_json(exception, session, position_values.get(exception.id))
+            for exception in exceptions
+        ]
 
     @app.put("/api/exceptions/{exception_id}/split")
     def save_split(
@@ -1864,6 +1953,7 @@ def create_app(
         )
         if export_job and export_job.status in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="导出任务运行期间不可修改拆分")
+        position_values = _exception_position_values([exception], batch, session)
         previous_parts = session.scalars(
             select(SplitRecord)
             .where(SplitRecord.exception_id == exception.id)
@@ -1958,7 +2048,7 @@ def create_app(
             },
         )
         session.commit()
-        return _exception_json(exception, session)
+        return _exception_json(exception, session, position_values.get(exception.id))
 
     @app.post("/api/batches/{batch_id}/export", status_code=status.HTTP_202_ACCEPTED)
     def start_export(

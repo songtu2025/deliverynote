@@ -77,6 +77,53 @@ function ExceptionStatusTag({ status }: { status: string }) {
   return <Tag color={item.color}>{item.label}</Tag>;
 }
 
+function formatPositionValue(value: string | number): string {
+  const text = String(value ?? "").trim();
+  if (!text) return "—";
+  if (!text.startsWith("{")) return text;
+  try {
+    const mapping = JSON.parse(text) as Record<string, unknown>;
+    if (!mapping || Array.isArray(mapping) || typeof mapping !== "object") return text;
+    return Object.entries(mapping)
+      .map(([msku, item]) => `${msku}：${String(item ?? "").trim() || "—"}`)
+      .join("；");
+  } catch {
+    return text;
+  }
+}
+
+function positionFilterValues(value: string | number): string[] {
+  const text = String(value ?? "").trim();
+  if (!text) return [];
+  if (!text.startsWith("{")) return [text];
+  try {
+    const mapping = JSON.parse(text) as Record<string, unknown>;
+    if (!mapping || Array.isArray(mapping) || typeof mapping !== "object") return [text];
+    return Array.from(new Set(
+      Object.values(mapping)
+        .map((item) => String(item ?? "").trim())
+        .filter(Boolean)
+    ));
+  } catch {
+    return [text];
+  }
+}
+
+function filterOptions(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)))
+    .sort((left, right) => left.localeCompare(right, "zh-CN"))
+    .map((value) => ({ value, label: value }));
+}
+
+function PositionValue({ value }: { value: string | number }) {
+  const display = formatPositionValue(value);
+  return (
+    <Tooltip title={display === "—" ? "未匹配到当前批次锁定的库位资料" : display}>
+      <span className={display === "—" ? "muted" : "position-reference-value"}>{display}</span>
+    </Tooltip>
+  );
+}
+
 export default function BatchDetail({ batchId, onBack }: { batchId: number; onBack: () => void }) {
   const [batch, setBatch] = useState<Batch | null>(null);
   const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
@@ -84,6 +131,9 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [query, setQuery] = useState("");
+  const [siteFilter, setSiteFilter] = useState<string>();
+  const [scaleFilter, setScaleFilter] = useState<string>();
+  const [stockingFilter, setStockingFilter] = useState<string>();
   const [statusFilter, setStatusFilter] = useState<string>();
   const [reasonFilter, setReasonFilter] = useState<string>();
   const [splitForm] = Form.useForm<SplitFormValues>();
@@ -173,16 +223,39 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     () => Array.from(new Set(exceptions.map((item) => item.reason))).map((reason) => ({ value: reason, label: reason })),
     [exceptions]
   );
+  const siteOptions = useMemo(
+    () => filterOptions(exceptions.map((item) => item.full_site)),
+    [exceptions]
+  );
+  const scaleOptions = useMemo(
+    () => filterOptions(exceptions.flatMap((item) => positionFilterValues(item.scale_position))),
+    [exceptions]
+  );
+  const stockingOptions = useMemo(
+    () => filterOptions(exceptions.flatMap((item) => positionFilterValues(item.stocking_position))),
+    [exceptions]
+  );
   const filteredExceptions = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("zh-CN");
     return exceptions.filter((item) => {
       const source = fileById[item.batch_file_id]?.original_name ?? "";
-      const haystack = `${source} ${item.sku} ${item.full_site} ${item.destination}`.toLocaleLowerCase("zh-CN");
+      const haystack = [
+        source,
+        item.sku,
+        item.full_site,
+        item.destination,
+        formatPositionValue(item.scale_position),
+        formatPositionValue(item.stocking_position),
+        formatPositionValue(item.ordered_days)
+      ].join(" ").toLocaleLowerCase("zh-CN");
       return (!keyword || haystack.includes(keyword))
+        && (!siteFilter || item.full_site === siteFilter)
+        && (!scaleFilter || positionFilterValues(item.scale_position).includes(scaleFilter))
+        && (!stockingFilter || positionFilterValues(item.stocking_position).includes(stockingFilter))
         && (!statusFilter || item.status === statusFilter)
         && (!reasonFilter || item.reason === reasonFilter);
     });
-  }, [exceptions, fileById, query, reasonFilter, statusFilter]);
+  }, [exceptions, fileById, query, reasonFilter, scaleFilter, siteFilter, statusFilter, stockingFilter]);
 
   const runAction = async (name: string, operation: () => Promise<void>) => {
     setAction(name);
@@ -497,10 +570,43 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
             <Input
               allowClear
               prefix={<SearchOutlined />}
-              placeholder="搜索来源文件、SKU、站点或目的仓"
+              placeholder="搜索来源、SKU、站点、目的仓或排仓信息"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              style={{ width: 320 }}
+              style={{ width: 280 }}
+            />
+            <Select
+              aria-label="站点筛选"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="全部站点"
+              options={siteOptions}
+              value={siteFilter}
+              onChange={setSiteFilter}
+              style={{ width: 190 }}
+            />
+            <Select
+              aria-label="规模定位筛选"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="全部规模定位"
+              options={scaleOptions}
+              value={scaleFilter}
+              onChange={setScaleFilter}
+              style={{ width: 150 }}
+            />
+            <Select
+              aria-label="备货定位筛选"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              placeholder="全部备货定位"
+              options={stockingOptions}
+              value={stockingFilter}
+              onChange={setStockingFilter}
+              style={{ width: 150 }}
             />
             <Select
               allowClear
@@ -523,35 +629,61 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           <Table<DeliveryException>
             rowKey="id"
             dataSource={filteredExceptions}
-            scroll={{ x: 1050 }}
+            scroll={{ x: 1420 }}
             locale={{ emptyText: <Empty description={exceptions.length ? "没有匹配的待处理记录" : "本批次没有待处理记录"} /> }}
             columns={[
               {
                 title: "来源文件",
                 dataIndex: "batch_file_id",
-                width: 220,
+                width: 180,
                 ellipsis: true,
                 render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
               },
-              { title: "SKU", dataIndex: "sku", width: 130 },
-              { title: "站点", dataIndex: "full_site", width: 210, ellipsis: true },
-              { title: "目的仓", dataIndex: "destination", width: 160, ellipsis: true },
+              { title: "SKU", dataIndex: "sku", width: 110 },
+              { title: "站点", dataIndex: "full_site", width: 180, ellipsis: true },
+              { title: "目的仓", dataIndex: "destination", width: 140, ellipsis: true },
+              {
+                title: "排仓参考",
+                children: [
+                  {
+                    title: "规模定位",
+                    dataIndex: "scale_position",
+                    width: 105,
+                    ellipsis: true,
+                    render: (value: string | number) => <PositionValue value={value} />
+                  },
+                  {
+                    title: "备货定位",
+                    dataIndex: "stocking_position",
+                    width: 105,
+                    ellipsis: true,
+                    render: (value: string | number) => <PositionValue value={value} />
+                  },
+                  {
+                    title: "已下单可售天数",
+                    dataIndex: "ordered_days",
+                    width: 135,
+                    ellipsis: true,
+                    render: (value: string | number) => <PositionValue value={value} />
+                  }
+                ]
+              },
               {
                 title: "待处理量",
                 dataIndex: "manual_quantity",
-                width: 110,
+                width: 100,
                 render: (value: number) => <strong className="pending-value">{value}</strong>
               },
-              { title: "原因", dataIndex: "reason", width: 180, ellipsis: true },
+              { title: "原因", dataIndex: "reason", width: 160, ellipsis: true },
               {
                 title: "状态",
                 dataIndex: "status",
-                width: 110,
+                width: 100,
                 render: (value: string) => <ExceptionStatusTag status={value} />
               },
               {
                 title: "操作",
-                width: 110,
+                width: 105,
                 fixed: "right",
                 render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>拆分审校</Button>
               }
@@ -625,6 +757,9 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               <Descriptions.Item label="来源文件">{fileById[splitTarget.batch_file_id]?.original_name}</Descriptions.Item>
               <Descriptions.Item label="站点">{splitTarget.full_site || "—"}</Descriptions.Item>
               <Descriptions.Item label="目的仓">{splitTarget.destination || "—"}</Descriptions.Item>
+              <Descriptions.Item label="规模定位"><PositionValue value={splitTarget.scale_position} /></Descriptions.Item>
+              <Descriptions.Item label="备货定位"><PositionValue value={splitTarget.stocking_position} /></Descriptions.Item>
+              <Descriptions.Item label="已下单可售天数"><PositionValue value={splitTarget.ordered_days} /></Descriptions.Item>
               <Descriptions.Item label="异常原因"><Tag color="warning">{splitTarget.reason}</Tag></Descriptions.Item>
             </Descriptions>
 

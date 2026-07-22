@@ -3,8 +3,6 @@ import {
   Alert,
   Button,
   Card,
-  Descriptions,
-  Divider,
   Form,
   Input,
   Popconfirm,
@@ -20,10 +18,11 @@ import {
   CheckCircleFilled,
   DatabaseOutlined,
   DownloadOutlined,
+  InboxOutlined,
   ToolOutlined,
   UploadOutlined
 } from "@ant-design/icons";
-import type { TableProps, UploadProps } from "antd";
+import type { TableProps, UploadFile, UploadProps } from "antd";
 
 import { api, download } from "../../api";
 import type {
@@ -89,6 +88,7 @@ export function InputDataPanel({
   const [uploadError, setUploadError] = useState<KindError | null>(null);
   const [actionError, setActionError] = useState<KindError | null>(null);
   const [mutation, setMutation] = useState<MutationState | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const [uploadForm] = Form.useForm<{ name: string }>();
 
   const selectedDefinition = INPUT_KIND_BY_VALUE[selectedKind];
@@ -104,6 +104,7 @@ export function InputDataPanel({
 
   useEffect(() => {
     uploadForm.resetFields();
+    setPendingFiles([]);
   }, [selectedKind, uploadForm]);
 
   useEffect(() => {
@@ -162,32 +163,38 @@ export function InputDataPanel({
     [preview]
   );
 
-  const uploadVersion: NonNullable<UploadProps["customRequest"]> = async (options) => {
-    if (mutationBusy) {
-      options.onError?.(new Error("已有资料操作正在进行"));
-      return;
-    }
+  const selectUploadFile: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
+    setPendingFiles(fileList.slice(-1));
+    setUploadError(null);
+  };
+
+  const uploadVersion = async () => {
+    if (mutationBusy) return;
     const kind = selectedKind;
     setUploadError(null);
-    setMutation({ kind, action: "upload" });
     try {
       const values = await uploadForm.validateFields();
+      const file = pendingFiles[0]?.originFileObj;
+      if (!file) {
+        setUploadError({ kind, message: "请选择要上传的 Excel 文件" });
+        return;
+      }
+      setMutation({ kind, action: "upload" });
       const formData = new FormData();
       formData.append("name", values.name);
       formData.append("activate", "true");
-      formData.append("file", options.file as File);
+      formData.append("file", file);
       await api<InputVersion>(`/api/input-versions/${kind}`, {
         method: "POST",
         body: formData
       });
-      options.onSuccess?.({});
       uploadForm.resetFields();
+      setPendingFiles([]);
       await onVersionsChanged();
       message.success(`${INPUT_KIND_BY_VALUE[kind].label}已上传并启用，仅影响以后创建的批次`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "上传失败";
       setUploadError({ kind, message: errorMessage });
-      options.onError?.(error instanceof Error ? error : new Error(errorMessage));
       message.error("上传失败，请检查页面提示");
     } finally {
       setMutation(null);
@@ -226,49 +233,78 @@ export function InputDataPanel({
     }
   };
 
-  const renderSummary = () => {
-    if (!activeVersion || inspectionVersionId !== activeVersion.id || !summary || !preview) return null;
-    const errors = issueCount(summary.issues, "error");
-    const warnings = issueCount(summary.issues, "warning");
+  const inspectionReady = Boolean(
+    activeVersion
+    && inspectionVersionId === activeVersion.id
+    && summary
+    && preview
+  );
+  const errors = summary ? issueCount(summary.issues, "error") : 0;
+  const warnings = summary ? issueCount(summary.issues, "warning") : 0;
+  const readyKindCount = INPUT_KIND_DEFINITIONS.filter((definition) =>
+    versions.some((version) => version.kind === definition.value && version.active)
+  ).length;
+
+  const renderCurrentData = () => {
+    if (loading) {
+      return <div className="input-data-loading"><Spin description="读取资料状态" /></div>;
+    }
+    if (!activeVersion) {
+      return (
+        <Alert
+          type="warning"
+          showIcon
+          title={`${selectedDefinition.label}尚无启用版本`}
+          description="请在维护操作中上传并启用一个通过校验的 Excel 版本。"
+        />
+      );
+    }
+    if (inspectionLoading || (inspectionVersionId !== activeVersion.id && !inspectionError)) {
+      return <div className="input-data-loading"><Spin description="读取摘要与预览" /></div>;
+    }
+    if (inspectionError?.versionId === activeVersion.id) {
+      return (
+        <Alert
+          type="error"
+          showIcon
+          title="无法读取当前版本内容"
+          description={inspectionError.message}
+          action={<Button size="small" onClick={() => setInspectionAttempt((value) => value + 1)}>重新加载</Button>}
+        />
+      );
+    }
+    if (!inspectionReady || !summary || !preview) return null;
+
     const metricItems = selectedKind === "position"
       ? [
           `${summary.row_count} 行`,
           `${summary.metrics.sites ?? 0} 个站点`,
           `${summary.metrics.skus ?? 0} 个积加 SKU`,
-          `${summary.metrics.mskus ?? 0} 个 MSKU`,
-          `${errors} 个错误`,
-          `${warnings} 个警告`
+          `${summary.metrics.mskus ?? 0} 个 MSKU`
         ]
       : [`${summary.row_count} 行`, `${summary.columns.length} 个字段`];
 
     return (
       <>
-        <Divider titlePlacement="start">摘要指标</Divider>
-        <Space wrap size={[8, 8]}>
-          {metricItems.map((item) => <Tag key={item} color="blue">{item}</Tag>)}
-        </Space>
-
-        <Divider titlePlacement="start">质量问题</Divider>
-        {selectedKind !== "position" ? (
-          <Alert type="info" showIcon title="文件结构已通过校验，当前未执行内容质量诊断" />
-        ) : summary.issues.length === 0 ? (
-          <Alert type="success" showIcon title="未发现资料质量问题" />
-        ) : (
-          <Space orientation="vertical" size={8} style={{ width: "100%" }}>
-            {summary.issues.map((issue) => (
-              <Alert
-                key={`${issue.code}-${issue.row_numbers.join("-")}`}
-                type={issue.severity}
-                showIcon
-                title={issue.message}
-                description={issue.row_numbers.length > 0 ? `涉及 Excel 行：${issue.row_numbers.join("、")}` : undefined}
-              />
-            ))}
-          </Space>
-        )}
-
-        <Divider titlePlacement="start">内容预览</Divider>
+        <div className="input-data-metric-grid">
+          {metricItems.map((item) => (
+            <div className="input-data-metric" key={item}>
+              <strong>{item}</strong>
+              <span>当前版本</span>
+            </div>
+          ))}
+        </div>
+        <div className="input-data-preview-heading">
+          <div>
+            <Typography.Title level={5}>数据预览</Typography.Title>
+            <Typography.Text type="secondary">用于快速确认字段和内容，不会修改原始文件。</Typography.Text>
+          </div>
+          <Typography.Text type="secondary">
+            当前展示前 {preview.rows.length} 行，共 {preview.total} 行。
+          </Typography.Text>
+        </div>
         <Table<PreviewRow>
+          className="input-data-preview-table"
           rowKey="__previewKey"
           size="small"
           columns={previewColumns}
@@ -277,202 +313,312 @@ export function InputDataPanel({
           scroll={{ x: "max-content" }}
           locale={{ emptyText: "当前版本没有可预览的数据" }}
         />
-        {preview.total > preview.rows.length && (
-          <Typography.Text type="secondary">当前展示前 {preview.rows.length} 行，共 {preview.total} 行。</Typography.Text>
-        )}
       </>
     );
   };
 
+  const renderQuality = () => {
+    if (!activeVersion) {
+      return <Typography.Text type="secondary">启用资料后，这里会显示结构校验与质量提示。</Typography.Text>;
+    }
+    if (!inspectionReady || !summary) {
+      return <Typography.Text type="secondary">正在等待当前版本的检查结果。</Typography.Text>;
+    }
+    if (selectedKind !== "position") {
+      return <Alert type="info" showIcon title="文件结构已通过校验，当前未执行内容质量诊断" />;
+    }
+    if (summary.issues.length === 0) {
+      return <Alert type="success" showIcon title="未发现资料质量问题" />;
+    }
+    return (
+      <Space orientation="vertical" size={8} className="input-data-quality-list">
+        <Space wrap size={[6, 6]}>
+          <Tag color={errors > 0 ? "error" : "default"}>{errors} 个错误</Tag>
+          <Tag color={warnings > 0 ? "warning" : "default"}>{warnings} 个警告</Tag>
+        </Space>
+        {summary.issues.map((issue) => (
+          <Alert
+            key={`${issue.code}-${issue.row_numbers.join("-")}`}
+            type={issue.severity}
+            showIcon
+            title={issue.message}
+            description={issue.row_numbers.length > 0 ? `涉及 Excel 行：${issue.row_numbers.join("、")}` : undefined}
+          />
+        ))}
+      </Space>
+    );
+  };
+
   return (
-    <div className="input-data-panel" style={{ display: "flex", alignItems: "flex-start", gap: 18 }}>
+    <div className="input-data-panel">
       <Card
         className="input-data-catalog"
-        title={<Space><DatabaseOutlined />基础资料</Space>}
-        style={{ flex: "0 0 280px", width: 280 }}
-        styles={{ body: { padding: 8 } }}
+        title={(
+          <div className="input-data-catalog-title">
+            <Space><DatabaseOutlined />基础资料</Space>
+            <Typography.Text type="secondary">{readyKindCount}/{INPUT_KIND_DEFINITIONS.length} 已启用</Typography.Text>
+          </div>
+        )}
       >
-        <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+        <div className="input-data-kind-list">
           {INPUT_KIND_DEFINITIONS.map((definition) => {
             const current = versions.find((version) => version.kind === definition.value && version.active);
             const selected = definition.value === selectedKind;
             return (
               <Button
                 key={definition.value}
+                className={`input-data-kind-button${selected ? " is-selected" : ""}`}
                 aria-label={current
                   ? `${definition.label}，已就绪，当前版本 ${current.name}`
                   : `${definition.label}，未启用，等待上传`}
                 aria-pressed={selected}
                 block
                 disabled={mutationBusy}
-                type={selected ? "primary" : "default"}
                 onClick={() => setSelectedKind(definition.value)}
-                style={{ height: "auto", padding: "11px 12px", whiteSpace: "normal", textAlign: "left" }}
               >
-                <span style={{ display: "flex", width: "100%", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
-                  <span style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <span className="input-data-kind-content">
+                  <span className="input-data-kind-heading">
                     <strong>{definition.label}</strong>
                     {current ? <CheckCircleFilled aria-label="已就绪" /> : <Tag color="warning">未启用</Tag>}
                   </span>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{current?.name ?? "等待上传"}</span>
+                  <span className="input-data-kind-version">{current?.name ?? "等待上传"}</span>
                   <small>{current ? formatDate(current.created_at) : "尚无启用版本"}</small>
                 </span>
               </Button>
             );
           })}
-        </Space>
+        </div>
       </Card>
 
-      <Card
-        className="input-data-detail"
-        title={selectedDefinition.label}
-        style={{ flex: "1 1 auto", minWidth: 0 }}
-        extra={(
-          <Space wrap>
-            {activeVersion && (
-              <Button aria-label="下载当前文件" icon={<DownloadOutlined />} onClick={() => void downloadCurrent()}>
-                下载当前文件
-              </Button>
-            )}
-            {selectedKind === "position" && (
-              <Button
-                aria-label="开始网页维护"
-                type="primary"
-                icon={<ToolOutlined />}
-                disabled={!activeVersion || mutationBusy}
-                onClick={onOpenPositionDraft}
+      <main className="input-data-detail">
+        <Card className="input-data-overview-card">
+          <div className="input-data-overview-grid">
+            <div className="input-data-overview-copy">
+              <Typography.Text className="input-data-eyebrow">资料用途</Typography.Text>
+              <Typography.Title level={3}>{selectedDefinition.label}</Typography.Title>
+              <Typography.Paragraph>{selectedDefinition.purpose}</Typography.Paragraph>
+              <div className="input-data-impact">
+                <span>对业务的影响</span>
+                <p>{selectedDefinition.impact}</p>
+              </div>
+              <div className="input-data-required-fields">
+                <Typography.Text type="secondary">必填字段</Typography.Text>
+                <Space wrap size={[6, 6]}>
+                  {selectedDefinition.requiredFields.map((field) => <Tag key={field}>{field}</Tag>)}
+                </Space>
+              </div>
+            </div>
+
+            <div className={`input-data-current-version${activeVersion ? " is-ready" : ""}`}>
+              <div className="input-data-current-heading">
+                <span>当前生效版本</span>
+                {activeVersion ? <Tag color="success">已启用</Tag> : <Tag color="warning">未启用</Tag>}
+              </div>
+              {activeVersion ? (
+                <>
+                  <strong className="input-data-current-name">{activeVersion.name}</strong>
+                  <Typography.Text className="input-data-current-file" title={activeVersion.original_name}>
+                    {activeVersion.original_name}
+                  </Typography.Text>
+                  <dl className="input-data-current-meta">
+                    <div><dt>上传时间</dt><dd>{formatDate(activeVersion.created_at)}</dd></div>
+                    <div><dt>创建人</dt><dd>用户 #{activeVersion.created_by}</dd></div>
+                  </dl>
+                  <Button
+                    block
+                    aria-label="下载当前文件"
+                    icon={<DownloadOutlined />}
+                    onClick={() => void downloadCurrent()}
+                  >
+                    下载当前文件
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <strong className="input-data-current-name">等待上传首个版本</strong>
+                  <Typography.Text type="secondary">新建批次前请先完成资料启用。</Typography.Text>
+                </>
+              )}
+            </div>
+          </div>
+          {actionError?.kind === selectedKind && (
+            <Alert className="input-data-overview-error" type="error" showIcon closable title="操作失败" description={actionError.message} />
+          )}
+        </Card>
+
+        <div className="input-data-content-grid">
+          <section aria-label="当前数据" className="input-data-main-column">
+            <Card title="当前数据" className="input-data-section-card">
+              {renderCurrentData()}
+            </Card>
+          </section>
+
+          <aside className="input-data-side-column">
+            <section aria-label="维护操作">
+              <Card title="维护操作" className="input-data-section-card input-data-maintenance-card">
+                {selectedKind === "position" && activeVersion ? (
+                  <div className="input-data-draft-entry">
+                    <Tag color="processing">推荐流程</Tag>
+                    <Typography.Title level={5}>库位资料已有正式版本</Typography.Title>
+                    <Typography.Paragraph type="secondary">
+                      请使用“开始网页维护”进入草稿流程，检查差异与质量问题后发布新版本。
+                    </Typography.Paragraph>
+                    <ol>
+                      <li>网页修改自动保存草稿</li>
+                      <li>发布前检查差异和质量问题</li>
+                      <li>确认后生成新的正式版本</li>
+                    </ol>
+                    <Button
+                      block
+                      aria-label="开始网页维护"
+                      type="primary"
+                      icon={<ToolOutlined />}
+                      disabled={mutationBusy}
+                      onClick={onOpenPositionDraft}
+                    >
+                      开始网页维护
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Typography.Title level={5}>
+                      {activeVersion ? "上传替换当前版本" : "上传首个版本"}
+                    </Typography.Title>
+                    <Typography.Paragraph type="secondary">
+                      先选择文件并核对名称，再手动确认。校验通过后立即启用，仅影响以后创建的批次。
+                    </Typography.Paragraph>
+                    {uploadError?.kind === selectedKind && (
+                      <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError.message} />
+                    )}
+                    <Form form={uploadForm} layout="vertical">
+                      <Form.Item
+                        label="新版本名称"
+                        name="name"
+                        rules={[{ required: true, message: "请输入版本名称" }]}
+                      >
+                        <Input disabled={mutationBusy} placeholder={`例如：${selectedKind}-20260721`} />
+                      </Form.Item>
+                      <Upload.Dragger
+                        className="input-data-uploader"
+                        disabled={mutationBusy}
+                        accept=".xls,.xlsx"
+                        maxCount={1}
+                        multiple={false}
+                        beforeUpload={() => false}
+                        fileList={pendingFiles}
+                        onChange={selectUploadFile}
+                      >
+                        <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                        <p className="ant-upload-text">拖放 Excel 到这里，或点击选择</p>
+                        <p className="ant-upload-hint">支持 .xls、.xlsx；选择后不会立即生效</p>
+                      </Upload.Dragger>
+                      <Button
+                        className="input-data-upload-submit"
+                        block
+                        type="primary"
+                        icon={<UploadOutlined />}
+                        aria-label="校验并启用新版本"
+                        aria-busy={uploading}
+                        disabled={mutationBusy}
+                        loading={uploading}
+                        onClick={() => void uploadVersion()}
+                      >
+                        校验并启用新版本
+                      </Button>
+                    </Form>
+                    <Typography.Paragraph className="input-data-upload-impact" type="secondary">
+                      已有批次继续使用创建时锁定的旧版本，不会被替换。
+                    </Typography.Paragraph>
+                  </>
+                )}
+              </Card>
+            </section>
+
+            <section aria-label="质量检查">
+              <Card
+                title="质量检查"
+                className="input-data-section-card input-data-quality-card"
+                extra={inspectionReady && selectedKind === "position" ? <Tag>{errors + warnings} 项提示</Tag> : undefined}
               >
-                开始网页维护
-              </Button>
-            )}
-          </Space>
-        )}
-      >
-        <Typography.Paragraph strong>{selectedDefinition.purpose}</Typography.Paragraph>
-        <Descriptions
-          size="small"
-          column={1}
-          items={[
-            { key: "impact", label: "影响范围", children: selectedDefinition.impact },
-            { key: "fields", label: "必填字段", children: selectedDefinition.requiredFields.join("、") }
-          ]}
-        />
+                {renderQuality()}
+              </Card>
+            </section>
+          </aside>
+        </div>
 
-        {actionError?.kind === selectedKind && (
-          <Alert type="error" showIcon closable title="操作失败" description={actionError.message} />
-        )}
-
-        <Divider titlePlacement="start">当前启用版本</Divider>
-        {loading ? (
-          <div style={{ minHeight: 120, display: "grid", placeItems: "center" }}><Spin description="读取资料状态" /></div>
-        ) : !activeVersion ? (
-          <Alert
-            type="warning"
-            showIcon
-            title={`${selectedDefinition.label}尚无启用版本`}
-            description="请在下方上传并启用一个通过校验的 Excel 版本。"
-          />
-        ) : (
-          <>
-            <Descriptions
+        <section aria-label="版本记录">
+          <Card
+            title="版本记录"
+            className="input-data-section-card input-data-history-card"
+            extra={<Typography.Text type="secondary">共 {selectedVersions.length} 个版本</Typography.Text>}
+          >
+            <Table<InputVersion>
+              rowKey="id"
               size="small"
-              bordered
-              column={2}
-              items={[
-                { key: "name", label: "版本", children: activeVersion.name },
-                { key: "file", label: "文件", children: activeVersion.original_name },
-                { key: "creator", label: "创建人", children: `用户 #${activeVersion.created_by}` },
-                { key: "created", label: "上传时间", children: formatDate(activeVersion.created_at) }
+              loading={loading}
+              dataSource={selectedVersions}
+              pagination={selectedVersions.length > 8 ? { pageSize: 8, showSizeChanger: false } : false}
+              scroll={{ x: 720 }}
+              rowClassName={(version) => version.active ? "input-data-active-version-row" : ""}
+              locale={{ emptyText: `暂无${selectedDefinition.label}版本` }}
+              columns={[
+                {
+                  title: "资料版本",
+                  key: "version",
+                  width: 300,
+                  render: (_, version) => (
+                    <div className="input-data-version-cell">
+                      <strong>{version.name}</strong>
+                      <Typography.Text type="secondary" ellipsis={{ tooltip: version.original_name }}>
+                        {version.original_name}
+                      </Typography.Text>
+                    </div>
+                  )
+                },
+                {
+                  title: "上传信息",
+                  key: "created",
+                  width: 230,
+                  render: (_, version) => (
+                    <div className="input-data-version-cell">
+                      <span>{formatDate(version.created_at)}</span>
+                      <Typography.Text type="secondary">用户 #{version.created_by}</Typography.Text>
+                    </div>
+                  )
+                },
+                {
+                  title: "状态",
+                  dataIndex: "active",
+                  width: 120,
+                  render: (active: boolean) => active ? <Tag color="success">当前启用</Tag> : <Tag>历史版本</Tag>
+                },
+                {
+                  title: "操作",
+                  width: 100,
+                  render: (_, version) => version.active || (selectedKind === "position" && activeVersion) ? null : (
+                    <Popconfirm
+                      title={`启用 ${version.name}？`}
+                      description="仅影响以后创建的批次，已有批次继续使用锁定版本。"
+                      okText="确认启用"
+                      cancelText="取消"
+                      onConfirm={() => activateVersion(version)}
+                    >
+                      <Button
+                        type="link"
+                        aria-busy={mutation?.action === "activate" && mutation.versionId === version.id}
+                        disabled={mutationBusy}
+                        loading={mutation?.action === "activate" && mutation.versionId === version.id}
+                      >
+                        启用
+                      </Button>
+                    </Popconfirm>
+                  )
+                }
               ]}
             />
-            {inspectionLoading || (inspectionVersionId !== activeVersion.id && !inspectionError) ? (
-              <div style={{ minHeight: 160, display: "grid", placeItems: "center" }}><Spin description="读取摘要与预览" /></div>
-            ) : inspectionError?.versionId === activeVersion.id ? (
-              <Alert
-                type="error"
-                showIcon
-                title="无法读取当前版本内容"
-                description={inspectionError.message}
-                action={<Button size="small" onClick={() => setInspectionAttempt((value) => value + 1)}>重新加载</Button>}
-              />
-            ) : renderSummary()}
-          </>
-        )}
-
-        <Divider titlePlacement="start">上传替换</Divider>
-        <Typography.Paragraph type="secondary">
-          当前固定上传为“{selectedDefinition.label}”，文件校验通过后立即启用，仅影响以后创建的批次。
-        </Typography.Paragraph>
-        {uploadError?.kind === selectedKind && (
-          <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError.message} />
-        )}
-        <Form form={uploadForm} layout="inline">
-          <Form.Item
-            label="版本名称"
-            name="name"
-            rules={[{ required: true, message: "请输入版本名称" }]}
-          >
-            <Input disabled={mutationBusy} placeholder={`例如：${selectedKind}-20260721`} style={{ width: 260 }} />
-          </Form.Item>
-          <Form.Item>
-            <Upload disabled={mutationBusy} accept=".xls,.xlsx" showUploadList={false} customRequest={uploadVersion}>
-              <Button
-                aria-label="选择 Excel 并上传替换"
-                aria-busy={uploading}
-                disabled={mutationBusy}
-                loading={uploading}
-                icon={<UploadOutlined />}
-              >
-                选择 Excel 并上传替换
-              </Button>
-            </Upload>
-          </Form.Item>
-        </Form>
-
-        <Divider titlePlacement="start">版本记录</Divider>
-        <Table<InputVersion>
-          rowKey="id"
-          size="small"
-          loading={loading}
-          dataSource={selectedVersions}
-          pagination={{ pageSize: 8, showSizeChanger: false }}
-          scroll={{ x: 760 }}
-          locale={{ emptyText: `暂无${selectedDefinition.label}版本` }}
-          columns={[
-            { title: "版本", dataIndex: "name", width: 180 },
-            { title: "文件", dataIndex: "original_name", ellipsis: true, width: 220 },
-            { title: "上传时间", dataIndex: "created_at", width: 190, render: formatDate },
-            {
-              title: "状态",
-              dataIndex: "active",
-              width: 110,
-              render: (active: boolean) => active ? <Tag color="success">当前启用</Tag> : <Tag>历史版本</Tag>
-            },
-            {
-              title: "操作",
-              width: 100,
-              render: (_, version) => version.active ? null : (
-                <Popconfirm
-                  title={`启用 ${version.name}？`}
-                  description="仅影响以后创建的批次，已有批次继续使用锁定版本。"
-                  okText="确认启用"
-                  cancelText="取消"
-                  onConfirm={() => activateVersion(version)}
-                >
-                  <Button
-                    type="link"
-                    aria-busy={mutation?.action === "activate" && mutation.versionId === version.id}
-                    disabled={mutationBusy}
-                    loading={mutation?.action === "activate" && mutation.versionId === version.id}
-                  >
-                    启用
-                  </Button>
-                </Popconfirm>
-              )
-            }
-          ]}
-        />
-      </Card>
+          </Card>
+        </section>
+      </main>
     </div>
   );
 }

@@ -205,6 +205,7 @@ def create_or_resume_draft(
         session.scalars(
             select(InputVersion.id)
             .where(InputVersion.kind == "position")
+            .order_by(InputVersion.id)
             .with_for_update()
         )
     )
@@ -501,6 +502,7 @@ def publish_draft(
             session.scalars(
                 select(InputVersion)
                 .where(InputVersion.kind == "position")
+                .order_by(InputVersion.id)
                 .with_for_update()
             )
         )

@@ -80,6 +80,9 @@ export interface DeliveryException {
   manual_quantity: number;
   reason: string;
   status: string;
+  scale_position: string | number;
+  stocking_position: string | number;
+  ordered_days: string | number;
   parts: SplitPart[];
 }
 
@@ -135,6 +138,8 @@ export interface PositionDraft {
   kind: "position";
   base_version_id: number;
   base_version_name: string;
+  active_version_id: number | null;
+  active_version_name: string | null;
   status: "editing" | "published" | "discarded";
   revision: number;
   created_by: number;
