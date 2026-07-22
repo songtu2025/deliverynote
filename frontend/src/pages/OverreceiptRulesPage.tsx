@@ -167,7 +167,7 @@ export default function OverreceiptRulesPage() {
             description={
               <span>
                 调整时发布新版本。规模定位为空或多个 MSKU 定位冲突时不自动超收；通常不要勾选
-                <Typography.Text code>供应链成品仓</Typography.Text>。仓库留空表示所有仓库都不允许超收。
+                <Typography.Text code>供应商成品本地仓</Typography.Text>。仓库留空表示所有仓库都不允许超收。
               </span>
             }
           />

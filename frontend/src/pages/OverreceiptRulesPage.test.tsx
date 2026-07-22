@@ -26,7 +26,7 @@ describe("OverreceiptRulesPage", () => {
       const url = String(input);
       const method = init?.method ?? "GET";
       if (url.endsWith("/api/overreceipt-rule-versions/warehouses")) {
-        return jsonResponse(["供应链成品仓", "水鞋-广州仓"]);
+        return jsonResponse(["供应商成品本地仓", "水鞋-广州仓"]);
       }
       if (url.endsWith("/api/overreceipt-rule-versions") && method === "GET") {
         return jsonResponse([firstRule]);
@@ -50,7 +50,8 @@ describe("OverreceiptRulesPage", () => {
     expect(screen.getAllByText("短尾 +50").length).toBeGreaterThan(0);
     expect(screen.getAllByText("中尾 +20").length).toBeGreaterThan(0);
     expect(screen.getAllByText("长尾 +10").length).toBeGreaterThan(0);
-    expect(screen.getByText("供应链成品仓")).toBeInTheDocument();
+    expect(screen.getByText("供应商成品本地仓")).toBeInTheDocument();
+    expect(screen.queryByText("供应链成品仓")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("规则版本名称"), {
       target: { value: "2026-08 新规则" }

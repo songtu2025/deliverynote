@@ -361,7 +361,7 @@ class AllocationTests(unittest.TestCase):
 
     def test_warehouse_outside_whitelist_does_not_create_overreceipt_allowance(self):
         self.assertEqual(
-            self.overreceipt_allowances(allowed_warehouses={"供应链成品仓"}),
+            self.overreceipt_allowances(allowed_warehouses={"手套-广州仓"}),
             {},
         )
 
