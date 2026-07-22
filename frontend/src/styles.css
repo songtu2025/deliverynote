@@ -154,6 +154,37 @@ button, input { font: inherit; }
 }
 
 .locked-version-preview strong { color: #17211f; }
+.locked-overreceipt-rule { display: flex; flex-direction: column; gap: 2px; }
+.locked-overreceipt-rule small { color: #66736f; }
+
+.overreceipt-active-card { border-color: #b8d8d0; }
+.overreceipt-eyebrow {
+  display: block;
+  margin-bottom: 10px;
+  color: #176b5b;
+  font-weight: 700;
+}
+.overreceipt-active-content {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(300px, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+}
+.overreceipt-active-content h4 { margin: 0 0 10px !important; }
+.overreceipt-warehouse-list { display: flex; flex-direction: column; gap: 8px; }
+.overreceipt-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.8fr) minmax(620px, 1.4fr);
+  align-items: start;
+  gap: 18px;
+}
+.overreceipt-limit-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.overreceipt-limit-grid .ant-input-number-group-wrapper,
+.overreceipt-limit-grid .ant-input-number { width: 100%; }
 
 .batch-heading { align-items: flex-end; }
 .back-link { padding-left: 0 !important; margin-bottom: 4px; }
@@ -312,6 +343,7 @@ button, input { font: inherit; }
   .summary-metric:nth-child(3) { border-left: none; border-top: 1px solid #e5ebe9; }
   .summary-equation { border-top: 1px solid #e5ebe9; }
   .version-readiness-grid { grid-template-columns: repeat(3, 1fr); }
+  .overreceipt-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 900px) {
@@ -330,6 +362,7 @@ button, input { font: inherit; }
   .export-content > .ant-space { align-items: stretch !important; width: 100%; }
   .version-readiness-grid { grid-template-columns: 1fr 1fr; }
   .toolbar-count { width: 100%; margin-left: 0; }
+  .overreceipt-active-content { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {
@@ -361,6 +394,7 @@ button, input { font: inherit; }
   .split-fields-row { grid-template-columns: 1fr; }
   .split-conservation { grid-template-columns: repeat(3, 1fr); }
   .split-conservation > .anticon { display: none; }
+  .overreceipt-limit-grid { grid-template-columns: 1fr; }
 }
 
 /* Administrator maintenance is a PC workspace (1280–1920px). */

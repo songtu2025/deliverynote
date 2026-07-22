@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..application import SplitPart, project_split
-from ..config import resolve_supplier
+from ..config import PURCHASE_STATUSES, resolve_supplier, warehouse_sort_key
 from ..excel_io import (
     read_delivery_workbook,
     read_position_workbook,
@@ -58,10 +58,12 @@ from .models import (
     AuthSession,
     Batch,
     BatchFile,
+    BatchOverreceiptRule,
     ExceptionRecord,
     InputDraft,
     InputVersion,
     Job,
+    OverreceiptRuleVersion,
     PositionDraftRow,
     SplitRecord,
     User,
@@ -172,6 +174,14 @@ class PublishDraftPayload(DraftMutationPayload):
     confirm_warnings: bool = False
 
 
+class OverreceiptRulePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    short_tail_limit: int = Field(ge=0)
+    medium_tail_limit: int = Field(ge=0)
+    long_tail_limit: int = Field(ge=0)
+    allowed_warehouses: list[str]
+
+
 def _user_json(user: User) -> dict:
     return {
         "id": user.id,
@@ -187,6 +197,20 @@ def _version_json(version: InputVersion) -> dict:
         "kind": version.kind,
         "name": version.name,
         "original_name": version.original_name,
+        "active": version.active,
+        "created_by": version.created_by,
+        "created_at": version.created_at.isoformat(),
+    }
+
+
+def _overreceipt_rule_json(version: OverreceiptRuleVersion) -> dict:
+    return {
+        "id": version.id,
+        "name": version.name,
+        "short_tail_limit": version.short_tail_limit,
+        "medium_tail_limit": version.medium_tail_limit,
+        "long_tail_limit": version.long_tail_limit,
+        "allowed_warehouses": version.allowed_warehouses,
         "active": version.active,
         "created_by": version.created_by,
         "created_at": version.created_at.isoformat(),
@@ -360,6 +384,12 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         .where(BatchFile.batch_id == batch.id)
         .order_by(BatchFile.file_order)
     ).all()
+    overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
+    overreceipt_rule = (
+        session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
+        if overreceipt_binding is not None
+        else None
+    )
     result = {
         "id": batch.id,
         "name": batch.name,
@@ -369,6 +399,11 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
             kind: getattr(batch, field)
             for kind, field in VERSION_FIELDS.items()
         },
+        "overreceipt_rule": (
+            _overreceipt_rule_json(overreceipt_rule)
+            if overreceipt_rule is not None
+            else None
+        ),
         "error_message": batch.error_message,
         "download_ready": bool(batch.zip_path),
         "created_at": batch.created_at.isoformat(),
@@ -614,6 +649,7 @@ def create_app(
     import_candidates: dict[str, dict] = {}
     import_candidates_lock = Lock()
     batch_file_upload_lock = Lock()
+    overreceipt_rule_lock = Lock()
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -992,6 +1028,156 @@ def create_app(
             select(InputVersion).order_by(InputVersion.kind, InputVersion.created_at.desc())
         ).all()
         return [_version_json(version) for version in versions]
+
+    @app.get("/api/overreceipt-rule-versions/warehouses")
+    def list_overreceipt_warehouses(
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        purchase_version = session.scalar(
+            select(InputVersion).where(
+                InputVersion.kind == "purchase",
+                InputVersion.active.is_(True),
+            )
+        )
+        if purchase_version is None:
+            return []
+        try:
+            purchases = read_purchase_workbook(Path(purchase_version.storage_path))
+        except (OSError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"启用的采购需求版本无法读取：{error}",
+            ) from error
+        active = purchases[purchases["单据状态"].isin(PURCHASE_STATUSES)]
+        warehouses = {
+            str(value).strip()
+            for value in active["目的仓"]
+            if not pd.isna(value) and str(value).strip()
+        }
+        return sorted(warehouses, key=warehouse_sort_key)
+
+    @app.get("/api/overreceipt-rule-versions")
+    def list_overreceipt_rule_versions(
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        versions = session.scalars(
+            select(OverreceiptRuleVersion).order_by(
+                OverreceiptRuleVersion.created_at.desc(),
+                OverreceiptRuleVersion.id.desc(),
+            )
+        ).all()
+        return [_overreceipt_rule_json(version) for version in versions]
+
+    @app.post(
+        "/api/overreceipt-rule-versions",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def publish_overreceipt_rule(
+        payload: OverreceiptRulePayload,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        name = payload.name.strip()
+        warehouses = [warehouse.strip() for warehouse in payload.allowed_warehouses]
+        if not name:
+            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
+        if any(not warehouse for warehouse in warehouses):
+            raise HTTPException(status_code=400, detail="允许超收仓库不能为空")
+        if len(set(warehouses)) != len(warehouses):
+            raise HTTPException(status_code=400, detail="允许超收仓库不能重复")
+        warehouses = sorted(warehouses, key=warehouse_sort_key)
+
+        with overreceipt_rule_lock:
+            current_versions = list(
+                session.scalars(
+                    select(OverreceiptRuleVersion)
+                    .order_by(OverreceiptRuleVersion.id)
+                    .with_for_update()
+                )
+            )
+            if any(version.name == name for version in current_versions):
+                raise HTTPException(status_code=409, detail="规则版本名称已存在")
+            for current in current_versions:
+                current.active = False
+            session.flush()
+            version = OverreceiptRuleVersion(
+                name=name,
+                short_tail_limit=payload.short_tail_limit,
+                medium_tail_limit=payload.medium_tail_limit,
+                long_tail_limit=payload.long_tail_limit,
+                allowed_warehouses=warehouses,
+                active=True,
+                created_by=user.id,
+            )
+            session.add(version)
+            try:
+                session.flush()
+                _audit(
+                    session,
+                    user.id,
+                    "publish_overreceipt_rule",
+                    "overreceipt_rule",
+                    version.id,
+                    {
+                        "short_tail_limit": version.short_tail_limit,
+                        "medium_tail_limit": version.medium_tail_limit,
+                        "long_tail_limit": version.long_tail_limit,
+                        "allowed_warehouses": version.allowed_warehouses,
+                    },
+                )
+                session.commit()
+            except IntegrityError as error:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="超收规则发布发生并发冲突，请刷新后重试",
+                ) from error
+        return _overreceipt_rule_json(version)
+
+    @app.post("/api/overreceipt-rule-versions/{version_id}/activate")
+    def activate_overreceipt_rule(
+        version_id: int,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        with overreceipt_rule_lock:
+            versions = list(
+                session.scalars(
+                    select(OverreceiptRuleVersion)
+                    .order_by(OverreceiptRuleVersion.id)
+                    .with_for_update()
+                )
+            )
+            target = next(
+                (version for version in versions if version.id == version_id),
+                None,
+            )
+            if target is None:
+                raise HTTPException(status_code=404, detail="超收规则版本不存在")
+            if target.active:
+                return _overreceipt_rule_json(target)
+            for version in versions:
+                version.active = False
+            session.flush()
+            target.active = True
+            _audit(
+                session,
+                user.id,
+                "activate_overreceipt_rule",
+                "overreceipt_rule",
+                target.id,
+            )
+            try:
+                session.commit()
+            except IntegrityError as error:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="超收规则启用发生并发冲突，请刷新后重试",
+                ) from error
+        return _overreceipt_rule_json(target)
 
     @app.get("/api/input-versions/{version_id}/summary")
     def input_version_summary(
@@ -1634,6 +1820,11 @@ def create_app(
                 status_code=409,
                 detail=f"缺少启用的输入版本：{', '.join(missing)}",
             )
+        active_overreceipt_rule = session.scalar(
+            select(OverreceiptRuleVersion).where(
+                OverreceiptRuleVersion.active.is_(True)
+            )
+        )
         batch = Batch(
             name=payload.name,
             created_by=user.id,
@@ -1644,7 +1835,27 @@ def create_app(
         )
         session.add(batch)
         session.flush()
-        _audit(session, user.id, "create_batch", "batch", batch.id)
+        if active_overreceipt_rule is not None:
+            session.add(
+                BatchOverreceiptRule(
+                    batch_id=batch.id,
+                    rule_version_id=active_overreceipt_rule.id,
+                )
+            )
+        _audit(
+            session,
+            user.id,
+            "create_batch",
+            "batch",
+            batch.id,
+            {
+                "overreceipt_rule_version_id": (
+                    active_overreceipt_rule.id
+                    if active_overreceipt_rule is not None
+                    else None
+                )
+            },
+        )
         session.commit()
         return _batch_json(batch, session)
 

@@ -20,6 +20,15 @@ except ImportError:
     process_data = None
 
 try:
+    from delivery_note.pipeline import (
+        OverreceiptPolicy,
+        build_overreceipt_allowances,
+    )
+except ImportError:
+    OverreceiptPolicy = None
+    build_overreceipt_allowances = None
+
+try:
     from delivery_note.config import build_document_note
 except ImportError:
     build_document_note = None
@@ -175,6 +184,47 @@ class AllocationTests(unittest.TestCase):
             ]
         )
 
+    @staticmethod
+    def positions(rows=None):
+        return pd.DataFrame(
+            rows
+            or [
+                {
+                    "店铺-站点": "SEEKWAY:US",
+                    "积加SKU": "SKU-A",
+                    "MSKU": "MSKU-A",
+                    "规模定位": "短尾",
+                    "备货定位": "备货",
+                    "已下单可售天数": 30,
+                }
+            ]
+        )
+
+    @staticmethod
+    def overreceipt_policy(allowed_warehouses=None):
+        return OverreceiptPolicy(
+            short_tail_limit=50,
+            medium_tail_limit=20,
+            long_tail_limit=10,
+            allowed_warehouses=frozenset(
+                allowed_warehouses or {"水鞋-广州仓"}
+            ),
+        )
+
+    def overreceipt_allowances(
+        self,
+        purchases=None,
+        positions=None,
+        allowed_warehouses=None,
+    ):
+        self.assertIsNotNone(OverreceiptPolicy, "超收规则尚未实现")
+        self.assertIsNotNone(build_overreceipt_allowances, "超收额度计算尚未实现")
+        return build_overreceipt_allowances(
+            purchases if purchases is not None else self.purchases(),
+            positions if positions is not None else self.positions(),
+            self.overreceipt_policy(allowed_warehouses),
+        )
+
     def test_partial_delivery_is_fully_importable(self):
         result = process_data(
             self.delivery(100), self.products(), self.purchases(), "KuangBiao"
@@ -223,6 +273,97 @@ class AllocationTests(unittest.TestCase):
             result.import_rows.iloc[0]["交货备注"], "超出采购未交量：40"
         )
         self.assertEqual(result.exception_rows.iloc[0]["异常原因"], "超出采购未交量")
+
+    def test_short_tail_rule_imports_only_the_configured_overreceipt_quantity(self):
+        purchases = self.purchases(
+            [
+                {
+                    "单据状态": "待交货",
+                    "供应商": "KuangBiao",
+                    "SKU": "SKU-A",
+                    "平台站点": "AMAZON:SEEKWAY:US",
+                    "目的仓": "水鞋-广州仓",
+                    "未交量": 100,
+                }
+            ]
+        )
+        result = process_data(
+            self.delivery(165),
+            self.products(),
+            purchases,
+            "KuangBiao",
+            overreceipt_allowances=self.overreceipt_allowances(purchases=purchases),
+        )
+
+        self.assertEqual(result.delivery_total, 165)
+        self.assertEqual(result.import_total, 150)
+        self.assertEqual(result.manual_total, 15)
+        self.assertEqual(
+            result.import_rows[["*本次交货量", "交货备注"]].to_dict("records"),
+            [
+                {"*本次交货量": 100, "交货备注": ""},
+                {"*本次交货量": 50, "交货备注": "规则允许超收：50"},
+            ],
+        )
+        self.assertEqual(result.exception_rows.iloc[0]["异常原因"], "超出允许超收量")
+        self.assertEqual(result.exception_rows.iloc[0]["人工处理量"], 15)
+
+    def test_blank_scale_does_not_create_overreceipt_allowance(self):
+        positions = self.positions()
+        positions.loc[:, "规模定位"] = ""
+        allowances = self.overreceipt_allowances(positions=positions)
+
+        result = process_data(
+            self.delivery(165),
+            self.products(),
+            self.purchases(
+                [
+                    {
+                        "单据状态": "待交货",
+                        "供应商": "KuangBiao",
+                        "SKU": "SKU-A",
+                        "平台站点": "AMAZON:SEEKWAY:US",
+                        "目的仓": "水鞋-广州仓",
+                        "未交量": 100,
+                    }
+                ]
+            ),
+            "KuangBiao",
+            overreceipt_allowances=allowances,
+        )
+
+        self.assertEqual(result.import_total, 100)
+        self.assertEqual(result.manual_total, 65)
+
+    def test_conflicting_msku_scales_do_not_create_overreceipt_allowance(self):
+        positions = self.positions(
+            [
+                {
+                    "店铺-站点": "SEEKWAY:US",
+                    "积加SKU": "SKU-A",
+                    "MSKU": "MSKU-S",
+                    "规模定位": "短尾",
+                    "备货定位": "备货",
+                    "已下单可售天数": 30,
+                },
+                {
+                    "店铺-站点": "SEEKWAY:US",
+                    "积加SKU": "SKU-A",
+                    "MSKU": "MSKU-M",
+                    "规模定位": "中尾",
+                    "备货定位": "备货",
+                    "已下单可售天数": 30,
+                },
+            ]
+        )
+
+        self.assertEqual(self.overreceipt_allowances(positions=positions), {})
+
+    def test_warehouse_outside_whitelist_does_not_create_overreceipt_allowance(self):
+        self.assertEqual(
+            self.overreceipt_allowances(allowed_warehouses={"供应链成品仓"}),
+            {},
+        )
 
     def test_product_mapping_ambiguity_is_sent_to_manual_processing(self):
         products = self.products(

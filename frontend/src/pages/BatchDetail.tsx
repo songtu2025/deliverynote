@@ -554,13 +554,23 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         />
       </Card>
 
-      <Card title="本批次锁定的基础资料" className="section-card compact-card">
-        <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 5 }}>
+      <Card title="本批次锁定的基础资料与规则" className="section-card compact-card">
+        <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 6 }}>
           {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
             <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
               <Tooltip title={version.original_name}>{version.name}</Tooltip>
             </Descriptions.Item>
           ))}
+          <Descriptions.Item label="超收规则">
+            {batch.overreceipt_rule ? (
+              <span className="locked-overreceipt-rule">
+                <strong>{batch.overreceipt_rule.name}</strong>
+                <small>
+                  短尾 +{batch.overreceipt_rule.short_tail_limit} / 中尾 +{batch.overreceipt_rule.medium_tail_limit} / 长尾 +{batch.overreceipt_rule.long_tail_limit}
+                </small>
+              </span>
+            ) : "未启用（不自动超收）"}
+          </Descriptions.Item>
         </Descriptions>
       </Card>
 

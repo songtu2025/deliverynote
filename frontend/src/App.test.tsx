@@ -33,6 +33,12 @@ describe("App", () => {
             headers: { "Content-Type": "application/json" }
           });
         }
+        if (url.endsWith("/api/overreceipt-rule-versions")) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
         throw new Error(`Unexpected request: ${url}`);
       })
     );
@@ -54,9 +60,26 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
 
     await screen.findByText("交货批次");
+    expect(screen.getByText("超收规则")).toBeInTheDocument();
     expect(screen.getByText("管理员维护")).toBeInTheDocument();
     expect(localStorage.getItem("delivery-note-token")).toBe("token-1");
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+  });
+
+  it("shows overreceipt rule management to operators", async () => {
+    localStorage.setItem("delivery-note-token", "operator-token");
+    localStorage.setItem("delivery-note-user", JSON.stringify({
+      id: 2,
+      username: "operator",
+      role: "operator",
+      active: true
+    }));
+
+    render(<App />);
+
+    await screen.findByText("交货批次");
+    expect(screen.getByText("超收规则")).toBeInTheDocument();
+    expect(screen.queryByText("管理员维护")).not.toBeInTheDocument();
   });
 
   it("returns to login when a stored session expires", async () => {
@@ -77,6 +100,6 @@ describe("App", () => {
     await screen.findByRole("button", { name: /登\s*录/ });
     expect(localStorage.getItem("delivery-note-token")).toBeNull();
     expect(localStorage.getItem("delivery-note-user")).toBeNull();
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   });
 });

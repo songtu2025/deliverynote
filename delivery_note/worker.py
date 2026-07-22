@@ -27,6 +27,7 @@ from .pipeline import (
     EXCEPTION_COLUMNS,
     IMPORT_COLUMNS,
     BatchResult,
+    OverreceiptPolicy,
     build_manual_import_rows,
     enrich_pending_import_rows,
 )
@@ -35,9 +36,11 @@ from .web.models import (
     AuditLog,
     Batch,
     BatchFile,
+    BatchOverreceiptRule,
     ExceptionRecord,
     InputVersion,
     Job,
+    OverreceiptRuleVersion,
     SplitRecord,
 )
 
@@ -181,7 +184,19 @@ def _load_compute_inputs(database: Database, batch_id: int):
             }
             for source in sources
         ]
-    return version_paths, source_data
+        overreceipt_policy = None
+        binding = session.get(BatchOverreceiptRule, batch.id)
+        if binding is not None:
+            rule = session.get(OverreceiptRuleVersion, binding.rule_version_id)
+            if rule is None:
+                raise RuntimeError("批次锁定的超收规则版本不存在")
+            overreceipt_policy = OverreceiptPolicy(
+                short_tail_limit=rule.short_tail_limit,
+                medium_tail_limit=rule.medium_tail_limit,
+                long_tail_limit=rule.long_tail_limit,
+                allowed_warehouses=frozenset(rule.allowed_warehouses or []),
+            )
+    return version_paths, source_data, overreceipt_policy
 
 
 def _execute_compute(
@@ -191,10 +206,17 @@ def _execute_compute(
     claim_token: str,
 ) -> None:
     _heartbeat(database, job_id, claim_token)
-    version_paths, sources = _load_compute_inputs(database, batch_id)
+    version_paths, sources, overreceipt_policy = _load_compute_inputs(
+        database, batch_id
+    )
     supplier_rows = read_supplier_workbook(version_paths["supplier"])
     product_rows = read_product_workbook(version_paths["product"])
     purchase_rows = read_purchase_workbook(version_paths["purchase"])
+    position_rows = (
+        read_position_workbook(version_paths["position"])
+        if overreceipt_policy is not None
+        else None
+    )
     _heartbeat(database, job_id, claim_token)
 
     requests = []
@@ -215,7 +237,13 @@ def _execute_compute(
             )
         )
 
-    batch_result = process_delivery_batch(requests, product_rows, purchase_rows)
+    batch_result = process_delivery_batch(
+        requests,
+        product_rows,
+        purchase_rows,
+        position_data=position_rows,
+        overreceipt_policy=overreceipt_policy,
+    )
     _heartbeat(database, job_id, claim_token)
     payloads = []
     for item in batch_result.items:

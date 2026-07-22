@@ -25,6 +25,17 @@ describe("BatchDetail", () => {
       status: "succeeded",
       created_by: 1,
       version_ids: { purchase: 1, product: 2, supplier: 3, position: 4, template: 5 },
+      overreceipt_rule: {
+        id: 9,
+        name: "短尾超收 V1",
+        short_tail_limit: 50,
+        medium_tail_limit: 20,
+        long_tail_limit: 10,
+        allowed_warehouses: ["水鞋-广州仓"],
+        active: false,
+        created_by: 1,
+        created_at: "2026-07-21T07:00:00"
+      },
       versions: {
         purchase: version(1, "purchase"),
         product: version(2, "product"),
@@ -129,6 +140,8 @@ describe("BatchDetail", () => {
     expect(screen.getByText("短尾")).toBeInTheDocument();
     expect(screen.getByText("备货")).toBeInTheDocument();
     expect(screen.getByText("90")).toBeInTheDocument();
+    expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
+    expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "拆分审校" })[0]);
 
     await screen.findByText("拆分审校 · SKU-A");

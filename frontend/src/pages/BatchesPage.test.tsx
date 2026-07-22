@@ -22,6 +22,17 @@ describe("BatchesPage", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/input-versions")) return jsonResponse(versions);
+      if (url.endsWith("/api/overreceipt-rule-versions")) return jsonResponse([{
+        id: 9,
+        name: "短尾超收 V1",
+        short_tail_limit: 50,
+        medium_tail_limit: 20,
+        long_tail_limit: 10,
+        allowed_warehouses: ["水鞋-广州仓"],
+        active: true,
+        created_by: 1,
+        created_at: "2026-07-21T08:00:00"
+      }]);
       if (url.endsWith("/api/batches")) return jsonResponse([{
         id: 7,
         name: "2026-07-21 交货批次",
@@ -51,6 +62,7 @@ describe("BatchesPage", () => {
     expect(screen.getByRole("button", { name: /新建批次/ })).toBeEnabled();
     expect(screen.getByText("审校待处理")).toBeInTheDocument();
     expect(screen.getByText("2 个文件 · 交货 160")).toBeInTheDocument();
+    expect(screen.getByText("新批次将锁定超收规则：短尾超收 V1")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "2026-07-21 交货批次" }));
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(7));

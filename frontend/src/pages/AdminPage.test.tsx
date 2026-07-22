@@ -449,6 +449,8 @@ describe("AdminPage", () => {
 
   it("shows draft audit labels and resolves operator names", async () => {
     auditLogs = [
+      { id: 8, user_id: 2, action: "activate_overreceipt_rule", entity_type: "overreceipt_rule", entity_id: "9", details: {}, created_at: "2026-07-21T09:07:00" },
+      { id: 7, user_id: 2, action: "publish_overreceipt_rule", entity_type: "overreceipt_rule", entity_id: "9", details: {}, created_at: "2026-07-21T09:06:00" },
       { id: 6, user_id: 1, action: "activate_input_version", entity_type: "input_version", entity_id: "32", details: {}, created_at: "2026-07-21T09:05:00" },
       { id: 5, user_id: 1, action: "publish_input_draft", entity_type: "input_draft", entity_id: "7", details: {}, created_at: "2026-07-21T09:04:00" },
       { id: 4, user_id: 1, action: "discard_input_draft", entity_type: "input_draft", entity_id: "7", details: {}, created_at: "2026-07-21T09:03:00" },
@@ -464,6 +466,8 @@ describe("AdminPage", () => {
     expect(screen.getByText("发布库位版本")).toBeInTheDocument();
     expect(screen.getByText("启用输入版本")).toBeInTheDocument();
     expect(screen.getByText("继续库位草稿")).toBeInTheDocument();
+    expect(screen.getByText("发布超收规则")).toBeInTheDocument();
+    expect(screen.getByText("启用超收规则")).toBeInTheDocument();
     expect(screen.queryByText("resume_input_draft")).not.toBeInTheDocument();
     expect(screen.getAllByText("operator").length).toBeGreaterThan(0);
   });

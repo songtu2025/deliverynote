@@ -21,7 +21,7 @@ import {
 } from "@ant-design/icons";
 
 import { api } from "../api";
-import type { Batch, InputVersion } from "../types";
+import type { Batch, InputVersion, OverreceiptRuleVersion } from "../types";
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: "准备文件",
@@ -83,6 +83,7 @@ export function StatusTag({ status }: { status: string }) {
 export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }) {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [versions, setVersions] = useState<InputVersion[]>([]);
+  const [overreceiptRules, setOverreceiptRules] = useState<OverreceiptRuleVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState("");
@@ -92,12 +93,14 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
   const load = async () => {
     setLoading(true);
     try {
-      const [batchRows, versionRows] = await Promise.all([
+      const [batchRows, versionRows, overreceiptRuleRows] = await Promise.all([
         api<Batch[]>("/api/batches"),
-        api<InputVersion[]>("/api/input-versions")
+        api<InputVersion[]>("/api/input-versions"),
+        api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions")
       ]);
       setBatches(batchRows);
       setVersions(versionRows);
+      setOverreceiptRules(overreceiptRuleRows);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取批次失败");
     } finally {
@@ -114,6 +117,7 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
     [versions]
   );
   const missingKinds = VERSION_KINDS.filter((kind) => !activeVersions[kind.value]);
+  const activeOverreceiptRule = overreceiptRules.find((rule) => rule.active);
   const ready = missingKinds.length === 0;
 
   const filtered = useMemo(() => {
@@ -185,6 +189,17 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
           description={`缺少启用的基础资料：${missingKinds.map((kind) => kind.label).join("、")}。请联系管理员补齐。`}
         />
       )}
+
+      <Alert
+        className="section-card"
+        type={activeOverreceiptRule ? "success" : "info"}
+        showIcon
+        title={
+          activeOverreceiptRule
+            ? `新批次将锁定超收规则：${activeOverreceiptRule.name}`
+            : "尚无启用的超收规则；新批次不会自动超收"
+        }
+      />
 
       <div className="table-toolbar">
         <Input
@@ -287,6 +302,10 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
               <strong>{activeVersions[kind.value]?.name ?? "未启用"}</strong>
             </div>
           ))}
+          <div>
+            <span>超收规则</span>
+            <strong>{activeOverreceiptRule?.name ?? "未启用（不自动超收）"}</strong>
+          </div>
         </div>
       </Modal>
     </div>

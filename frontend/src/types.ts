@@ -27,6 +27,7 @@ export interface Batch {
   status: string;
   created_by: number;
   version_ids: Record<string, number>;
+  overreceipt_rule?: OverreceiptRuleVersion | null;
   error_message: string | null;
   download_ready: boolean;
   created_at: string;
@@ -41,6 +42,18 @@ export interface Batch {
     manual_total: number;
     conserved: boolean;
   };
+}
+
+export interface OverreceiptRuleVersion {
+  id: number;
+  name: string;
+  short_tail_limit: number;
+  medium_tail_limit: number;
+  long_tail_limit: number;
+  allowed_warehouses: string[];
+  active: boolean;
+  created_by: number;
+  created_at: string;
 }
 
 export interface Job {

@@ -15,8 +15,11 @@ from .config import (
 )
 from .pipeline import (
     IMPORT_COLUMNS,
+    OVERRECEIPT_NOTE_PREFIX,
     BatchResult,
+    OverreceiptPolicy,
     build_manual_import_rows,
+    build_overreceipt_allowances,
     process_data,
 )
 
@@ -149,6 +152,8 @@ def _consume_purchase_rows(
     purchases.loc[:, "未交量"] = numeric
 
     for _, imported in imports.iterrows():
+        if str(imported["交货备注"]).startswith(OVERRECEIPT_NOTE_PREFIX):
+            continue
         remaining = int(imported["*本次交货量"])
         mask = (
             purchases["状态"].isin(PURCHASE_STATUSES)
@@ -175,10 +180,21 @@ def process_delivery_batch(
     deliveries: Iterable[DeliveryRequest],
     product_info: pd.DataFrame,
     purchase_data: pd.DataFrame,
+    position_data: pd.DataFrame | None = None,
+    overreceipt_policy: OverreceiptPolicy | None = None,
 ) -> DeliveryBatchResult:
     """Process every source against one shared, in-memory purchase snapshot."""
 
     shared_purchases = purchase_data.copy(deep=True)
+    overreceipt_allowances = None
+    if overreceipt_policy is not None:
+        if position_data is None:
+            raise ValueError("启用超收规则时必须提供排查表")
+        overreceipt_allowances = build_overreceipt_allowances(
+            shared_purchases,
+            position_data,
+            overreceipt_policy,
+        )
     items: list[DeliveryItemResult] = []
     for file_order, delivery in enumerate(deliveries, start=1):
         document_note = ""
@@ -198,6 +214,7 @@ def process_delivery_batch(
             shared_purchases,
             delivery.supplier_name,
             delivery.supplier_code,
+            overreceipt_allowances=overreceipt_allowances,
         )
         _consume_purchase_rows(shared_purchases, result.import_rows, delivery.supplier_name)
         if document_note:

@@ -16,6 +16,7 @@ import {
 import {
   ApartmentOutlined,
   LogoutOutlined,
+  SafetyCertificateOutlined,
   SettingOutlined,
   UserOutlined
 } from "@ant-design/icons";
@@ -24,6 +25,7 @@ import { api, AUTH_EXPIRED_EVENT, getToken, setToken } from "./api";
 import AdminPage from "./pages/AdminPage";
 import BatchDetail from "./pages/BatchDetail";
 import BatchesPage from "./pages/BatchesPage";
+import OverreceiptRulesPage from "./pages/OverreceiptRulesPage";
 import type { User } from "./types";
 
 const USER_KEY = "delivery-note-user";
@@ -90,10 +92,11 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
 }
 
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [page, setPage] = useState<"batches" | "admin">("batches");
+  const [page, setPage] = useState<"batches" | "overreceipt" | "admin">("batches");
   const [batchId, setBatchId] = useState<number | null>(null);
   const menuItems = [
     { key: "batches", icon: <ApartmentOutlined />, label: "批次处理" },
+    { key: "overreceipt", icon: <SafetyCertificateOutlined />, label: "超收规则" },
     ...(user.role === "admin"
       ? [{ key: "admin", icon: <SettingOutlined />, label: "管理员维护" }]
       : [])
@@ -111,7 +114,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           selectedKeys={[page]}
           items={menuItems}
           onClick={({ key }) => {
-            setPage(key as "batches" | "admin");
+            setPage(key as "batches" | "overreceipt" | "admin");
             setBatchId(null);
           }}
         />
@@ -130,6 +133,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             <BatchDetail batchId={batchId} onBack={() => setBatchId(null)} />
           ) : page === "admin" && user.role === "admin" ? (
             <AdminPage currentUser={user} />
+          ) : page === "overreceipt" ? (
+            <OverreceiptRulesPage />
           ) : (
             <BatchesPage onOpen={setBatchId} />
           )}

@@ -15,6 +15,8 @@ const AUDIT_LABELS: Record<string, string> = {
   import_input_draft: "导入库位草稿",
   discard_input_draft: "放弃库位草稿",
   publish_input_draft: "发布库位版本",
+  publish_overreceipt_rule: "发布超收规则",
+  activate_overreceipt_rule: "启用超收规则",
   create_batch: "创建批次",
   upload_batch_file: "上传交货文件",
   delete_batch_file: "删除交货文件",
