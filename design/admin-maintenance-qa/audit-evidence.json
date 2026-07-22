@@ -1,5 +1,5 @@
 {
-  "audit_date": "2026-07-21",
+  "audit_date": "2026-07-22",
   "browser": "Google Chrome 146.0.7680.71",
   "scope": "管理员维护 PC 端：基础资料、库位网页草稿、发布校验、用户账号和操作记录",
   "environment": "隔离 Docker Compose QA 项目，使用脱敏数据",
