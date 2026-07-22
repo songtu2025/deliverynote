@@ -5,7 +5,7 @@
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 15:38 最新接续状态（新会话先看）
+## 0. 2026-07-22 16:35 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -18,7 +18,7 @@ git diff --check
 ```
 
 - 分支：`feature/admin-maintenance`
-- 当前功能提交：`66b44e3 feat: add versioned overreceipt rules`
+- 当前超收功能提交：`66b44e3 feat: add versioned overreceipt rules`；Worker SIGTERM 修复提交：`e410a7e fix: stop worker gracefully`。
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
 - 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。本交接文档提交后工作树应保持干净。
 - 正式环境仍是 14:37 左右由旧的未提交源码构建的版本；`455b759` 与 `66b44e3` 均尚未部署。不要把“代码已验证”写成“线上已更新”。
@@ -39,11 +39,12 @@ git diff --check
 11. 同一批次按 `供应商 + SKU + 站点` 共享一次超收额度，继续遵循用户文件顺序。先扣采购余额，再扣超收额度；只使用规则允许且原采购快照中真实存在的仓库，剩余超量进入待处理，保持数量守恒。
 12. Worker、批次详情和 A:G 导出已接入锁定规则。脱敏场景在短尾额度 50 时由原 `160 = 100 + 60` 变为 `160 = 150 + 10`，第二个文件导出为 70 可导入、10 待处理，备注为“超出允许超收量：10”。无规则时 CLI 和 Web 原行为不变。
 13. 已新增专用幂等迁移 `python -m delivery_note.migrations.overreceipt_rules`，只创建规则版本表和批次绑定表，不修改既有批次表。
+14. 独立恢复栈停机时稳定发现 Worker 作为容器 PID 1 不响应默认 SIGTERM，Compose 最终将其强制结束为 137。新增显式 SIGTERM/SIGINT 处理：空闲轮询可立即退出，处理中会在 Docker 宽限期内继续当前 `run_once`，完成后停止；进程级回归测试和空闲恢复栈 Compose 停机均验证退出码为 0。
 
 ### 0.3 最近一次完整验证证据
 
 ```text
-Python unittest: 121/121 passed
+Python unittest: 122/122 passed
 Python pip check: passed
 Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
@@ -51,6 +52,11 @@ git diff --check: passed
 Docker Compose config: passed
 Temporary PostgreSQL concurrent upload: passed (`[201, 201]`, orders `[1, 2]`)
 Temporary PostgreSQL overreceipt migration/version lock: passed (one active rule; batch remained on V1 after V2 publish)
+Isolated overreceipt business QA: passed (no rule `160 = 100 + 60`; short-tail 50 `160 = 150 + 10`; A:G and notes passed)
+Operator Chrome QA: passed (`index-2g7-gWL5.js` / `index-gXYtaLj0.css`, no console errors)
+Paired production backup/restore drill: passed (all DB counts matched; 50/50 files and aggregate SHA-256 matched; migration ran twice)
+Restored legacy compatibility: passed (10/10 old batches have no rule binding; restored input download passed)
+Worker Compose SIGTERM: passed after fix (exit 0; previously reproduced 137)
 ```
 
 实际命令：
@@ -79,15 +85,14 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.5 尚未完成与优先级
 
-1. **P0：对 `455b759` 与 `66b44e3` 做隔离 QA，再决定正式部署。** 正式部署前先成对备份 PostgreSQL 和文件卷，在现有数据库执行 `python -m delivery_note.migrations.overreceipt_rules`，再重建 API/Worker/Web；部署前后核对资源哈希、健康检查、日志、唯一启用规则和旧批次无规则兼容，不删除数据卷。
-2. **P1：完成脱敏双文件完整业务验收。** 同时覆盖无规则 `160 = 100 + 60` 与短尾 50 规则 `160 = 150 + 10`、规则发布/批次锁定、待处理、拆分守恒、单文件和 ZIP 导出，并人工核对 Excel 表头、样式、备注和可调列宽/行高。
-3. **P1：完成超收规则 PC 浏览器人工验收。** 自动化测试和构建已通过，但新规则页面尚未做本轮 Chrome 视觉/交互证据采集。
-4. **P1：完成数据库与文件卷成对备份和恢复演练。** 在此之前不得宣称项目完整生产可用。
-5. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
+1. **P0：正式部署前把同机 `/tmp` 成对备份复制到持久受控位置。** 当前可恢复备份目录是 `/tmp/deliverynote-production-backup-20260722-OiF5u4`，恢复证据和 SHA-256 在目录内；该目录含真实数据库与文件，不得加入 Git。独立恢复卷 `deliverynoterestoreqa_postgres_data`、`deliverynoterestoreqa_delivery_data` 已保留。
+2. **P0：决定并执行正式迁移/部署。** 确认生产无 queued/running 任务后，在现有数据库执行 `python -m delivery_note.migrations.overreceipt_rules`，再重建 API/Worker/Web；部署前后核对资源哈希、健康检查、日志、规则表为空且唯一启用约束可用、10 个旧批次无规则兼容，不删除数据卷。
+3. **P1：建立定时与异机成对备份。** 本次同机备份/恢复演练已通过，但尚未形成长期备份策略。
+4. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。当前功能提交为 `66b44e3`；后端 121/121、前端 61/61、pip check、build、Compose config、diff check，以及临时 PostgreSQL 的超收迁移、operator 发布、唯一启用版本和批次锁定均已通过，但新提交尚未部署，线上仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`。下一目标是先做隔离 QA 和成对备份，再执行专用迁移并决定正式部署；同时完成无规则与短尾 50 规则的双场景业务验收。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除部署数据卷。完整业务验收与备份恢复完成前，不要宣称项目完整生产可用。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，Worker SIGTERM 修复为 `e410a7e`；超收规则隔离业务/浏览器 QA、生产数据库与文件卷同机成对备份恢复、旧批次兼容和 Worker 停机均已通过。后端 122/122、前端 61/61、pip check、build、Compose config、diff check 通过。备份仍位于 `/tmp/deliverynote-production-backup-20260722-OiF5u4`，含真实数据且不可提交，正式部署前先复制到持久受控位置。新功能尚未部署，线上仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
 
 ## 1. 接手时先做什么
 
@@ -136,7 +141,7 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 121/121 passed
+Python unittest: 122/122 passed
 Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
 pip check: passed
@@ -144,13 +149,16 @@ Compose YAML static check: passed
 PostgreSQL DDL compile check: passed
 Existing batch-workbench Chrome desktop/tablet/mobile visual QA: passed
 Administrator-maintenance Chrome PC visual QA: passed after publish-dialog viewport fix
+Overreceipt operator Chrome PC and two-file business QA: passed
+Paired production backup and isolated restore drill: passed
+Worker SIGTERM process and Compose shutdown: passed (exit 0)
 Linux Docker Compose build and runtime smoke test: passed
 HTTPS health, login, read API and logout smoke test: passed
 ```
 
 本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1280×800、1440×900 和 1920×1080 PC 验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；最终复审又补上了库位草稿基线保护，维护期间不再允许替换当前库位版本，发布时会再次校验基线，创建/恢复草稿也统一按“版本行 → 草稿行”加锁并在等待后重新读取当前版本。不再把平板和移动端作为本轮完成门槛。
 
-2026-07-22 14:37 左右已从 `feature/admin-maintenance` 工作树的未提交源码执行 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS `/health` 均返回成功；当前前端资源为 `index-BVNBHU_E.js` 和 `index-BfjwUI3X.css`，且已验证资源包含待处理审校的站点、规模定位和备货定位筛选。管理员登录、版本列表只读接口和退出均返回成功；现网没有编辑中的库位草稿，库位写流程及维护期间阻止版本替换已在隔离 PostgreSQL QA 和临时 SQLite 中复验，PostgreSQL 另完成 24 轮双向并发竞争验收，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为完整生产可用。
+2026-07-22 14:37 左右已从 `feature/admin-maintenance` 工作树的未提交源码执行 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS `/health` 均返回成功；当前前端资源为 `index-BVNBHU_E.js` 和 `index-BfjwUI3X.css`，且已验证资源包含待处理审校的站点、规模定位和备货定位筛选。管理员登录、版本列表只读接口和退出均返回成功；现网没有编辑中的库位草稿，库位写流程及维护期间阻止版本替换已在隔离 PostgreSQL QA 和临时 SQLite 中复验，PostgreSQL 另完成 24 轮双向并发竞争验收，未向生产库写入验收草稿。脱敏双文件场景和同机成对备份恢复随后已在独立项目通过，但新规则和并发/审计修复仍未部署到生产；当前不能把本分支状态写成已经上线。
 
 本次自动化验证实际使用：
 
@@ -288,7 +296,7 @@ docker compose up -d
 - 数据库仍主要通过 SQLAlchemy `create_all()` 建表；本次超收新增表已有 `python -m delivery_note.migrations.overreceipt_rules` 专用幂等迁移，但尚无通用 migration history。
 - 自动文件过期清理、数据库定时备份和文件卷备份尚未实现。
 - 管理员账号只在数据库不存在同名用户时创建。修改 `.env` 不会重置已有管理员密码。
-- PostgreSQL 已通过 Linux Compose 真实运行、登录和数据读取冒烟验收；完整脱敏业务流程和备份恢复仍未验收。
+- PostgreSQL 已通过 Linux Compose 真实运行、登录和数据读取冒烟验收；脱敏双文件业务流程和同机成对备份恢复已通过。定时与异机备份仍未建立。
 - 前端生产构建存在单包约 1.1 MB 的体积提示，当前不影响功能，不要为了消除提示优先引入复杂拆包。
 - 库位 Excel 导入预览 Token 保存在单 API 进程内存中，默认 900 秒过期；当前 Compose 单进程部署成立，扩展多 API 进程前必须改为共享状态并补并发测试。
 - 库位资料最多只有一个 `editing` 草稿；行修改会持久化到服务器，但只有发布后才生成不可变的新输入版本并成为新批次可选的当前版本，已有批次继续使用锁定的旧版本。
@@ -341,8 +349,8 @@ codex
 
 1. 记录真实 Docker/PostgreSQL 部署中发现的问题并补回归测试。
 2. 验证外部 HTTPS 代理、上传大小和长任务日志。
-3. 建立 PostgreSQL 与文件卷的成对备份流程。
+3. 把已验证的 PostgreSQL 与文件卷成对备份流程固化为定时、异机任务。
 4. 把本次专用迁移逐步扩展为有版本登记的通用迁移方案。
 5. 根据实际操作反馈补前端关键流程测试，不做无业务依据的界面重构。
 
-完成剩余业务验收和运维门槛前，不要把项目状态标记为生产可用。
+当前新功能仍未正式部署；完成持久备份复制、生产迁移和部署后验收前，不要把本分支状态写成已经上线。
