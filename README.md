@@ -201,7 +201,7 @@ npm run test
 npm run build
 ```
 
-2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 129/129 通过、前端 7 个测试文件共 61/61 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。超收规则的专用迁移、operator 发布、唯一启用版本和批次锁定已在临时 PostgreSQL 17 验证；无规则与短尾 50 的脱敏双文件场景、ZIP A:G 和备注、operator PC 页面也已在独立 Compose 项目验证。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。成对备份脚本另有 6/6 专用测试通过，最终版已对正式 Compose 完成只读预检，但尚未安装定时器或执行异机同步。
+2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 129/129 通过、前端 7 个测试文件共 61/61 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。超收规则的专用迁移、operator 发布、唯一启用版本和批次锁定已在临时 PostgreSQL 17 验证；无规则与短尾 50 的脱敏双文件场景、ZIP A:G 和备注、operator PC 页面也已在独立 Compose 项目验证。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。成对备份脚本另有 6/6 专用测试通过，最终版已对正式 Compose 完成只读预检，并在独立恢复栈真实生成和校验数据库 dump、50 个文件的卷归档及服务恢复；尚未安装定时器或执行异机同步。
 
 ## 项目完成标准
 

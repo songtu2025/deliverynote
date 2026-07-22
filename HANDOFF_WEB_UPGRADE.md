@@ -1,11 +1,11 @@
 # 供应链交货处理系统 Linux/Codex CLI 交接
 
-- 更新时间：2026-07-22 19:09（Asia/Shanghai）
+- 更新时间：2026-07-22 19:27（Asia/Shanghai）
 - 仓库：`https://github.com/songtu2025/deliverynote.git`
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 19:09 最新接续状态（新会话先看）
+## 0. 2026-07-22 19:27 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -19,6 +19,7 @@ git diff --check
 
 - 分支：`feature/admin-maintenance`
 - 当前超收功能提交：`66b44e3 feat: add versioned overreceipt rules`；Worker SIGTERM 修复提交：`e410a7e fix: stop worker gracefully`；仓库正式名称修复提交：`0b4ba6b fix: use canonical local warehouse name`。
+- 成对备份工作流提交：`13a7b96 feat: add paired backup workflow`。脚本和 systemd 示例已提交，但正式 timer 与异机目标尚未配置。
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
 - 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。本交接文档提交后工作树应保持干净。
 - 2026-07-22 16:43 已完成正式迁移和全栈重建；18:02 又从提交 `0b4ba6b` 部署仓库正式名称修复，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`。系统初始默认无规则；业务随后由 `admin` 发布了首个正式版本并完成一个规则批次。
@@ -58,6 +59,7 @@ Production Chrome QA: passed (`index-DDAEHKYt.js` / `index-gXYtaLj0.css`, canoni
 Paired production backup/restore drill: passed (all DB counts matched; 50/50 files and aggregate SHA-256 matched; migration ran twice)
 Paired backup script unit tests: 6/6 passed (success, archive failure recovery, timeout, safe tar links/retention, check-only)
 Production backup script check-only: passed (4 services running, 0 active jobs, volume/images resolved)
+Isolated restore-stack paired backup: passed (custom dump 165438 bytes; archive 50 files; SHA-256, safe paths, READY, service resume passed)
 Restored legacy compatibility: passed (10/10 old batches have no rule binding; restored input download passed)
 Worker Compose SIGTERM: passed after fix (exit 0; previously reproduced 137)
 ```
@@ -92,13 +94,13 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.5 尚未完成与优先级
 
-1. **P1：配置并演练定时异机成对备份。** 成对备份脚本、失败恢复、完整标记、安全保留逻辑和 systemd 示例已经实现，正式 Compose 的只读预检通过；尚未确定异机落点与保留周期，因此未安装 timer、未执行新脚本停服备份，也未做异机恢复抽检。
+1. **P1：配置并演练定时异机成对备份。** 成对备份脚本、失败恢复、完整标记、安全保留逻辑和 systemd 示例已经实现，正式 Compose 的只读预检通过；脚本又在独立恢复栈真实生成并校验了 1 个 dump + 50 个文件的归档，服务恢复正常且 QA 栈随后恢复原停止状态。尚未确定异机落点与保留周期，因此未安装 timer、未对正式栈执行新脚本停服备份，也未做异机恢复抽检。
 2. **P1：由业务员决定首个真实规则批次的待处理去向。** 批次 11 的规则、511 明细汇总、单文件/ZIP、A:G、备注和数量守恒已完成只读技术复核；仍需业务员逐条判断 8 条待处理记录应保留还是拆分，技术验收不能代替该业务决定。
 3. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，仓库正式名称修复为 `0b4ba6b`；后端 129/129、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 18:02 已部署最新 Web，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`，页面只使用正式名称“供应商成品本地仓”。生产当前有 11 个批次、1 个规则版本、1 个规则绑定和 0 个活动任务；批次 11 锁定首个正式规则并满足 `7732 = 7221 + 511`。18:10 已只读核对 8 条待处理记录、单文件/ZIP、A:G/H:J、规则额度、备注和数量守恒，技术结果通过且未触发业务写入；业务员仍需决定 511 的实际处置。成对备份脚本及 systemd 示例已实现并通过 6/6 专用测试与正式只读预检，但 timer 未安装、异机目标和保留周期未配置。持久备份位于 `/root/backups/deliverynote/20260722-160803`，但它早于首条规则和批次 11；源临时备份及恢复卷仍保留。下一步配置异机落点后做受控停服备份、同步和恢复抽检。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，仓库正式名称修复为 `0b4ba6b`，成对备份工作流提交为 `13a7b96`；后端 129/129、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 18:02 已部署最新 Web，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`，页面只使用正式名称“供应商成品本地仓”。生产当前有 11 个批次、1 个规则版本、1 个规则绑定和 0 个活动任务；批次 11 锁定首个正式规则并满足 `7732 = 7221 + 511`。18:10 已只读核对 8 条待处理记录、单文件/ZIP、A:G/H:J、规则额度、备注和数量守恒，技术结果通过且未触发业务写入；业务员仍需决定 511 的实际处置。成对备份脚本及 systemd 示例已实现并通过 6/6 专用测试、正式只读预检和独立恢复栈真实备份；QA 备份位于 `/tmp/deliverynote-paired-backup-integration/20260722-192607`，两项 SHA-256、50 个文件、权限和服务恢复均通过，QA 容器已恢复为停止且卷保留。timer 仍未安装，异机目标和保留周期未配置。正式持久备份位于 `/root/backups/deliverynote/20260722-160803`，但它早于首条规则和批次 11。下一步配置异机落点后做正式受控备份、同步和异机恢复抽检。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
 
 ## 1. 接手时先做什么
 
