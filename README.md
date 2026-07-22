@@ -236,7 +236,7 @@ npm run build
 
 当前代码门槛已通过自动化验证；管理员维护和超收规则 PC 端 Chrome 验收、脱敏双文件业务场景均已通过。2026-07-22 已在业务静止窗口内对正式 PostgreSQL 与 `delivery_data` 生成成对备份并恢复到独立 Compose 项目；恢复前后业务表计数一致，50 个文件的路径/内容聚合校验值一致，恢复库迁移两次成功，10 个历史批次保持无规则兼容。恢复演练发现并修复了 Worker 不响应容器 SIGTERM 的问题，进程测试和 Compose 退出码均为 0。成对备份已复制到受控目录 `/root/backups/deliverynote/20260722-160803` 并再次通过 SHA-256 校验。
 
-2026-07-22 16:43（Asia/Shanghai）已从 `feature/admin-maintenance` 提交 `9624c3d` 时的代码状态完成正式超收表迁移和 Compose 重建，批次并发上传、草稿恢复审计、超收规则及 Worker 停机修复均已部署。数据库容器和 `deliverynote_postgres_data` 卷保持原实例；PostgreSQL、API、单 Worker 和 Web 正常运行，本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`。线上前端资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`；真实 HTTPS Chrome 验证了管理员菜单、空规则页、发布表单和 10 个历史批次，控制台零错误。部署后有 10 个历史批次、14 个批次文件、0 个规则版本、0 个批次规则绑定和 0 个活动任务，符合系统初始默认不使用超收规则的要求。只有业务主动发布规则后，此后创建的新批次才会锁定并使用该版本。定时和异机成对备份尚未建立；本次版本已上线不等于整个项目已完整生产可用。
+2026-07-22 16:43（Asia/Shanghai）已从 `feature/admin-maintenance` 完成正式超收表迁移和 Compose 重建；18:02 又从提交 `0b4ba6b` 部署仓库正式名称修复，页面统一使用“供应商成品本地仓”。数据库容器和 `deliverynote_postgres_data` 卷、Worker 实例保持不变；PostgreSQL、API、单 Worker 和 Web 正常运行，本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`。线上前端资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`。真实 HTTPS Chrome 验证了登录、规则页、仓库下拉、本地未提交表单刷新、批次列表、规则批次详情和退出，规则写请求、失败响应与控制台错误均为 0。生产当前有 11 个批次、1 个规则版本、1 个批次规则绑定和 0 个活动任务；批次 11 锁定 `2026-07-22版本` 并满足 `7732 = 7221 + 511`。首个规则批次仍需业务复核待处理明细和下载结果，定时和异机成对备份也尚未建立；本次版本已上线不等于整个项目已完整生产可用。
 
 ## 原有单文件 CLI
 
