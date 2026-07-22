@@ -221,6 +221,34 @@ class WebApiTests(unittest.TestCase):
         ).json()
         self.assertEqual(versions, [])
 
+    def test_initial_state_creates_batches_without_overreceipt_rule(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+
+        rules = self.client.get(
+            "/api/overreceipt-rule-versions",
+            headers=admin_headers,
+        )
+        self.assertEqual(rules.status_code, 200, rules.text)
+        self.assertEqual(rules.json(), [])
+
+        created = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "默认关闭超收"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertIsNone(created.json()["overreceipt_rule"])
+
+        logs = self.client.get("/api/audit-logs", headers=admin_headers).json()
+        create_log = next(
+            log
+            for log in logs
+            if log["action"] == "create_batch"
+            and log["entity_id"] == str(created.json()["id"])
+        )
+        self.assertIsNone(create_log["details"]["overreceipt_rule_version_id"])
+
     def test_operator_can_publish_activate_and_lock_immutable_overreceipt_rules(self):
         admin_headers = self.login("admin", "admin-pass")
         operator = self.create_operator(admin_headers)

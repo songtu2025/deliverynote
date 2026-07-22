@@ -5,7 +5,7 @@
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 16:47 最新接续状态（新会话先看）
+## 0. 2026-07-22 16:53 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -21,7 +21,7 @@ git diff --check
 - 当前超收功能提交：`66b44e3 feat: add versioned overreceipt rules`；Worker SIGTERM 修复提交：`e410a7e fix: stop worker gracefully`；备份恢复记录提交：`9624c3d docs: record backup restore verification`。
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
 - 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。本交接文档提交后工作树应保持干净。
-- 2026-07-22 16:43 已从本工作树提交 `9624c3d` 的代码状态完成正式迁移和 Compose 重建，`455b759`、`66b44e3`、`e410a7e` 已上线；线上资源已更新为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`。首条超收规则尚未发布，当前新批次不会自动超收。
+- 2026-07-22 16:43 已从本工作树提交 `9624c3d` 的代码状态完成正式迁移和 Compose 重建，`455b759`、`66b44e3`、`e410a7e` 已上线；线上资源已更新为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`。系统初始默认不使用超收规则；生产当前没有规则版本，新批次不会自动超收，符合预期。
 - 用户已要求停用 Superpowers 插件；后续会话不要调用 `superpowers:*` 技能。
 
 ### 0.2 本轮已完成的代码工作
@@ -34,7 +34,7 @@ git diff --check
 6. 导出 Excel 的保护策略已在提交 `37339da` 中调整：用户打开导出表后可以自行修改列宽、行高等格式，同时保持业务单元格保护约束。
 7. 批次多文件并发上传的排序竞争已用 API 屏障测试稳定复现：修复前两个请求返回 `[201, 409]`；修复后 SQLite 与临时 PostgreSQL 17 均返回 `[201, 201]`，文件顺序连续为 `[1, 2]`。实现只在文件保存后的短事务内分配顺序，使用当前单 API 进程锁并对 PostgreSQL 批次行执行 `FOR UPDATE`。
 8. POST 恢复已有库位草稿现在会记录 `resume_input_draft`，包含操作人、草稿 ID 和基线版本；操作记录页面显示“继续库位草稿”。GET 只读草稿不会产生审计噪音。
-9. 超收规则已实现为不可变版本。所有现有 `operator` 与 `admin` 都能发布新版本和重新启用历史版本；每次发布/启用都有审计记录。新批次锁定当时唯一启用的规则，后续发布不会改变旧批次。
+9. 系统初始默认不使用超收规则。所有现有 `operator` 与 `admin` 都能按需发布不可变版本和重新启用历史版本；每次发布/启用都有审计记录。只有主动发布规则后，新批次才锁定当时唯一启用的规则，后续发布不会改变旧批次。
 10. 规则按短尾/中尾/长尾配置绝对超收数量和目的仓精确白名单。仓库列表可为空，表示全部禁止；通常不勾选“供应链成品仓”。规模定位为空、未知或同一 SKU/站点下多个 MSKU 定位冲突时不自动超收。
 11. 同一批次按 `供应商 + SKU + 站点` 共享一次超收额度，继续遵循用户文件顺序。先扣采购余额，再扣超收额度；只使用规则允许且原采购快照中真实存在的仓库，剩余超量进入待处理，保持数量守恒。
 12. Worker、批次详情和 A:G 导出已接入锁定规则。脱敏场景在短尾额度 50 时由原 `160 = 100 + 60` 变为 `160 = 150 + 10`，第二个文件导出为 70 可导入、10 待处理，备注为“超出允许超收量：10”。无规则时 CLI 和 Web 原行为不变。
@@ -44,7 +44,7 @@ git diff --check
 ### 0.3 最近一次完整验证证据
 
 ```text
-Python unittest: 122/122 passed
+Python unittest: 123/123 passed
 Python pip check: passed
 Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
@@ -87,14 +87,13 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.5 尚未完成与优先级
 
-1. **P0：由业务确认并发布首条超收规则，或明确继续保持关闭。** 当前规则表为空，所以系统不会自动超收；发布前应再次确认短/中/长尾额度和目的仓精确白名单，通常不要选择“供应链成品仓”。不要为了验收向生产发布虚拟规则。
-2. **P1：观察首个使用规则的真实批次。** 核对批次锁定版本、共享额度、文件顺序、待处理数量、A:G 导出和审计记录；现有自动化与隔离业务 QA 已通过，但生产尚无规则批次。
-3. **P1：建立定时与异机成对备份。** 本次持久同机备份和独立恢复演练已通过，但尚未形成长期、异机备份策略。
-4. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
+1. **P1：建立定时与异机成对备份。** 本次持久同机备份和独立恢复演练已通过，但尚未形成长期、异机备份策略。
+2. **P1：未来业务主动启用规则时观察首个真实批次。** 发布前确认短/中/长尾额度和目的仓精确白名单，通常不要选择“供应链成品仓”；随后核对批次锁定版本、共享额度、文件顺序、待处理数量、A:G 导出和审计记录。默认关闭状态不要求发布首条规则，也不要为了验收向生产发布虚拟规则。
+3. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，Worker SIGTERM 修复为 `e410a7e`；后端 122/122、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 16:43 已完成正式迁移和部署，线上资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`，HTTPS API/Chrome 验收通过；生产当前有 10 个历史批次、14 个文件、0 个规则版本和 0 个活动任务。持久备份位于 `/root/backups/deliverynote/20260722-160803`，源临时备份及恢复卷仍保留。下一步应由业务决定是否发布首条真实规则，并建立定时异机成对备份。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，Worker SIGTERM 修复为 `e410a7e`；后端 123/123、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 16:43 已完成正式迁移和部署，线上资源为 `index-2g7-gWL5.js` / `index-gXYtaLj0.css`，HTTPS API/Chrome 验收通过；生产当前有 10 个历史批次、14 个文件、0 个规则版本和 0 个活动任务，符合系统初始默认不使用超收规则的要求。持久备份位于 `/root/backups/deliverynote/20260722-160803`，源临时备份及恢复卷仍保留。下一步优先建立定时异机成对备份；只有业务未来主动启用规则时才发布真实版本并观察首个规则批次。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
 
 ## 1. 接手时先做什么
 
@@ -143,7 +142,7 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 122/122 passed
+Python unittest: 123/123 passed
 Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
 pip check: passed
@@ -160,7 +159,7 @@ HTTPS health, login, read API and logout smoke test: passed
 
 本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1280×800、1440×900 和 1920×1080 PC 验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；最终复审又补上了库位草稿基线保护，维护期间不再允许替换当前库位版本，发布时会再次校验基线，创建/恢复草稿也统一按“版本行 → 草稿行”加锁并在等待后重新读取当前版本。不再把平板和移动端作为本轮完成门槛。
 
-2026-07-22 16:43 已从 `feature/admin-maintenance` 工作树提交 `9624c3d` 时的代码状态执行生产超收表迁移和 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库容器和卷保持原实例，API、Worker、Web 完成重建；本机和外部 HTTPS `/health` 均成功，线上资源更新为 `index-2g7-gWL5.js` 和 `index-gXYtaLj0.css`。真实 HTTPS Chrome 验证了管理员菜单、空规则页、发布表单和 10 个历史批次，控制台零错误；只读 API 验证了全部历史批次及一个 1,685,688 字节的输入文件下载。部署后规则版本和批次绑定均为 0，活动任务为 0，因此不会自动超收。生产部署和当前发布已验证，但首条真实规则及规则批次仍待业务操作，定时异机备份也未建立，不能据此宣称整个项目已完整生产可用。
+2026-07-22 16:43 已从 `feature/admin-maintenance` 工作树提交 `9624c3d` 时的代码状态执行生产超收表迁移和 `WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote up -d --build`。数据库容器和卷保持原实例，API、Worker、Web 完成重建；本机和外部 HTTPS `/health` 均成功，线上资源更新为 `index-2g7-gWL5.js` 和 `index-gXYtaLj0.css`。真实 HTTPS Chrome 验证了管理员菜单、空规则页、发布表单和 10 个历史批次，控制台零错误；只读 API 验证了全部历史批次及一个 1,685,688 字节的输入文件下载。部署后规则版本和批次绑定均为 0，活动任务为 0，符合系统初始默认不使用超收规则的要求。只有业务主动发布规则后，此后创建的新批次才会锁定并使用该版本。生产部署和当前发布已验证，但定时异机备份仍未建立，不能据此宣称整个项目已完整生产可用。
 
 本次自动化验证实际使用：
 
@@ -355,4 +354,4 @@ codex
 4. 把本次专用迁移逐步扩展为有版本登记的通用迁移方案。
 5. 根据实际操作反馈补前端关键流程测试，不做无业务依据的界面重构。
 
-当前新功能已正式部署并通过上述有限生产验收；首条真实规则、真实规则批次观察以及定时异机成对备份仍未完成，不要把“本次版本已上线”扩大表述为“整个项目已完整生产可用”。
+当前新功能已正式部署并通过上述有限生产验收；系统初始默认不使用超收规则，未来只有业务主动启用时才需要观察首个真实规则批次。定时异机成对备份仍未完成，不要把“本次版本已上线”扩大表述为“整个项目已完整生产可用”。
