@@ -95,6 +95,9 @@ BATCH_STATUSES = {
     "expired",
 }
 ROLES = {"admin", "operator"}
+POSITION_DRAFT_REPLACEMENT_BLOCKED_DETAIL = (
+    "存在编辑中的库位草稿，请先发布或放弃草稿再替换当前版本"
+)
 
 
 class LoginPayload(BaseModel):
@@ -251,11 +254,17 @@ def _issue_summary(issues: list[dict]) -> dict:
 def _draft_json(session: Session, draft: InputDraft) -> dict:
     rows = list_draft_rows(session, draft.id)
     active_rows = [row for row in rows if not row.deleted]
+    base_version = session.get(InputVersion, draft.base_version_id)
     issue_summary = _issue_summary(validate_draft(session, draft))
     return {
         "id": draft.id,
         "kind": draft.kind,
         "base_version_id": draft.base_version_id,
+        "base_version_name": (
+            base_version.name
+            if base_version is not None
+            else f"版本 #{draft.base_version_id}"
+        ),
         "status": draft.status,
         "revision": draft.revision,
         "created_by": draft.created_by,
@@ -632,8 +641,21 @@ def create_app(
             session.rollback()
         raise HTTPException(
             status_code=409,
-            detail="草稿已被其他管理员更新，请刷新后重试",
+            detail=str(error).strip() or "草稿已被其他管理员更新，请刷新后重试",
         ) from error
+
+    def ensure_position_replacement_allowed(session: Session) -> None:
+        editing_draft_id = session.scalar(
+            select(InputDraft.id).where(
+                InputDraft.kind == "position",
+                InputDraft.status == "editing",
+            )
+        )
+        if editing_draft_id is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=POSITION_DRAFT_REPLACEMENT_BLOCKED_DETAIL,
+            )
 
     def rollback_integrity_conflict(session: Session, error: Exception) -> None:
         if session.in_transaction():
@@ -825,6 +847,8 @@ def create_app(
             )
         ):
             raise HTTPException(status_code=409, detail="版本名称已存在")
+        if kind == "position" and activate:
+            ensure_position_replacement_allowed(session)
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
@@ -845,11 +869,16 @@ def create_app(
         )
         try:
             if activate:
-                for current in session.scalars(
-                    select(InputVersion)
-                    .where(InputVersion.kind == kind)
-                    .with_for_update()
-                ):
+                current_versions = list(
+                    session.scalars(
+                        select(InputVersion)
+                        .where(InputVersion.kind == kind)
+                        .with_for_update()
+                    )
+                )
+                if kind == "position":
+                    ensure_position_replacement_allowed(session)
+                for current in current_versions:
                     current.active = False
                 session.flush()
             session.add(version)
@@ -863,6 +892,10 @@ def create_app(
                 {"kind": kind},
             )
             session.commit()
+        except HTTPException:
+            session.rollback()
+            destination.unlink(missing_ok=True)
+            raise
         except IntegrityError as error:
             session.rollback()
             destination.unlink(missing_ok=True)
@@ -947,11 +980,16 @@ def create_app(
         if version is None:
             raise HTTPException(status_code=404, detail="输入版本不存在")
         try:
-            for current in session.scalars(
-                select(InputVersion)
-                .where(InputVersion.kind == version.kind)
-                .with_for_update()
-            ):
+            current_versions = list(
+                session.scalars(
+                    select(InputVersion)
+                    .where(InputVersion.kind == version.kind)
+                    .with_for_update()
+                )
+            )
+            if version.kind == "position":
+                ensure_position_replacement_allowed(session)
+            for current in current_versions:
                 current.active = False
             session.flush()
             version.active = True
@@ -963,6 +1001,9 @@ def create_app(
                 version.id,
             )
             session.commit()
+        except HTTPException:
+            session.rollback()
+            raise
         except IntegrityError as error:
             session.rollback()
             raise HTTPException(
@@ -989,11 +1030,16 @@ def create_app(
         if existing is not None:
             version = session.get(InputVersion, existing.base_version_id)
         else:
-            version = session.scalar(
-                select(InputVersion).where(
-                    InputVersion.kind == "position",
-                    InputVersion.active.is_(True),
+            position_versions = list(
+                session.scalars(
+                    select(InputVersion)
+                    .where(InputVersion.kind == "position")
+                    .with_for_update()
                 )
+            )
+            version = next(
+                (current for current in position_versions if current.active),
+                None,
             )
         if version is None:
             raise HTTPException(status_code=404, detail="当前启用的库位版本不存在")

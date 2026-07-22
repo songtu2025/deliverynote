@@ -39,6 +39,7 @@ ROW_FIELDS = (
 FIELD_TO_COLUMN = dict(zip(ROW_FIELDS, POSITION_SOURCE_COLUMNS))
 IDENTITY_FIELDS = ROW_FIELDS[:3]
 _PENDING_PUBLISH_KEY = "position_draft_pending_publish"
+BASE_VERSION_CHANGED_DETAIL = "当前启用的库位版本已变化，请放弃当前草稿后重新开始"
 
 
 class DraftConflict(Exception):
@@ -474,11 +475,19 @@ def publish_draft(
             temporary_path,
             _frame_from_rows(list_draft_rows(session, draft.id)),
         )
-        for current in session.scalars(
-            select(InputVersion)
-            .where(InputVersion.kind == "position")
-            .with_for_update()
-        ):
+        position_versions = list(
+            session.scalars(
+                select(InputVersion)
+                .where(InputVersion.kind == "position")
+                .with_for_update()
+            )
+        )
+        active_version_ids = [
+            current.id for current in position_versions if current.active
+        ]
+        if active_version_ids != [draft.base_version_id]:
+            raise DraftConflict(BASE_VERSION_CHANGED_DETAIL)
+        for current in position_versions:
             current.active = False
         session.flush()
         version = InputVersion(

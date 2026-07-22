@@ -4,6 +4,7 @@
   "scope": "管理员维护 PC 端：基础资料、库位网页草稿、发布校验、用户账号和操作记录",
   "environment": "隔离 Docker Compose QA 项目，使用脱敏数据",
   "viewports": [
+    "1280x800",
     "1440x900",
     "1920x1080"
   ],
@@ -12,6 +13,7 @@
     "production_data_mutated": false,
     "qa_active_version_preserved": true,
     "qa_draft_discarded": true,
+    "qa_replacement_conflict_verified": true,
     "page_horizontal_overflow_px": 0
   },
   "fixed_during_audit": [
@@ -20,6 +22,12 @@
       "problem": "多条警告使 1440x900 首屏看不到弹窗底部操作",
       "resolution": "限制弹窗内容区高度并在内容区滚动，头部与底部操作保持可达",
       "verified_by": "07-publish-errors-1440x900.png, 08-publish-warnings-1440x900.png"
+    },
+    {
+      "surface": "库位草稿基线保护",
+      "problem": "草稿建立后若正式版本发生变化，旧草稿可能覆盖较新的库位版本",
+      "resolution": "维护期间阻止替换当前版本，发布事务再次校验草稿基线，页面显示真实基线并为历史漂移提供放弃出口",
+      "verified_by": "PostgreSQL QA conflict check, 03-draft-workspace-1440x900.png"
     }
   ],
   "steps": [
@@ -28,10 +36,11 @@
       "name": "基础资料目录与当前库位内容",
       "health": "healthy",
       "screenshots": [
+        "02b-base-data-catalog-1280x800.png",
         "01-base-data-catalog-1440x900.png",
         "02-base-data-catalog-1920x1080.png"
       ],
-      "evidence": "五类资料目的和状态可见；当前版本、摘要、质量问题、预览及维护入口层级清楚。"
+      "evidence": "1280、1440 和 1920 三档 PC 视口下，五类资料目的和状态可见；当前版本、摘要、质量问题、预览及维护入口层级清楚。"
     },
     {
       "step": 2,

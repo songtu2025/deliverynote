@@ -134,6 +134,7 @@ export interface PositionDraft {
   id: number;
   kind: "position";
   base_version_id: number;
+  base_version_name: string;
   status: "editing" | "published" | "discarded";
   revision: number;
   created_by: number;

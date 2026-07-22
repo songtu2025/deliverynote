@@ -175,6 +175,56 @@ class PositionDraftTests(unittest.TestCase):
                 0,
             )
 
+    def test_publish_rejects_a_draft_when_its_base_is_no_longer_active(self):
+        with self.database.session() as session:
+            draft = create_or_resume_draft(
+                session, self._version(session), self.admin_id
+            )
+            session.commit()
+            draft_id = draft.id
+            revision = draft.revision
+
+        replacement_path = self.root / "position-v2.xlsx"
+        write_position_workbook(replacement_path, self.base_frame)
+        with self.database.session() as session:
+            session.get(InputVersion, self.version_id).active = False
+            replacement = InputVersion(
+                kind="position",
+                name="position-v2",
+                original_name="position-v2.xlsx",
+                storage_path=str(replacement_path),
+                active=True,
+                created_by=self.admin_id,
+            )
+            session.add(replacement)
+            session.commit()
+            replacement_id = replacement.id
+
+        published_path = self.root / "position-v3.xlsx"
+        with self.database.session() as session:
+            draft = session.get(InputDraft, draft_id)
+            with self.assertRaisesRegex(DraftConflict, "当前启用的库位版本已变化"):
+                publish_draft(
+                    session,
+                    draft,
+                    revision,
+                    self.admin_id,
+                    name="position-v3",
+                    storage_path=published_path,
+                    confirm_warnings=True,
+                )
+            session.rollback()
+
+        self.assertFalse(published_path.exists())
+        self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
+        with self.database.session() as session:
+            self.assertEqual(session.get(InputDraft, draft_id).status, "editing")
+            self.assertTrue(session.get(InputVersion, replacement_id).active)
+            self.assertEqual(
+                session.query(InputVersion).filter_by(name="position-v3").count(),
+                0,
+            )
+
     def test_concurrent_first_create_resumes_committed_winner(self):
         with self.database.session() as session:
             winner = create_or_resume_draft(
@@ -1244,6 +1294,100 @@ class PositionDraftApiTests(unittest.TestCase):
             persisted.json()["diff"],
             {"added": 0, "modified": 0, "deleted": 0, "unchanged": 1},
         )
+
+    def test_active_position_replacement_is_blocked_while_draft_is_editing(self):
+        self.create_draft()
+        detail = "存在编辑中的库位草稿，请先发布或放弃草稿再替换当前版本"
+
+        active_upload = self.client.post(
+            "/api/input-versions/position",
+            headers=self.admin_headers,
+            data={"name": "position-v2-active", "activate": "true"},
+            files={
+                "file": (
+                    "position-v2-active.xlsx",
+                    BytesIO(self.position_bytes()),
+                )
+            },
+        )
+        self.assertEqual(active_upload.status_code, 409, active_upload.text)
+        self.assertEqual(active_upload.json()["detail"], detail)
+
+        inactive_upload = self.client.post(
+            "/api/input-versions/position",
+            headers=self.admin_headers,
+            data={"name": "position-v2-inactive", "activate": "false"},
+            files={
+                "file": (
+                    "position-v2-inactive.xlsx",
+                    BytesIO(self.position_bytes()),
+                )
+            },
+        )
+        self.assertEqual(inactive_upload.status_code, 201, inactive_upload.text)
+        activation = self.client.post(
+            f"/api/input-versions/{inactive_upload.json()['id']}/activate",
+            headers=self.admin_headers,
+        )
+        self.assertEqual(activation.status_code, 409, activation.text)
+        self.assertEqual(activation.json()["detail"], detail)
+
+        versions = self.client.get(
+            "/api/input-versions", headers=self.admin_headers
+        ).json()
+        self.assertTrue(next(item for item in versions if item["id"] == self.version["id"])["active"])
+        self.assertFalse(next(item for item in versions if item["id"] == inactive_upload.json()["id"])["active"])
+        self.assertFalse(any(item["name"] == "position-v2-active" for item in versions))
+
+    def test_resumed_legacy_draft_reports_its_base_and_cannot_overwrite_new_active(self):
+        draft = self.create_draft()
+        replacement_path = self.storage / "master" / "position" / "legacy-v2.xlsx"
+        replacement_path.write_bytes(self.position_bytes())
+        with self.app.state.database.session() as session:
+            session.get(InputVersion, self.version["id"]).active = False
+            replacement = InputVersion(
+                kind="position",
+                name="position-v2",
+                original_name="position-v2.xlsx",
+                storage_path=str(replacement_path),
+                active=True,
+                created_by=draft["created_by"],
+            )
+            session.add(replacement)
+            session.commit()
+            replacement_id = replacement.id
+
+        resumed = self.client.post(
+            "/api/input-drafts/position", headers=self.admin_headers
+        )
+        self.assertEqual(resumed.status_code, 200, resumed.text)
+        self.assertEqual(resumed.json()["base_version_id"], self.version["id"])
+        self.assertEqual(resumed.json()["base_version_name"], "position-v1")
+
+        rejected = self.client.post(
+            f"/api/input-drafts/{draft['id']}/publish",
+            headers=self.admin_headers,
+            json={
+                "revision": draft["revision"],
+                "name": "position-v3",
+                "confirm_warnings": True,
+            },
+        )
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(
+            rejected.json()["detail"],
+            "当前启用的库位版本已变化，请放弃当前草稿后重新开始",
+        )
+        current = self.client.get(
+            "/api/input-drafts/position", headers=self.admin_headers
+        ).json()
+        self.assertEqual(current["status"], "editing")
+        with self.app.state.database.session() as session:
+            self.assertTrue(session.get(InputVersion, replacement_id).active)
+            self.assertEqual(
+                session.query(InputVersion).filter_by(name="position-v3").count(),
+                0,
+            )
 
     def test_draft_and_validate_diff_tracks_edit_restore_add_and_soft_delete(self):
         draft = self.create_draft()

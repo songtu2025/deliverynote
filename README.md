@@ -194,7 +194,7 @@ npm run test
 npm run build
 ```
 
-2026-07-21 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 102/102 通过、前端 6 个测试文件共 54/54 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。管理员维护已用 Google Chrome 完成 1440×900 全流程和 1920×1080 主界面验收，证据在 `design/admin-maintenance-qa/`。
+2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 105/105 通过、前端 6 个测试文件共 55/55 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。
 
 ## 项目完成标准
 

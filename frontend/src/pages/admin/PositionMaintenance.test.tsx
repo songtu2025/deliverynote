@@ -43,6 +43,7 @@ const baseDraft = {
   id: 7,
   kind: "position",
   base_version_id: 31,
+  base_version_name: "position-current",
   status: "editing",
   revision: 3,
   created_by: 1,
@@ -259,6 +260,23 @@ describe("PositionMaintenance", () => {
     expect(body).toMatchObject({ revision: 3, store_site: "SEEKWAY:UK", jiaji_sku: "SKU-B" });
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
+  });
+
+  it("shows the real draft base and blocks edits when the active version changed", async () => {
+    draftResponse = {
+      ...baseDraft,
+      base_version_id: 30,
+      base_version_name: "position-v1"
+    };
+    renderMaintenance();
+
+    expect(await screen.findByText(/草稿基线：position-v1/)).toBeInTheDocument();
+    expect(screen.getByText("草稿基线已过期")).toBeInTheDocument();
+    expect(screen.getByText(/当前正式版本已变为 position-current/)).toBeInTheDocument();
+    expect(screen.getByLabelText("新增记录")).toBeDisabled();
+    expect(screen.getByLabelText("Excel 整表替换")).toBeDisabled();
+    expect(screen.getByText("发布新版本").closest("button")).toBeDisabled();
+    expect(screen.getByText("放弃草稿").closest("button")).toBeEnabled();
   });
 
   it("edits with the current revision and uses only the returned revision for the next mutation", async () => {

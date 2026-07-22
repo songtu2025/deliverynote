@@ -396,7 +396,10 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   const keepBulkDeleteConfirmOpenRef = useRef(false);
   const keepDiscardConfirmOpenRef = useRef(false);
 
-  const actionsDisabled = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
+  const draftUnavailable = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
+  const baseVersionChanged = Boolean(draft && draft.base_version_id !== activeVersion.id);
+  const actionsDisabled = draftUnavailable || baseVersionChanged;
+  const discardDisabled = draftUnavailable;
 
   const invalidateLocalState = (messageText: string) => {
     setConflictMessage(messageText);
@@ -796,7 +799,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
   };
 
   const discardDraft = async () => {
-    if (!draft || actionsDisabled) return false;
+    if (!draft || discardDisabled) return false;
     setBusyAction("discard");
     setActionError(null);
     try {
@@ -957,7 +960,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
             返回基础资料
           </Button>
           <Typography.Title level={2} style={{ margin: 0 }}>库位/排仓网页维护</Typography.Title>
-          <Typography.Text type="secondary">正式版本：{activeVersion.name}。网页修改只保存在服务器草稿，发布前不影响正式数据。</Typography.Text>
+          <Typography.Text type="secondary">草稿基线：{draft.base_version_name}。网页修改只保存在服务器草稿，发布前不影响正式数据。</Typography.Text>
         </div>
         <Space wrap style={{ justifyContent: "flex-end" }}>
           <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void downloadDraft()}>下载草稿</Button>
@@ -993,7 +996,7 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
               if (!await discardDraft()) keepDiscardConfirmOpenRef.current = true;
             }}
           >
-            <Button danger disabled={actionsDisabled} loading={busyAction === "discard"}>放弃草稿</Button>
+            <Button danger disabled={discardDisabled} loading={busyAction === "discard"}>放弃草稿</Button>
           </Popconfirm>
           <Button type="primary" disabled={actionsDisabled} loading={busyAction === "validate"} onClick={() => void openPublish()}>
             发布新版本
@@ -1015,6 +1018,16 @@ export function PositionMaintenance({ activeVersion, onPublished, onBack }: Posi
           </Space>
         )}
       />
+
+      {baseVersionChanged && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          title="草稿基线已过期"
+          description={`当前正式版本已变为 ${activeVersion.name}。为避免覆盖新版本，请放弃当前草稿后重新开始维护。`}
+        />
+      )}
 
       {conflictMessage && (
         <Alert
