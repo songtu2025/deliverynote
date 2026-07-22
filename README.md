@@ -33,6 +33,8 @@ delivery_note/          Python 核心逻辑、FastAPI 和 Worker
 delivery_note/web/      数据库模型、认证和 API
 frontend/               React + TypeScript + Ant Design 前端
 tests/                  Python 单元与端到端测试
+scripts/                验收数据与成对备份运维脚本
+ops/systemd/            成对备份 service/timer 未安装示例
 compose.yaml            PostgreSQL、API、Worker、Web 编排
 Dockerfile              API 和 Worker 镜像
 .env.example            部署环境变量示例
@@ -199,7 +201,7 @@ npm run test
 npm run build
 ```
 
-2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 123/123 通过、前端 7 个测试文件共 61/61 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。超收规则的专用迁移、operator 发布、唯一启用版本和批次锁定已在临时 PostgreSQL 17 验证；无规则与短尾 50 的脱敏双文件场景、ZIP A:G 和备注、operator PC 页面也已在独立 Compose 项目验证。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。
+2026-07-22 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 129/129 通过、前端 7 个测试文件共 61/61 通过、`pip check` 无冲突，生产构建成功。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。超收规则的专用迁移、operator 发布、唯一启用版本和批次锁定已在临时 PostgreSQL 17 验证；无规则与短尾 50 的脱敏双文件场景、ZIP A:G 和备注、operator PC 页面也已在独立 Compose 项目验证。管理员维护已用 Google Chrome 完成 1280×800、1440×900 和 1920×1080 PC 端验收，证据在 `design/admin-maintenance-qa/`。成对备份脚本另有 6/6 专用测试通过，最终版已对正式 Compose 完成只读预检，但尚未安装定时器或执行异机同步。
 
 ## 项目完成标准
 
@@ -284,7 +286,30 @@ docker compose down
 docker compose exec -T db pg_dump -U delivery_note delivery_note > delivery_note.sql
 ```
 
-还需要为 Docker 的 `delivery_data` 卷配置定期快照或文件备份。数据库和文件卷必须一起备份，单独恢复其中一项可能造成记录与文件不一致。
+仅执行上述命令不会包含上传文件。仓库提供了成对备份脚本，先用只读模式检查正式 Compose、活动任务、数据卷和镜像：
+
+```bash
+python scripts/backup_deliverynote.py \
+  --compose-file compose.yaml \
+  --env-file .env \
+  --project-name deliverynote \
+  --destination /srv/backups/deliverynote \
+  --check-only
+```
+
+正式执行时去掉 `--check-only`。脚本会先停止 Web/API 入口、等待已有任务结束，再停止 Worker；数据库保持运行。随后生成 PostgreSQL custom dump 和 `delivery_data` 只读归档，分别通过 `pg_restore --list`、tar 路径/链接/结构及 SHA-256 校验，最后恢复并等待全部服务运行。dump、归档和校验命令默认各有 1 小时硬超时，超时同样会恢复服务。只有所有步骤成功后，时间戳目录才会写入 `READY`；失败目录保留为 `.incomplete-*` 并写入 `FAILED.txt`，不能用于恢复。
+
+每个完整目录包含：
+
+```text
+database.dump
+delivery_data.tar.gz
+BACKUP-METADATA.json
+SHA256SUMS
+READY
+```
+
+`--retention-count` 默认为 `0`，表示不自动删除任何备份。只有显式设置正整数时，脚本才会清理超出数量、名称符合时间戳且含 `READY` 的旧完整目录，不会操作 Docker 卷或其他目录。systemd 示例位于 `ops/systemd/`，复制前必须调整工作目录、`.env` 路径和目标目录；在确认维护窗口、容量监控、异机落点和恢复抽检前不要启用 timer。异机同步应先传输数据和校验文件，最后传输 `READY`，或者先写远端临时目录再原子改名；目标端必须重新核对 `SHA256SUMS`。数据库和文件卷必须作为同一目录的一对进行保留和恢复，单独恢复其中一项可能造成记录与文件不一致。
 
 ## 安全提醒
 

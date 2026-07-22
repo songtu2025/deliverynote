@@ -1,0 +1,21 @@
+[Unit]
+Description=DeliveryNote paired PostgreSQL and file-volume backup
+Requires=docker.service
+After=docker.service
+ConditionPathExists=/etc/deliverynote/backup.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/deliverynote
+EnvironmentFile=/etc/deliverynote/backup.env
+UMask=0077
+ExecStart=/usr/bin/python3 scripts/backup_deliverynote.py --compose-file compose.yaml --env-file /opt/deliverynote/.env --project-name deliverynote --destination ${BACKUP_DESTINATION} --retention-count ${BACKUP_RETENTION_COUNT}
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+[Install]
+WantedBy=multi-user.target

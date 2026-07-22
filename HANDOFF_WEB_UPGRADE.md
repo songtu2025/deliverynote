@@ -1,11 +1,11 @@
 # 供应链交货处理系统 Linux/Codex CLI 交接
 
-- 更新时间：2026-07-22 18:12（Asia/Shanghai）
+- 更新时间：2026-07-22 19:09（Asia/Shanghai）
 - 仓库：`https://github.com/songtu2025/deliverynote.git`
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 18:12 最新接续状态（新会话先看）
+## 0. 2026-07-22 19:09 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -40,11 +40,12 @@ git diff --check
 12. Worker、批次详情和 A:G 导出已接入锁定规则。脱敏场景在短尾额度 50 时由原 `160 = 100 + 60` 变为 `160 = 150 + 10`，第二个文件导出为 70 可导入、10 待处理，备注为“超出允许超收量：10”。无规则时 CLI 和 Web 原行为不变。
 13. 已新增专用幂等迁移 `python -m delivery_note.migrations.overreceipt_rules`，只创建规则版本表和批次绑定表，不修改既有批次表。
 14. 独立恢复栈停机时稳定发现 Worker 作为容器 PID 1 不响应默认 SIGTERM，Compose 最终将其强制结束为 137。新增显式 SIGTERM/SIGINT 处理：空闲轮询可立即退出，处理中会在 Docker 宽限期内继续当前 `run_once`，完成后停止；进程级回归测试和空闲恢复栈 Compose 停机均验证退出码为 0。
+15. 新增 `scripts/backup_deliverynote.py`，把 PostgreSQL custom dump 与 `delivery_data` 只读归档固化为同一原子完成目录；脚本先关闭入口并排空任务，成功或失败都会恢复服务，同时校验 dump、tar 路径、SHA-256 和完整标记。默认保留数量为 0，不自动删除备份；`ops/systemd/` 只提供未安装示例。
 
 ### 0.3 最近一次完整验证证据
 
 ```text
-Python unittest: 123/123 passed
+Python unittest: 129/129 passed
 Python pip check: passed
 Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
@@ -55,6 +56,8 @@ Temporary PostgreSQL overreceipt migration/version lock: passed (one active rule
 Isolated overreceipt business QA: passed (no rule `160 = 100 + 60`; short-tail 50 `160 = 150 + 10`; A:G and notes passed)
 Production Chrome QA: passed (`index-DDAEHKYt.js` / `index-gXYtaLj0.css`, canonical warehouse name, no failed responses or console errors)
 Paired production backup/restore drill: passed (all DB counts matched; 50/50 files and aggregate SHA-256 matched; migration ran twice)
+Paired backup script unit tests: 6/6 passed (success, archive failure recovery, timeout, safe tar links/retention, check-only)
+Production backup script check-only: passed (4 services running, 0 active jobs, volume/images resolved)
 Restored legacy compatibility: passed (10/10 old batches have no rule binding; restored input download passed)
 Worker Compose SIGTERM: passed after fix (exit 0; previously reproduced 137)
 ```
@@ -89,13 +92,13 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.5 尚未完成与优先级
 
-1. **P1：建立定时与异机成对备份。** 本次持久同机备份和独立恢复演练已通过，但尚未形成长期、异机备份策略。
+1. **P1：配置并演练定时异机成对备份。** 成对备份脚本、失败恢复、完整标记、安全保留逻辑和 systemd 示例已经实现，正式 Compose 的只读预检通过；尚未确定异机落点与保留周期，因此未安装 timer、未执行新脚本停服备份，也未做异机恢复抽检。
 2. **P1：由业务员决定首个真实规则批次的待处理去向。** 批次 11 的规则、511 明细汇总、单文件/ZIP、A:G、备注和数量守恒已完成只读技术复核；仍需业务员逐条判断 8 条待处理记录应保留还是拆分，技术验收不能代替该业务决定。
 3. **P2：把本次专用迁移扩展为通用迁移版本登记机制。** 本次新增表已有可执行幂等迁移，但项目还没有通用 migration history。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，仓库正式名称修复为 `0b4ba6b`；后端 123/123、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 18:02 已部署最新 Web，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`，页面只使用正式名称“供应商成品本地仓”。生产当前有 11 个批次、1 个规则版本、1 个规则绑定和 0 个活动任务；批次 11 锁定首个正式规则并满足 `7732 = 7221 + 511`。18:10 已只读核对 8 条待处理记录、单文件/ZIP、A:G/H:J、规则额度、备注和数量守恒，技术结果通过且未触发业务写入；业务员仍需决定 511 的实际处置。持久备份位于 `/root/backups/deliverynote/20260722-160803`，但它早于首条规则和批次 11；源临时备份及恢复卷仍保留。下一步优先建立定时异机成对备份。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，仓库正式名称修复为 `0b4ba6b`；后端 129/129、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 18:02 已部署最新 Web，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`，页面只使用正式名称“供应商成品本地仓”。生产当前有 11 个批次、1 个规则版本、1 个规则绑定和 0 个活动任务；批次 11 锁定首个正式规则并满足 `7732 = 7221 + 511`。18:10 已只读核对 8 条待处理记录、单文件/ZIP、A:G/H:J、规则额度、备注和数量守恒，技术结果通过且未触发业务写入；业务员仍需决定 511 的实际处置。成对备份脚本及 systemd 示例已实现并通过 6/6 专用测试与正式只读预检，但 timer 未安装、异机目标和保留周期未配置。持久备份位于 `/root/backups/deliverynote/20260722-160803`，但它早于首条规则和批次 11；源临时备份及恢复卷仍保留。下一步配置异机落点后做受控停服备份、同步和恢复抽检。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
 
 ## 1. 接手时先做什么
 
@@ -144,7 +147,7 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 123/123 passed
+Python unittest: 129/129 passed
 Frontend Vitest: 7 files, 61/61 passed
 Frontend production build: passed
 pip check: passed
