@@ -59,7 +59,7 @@ Keep the existing assertions that verify `A1` and `A2` are locked, `A3` and late
 Run:
 
 ```bash
-.venv/bin/python -m unittest tests.test_excel_io.ExcelOutputTests.test_write_delivery_workbook_contains_import_details_and_editable_pending_rows -v
+/root/deliverynote/.venv/bin/python -m unittest tests.test_excel_io.ExcelOutputTests.test_write_delivery_workbook_contains_import_details_and_editable_pending_rows -v
 ```
 
 Expected: `FAIL`, with the first new format-permission assertion reporting `AssertionError: True is not false`. This proves the current exported workbook blocks at least one requested formatting operation.
@@ -104,7 +104,7 @@ Do not set `sheet.protection.sheet = False`, do not remove `hidden=True` from pr
 Run:
 
 ```bash
-.venv/bin/python -m unittest tests.test_excel_io.ExcelOutputTests.test_write_delivery_workbook_contains_import_details_and_editable_pending_rows -v
+/root/deliverynote/.venv/bin/python -m unittest tests.test_excel_io.ExcelOutputTests.test_write_delivery_workbook_contains_import_details_and_editable_pending_rows -v
 ```
 
 Expected: `Ran 1 test` followed by `OK`.
@@ -114,8 +114,8 @@ Expected: `Ran 1 test` followed by `OK`.
 Run:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m pip check
+/root/deliverynote/.venv/bin/python -m unittest discover -s tests -v
+/root/deliverynote/.venv/bin/python -m pip check
 ```
 
 Expected: all 108 Python tests pass and `pip check` prints `No broken requirements found.` If the test count has increased because another approved change landed first, every discovered test must still pass.
