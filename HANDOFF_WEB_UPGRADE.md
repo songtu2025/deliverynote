@@ -64,7 +64,7 @@ HTTPS health, login, read API and logout smoke test: passed
 
 本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1280×800、1440×900 和 1920×1080 PC 验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；最终复审又补上了库位草稿基线保护，维护期间不再允许替换当前库位版本，发布时会再次校验基线。不再把平板和移动端作为本轮完成门槛。
 
-2026-07-21 已从 `feature/admin-maintenance` 工作树在 Linux 目标机执行 `docker compose -p deliverynote --env-file /root/deliverynote/.env up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，容器内 Web `/health` 返回成功；视觉修复后的前端资源为 `index-DHi1_OIo.js` 和 `index-DKtrA9Gk.css`。管理员登录、版本列表、当前库位摘要/预览、用户和操作记录只读接口均返回成功；现网没有编辑中的库位草稿，写流程在临时 SQLite/API 存储中复验，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
+2026-07-22 已从提交 `ae0c16b` 的 `feature/admin-maintenance` 工作树在 Linux 目标机执行 `docker compose -p deliverynote --env-file /root/deliverynote/.env up -d --build`。数据库和 API 健康，Worker 与 Web 正常运行，本机和外部 HTTPS `/health` 均返回成功；当前前端资源为 `index-CcxgtQ8v.js` 和 `index-DKtrA9Gk.css`。管理员登录、版本列表只读接口和退出均返回成功；现网没有编辑中的库位草稿，库位写流程及维护期间阻止版本替换已在隔离 PostgreSQL QA 和临时 SQLite 中复验，未向生产库写入验收草稿。完整脱敏业务场景、数据库与文件卷成对备份及恢复演练仍需单独完成，因此当前不标记为生产可用。
 
 本次自动化验证实际使用：
 
