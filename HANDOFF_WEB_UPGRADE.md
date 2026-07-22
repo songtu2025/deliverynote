@@ -5,7 +5,7 @@
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 14:40 最新接续状态（新会话先看）
+## 0. 2026-07-22 15:04 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -18,51 +18,33 @@ git diff --check
 ```
 
 - 分支：`feature/admin-maintenance`
-- 当前提交：`37339da feat: allow formatting protected exports`
+- 当前功能提交：`455b759 fix: serialize uploads and audit draft resumes`（其后仅有本交接文档更新）
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
-- 交接文档更新前，功能工作树共有 15 个未提交的源码/测试文件；加上本交接文档后，`git status --short` 应看到 16 个修改路径。生产环境已经由这些未提交源码构建，因此“审查并形成可追溯提交”是下一会话的最高优先级。
+- 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`。本交接文档提交后工作树应保持干净。
+- 正式环境仍是 14:37 左右由旧的未提交源码构建的版本；`455b759` 尚未部署。不要把“代码已验证”写成“线上已更新”。
 - 用户已要求停用 Superpowers 插件；后续会话不要调用 `superpowers:*` 技能。
 
-当前未提交的 15 个源码/测试文件：
-
-```text
-delivery_note/web/api.py
-delivery_note/web/position_drafts.py
-frontend/src/pages/AdminPage.test.tsx
-frontend/src/pages/BatchDetail.test.tsx
-frontend/src/pages/BatchDetail.tsx
-frontend/src/pages/admin/InputDataPanel.test.tsx
-frontend/src/pages/admin/InputDataPanel.tsx
-frontend/src/pages/admin/PositionMaintenance.test.tsx
-frontend/src/pages/admin/PositionMaintenance.tsx
-frontend/src/styles.css
-frontend/src/test/setup.ts
-frontend/src/types.ts
-tests/test_position_drafts.py
-tests/test_web_api.py
-tests/test_worker.py
-```
-
-交接前统计为 15 个文件、约 1275 行新增、329 行删除。不要按统计数字机械判断是否异常，应逐文件检查实际 diff 与测试覆盖。
-
-### 0.2 本轮已完成并上线的产品能力
+### 0.2 本轮已完成的代码工作
 
 1. 管理员“基础资料”已按 PC 端重做：左侧资料目录显示就绪状态、版本与更新时间；右侧明确用途、业务影响、必填字段、当前版本、数据摘要、预览、质量与历史版本。
 2. “上传替换”改为先选文件，再明确执行“校验并启用新版本”；库位资料存在当前版本时必须走服务端草稿维护流程，保留“自动保存到服务器”。
-3. 库位草稿补强了基线与并发安全：草稿响应使用服务端权威当前版本、按固定顺序加锁、发布前再次校验基线；库位已有版本时禁止通过普通上传绕过草稿发布。相关改动和测试均在未提交 diff 中，提交前仍需最终代码复审。
+3. 库位草稿补强了基线与并发安全：草稿响应使用服务端权威当前版本、按固定顺序加锁、发布前再次校验基线；库位已有版本时禁止通过普通上传绕过草稿发布。
 4. “待处理审校”已展示 `规模定位`、`备货定位`、`已下单可售天数`，多 MSKU 定位值以可读格式展示，并纳入全文搜索。
 5. “待处理审校”已增加 `站点`、`规模定位`、`备货定位` 三个下拉筛选，支持组合筛选、搜索、清空；多 MSKU 定位值会拆成独立筛选项。
 6. 导出 Excel 的保护策略已在提交 `37339da` 中调整：用户打开导出表后可以自行修改列宽、行高等格式，同时保持业务单元格保护约束。
+7. 批次多文件并发上传的排序竞争已用 API 屏障测试稳定复现：修复前两个请求返回 `[201, 409]`；修复后 SQLite 与临时 PostgreSQL 17 均返回 `[201, 201]`，文件顺序连续为 `[1, 2]`。实现只在文件保存后的短事务内分配顺序，使用当前单 API 进程锁并对 PostgreSQL 批次行执行 `FOR UPDATE`。
+8. POST 恢复已有库位草稿现在会记录 `resume_input_draft`，包含操作人、草稿 ID 和基线版本；操作记录页面显示“继续库位草稿”。GET 只读草稿不会产生审计噪音。
 
 ### 0.3 最近一次完整验证证据
 
 ```text
-Python unittest: 111/111 passed
+Python unittest: 113/113 passed
 Python pip check: passed
 Frontend Vitest: 6 files, 59/59 passed
 Frontend production build: passed
 git diff --check: passed
 Docker Compose config: passed
+Temporary PostgreSQL concurrent upload: passed (`[201, 201]`, orders `[1, 2]`)
 ```
 
 实际命令：
@@ -77,12 +59,13 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 ```
 
 最近前端构建仍有单包大于 500 kB 的 Vite 提示，不是构建失败，暂不应优先引入复杂拆包。
+本地最新构建资源为 `index-Cor7HKfT.js` / `index-BfjwUI3X.css`；这不是当前线上资源。
 
 ### 0.4 正式环境状态
 
 - 正式地址：`https://deliverynote.seekwaygroup.com/`
 - 最近部署时间：约 2026-07-22 14:37（Asia/Shanghai）。
-- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 的当前未提交源码。
+- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 在 14:37 左右的旧源码状态，不包含 `455b759`。
 - 当前线上前端资源：`/assets/index-BVNBHU_E.js`、`/assets/index-BfjwUI3X.css`。
 - 本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`；`db`、`api`、`worker`、`web` 均运行，API 健康，日志未发现 traceback 或启动错误。
 - 已验证线上资源包含“全部站点”“全部规模定位”“全部备货定位”。此前只读生产 API 抽查到一个含 14 条待处理记录的批次，14 条均返回新增定位字段且有定位值，登录/列表/读取/退出分别返回 200/200/200/204。
@@ -90,16 +73,15 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.5 尚未完成与优先级
 
-1. **P0：审查并提交当前未提交改动。** 逐文件确认 15 个源码/测试文件，复跑完整验证，使用明确路径暂存，检查 `git diff --cached --name-only` 后再提交；不要把主工作区改动、`.env`、Excel、数据库、日志或输出文件带入提交。
-2. **P0：修复批次多文件并发上传的排序竞争。** 当前并发请求可能同时分配相同或不稳定顺序。先写能稳定复现的 API 测试，再做最小并发控制；必须保持“同一批次按用户指定顺序共享并连续扣减采购余额”。
-3. **P1：复核恢复已有库位草稿时的审计事件。** 确认恢复行为是否缺少应有操作记录；若缺失，先补测试再修复，不改变草稿的单实例与基线规则。
-4. **P1：完成脱敏双文件全流程业务验收。** 覆盖五类资料、共享余额 `160 = 100 + 60`、待处理、拆分守恒、单文件和 ZIP 导出，并核对 Excel 表头、样式、备注和可调列宽/行高。
-5. **P1：完成数据库与文件卷成对备份和恢复演练。** 在此之前不得宣称项目完整生产可用。
-6. **P2：建立最小数据库迁移方案。** 当前仍依赖 SQLAlchemy `create_all()`；仅在确实需要改表时推进。
+1. **P0：明确并实现“超收规则”需求。** 用户希望按 SKU 的规模定位设置绝对超收上限，例如短尾 50、中尾 20、长尾 10，规模定位为空时为 0；还要由业务员配置允许超收的仓库，通常“供应链成品仓”不允许。推荐同一批次按 `SKU + 站点` 共享一次超收额度，跨文件连续扣减，并只分配到规则允许且真实存在采购行的仓库。实现前仍需确认多 MSKU 规模定位不一致时的取值、仓库采用白名单还是黑名单、业务员对应现有 `operator` 还是新增权限，以及规则是否按批次锁定版本。
+2. **P0：决定并执行 `455b759` 的 QA/正式部署。** 当前代码和临时 PostgreSQL 验证已通过，但正式环境尚未包含并发上传与恢复草稿审计修复；部署前后应核对资源哈希、健康检查和日志，不删除数据卷。
+3. **P1：完成脱敏双文件全流程业务验收。** 覆盖五类资料、共享余额 `160 = 100 + 60`、待处理、拆分守恒、单文件和 ZIP 导出，并核对 Excel 表头、样式、备注和可调列宽/行高。
+4. **P1：完成数据库与文件卷成对备份和恢复演练。** 在此之前不得宣称项目完整生产可用。
+5. **P2：建立最小数据库迁移方案。** 当前仍依赖 SQLAlchemy `create_all()`；超收规则若增加表或批次外键，必须同时给出已有 PostgreSQL 的可执行迁移方案。
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。当前 `feature/admin-maintenance` 有 15 个源码/测试文件未提交，加上交接文档共 16 个修改路径，但这些源码已经部署；生产资源为 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`，后端 111/111、前端 59/59、pip check、build 和 diff check 已通过。先审查并整理未提交改动，随后优先用测试复现并修复批次多文件并发上传的排序竞争，再复核恢复库位草稿的审计事件。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除部署数据卷。每阶段只汇报实际验证结果；完整业务验收与备份恢复完成前，不要宣称项目完整生产可用。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。当前代码提交为 `455b759`；后端 113/113、前端 59/59、pip check、build、Compose config、diff check 和临时 PostgreSQL 并发上传验收已通过，但该提交尚未部署，线上仍是 `index-BVNBHU_E.js` / `index-BfjwUI3X.css`。下一目标是先确认超收规则的业务维度和权限，再测试先行实现：短尾/中尾/长尾绝对超收上限、空定位不超收、仓库允许规则、同批次跨文件共享额度和规则版本锁定。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除部署数据卷。完整业务验收与备份恢复完成前，不要宣称项目完整生产可用。
 
 ## 1. 接手时先做什么
 
@@ -146,7 +128,7 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 111/111 passed
+Python unittest: 113/113 passed
 Frontend Vitest: 6 files, 59/59 passed
 Frontend production build: passed
 pip check: passed
