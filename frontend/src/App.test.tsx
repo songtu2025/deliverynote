@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import "./styles.css";
 
 const routeBatch = {
   id: 7,
@@ -154,6 +155,50 @@ describe("App", () => {
       "/api/auth/logout",
       expect.objectContaining({ method: "POST" })
     );
+  });
+
+  it("keeps the standard account header appearance in the batch workspace", async () => {
+    localStorage.setItem("delivery-note-token", "admin-token");
+    localStorage.setItem("delivery-note-user", JSON.stringify({
+      id: 1,
+      username: "admin",
+      role: "admin",
+      active: true
+    }));
+
+    render(<App />);
+
+    await screen.findByRole("heading", { name: "交货批次" });
+    const listHeader = screen.getByRole("group", { name: "当前用户" }).closest(".app-header") as HTMLElement;
+    const listStyle = getComputedStyle(listHeader);
+    const listAppearance = {
+      position: listStyle.position,
+      height: listStyle.height,
+      backgroundColor: listStyle.backgroundColor,
+      borderBottomWidth: listStyle.borderBottomWidth,
+      borderBottomStyle: listStyle.borderBottomStyle,
+      paddingLeft: listStyle.paddingLeft,
+      paddingRight: listStyle.paddingRight
+    };
+
+    fireEvent.click(screen.getByRole("button", { name: "路由测试批次" }));
+    await screen.findByRole("heading", { name: "路由测试批次" });
+    const account = screen.getByRole("group", { name: "当前用户" });
+    const header = account.closest(".app-header") as HTMLElement;
+    const detailStyle = getComputedStyle(header);
+
+    expect(document.querySelector(".batch-focus-layout")).toBeInTheDocument();
+    expect({
+      position: detailStyle.position,
+      height: detailStyle.height,
+      backgroundColor: detailStyle.backgroundColor,
+      borderBottomWidth: detailStyle.borderBottomWidth,
+      borderBottomStyle: detailStyle.borderBottomStyle,
+      paddingLeft: detailStyle.paddingLeft,
+      paddingRight: detailStyle.paddingRight
+    }).toEqual(listAppearance);
+    expect(within(account).getByText("admin")).toBeVisible();
+    expect(within(account).getByText("管理员")).toBeVisible();
   });
 
   it("returns to the top when switching workspaces", async () => {

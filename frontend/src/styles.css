@@ -147,18 +147,6 @@ button, input { font: inherit; }
 .app-content { padding: 28px; overflow: auto; }
 .page-shell { max-width: 1480px; margin: 0 auto; }
 
-.batch-focus-layout > .ant-layout { position: relative; }
-.batch-focus-layout .app-header {
-  position: absolute;
-  top: 0;
-  right: 0;
-  z-index: 10;
-  width: auto;
-  height: 58px;
-  padding: 0 28px !important;
-  border-bottom: 0;
-  background: transparent !important;
-}
 .batch-focus-layout .app-content { padding: 20px 28px 28px; }
 
 .page-heading,
@@ -754,7 +742,6 @@ button, input { font: inherit; }
     font-size: 12px;
   }
   .exception-toolbar { grid-template-columns: 1fr; }
-  .batch-focus-layout .account-identity { display: none; }
 }
 
 /* Administrator maintenance is a PC workspace (1280–1920px). */
