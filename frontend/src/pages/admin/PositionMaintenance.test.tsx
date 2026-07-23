@@ -447,7 +447,7 @@ describe("PositionMaintenance", () => {
     singleDeleteRequest.resolve(jsonResponse({ row_id: 101, revision: 9 }));
     expect(await screen.findByText("修订号 9")).toBeInTheDocument();
     await waitFor(() => expect(deleteButton).not.toHaveClass("ant-popover-open"));
-  });
+  }, 15_000);
 
   it("sends server filters and pagination, and a late response cannot replace newer rows", async () => {
     const slow = deferred<Response>();

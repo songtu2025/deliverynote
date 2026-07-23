@@ -29,8 +29,11 @@ const jsonResponse = (payload: unknown, status = 200) => new Response(
   { status, headers: { "Content-Type": "application/json" } }
 );
 
+let failPublishOnce = false;
+
 describe("OverreceiptRulesPage", () => {
   beforeEach(() => {
+    failPublishOnce = false;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -41,6 +44,10 @@ describe("OverreceiptRulesPage", () => {
         return jsonResponse([firstRule, previousRule]);
       }
       if (url.endsWith("/api/overreceipt-rule-versions") && method === "POST") {
+        if (failPublishOnce) {
+          failPublishOnce = false;
+          return jsonResponse({ detail: "发布服务暂时不可用" }, 500);
+        }
         return jsonResponse({ ...firstRule, id: 2, name: "2026-08 新规则" }, 201);
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -94,5 +101,33 @@ describe("OverreceiptRulesPage", () => {
         allowed_warehouses: ["水鞋-广州仓"]
       });
     });
+  });
+
+  it("keeps a failed publication confirmation open and allows retry", async () => {
+    failPublishOnce = true;
+    render(<OverreceiptRulesPage />);
+
+    await screen.findByText("当前启用版本");
+    fireEvent.change(screen.getByLabelText("规则版本名称"), {
+      target: { value: "2026-08 重试规则" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "发布并用于新批次" }));
+
+    const ruleName = await screen.findByText("2026-08 重试规则");
+    const dialog = ruleName.closest<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const confirmButton = within(dialog!).getByRole("button", { name: "确认发布" });
+    fireEvent.click(confirmButton);
+
+    expect(await screen.findByText("发布服务暂时不可用")).toBeInTheDocument();
+    expect(dialog).toBeInTheDocument();
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+
+    fireEvent.click(confirmButton);
+    await waitFor(() => {
+      const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST");
+      expect(posts).toHaveLength(2);
+    });
+    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
   });
 });

@@ -333,7 +333,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const [stockingFilter, setStockingFilter] = useState<string>();
   const [reviewScope, setReviewScope] = useState<ReviewScope>("unfinished");
   const [reasonFilter, setReasonFilter] = useState<string>();
-  const [lockedDataOpen, setLockedDataOpen] = useState(false);
+  const [lockedDataOpen, setLockedDataOpen] = useState(true);
   const [splitForm] = Form.useForm<SplitFormValues>();
   const splitParts = Form.useWatch("parts", splitForm) ?? [];
   const pollingJob = useRef<number | null>(null);

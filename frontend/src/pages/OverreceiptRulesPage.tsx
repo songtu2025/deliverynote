@@ -57,6 +57,7 @@ export default function OverreceiptRulesPage() {
   const [activatingId, setActivatingId] = useState<number>();
   const [error, setError] = useState<string | null>(null);
   const [form] = Form.useForm<RuleForm>();
+  const [modal, modalContextHolder] = Modal.useModal();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -102,7 +103,7 @@ export default function OverreceiptRulesPage() {
   const confirmPublish = async () => {
     try {
       const values = await form.validateFields();
-      Modal.confirm({
+      await modal.confirm({
         title: "确认发布不可变版本？",
         content: (
           <div className="overreceipt-confirm-summary">
@@ -158,6 +159,7 @@ export default function OverreceiptRulesPage() {
 
   return (
     <div className="page-shell overreceipt-page">
+      {modalContextHolder}
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>超收规则</Typography.Title>

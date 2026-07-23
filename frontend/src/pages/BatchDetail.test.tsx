@@ -211,10 +211,12 @@ describe("BatchDetail", () => {
     expect(screen.getByRole("button", { name: "查看并处理（60）" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
+    expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
+    expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "收起锁定版本" }));
     expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
-    expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
     expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
 
