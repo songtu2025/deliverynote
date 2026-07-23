@@ -15,7 +15,6 @@ import {
   Space,
   Spin,
   Steps,
-  Switch,
   Table,
   Tag,
   Tooltip,
@@ -68,6 +67,7 @@ const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
 };
 
 type SplitFormValues = { parts: SplitPart[] };
+type ReviewScope = "unfinished" | "resolved" | "all";
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -106,6 +106,15 @@ function EvidenceMetric({ label, value }: { label: string; value: number }) {
       <strong>{value}</strong>
     </span>
   );
+}
+
+function unresolvedQuantity(exception: DeliveryException): number {
+  if (exception.parts.length) {
+    return exception.parts
+      .filter((part) => !part.resolved)
+      .reduce((sum, part) => sum + Number(part.quantity), 0);
+  }
+  return exception.status === "resolved" ? 0 : exception.manual_quantity;
 }
 
 function ExceptionEvidence({
@@ -277,7 +286,7 @@ function ReasonGuidance({
           showIcon
           type="warning"
           title="选择候选站点"
-          description="请在下方候选项中选择正确的完整站点，再将需要导入的拆分项切换为“可正式导入”。"
+          description="请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
         />
       </div>
     );
@@ -322,7 +331,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const [siteFilter, setSiteFilter] = useState<string>();
   const [scaleFilter, setScaleFilter] = useState<string>();
   const [stockingFilter, setStockingFilter] = useState<string>();
-  const [statusFilter, setStatusFilter] = useState<string>();
+  const [reviewScope, setReviewScope] = useState<ReviewScope>("unfinished");
   const [reasonFilter, setReasonFilter] = useState<string>();
   const [splitForm] = Form.useForm<SplitFormValues>();
   const splitParts = Form.useWatch("parts", splitForm) ?? [];
@@ -356,6 +365,26 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     if (isActiveJob(jobs?.export)) return jobs.export;
     return undefined;
   }, [batch?.jobs]);
+
+  useEffect(() => {
+    if (!splitTarget) return;
+    splitForm.resetFields();
+    splitForm.setFieldsValue({
+      parts: splitTarget.parts.length
+        ? splitTarget.parts
+        : [
+            {
+              quantity: splitTarget.manual_quantity,
+              destination: splitTarget.destination,
+              site: splitTarget.full_site.includes("、") ? "" : splitTarget.full_site,
+              supplier_code: "",
+              sku: splitTarget.sku,
+              delivery_note: splitTarget.reason,
+              resolved: false
+            }
+          ]
+    });
+  }, [splitForm, splitTarget]);
 
   useEffect(() => {
     if (!activeJob || pollingJob.current === activeJob.id) return;
@@ -424,6 +453,15 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     () => filterOptions(exceptions.flatMap((item) => positionFilterValues(item.stocking_position))),
     [exceptions]
   );
+  const reviewStats = useMemo(() => {
+    const unfinished = exceptions.filter((item) => item.status !== "resolved");
+    return {
+      unfinishedCount: unfinished.length,
+      unfinishedQuantity: unfinished.reduce((sum, item) => sum + unresolvedQuantity(item), 0),
+      resolvedCount: exceptions.filter((item) => item.status === "resolved").length,
+      totalCount: exceptions.length
+    };
+  }, [exceptions]);
   const filteredExceptions = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("zh-CN");
     return exceptions.filter((item) => {
@@ -437,14 +475,16 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         formatPositionValue(item.stocking_position),
         formatPositionValue(item.ordered_days)
       ].join(" ").toLocaleLowerCase("zh-CN");
+      const matchesScope = reviewScope === "all"
+        || (reviewScope === "resolved" ? item.status === "resolved" : item.status !== "resolved");
       return (!keyword || haystack.includes(keyword))
         && (!siteFilter || item.full_site === siteFilter)
         && (!scaleFilter || positionFilterValues(item.scale_position).includes(scaleFilter))
         && (!stockingFilter || positionFilterValues(item.stocking_position).includes(stockingFilter))
-        && (!statusFilter || item.status === statusFilter)
+        && matchesScope
         && (!reasonFilter || item.reason === reasonFilter);
     });
-  }, [exceptions, fileById, query, reasonFilter, scaleFilter, siteFilter, statusFilter, stockingFilter]);
+  }, [exceptions, fileById, query, reasonFilter, reviewScope, scaleFilter, siteFilter, stockingFilter]);
 
   const runAction = async (name: string, operation: () => Promise<void>) => {
     setAction(name);
@@ -515,22 +555,18 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
 
   const openSplit = (record: DeliveryException) => {
     setSplitTarget(record);
-    splitForm.setFieldsValue({
-      parts: record.parts.length
-        ? record.parts
-        : [
-            {
-              quantity: record.manual_quantity,
-              destination: record.destination,
-              site: record.full_site.includes("、") ? "" : record.full_site,
-              supplier_code: "",
-              sku: record.sku,
-              delivery_note: record.reason,
-              resolved: false
-            }
-          ]
-    });
   };
+
+  const currentReviewIndex = splitTarget
+    ? filteredExceptions.findIndex((item) => item.id === splitTarget.id)
+    : -1;
+  const previousReviewTarget = currentReviewIndex > 0
+    ? filteredExceptions[currentReviewIndex - 1]
+    : undefined;
+  const nextReviewTarget = currentReviewIndex >= 0
+    ? filteredExceptions[currentReviewIndex + 1]
+    : undefined;
+  const reviewNavigationLocked = splitForm.isFieldsTouched(true);
 
   const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
   const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
@@ -544,18 +580,26 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     && splitParts.every((part) => Number(part?.quantity ?? 0) > 0)
   );
 
-  const saveSplit = async () => {
+  const saveSplit = async (advance: boolean) => {
     if (!splitTarget || !splitValid) return;
+    const targetToOpen = advance ? nextReviewTarget : undefined;
     const values = await splitForm.validateFields();
     await runAction("split", async () => {
-      await api<DeliveryException>(`/api/exceptions/${splitTarget.id}/split`, {
+      const updated = await api<DeliveryException>(`/api/exceptions/${splitTarget.id}/split`, {
         method: "PUT",
         body: JSON.stringify(values)
       });
-      setSplitTarget(null);
-      splitForm.resetFields();
+      setExceptions((current) => current.map((item) => item.id === updated.id ? updated : item));
+      if (targetToOpen) {
+        openSplit(targetToOpen);
+      } else {
+        setSplitTarget(null);
+        splitForm.resetFields();
+      }
       await load(true);
-      message.success("拆分已保存，批次数量保持守恒");
+      message.success(targetToOpen
+        ? "当前记录已保存，已打开下一条未完成记录"
+        : "处理结果已保存，批次数量保持守恒");
     });
   };
 
@@ -876,6 +920,47 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           extra={<span className="toolbar-count">当前显示 {filteredExceptions.length} 条</span>}
           className="section-card exception-review-card"
         >
+          <section className="review-overview" aria-label="审校概览">
+            <div className="review-overview-copy">
+              <strong>审校进度</strong>
+              <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
+            </div>
+            <div className="review-scope-options">
+              <button
+                type="button"
+                className="review-scope-card"
+                aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
+                aria-pressed={reviewScope === "unfinished"}
+                onClick={() => setReviewScope("unfinished")}
+              >
+                <span>未完成</span>
+                <strong>{reviewStats.unfinishedCount} 条</strong>
+                <small>待处理 {reviewStats.unfinishedQuantity} 件</small>
+              </button>
+              <button
+                type="button"
+                className="review-scope-card"
+                aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
+                aria-pressed={reviewScope === "resolved"}
+                onClick={() => setReviewScope("resolved")}
+              >
+                <span>已处理</span>
+                <strong>{reviewStats.resolvedCount} 条</strong>
+                <small>查看已完成记录</small>
+              </button>
+              <button
+                type="button"
+                className="review-scope-card"
+                aria-label={`全部 ${reviewStats.totalCount} 条`}
+                aria-pressed={reviewScope === "all"}
+                onClick={() => setReviewScope("all")}
+              >
+                <span>全部</span>
+                <strong>{reviewStats.totalCount} 条</strong>
+                <small>查看完整审校队列</small>
+              </button>
+            </div>
+          </section>
           <div className="table-toolbar exception-toolbar">
             <div className="exception-filter-field exception-search-field">
               <label htmlFor="exception-search">搜索</label>
@@ -943,23 +1028,17 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                 onChange={setReasonFilter}
               />
             </div>
-            <div className="exception-filter-field exception-status-field">
-              <label htmlFor="exception-status-filter">状态</label>
-              <Select
-                id="exception-status-filter"
-                aria-label="状态筛选"
-                allowClear
-                placeholder="全部状态"
-                options={Object.entries(EXCEPTION_STATUS).map(([value, item]) => ({ value, label: item.label }))}
-                value={statusFilter}
-                onChange={setStatusFilter}
-              />
-            </div>
           </div>
           <Table<DeliveryException>
             rowKey="id"
             dataSource={filteredExceptions}
-            locale={{ emptyText: <Empty description={exceptions.length ? "没有匹配的待处理记录" : "本批次没有待处理记录"} /> }}
+            locale={{ emptyText: <Empty description={
+              exceptions.length
+                ? reviewScope === "unfinished"
+                  ? "当前没有未完成记录"
+                  : "没有匹配的审校记录"
+                : "本批次没有待处理记录"
+            } /> }}
             columns={[
               {
                 title: "来源文件",
@@ -1022,19 +1101,60 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       )}
 
       <Drawer
-        title={`拆分审校 · ${splitTarget?.sku ?? ""}`}
+        title={(
+          <div className="review-drawer-title">
+            <strong>审校处理 · {splitTarget?.sku ?? ""}</strong>
+            {currentReviewIndex >= 0 && (
+              <span>第 {currentReviewIndex + 1} / {filteredExceptions.length} 条</span>
+            )}
+          </div>
+        )}
         size={520}
         open={splitTarget !== null}
         onClose={() => setSplitTarget(null)}
         extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
         footer={(
           <div className="drawer-footer">
-            <Button onClick={() => setSplitTarget(null)}>取消</Button>
-            <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
-              <Button type="primary" disabled={!splitValid} loading={action === "split"} onClick={() => void saveSplit()}>
-                保存拆分
-              </Button>
-            </Tooltip>
+            <div className="drawer-review-navigation">
+              <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
+                <span>
+                  <Button
+                    disabled={!previousReviewTarget || reviewNavigationLocked}
+                    onClick={() => previousReviewTarget && openSplit(previousReviewTarget)}
+                  >
+                    上一条
+                  </Button>
+                </span>
+              </Tooltip>
+              <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
+                <span>
+                  <Button
+                    disabled={!nextReviewTarget || reviewNavigationLocked}
+                    onClick={() => nextReviewTarget && openSplit(nextReviewTarget)}
+                  >
+                    下一条
+                  </Button>
+                </span>
+              </Tooltip>
+            </div>
+            <div className="drawer-review-actions">
+              <Button onClick={() => setSplitTarget(null)}>返回列表</Button>
+              <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+                <Button
+                  aria-label="保存"
+                  disabled={!splitValid}
+                  loading={action === "split"}
+                  onClick={() => void saveSplit(false)}
+                >
+                  保存
+                </Button>
+              </Tooltip>
+              <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+                <Button type="primary" disabled={!splitValid} loading={action === "split"} onClick={() => void saveSplit(true)}>
+                  {nextReviewTarget ? "保存并处理下一条" : "保存并返回列表"}
+                </Button>
+              </Tooltip>
+            </div>
           </div>
         )}
       >
@@ -1083,7 +1203,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                             <Button danger type="link" size="small" onClick={() => remove(field.name)}>删除</Button>
                           )}
                         </div>
-                        <div className="split-fields-row">
+                        <div className="split-fields-row split-primary-fields">
                           <Form.Item
                             name={[field.name, "quantity"]}
                             label="数量"
@@ -1091,8 +1211,11 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                           >
                             <InputNumber min={1} precision={0} style={{ width: 130 }} />
                           </Form.Item>
-                          <Form.Item name={[field.name, "resolved"]} label="处理结果" valuePropName="checked">
-                            <Switch checkedChildren="可正式导入" unCheckedChildren="继续待处理" />
+                          <Form.Item name={[field.name, "resolved"]} label="处理结果">
+                            <Radio.Group className="resolution-choice">
+                              <Radio.Button value={true}>可正式导入</Radio.Button>
+                              <Radio.Button value={false}>继续保留待处理</Radio.Button>
+                            </Radio.Group>
                           </Form.Item>
                         </div>
                         <Form.Item
@@ -1152,7 +1275,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                         resolved: false
                       })}
                     >
-                      增加拆分{splitRemaining > 0 ? `并填入剩余 ${splitRemaining}` : ""}
+                      需要拆成多份？增加一份{splitRemaining > 0 ? `并填入剩余 ${splitRemaining}` : ""}
                     </Button>
                   </Space>
                 )}
