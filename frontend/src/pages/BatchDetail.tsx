@@ -1043,17 +1043,31 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               {
                 title: "来源文件",
                 dataIndex: "batch_file_id",
-                width: 145,
+                width: 130,
                 ellipsis: true,
                 render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
               },
-              { title: "SKU", dataIndex: "sku", width: 80 },
-              { title: "站点", dataIndex: "full_site", width: 115, ellipsis: true },
-              { title: "目的仓", dataIndex: "destination", width: 105, ellipsis: true },
+              {
+                title: "SKU",
+                dataIndex: "sku",
+                width: 130,
+                render: (value: string) => (
+                  <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
+                )
+              },
+              {
+                title: "站点",
+                dataIndex: "full_site",
+                width: 190,
+                render: (value: string) => (
+                  <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
+                )
+              },
+              { title: "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
               {
                 title: "规模定位",
                 dataIndex: "scale_position",
-                width: 90,
+                width: 85,
                 ellipsis: true,
                 render: (value: string | number, record) => (
                   <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}；已下单可售天数：${formatPositionValue(record.ordered_days)}`}>
@@ -1064,18 +1078,18 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               {
                 title: "待处理量",
                 dataIndex: "manual_quantity",
-                width: 80,
+                width: 75,
                 render: (value: number) => <strong className="pending-value">{value}</strong>
               },
               {
                 title: "异常原因",
                 dataIndex: "reason",
-                width: 140,
+                width: 130,
                 render: (reason: string) => <ExceptionReason reason={reason} />
               },
               {
                 title: "审校依据",
-                width: 280,
+                width: 250,
                 render: (_, record) => (
                   <ExceptionEvidence
                     exception={record}
@@ -1086,12 +1100,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               {
                 title: "状态",
                 dataIndex: "status",
-                width: 75,
+                width: 70,
                 render: (value: string) => <ExceptionStatusTag status={value} />
               },
               {
                 title: "操作",
-                width: 105,
+                width: 100,
                 render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
               }
             ]}

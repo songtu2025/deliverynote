@@ -256,6 +256,24 @@ describe("BatchDetail", () => {
     await screen.findByText("当前没有未完成记录");
   }, 30_000);
 
+  it("shows complete SKU and site identifiers in the review table", async () => {
+    exceptionPayload[0] = {
+      ...exceptionPayload[0],
+      sku: "SKU-EXCESS-LONG",
+      full_site: "AMAZON:SEEKWAY:US"
+    };
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    const sku = await screen.findByText("SKU-EXCESS-LONG");
+    const row = sku.closest("tr");
+    expect(row).not.toBeNull();
+    const site = within(row!).getByText("AMAZON:SEEKWAY:US");
+
+    expect(sku).toHaveClass("exception-sku-value");
+    expect(site).toHaveClass("exception-site-value");
+    expect(site.closest("td")).not.toHaveClass("ant-table-cell-ellipsis");
+  }, 30_000);
+
   it("summarizes unfinished work and saves directly into the next exception", async () => {
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
