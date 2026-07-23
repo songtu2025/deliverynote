@@ -67,6 +67,13 @@ const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
   resolved: { label: "已处理", color: "success" }
 };
 
+const EXCEPTION_REVIEW_HINTS: Record<string, string> = {
+  "未找到可交货采购需求": "核对供应商、SKU、站点和目的仓",
+  "超出采购未交量": "查看已分配、超出及规则命中",
+  "产品信息站点不唯一": "从候选项中选择完整站点",
+  "超出允许超收量": "查看采购分配、超收与剩余额度"
+};
+
 type SplitFormValues = { parts: SplitPart[] };
 
 function wait(milliseconds: number) {
@@ -80,6 +87,16 @@ function isActiveJob(job: Job | undefined): job is Job {
 function ExceptionStatusTag({ status }: { status: string }) {
   const item = EXCEPTION_STATUS[status] ?? { label: status, color: "default" };
   return <Tag color={item.color}>{item.label}</Tag>;
+}
+
+function ExceptionReason({ reason }: { reason: string }) {
+  const hint = EXCEPTION_REVIEW_HINTS[reason];
+  return (
+    <div className="exception-reason-cell">
+      <strong>{reason}</strong>
+      {hint && <span>{hint}</span>}
+    </div>
+  );
 }
 
 function formatPositionValue(value: string | number): string {
@@ -568,15 +585,15 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
             </strong>
             <span>
               {needsReview
-                ? `发现 ${totals.manual_total} 件超出规则或需要判断的记录，请先完成拆分审校。`
+                ? `发现 ${totals.manual_total} 件超出规则或需要判断的记录，请先查看原因指导并完成处理。`
                 : "计算结果已确认，可直接生成或下载处理结果。"}
             </span>
           </div>
           {needsReview && (
             <div className="stage-guidance-primary">
               <span>下一步（唯一主操作）</span>
-              <Button aria-label={`拆分审校（${totals.manual_total}）`} type="primary" size="large" onClick={focusReview}>
-                拆分审校（{totals.manual_total}）<RightOutlined />
+              <Button aria-label={`查看并处理（${totals.manual_total}）`} type="primary" size="large" onClick={focusReview}>
+                查看并处理（{totals.manual_total}）<RightOutlined />
               </Button>
             </div>
           )}
@@ -872,7 +889,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           <Table<DeliveryException>
             rowKey="id"
             dataSource={filteredExceptions}
-            scroll={{ x: 1020 }}
+            scroll={{ x: 1110 }}
             locale={{ emptyText: <Empty description={exceptions.length ? "没有匹配的待处理记录" : "本批次没有待处理记录"} /> }}
             columns={[
               {
@@ -902,7 +919,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                 width: 85,
                 render: (value: number) => <strong className="pending-value">{value}</strong>
               },
-              { title: "原因", dataIndex: "reason", width: 140, ellipsis: true },
+              {
+                title: "原因",
+                dataIndex: "reason",
+                width: 220,
+                render: (reason: string) => <ExceptionReason reason={reason} />
+              },
               {
                 title: "状态",
                 dataIndex: "status",
@@ -911,9 +933,9 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               },
               {
                 title: "操作",
-                width: 100,
+                width: 110,
                 fixed: "right",
-                render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>拆分审校</Button>
+                render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
               }
             ]}
           />
