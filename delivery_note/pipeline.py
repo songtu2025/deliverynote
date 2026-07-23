@@ -40,6 +40,12 @@ EXCEPTION_COLUMNS = [
     "人工处理量",
     "异常原因",
 ]
+EXCEPTION_GUIDANCE_COLUMNS = [
+    "正常采购分配量",
+    "超收规则分配量",
+    "超收剩余额度",
+]
+RESULT_EXCEPTION_COLUMNS = [*EXCEPTION_COLUMNS, *EXCEPTION_GUIDANCE_COLUMNS]
 
 OVERRECEIPT_NOTE_PREFIX = "规则允许超收"
 OverreceiptKey = tuple[str, str, str]
@@ -154,6 +160,10 @@ def _append_exception(
     allocated: int,
     manual: int,
     reason: str,
+    *,
+    purchase_allocated: int = 0,
+    overreceipt_allocated: int = 0,
+    overreceipt_remaining: int | None = None,
 ) -> None:
     exceptions.append(
         {
@@ -165,6 +175,9 @@ def _append_exception(
             "已自动分配量": allocated,
             "人工处理量": manual,
             "异常原因": reason,
+            "正常采购分配量": purchase_allocated,
+            "超收规则分配量": overreceipt_allocated,
+            "超收剩余额度": overreceipt_remaining,
         }
     )
 
@@ -481,6 +494,8 @@ def process_data(
 
         remaining = delivery_quantity
         allocated = 0
+        purchase_allocated = 0
+        overreceipt_allocated = 0
         last_destination_warehouse = ""
         for index in candidate_indexes:
             available = int(needs.at[index, "未交量"])
@@ -502,6 +517,7 @@ def process_data(
             needs.at[index, "未交量"] = available - quantity
             remaining -= quantity
             allocated += quantity
+            purchase_allocated += quantity
             last_destination_warehouse = destination_warehouse
             if remaining == 0:
                 break
@@ -532,6 +548,7 @@ def process_data(
             allowance.remaining -= quantity
             remaining -= quantity
             allocated += quantity
+            overreceipt_allocated += quantity
             last_destination_warehouse = allowance.destination_warehouse
 
         if remaining > 0:
@@ -553,10 +570,15 @@ def process_data(
                 allocated,
                 remaining,
                 reason,
+                purchase_allocated=purchase_allocated,
+                overreceipt_allocated=overreceipt_allocated,
+                overreceipt_remaining=(
+                    allowance.remaining if allowance is not None else None
+                ),
             )
 
     import_frame = pd.DataFrame(import_rows, columns=IMPORT_COLUMNS)
-    exception_frame = pd.DataFrame(exceptions, columns=EXCEPTION_COLUMNS)
+    exception_frame = pd.DataFrame(exceptions, columns=RESULT_EXCEPTION_COLUMNS)
     delivery_total = int(delivery["交货量"].sum())
     import_total = int(import_frame["*本次交货量"].sum()) if not import_frame.empty else 0
     manual_total = int(exception_frame["人工处理量"].sum()) if not exception_frame.empty else 0

@@ -155,7 +155,10 @@ def write_exception_workbook(
     details = workbook.create_sheet("异常明细", 1)
     details.append(EXCEPTION_COLUMNS)
     _style_table_header(details[1])
-    for values in result.exception_rows.itertuples(index=False, name=None):
+    for values in result.exception_rows[EXCEPTION_COLUMNS].itertuples(
+        index=False,
+        name=None,
+    ):
         details.append([_excel_value(value) for value in values])
     details.freeze_panes = "A2"
     details.auto_filter.ref = f"A1:H{max(details.max_row, 1)}"

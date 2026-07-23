@@ -91,6 +91,9 @@ export interface DeliveryException {
   destination: string;
   delivery_quantity: number;
   allocated_quantity: number;
+  purchase_allocated_quantity: number | null;
+  overreceipt_allocated_quantity: number | null;
+  overreceipt_remaining_quantity: number | null;
   manual_quantity: number;
   reason: string;
   status: string;

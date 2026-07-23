@@ -464,8 +464,53 @@ button, input { font: inherit; }
 
 .split-source {
   padding-bottom: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   border-bottom: 1px solid #e5ebe9;
+}
+
+.review-guidance { margin-bottom: 18px; }
+.review-guidance-title {
+  display: block;
+  margin-bottom: 10px;
+  color: #273b36;
+  font-size: 14px;
+}
+.review-guidance-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  margin-bottom: 10px;
+  border: 1px solid #dfe6e3;
+  border-radius: 8px;
+  background: #f7f9f8;
+  overflow: hidden;
+}
+.review-guidance-metrics-three { grid-template-columns: repeat(3, 1fr); }
+.review-guidance-metric {
+  display: flex;
+  min-width: 0;
+  padding: 11px 14px;
+  flex-direction: column;
+  border-left: 1px solid #dfe6e3;
+}
+.review-guidance-metric:first-child { border-left: none; }
+.review-guidance-metric span { color: #66736f; font-size: 12px; }
+.review-guidance-metric strong {
+  margin-top: 3px;
+  color: #273b36;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.candidate-site-options {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #dfe6e3;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+.candidate-site-options .ant-radio-wrapper {
+  margin-inline-end: 0;
+  overflow-wrap: anywhere;
 }
 
 .split-conservation {

@@ -362,6 +362,9 @@ class WorkerIntegrationTests(unittest.TestCase):
         ).json()
         self.assertEqual(exceptions[0]["reason"], "超出允许超收量")
         self.assertEqual(exceptions[0]["manual_quantity"], 10)
+        self.assertEqual(exceptions[0]["purchase_allocated_quantity"], 20)
+        self.assertEqual(exceptions[0]["overreceipt_allocated_quantity"], 50)
+        self.assertEqual(exceptions[0]["overreceipt_remaining_quantity"], 0)
 
         export = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers

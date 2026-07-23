@@ -10,6 +10,7 @@ import {
   Input,
   InputNumber,
   Popconfirm,
+  Radio,
   Select,
   Space,
   Spin,
@@ -126,6 +127,97 @@ function PositionValue({ value }: { value: string | number }) {
       <span className={display === "—" ? "muted" : "position-reference-value"}>{display}</span>
     </Tooltip>
   );
+}
+
+function GuidanceMetric({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div className="review-guidance-metric">
+      <span>{label}</span>
+      <strong>{value ?? "—"}</strong>
+    </div>
+  );
+}
+
+function ReasonGuidance({
+  exception,
+  hasOverreceiptRule
+}: {
+  exception: DeliveryException;
+  hasOverreceiptRule: boolean;
+}) {
+  if (exception.reason === "未找到可交货采购需求") {
+    return (
+      <div className="review-guidance">
+        <Alert
+          showIcon
+          type="warning"
+          title="核对锁定采购版本"
+          description="请核对本批次锁定采购版本中的供应商、SKU、站点和目的仓，并确认对应采购需求仍有可交货未交量。"
+        />
+      </div>
+    );
+  }
+
+  if (exception.reason === "超出采购未交量") {
+    return (
+      <section className="review-guidance" aria-label="原因指导">
+        <strong className="review-guidance-title">采购量与超出量</strong>
+        <div className="review-guidance-metrics">
+          <GuidanceMetric label="已分配量" value={exception.allocated_quantity} />
+          <GuidanceMetric label="超出量" value={exception.manual_quantity} />
+        </div>
+        <Alert
+          showIcon
+          type={hasOverreceiptRule ? "warning" : "info"}
+          title={hasOverreceiptRule ? "未命中本批次超收规则" : "本批次未启用超收规则"}
+          description={hasOverreceiptRule
+            ? "请核对该 SKU 的规模定位、规则额度和允许超收仓库；未命中的数量继续保留为待处理。"
+            : "本批次按正常采购未交量分配，超出部分继续保留为待处理。"}
+        />
+      </section>
+    );
+  }
+
+  if (exception.reason === "产品信息站点不唯一") {
+    return (
+      <div className="review-guidance">
+        <Alert
+          showIcon
+          type="warning"
+          title="选择候选站点"
+          description="请在下方候选项中选择正确的完整站点，再将需要导入的拆分项切换为“可正式导入”。"
+        />
+      </div>
+    );
+  }
+
+  if (exception.reason === "超出允许超收量") {
+    const hasExactBreakdown = (
+      exception.purchase_allocated_quantity !== null
+      && exception.overreceipt_allocated_quantity !== null
+      && exception.overreceipt_remaining_quantity !== null
+    );
+    return (
+      <section className="review-guidance" aria-label="原因指导">
+        <strong className="review-guidance-title">超收额度使用情况</strong>
+        <div className="review-guidance-metrics review-guidance-metrics-three">
+          <GuidanceMetric label="正常采购分配" value={exception.purchase_allocated_quantity} />
+          <GuidanceMetric label="本条使用超收额度" value={exception.overreceipt_allocated_quantity} />
+          <GuidanceMetric label="剩余额度" value={exception.overreceipt_remaining_quantity} />
+        </div>
+        <Alert
+          showIcon
+          type="warning"
+          title={hasExactBreakdown ? "本批次共享超收额度已用尽" : "历史批次暂无额度明细"}
+          description={hasExactBreakdown
+            ? "超收额度按供应商 + SKU + 站点在本批次内共享，前序文件可能已使用部分额度；超过剩余额度的数量继续保留为待处理。"
+            : "该记录生成时尚未保存正常采购与超收额度的分配构成，页面不会用规则上限倒推。"}
+        />
+      </section>
+    );
+  }
+
+  return null;
 }
 
 export default function BatchDetail({ batchId, onBack }: { batchId: number; onBack: () => void }) {
@@ -350,6 +442,14 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
 
   const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
   const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
+  const splitCandidateSites = splitTarget?.reason === "产品信息站点不唯一"
+    ? Array.from(new Set(
+        splitTarget.full_site
+          .split("、")
+          .map((site) => site.trim())
+          .filter(Boolean)
+      ))
+    : [];
   const splitValid = Boolean(
     splitTarget
     && splitParts.length
@@ -850,6 +950,11 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               <Descriptions.Item label="异常原因"><Tag color="warning">{splitTarget.reason}</Tag></Descriptions.Item>
             </Descriptions>
 
+            <ReasonGuidance
+              exception={splitTarget}
+              hasOverreceiptRule={Boolean(batch.overreceipt_rule)}
+            />
+
             <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
               <div>
                 <span>原待处理</span>
@@ -910,7 +1015,15 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                               : Promise.resolve()
                           }]}
                         >
-                          <Input />
+                          {splitCandidateSites.length > 1 ? (
+                            <Radio.Group className="candidate-site-options">
+                              {splitCandidateSites.map((site) => (
+                                <Radio key={site} value={site}>{site}</Radio>
+                              ))}
+                            </Radio.Group>
+                          ) : (
+                            <Input />
+                          )}
                         </Form.Item>
                         <div className="split-fields-row">
                           <Form.Item name={[field.name, "sku"]} label="SKU">
