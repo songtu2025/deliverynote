@@ -1,38 +1,111 @@
-# DeliveryNote 当前维护交接
+# DeliveryNote 运维与交接手册
 
-- 更新时间：2026-07-23（Asia/Shanghai）
-- 仓库：`https://github.com/songtu2025/deliverynote.git`
-- 默认分支：`master`
-- 功能合并基线：`71d51d8 feat: upgrade internal delivery workflow`
-- 生产功能分支最终提交：`072b316 feat: polish internal delivery workflow`
+| 文档属性 | 说明 |
+| --- | --- |
+| 文档状态 | 当前生产 Runbook 与开发交接基线 |
+| 适用读者 | 部署维护人员、故障处理人员、后续开发人员 |
+| 最后核对 | 2026-07-23（Asia/Shanghai） |
+| 生产仓库 | `https://github.com/songtu2025/deliverynote.git` |
+| 默认分支 | `master` |
+| 功能基线 | `master@71d51d8`，Git tree `85bc74b6915def6a0711d5a1e2bcce1a90746d9e` |
 
-`71d51d8` 是 PR #1 的 Squash merge 结果，其 Git tree 与 `072b316` 完全一致。远端 `feature/admin-maintenance` 分支保留了 44 个详细开发提交。
+本文记录会随部署变化的运行状态和安全操作步骤。稳定的产品范围、业务契约、权限和文件格式以 [README](README.md) 为准。
 
-## 1. 工具定位
+## 1. 信息责任边界
 
-这是供不超过 5 人使用的内部交货 Excel 处理工具，不按大型业务平台建设。
+| 主题 | 权威来源 |
+| --- | --- |
+| 产品范围、角色权限、业务不变量、文件契约 | `README.md` |
+| 代理工作规则与强制验证要求 | `AGENTS.md` |
+| 当前实现行为 | 业务代码与对应自动化测试 |
+| 生产提交、容器、资产、批次状态 | 本文最近一次核对记录与生产只读检查 |
+| PC 界面要求 | `UI_UX_OPTIMIZATION_PLAN.md` |
+| 已执行验收及证据 | `design-qa.md`、`design/admin-maintenance-qa/` |
 
-当前部署保持：
+文档与代码不一致时，不应默认为任一方“自动正确”。先定位差异属于需求变更、实现缺陷还是文档过期，再通过测试和业务口径确认。
+
+## 2. 运行拓扑
 
 ```text
-HTTPS 反向代理
-    ↓
-React / Nginx
-    ↓
-FastAPI
-    ↓
-PostgreSQL + delivery_data 文件卷
-    ↓
-单 Worker
+Internet / Internal Network
+          │ HTTPS
+          ▼
+宿主机反向代理
+          │ 127.0.0.1:18080
+          ▼
+deliverynote-web (React / Nginx)
+          │ /api
+          ▼
+deliverynote-api (FastAPI) ───── deliverynote_delivery_data
+          │                              ▲
+          ▼                              │
+deliverynote-db (PostgreSQL) ◀── deliverynote-worker
+          │
+deliverynote_postgres_data
 ```
 
-不要为当前规模引入 Redis、Celery、微服务、多 API、多 Worker、Kubernetes、移动端或复杂权限平台。
+生产 Compose 项目名固定为 `deliverynote`。项目名决定数据卷前缀；部署时不得临时更换，否则可能连接到一组新的空数据卷。
 
-## 2. 继续工作的位置
+| 组件 | 数量 | 持久状态 |
+| --- | :---: | --- |
+| `web` | 1 | 无；静态前端资源 |
+| `api` | 1 | 元数据写入 PostgreSQL，文件写入共享数据卷 |
+| `worker` | 1 | 任务状态写入 PostgreSQL，结果写入共享数据卷 |
+| `db` | 1 | `deliverynote_postgres_data` |
+| 文件存储 | 1 | `deliverynote_delivery_data` |
 
-服务器上的 `/root/deliverynote` 主工作区有用户自己的未提交改动，不要进入、覆盖、还原或清理。
+当前规模固定使用单 API、单 Worker。库位 Excel 导入预览 Token 保存在 API 进程内存中，重启 API 后未发布的导入预览会失效，但服务器草稿中已保存的数据不因此丢失。
 
-继续开发应新建或使用独立 worktree，例如：
+## 3. 生产基线
+
+### 3.1 版本与资源
+
+| 项目 | 已核对值 |
+| --- | --- |
+| 正式地址 | `https://deliverynote.seekwaygroup.com/` |
+| 最近部署时间 | 2026-07-23 12:46（Asia/Shanghai） |
+| 部署源码树 | 与 `master@71d51d8` 完全一致 |
+| 功能分支最终提交 | `feature/admin-maintenance@072b316` |
+| 前端 JavaScript | `index-DzkyLbfg.js` |
+| 前端 CSS | `index-BJrakn5L.css` |
+| Web 回环端口 | `127.0.0.1:18080` |
+
+PR #1 通过 Squash merge 合入 `master`。`71d51d8` 与功能分支最终提交 `072b316` 的 Git tree 相同；合并没有触发重复部署，因为生产已运行同一源码树。
+
+### 3.2 服务状态
+
+最近一次核对结果：
+
+- `db`、`api`、`worker`、`web` 共 4 个容器运行；
+- PostgreSQL 和 API 健康检查通过；
+- 正式 HTTPS `/health` 返回成功；
+- 生产数据卷仍为 `deliverynote_postgres_data` 与 `deliverynote_delivery_data`。
+
+这些结果是带日期的快照，不替代变更前的现场检查。
+
+### 3.3 验证基线
+
+2026-07-23 功能合并前完整执行：
+
+| 检查 | 结果 |
+| --- | --- |
+| Python `unittest` | 131/131 通过 |
+| Frontend Vitest | 8 个测试文件，71/71 通过 |
+| `pip check` | 通过 |
+| Frontend production build | 通过 |
+| Docker Compose config | 通过 |
+| `git diff --check` | 通过 |
+| 正式 HTTPS `/health` | 通过 |
+
+前端构建存在约 1.2 MB 单包提示，不是构建失败。当前少量 PC 用户场景未因此出现已知功能问题。
+
+## 4. 安全接续开发
+
+### 4.1 工作目录
+
+服务器 `/root/deliverynote` 主工作区包含用户未提交改动。不得在其中执行拉取、还原、清理、覆盖或提交操作。
+
+使用独立 worktree：
 
 ```bash
 cd /root/deliverynote
@@ -41,7 +114,7 @@ git worktree add .worktrees/<task-name> -b <task-branch> origin/master
 cd .worktrees/<task-name>
 ```
 
-开始前必须：
+进入任务 worktree 后：
 
 ```bash
 cat AGENTS.md
@@ -51,203 +124,269 @@ git status -sb
 git diff --check
 ```
 
-不要执行：
+当前文档工作位于：
+
+```text
+/root/deliverynote/.worktrees/admin-maintenance
+```
+
+### 4.2 修改原则
+
+- 先阅读相关测试和调用链，再修改业务代码；
+- 修复缺陷时先定位或新增可复现测试；
+- Web、CLI、Worker 共用核心匹配逻辑；
+- 使用明确路径暂存，提交前检查 `git diff --cached --name-only`；
+- 不处理与当前任务无关的用户改动；
+- 不调用 Superpowers 插件；
+- 不使用 `git reset --hard`、`git clean` 或批量删除；
+- 不提交 `.env`、真实 Excel、数据库、日志、上传文件或导出结果。
+
+### 4.3 业务安全闸门
+
+涉及匹配、拆分、导出或超收时，至少复核：
+
+1. 文件顺序决定共享采购余额的连续扣减顺序；
+2. 供应商成品本地仓仍为第一优先仓；
+3. 其他仓库排序保持确定性；
+4. 商品锁仓仍能解决 SKU/站点歧义；
+5. 拆分数量均为正且总和不变；
+6. `交货总量 = 可导入总量 + 待处理总量`；
+7. 任一文件失败不留下批次部分结果；
+8. CLI、A:G、模板样式、备注和导出命名兼容；
+9. 不跨批次扣减采购余额，不做 ERP 回写；
+10. 超收规则外数量完整进入待处理。
+
+## 5. 发布 Runbook
+
+以下步骤用于源码或运行配置变更。纯文档变更不需要部署生产容器。
+
+### 5.1 发布前条件
+
+- 已得到本次部署确认；
+- 发布提交位于远端，提交 SHA 明确；
+- 使用干净的发布 worktree，不使用 `/root/deliverynote` 主工作区；
+- `git status -sb` 无意外改动；
+- `git diff --check` 通过；
+- 与改动范围对应的自动化测试已通过；
+- Python 依赖变更时 `pip check` 通过；
+- 前端变更时测试与生产构建通过；
+- Compose 或环境变更时 `docker compose config` 通过；
+- 已记录变更前容器状态和健康状态。
+
+### 5.2 变更前只读检查
+
+在发布 worktree 中执行，并保持生产项目名和环境文件路径不变：
 
 ```bash
-git reset --hard
-git clean
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote ps
+
+curl -fsS https://deliverynote.seekwaygroup.com/health
+```
+
+如当前状态已异常，先保留日志和现场信息，不要把发布当作未经诊断的“重启修复”。
+
+### 5.3 构建与配置校验
+
+```bash
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote config --quiet
+
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote build api worker web
+```
+
+构建不会替换正在运行的容器。构建失败时停止发布，生产仍保持原容器。
+
+### 5.4 数据库迁移
+
+当前只有超收规则专用幂等迁移：
+
+```bash
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote run --rm api \
+  python -m delivery_note.migrations.overreceipt_rules
+```
+
+迁移只允许使用当前仓库已审查的模块。不要直接对生产数据库执行临时 DDL，也不要删除已有表或列。
+
+### 5.5 更新服务
+
+```bash
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote up -d api worker web
+
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote ps
+```
+
+禁止执行：
+
+```bash
 docker compose down -v
 ```
 
-用户已要求不调用 Superpowers 插件。
+该命令会删除数据库与业务文件数据卷。
 
-## 3. 当前功能
+### 5.6 发布后验证
 
-- 五类版本化基础资料及摘要、预览、下载和历史版本。
-- 库位资料服务器草稿、逐行维护、Excel 替换预览、校验和原子发布。
-- 多文件批次、用户排序、预检和共享采购余额。
-- 后台计算、任务租约、心跳、超时恢复和失败重试。
-- 待处理记录筛选和数量安全的人工拆分。
-- 单来源结果、多文件合并 Excel 和分文件 ZIP。
-- 默认关闭、不可变版本化、按批次锁定的超收规则。
-- admin/operator 发布和启用规则，管理员维护基础资料与用户。
-- 批次独立 URL、刷新/返回、北京时间显示和 PC 操作界面。
-- 原有单文件 CLI。
+至少完成：
 
-## 4. 不可破坏的业务规则
+```bash
+curl -fsS http://127.0.0.1:18080/health
+curl -fsS https://deliverynote.seekwaygroup.com/health
 
-1. 同一批次只加载一份采购数据。
-2. 多份交货文件严格按用户顺序连续消耗采购余额。
-3. 调换顺序可改变余额归属，但不能改变交货总量。
-4. 超量、未匹配或歧义数量必须完整进入待处理。
-5. 供应商成品本地仓优先，其他仓库保持确定性顺序。
-6. 商品锁仓标识用于解决 SKU 和站点歧义。
-7. 拆分数量全部为正，拆分总和等于原待处理数量。
-8. 始终满足 `交货总量 = 可导入总量 + 待处理总量`。
-9. 任一文件计算失败时不得持久化该批次的部分结果。
-10. 保持 CLI、A:G、模板样式、备注和导出命名兼容。
-11. 不跨批次延续采购扣减，不做 ERP 回写。
-12. 超收规则发布后不可修改，已有批次继续使用锁定版本。
-13. 超收额度按批次内 `供应商 + SKU + 站点` 共享，先扣采购余额，再按文件顺序扣额度。
-14. 空定位、未知定位、定位冲突、非白名单仓库和额度外数量不得自动超收。
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote ps
+```
 
-测试数据字段损坏时修正测试数据，不修改正式逻辑去兼容错误列名。
+随后在 PC 浏览器执行与变更范围对应的烟雾检查：
 
-## 5. 关键代码
+- 登录与退出；
+- 批次列表加载；
+- 打开一个批次详情并刷新；
+- 基础资料状态加载；
+- 如涉及批次逻辑，使用脱敏数据创建和计算新批次；
+- 如涉及导出，下载并打开对应 Excel/ZIP；
+- 如涉及北京时间，使用非北京时间浏览器时区复核；
+- 检查浏览器控制台和失败请求。
 
-| 路径 | 作用 |
+不要把 `/health` 成功等同于完整业务验收。
+
+### 5.7 发布记录
+
+发布完成后记录：
+
+- 发布提交 SHA 与 Git tree；
+- 发布时间（Asia/Shanghai）；
+- 执行的迁移；
+- 容器状态；
+- 健康检查；
+- 实际执行的自动化测试和浏览器场景；
+- 新前端资源名；
+- 未覆盖项目和残余风险。
+
+## 6. 回退边界
+
+当前没有通用数据库迁移版本登记，也没有自动应用回退机制。回退必须按变更性质评估：
+
+| 变更类型 | 处理原则 |
 | --- | --- |
-| `delivery_note/pipeline.py` | SKU/站点匹配、采购过滤、仓库分配、超量保留 |
-| `delivery_note/application.py` | 多文件共享余额、批次顺序、拆分投影 |
-| `delivery_note/excel_io.py` | Excel 读取、模板校验和写出 |
-| `delivery_note/config.py` | 供应商识别、仓库顺序和备注 |
-| `delivery_note/cli.py` | 单文件 CLI |
-| `delivery_note/web/models.py` | 数据库模型 |
-| `delivery_note/web/api.py` | FastAPI 接口 |
-| `delivery_note/web/position_drafts.py` | 库位草稿和原子发布 |
-| `delivery_note/worker.py` | 计算、导出和任务租约 |
-| `delivery_note/migrations/overreceipt_rules.py` | 超收规则幂等迁移 |
-| `frontend/src/` | React 页面和组件 |
-| `tests/` | Python 测试 |
-| `compose.yaml` | 正式单机编排 |
+| 纯前端 | 可从已知提交重新构建 `web`，仍需复核 API 兼容性 |
+| 后端但无数据结构变化 | 可从已知提交重新构建 `api`、`worker`，并执行健康和业务烟雾检查 |
+| 含数据库结构或数据语义变化 | 不自动回退；先确认旧代码与当前结构兼容 |
+| 批次计算或导出错误 | 保留现场与文件，不直接修改生产数据库“修结果” |
 
-Web、CLI 和 Worker 必须继续共用 `delivery_note` 核心业务逻辑，不复制一套 Web 专用采购匹配代码。
+超收规则迁移为向前兼容的加法迁移。代码回退时不要尝试删除其表结构或历史版本。
 
-## 6. 超收规则口径
+任何回退都必须：
 
-- 初始默认不启用。
-- 所有 admin/operator 可发布新版本或重新启用历史版本。
-- 发布后不可修改。
-- 新批次锁定创建时唯一启用的版本。
-- 短尾、中尾、长尾配置绝对数量。
-- 仓库使用精确白名单，空列表表示全部不允许。
-- 正式仓库名称为“供应商成品本地仓”。
-- 额度按供应商、SKU、站点在批次内共享。
-- 只使用采购快照中真实存在且命中白名单的仓库。
-- 任何规则外数量仍进入待处理并保持数量守恒。
+- 使用明确的已知提交；
+- 使用生产项目名 `deliverynote`；
+- 保留两个生产数据卷；
+- 不执行 `down -v`；
+- 不用 `git reset --hard` 处理发布目录；
+- 完成与正常发布相同的后置验证。
 
-## 7. 当前验证基线
+## 7. 故障检查
 
-2026-07-23 合并前重新执行：
-
-```text
-Python unittest: 131/131 passed
-Frontend Vitest: 8 files, 71/71 passed
-pip check: passed
-Frontend production build: passed
-Docker Compose config: passed
-git diff --check: passed
-HTTPS /health: passed
-```
-
-前端产物：
-
-```text
-index-DzkyLbfg.js
-index-BJrakn5L.css
-```
-
-前端仍有约 1.2 MB 单包提示，对当前少量 PC 用户不构成功能问题。
-
-## 8. 正式环境
-
-- 地址：`https://deliverynote.seekwaygroup.com/`
-- 最近部署：2026-07-23 12:46（Asia/Shanghai）
-- 部署源码树：与 `master@71d51d8` 完全一致
-- 容器：`db`、`api`、`worker`、`web`
-- Web 绑定：`127.0.0.1:18080`
-- 数据卷：`deliverynote_postgres_data`、`deliverynote_delivery_data`
-- 最近核对：4 个容器运行，API 和数据库健康，HTTPS `/health` 返回成功
-
-合并 PR #1 没有触发重新部署；生产在合并前已经运行相同文件树。
-
-不要删除或重建生产数据卷。
-
-## 9. 生产数据现状
-
-截至 2026-07-23：
-
-- 13 个批次，均为 `succeeded`。
-- 0 个 queued/running 任务。
-- 历史异常记录包含测试、重复处理和真实业务记录，不能把总量直接视为真实未结业务。
-- 批次 8–11 的同名来源文件 SHA-256 完全一致，是同一原文件的多次处理。
-- 批次 12 虽与批次 11 同名，但文件 SHA-256 不同，不能当成重复文件。
-- 批次 11 满足 `7732 = 7221 + 511`；其 511 件处置仍需业务人员决定。
-- 批次 13 的原待处理为 107，已通过拆分解决 80，当前有效待处理为 27。
-
-不要根据技术判断删除或批量修改这些批次。业务人员应先确认哪些批次是验收、重复或正式处理。
-
-## 10. 更新与验证
-
-代码更新：
+先只读收集证据，再决定是否重启或变更。通用日志命令：
 
 ```bash
-git pull --ff-only
-docker compose build api worker web
-docker compose run --rm api python -m delivery_note.migrations.overreceipt_rules
-docker compose up -d
-docker compose ps
-curl http://127.0.0.1:8080/health
+WEB_PORT=18080 docker compose \
+  --env-file /root/deliverynote/.env \
+  -p deliverynote logs --tail=200 api worker web db
 ```
 
-Python：
+| 现象 | 优先检查 | 禁止的捷径 |
+| --- | --- | --- |
+| HTTPS 或页面不可达 | 正式 `/health`、回环 `/health`、`web`/`api` 状态、反向代理日志 | 删除容器或数据卷 |
+| API 不健康 | `api` 与 `db` 健康状态、数据库连接错误、环境变量是否加载 | 临时修改生产库结构 |
+| 登录失败 | API 日志、账号是否停用、密码是否由应用内重置过 | 仅修改 `.env` 并假设旧账号密码被重置 |
+| Worker 长时间不完成 | `worker`/`api`/`db` 日志、任务状态、租约与心跳 | 启动第二个 Worker 并行抢任务 |
+| 上传被拒绝 | 文件大小、扩展名、Excel 结构、`MAX_UPLOAD_BYTES` | 放宽正式字段校验兼容坏文件 |
+| 库位导入预览失效 | API 是否重启、预览是否超过 TTL、草稿修订号 | 绕过修订冲突直接覆盖草稿 |
+| 数量不守恒 | 保留批次和来源文件，核对文件顺序、采购快照、规则版本和待处理投影 | 直接改数据库数量 |
+| 导出缺失或损坏 | Worker 日志、批次状态、共享文件卷挂载、结果文件是否存在 | 重建 `delivery_data` 卷 |
+| 浏览器刷新离开详情 | 当前 URL 是否为 `/batches/{id}`、前端资源是否为预期版本 | 用浏览器缓存问题掩盖路由缺陷 |
 
-```bash
-source .venv/bin/activate
-python -m unittest discover -s tests -v
-python -m pip check
-```
+若问题影响业务数量，应先复制脱敏场景在非生产环境复现并补测试，再做最小修复。
 
-前端：
+## 8. 生产数据说明
 
-```bash
-cd frontend
-npm ci
-npm run test
-npm run build
-```
+截至 2026-07-23 的只读核对：
 
-部署前：
+- 共 13 个批次，状态均为 `succeeded`；
+- 当前没有 `queued` 或 `running` 任务；
+- 历史异常包含测试、重复处理和真实业务记录，聚合数量不能直接视为真实未结业务；
+- 批次 8–11 的同名来源文件 SHA-256 相同，是同一原文件的多次处理；
+- 批次 12 与批次 11 文件名相同，但 SHA-256 不同，不能据名称认定为重复；
+- 批次 11 满足 `7732 = 7221 + 511`，其中 511 件仍需业务人员决定；
+- 批次 13 原待处理 107 件，已拆分解决 80 件，当前有效待处理 27 件。
 
-```bash
-docker compose config
-git diff --check
-```
+未经业务确认，不得删除、合并或批量修改这些批次。技术人员只负责说明数据关系，不替代业务人员判断哪些记录属于验收、重复或正式处理。
 
-涉及业务逻辑时还应使用脱敏双文件场景复核：
+## 9. 超收规则运维口径
 
-```text
-无规则：160 = 100 + 60
-短尾 50：160 = 150 + 10
-```
+- 初始默认关闭；
+- `admin` 与 `operator` 都能发布新版本或重新启用历史版本；
+- 版本发布后不可修改；
+- 新批次锁定创建时启用的规则，旧批次不追溯变化；
+- 短尾、中尾、长尾配置绝对件数；
+- 仓库采用精确白名单，空列表表示全部禁止；
+- 正式仓库名为“供应商成品本地仓”；
+- 空定位、未知定位和多 MSKU 定位冲突不获得超收额度；
+- 额度在批次内按 `供应商 + SKU + 站点` 共享；
+- 先扣采购余额，再按文件顺序扣超收额度；
+- 只有采购快照中存在且命中白名单的仓库可以超收；
+- 规则外数量继续进入待处理。
 
-同时检查 A:G、备注、来源顺序、合并 Excel、分文件 ZIP 和单文件下载。
+发布规则前必须让操作人员确认额度、仓库白名单和版本说明。不得修改历史版本来“修正”已创建批次。
 
-## 11. 已知边界
+## 10. 数据、安全与备份决策
 
-- 仅维护 PC 端，不做手机端。
-- 仅支持单 API、单 Worker。
-- 库位导入预览 Token 是进程内状态。
-- 没有通用 migration history，只有超收专用幂等迁移。
-- 操作记录接口只返回最近 200 条。
-- 没有 GitHub Actions CI。
-- 当前不安装自动备份 timer；这是用户确认的运维取舍，不是待开发功能。
-- 仓库保留备份脚本和 systemd 示例，但不会自动运行。
-- 不进行 ERP 回写，也不跨批次保存采购扣减。
+- 正式凭据仅保存在部署环境，不进入仓库；
+- 正式访问使用 HTTPS；
+- 两个生产数据卷不得删除或重建；
+- 不以数据库直改代替产品操作；
+- 不提交业务文件、导出结果或包含业务数据的截图；
+- 用户已明确决定当前小规模工具不启用自动备份定时器；
+- 仓库中的备份脚本与 systemd 示例保持未启用状态，不把“尚未启用”描述为“已备份”。
 
-## 12. 后续优先级
+“不启用自动备份”是当前运维取舍，不代表删除现有数据卷，也不授权清理任何历史数据。
 
-当前没有必须立即开发的新功能。
+## 11. 已知限制与扩展触发条件
 
-合理顺序：
+| 当前限制 | 当前处理 | 重新评估触发条件 |
+| --- | --- | --- |
+| 单 API、单 Worker | 保持简单部署 | 使用人数、吞吐或任务等待出现可量化瓶颈 |
+| 导入预览为进程内 Token | 接受重启后预览失效 | 需要多 API 或长时间恢复预览 |
+| 无通用 migration history | 维护专用幂等迁移 | 数据结构变更频率明显增加 |
+| 审计只显示最近 200 条 | 满足当前追溯范围 | 业务要求完整检索或合规留存 |
+| 无 GitHub Actions CI | 发布前人工执行验证矩阵 | 发布频率或协作人数上升 |
+| 前端单包较大 | 当前不做专项拆包 | 实测加载性能影响操作 |
+| 无手机端 | PC 为唯一验收范围 | 业务明确提出移动端场景 |
+| 无自动备份任务 | 遵循用户当前决定 | 用户重新提出恢复点要求 |
 
-1. 根据真实操作反馈修复明确问题。
-2. 由业务人员确认历史批次的实际状态。
-3. 修改业务逻辑时先补复现测试，再做最小修复。
-4. 只有数据量或使用人数真实增长后，才考虑分页、拆包或架构调整。
+不为追求“架构完整”提前引入平台组件。
 
-不要为了“架构完整”主动拆微服务或重写现有核心流程。
+## 12. 后续工作顺序
 
-## 13. 新会话启动提示
+当前没有必须立即开发的新功能。后续按以下优先级处理：
 
-> 请先完整阅读 `AGENTS.md`、`README.md` 和 `HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 与 `git diff --check`。这是供不超过 5 人使用的内部交货处理工具，保持单机、单 API、单 Worker，不做手机端、微服务或 ERP 回写。不要进入或覆盖 `/root/deliverynote` 主工作区，不要删除 Docker 数据卷。修改业务逻辑前先阅读相关测试和调用链，保持共享采购余额、数量守恒、供应商成品本地仓优先、锁仓、拆分、CLI 和 A:G 导出兼容。
+1. 根据真实操作反馈定位明确问题；
+2. 由业务人员确认历史批次的业务性质和未结数量；
+3. 修改业务逻辑前建立可复现测试；
+4. 以最小变更修复，并执行对应验证矩阵；
+5. 只有达到上表触发条件后，才评估架构扩展。
+
+## 13. 新会话启动模板
+
+> 请在独立 worktree 中继续任务。先完整阅读 `AGENTS.md`、`README.md` 和 `HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 与 `git diff --check`。不要进入、覆盖或清理 `/root/deliverynote` 主工作区，其中有用户未提交改动。保持单机、单 API、单 Worker 和 PC 范围；不做 ERP 回写，不跨批次扣减采购余额。修改业务逻辑前先读相关测试与调用链，保持文件顺序共享余额、数量守恒、供应商成品本地仓优先、锁仓、拆分、CLI 和 A:G 导出兼容。不要调用 Superpowers 插件，不要删除 Docker 数据卷。
