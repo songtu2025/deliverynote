@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 import sys
+from zoneinfo import ZoneInfo
 
 from .config import build_document_note, resolve_supplier
 from .excel_io import (
@@ -18,6 +19,8 @@ from .pipeline import (
     enrich_pending_import_rows,
     process_data,
 )
+
+BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,7 +81,7 @@ def run_batch(
         supplier.code,
     )
 
-    timestamp = (run_time or datetime.now()).strftime("%Y%m%d_%H%M%S")
+    timestamp = (run_time or datetime.now(BEIJING_TIMEZONE)).strftime("%Y%m%d_%H%M%S")
     batch_directory = output_dir / timestamp
     output_path = batch_directory / f"{delivery_path.stem}_交货处理.xlsx"
 

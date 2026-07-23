@@ -30,6 +30,8 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 
 # Editors and OS
+.worktrees/
+.superpowers/
 .vscode/
 .idea/
 .DS_Store

@@ -1,5 +1,6 @@
 const TOKEN_KEY = "delivery-note-token";
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+export const AUTH_EXPIRED_EVENT = "delivery-note-auth-expired";
 
 export class ApiError extends Error {
   status: number;
@@ -22,6 +23,13 @@ export function setToken(token: string | null): void {
   }
 }
 
+export function expireSession(message = "登录已过期，请重新登录"): void {
+  const hadToken = Boolean(getToken());
+  setToken(null);
+  if (!hadToken) return;
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { message } }));
+}
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const token = getToken();
@@ -33,10 +41,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (!response.ok) {
+    if (response.status === 401) {
+      expireSession();
+    }
     let message = `请求失败（${response.status}）`;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      message = payload.detail ?? message;
+      const payload = (await response.json()) as { detail?: unknown };
+      if (typeof payload.detail === "string") {
+        message = payload.detail;
+      }
     } catch {
       // Keep the status-based message when the body is not JSON.
     }
@@ -56,6 +69,9 @@ export async function download(path: string, filename: string): Promise<void> {
   }
   const response = await fetch(`${API_BASE}${path}`, { headers });
   if (!response.ok) {
+    if (response.status === 401) {
+      expireSession();
+    }
     throw new ApiError(response.status, "下载失败");
   }
   const blob = await response.blob();

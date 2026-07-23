@@ -1,0 +1,11 @@
+[Unit]
+Description=Run DeliveryNote paired backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=deliverynote-backup.service
+
+[Install]
+WantedBy=timers.target

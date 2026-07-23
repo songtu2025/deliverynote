@@ -4,9 +4,9 @@ import argparse
 from datetime import datetime, timedelta
 import os
 from pathlib import Path
+import signal
 import shutil
 from threading import Event, Thread
-import time
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -27,6 +27,7 @@ from .pipeline import (
     EXCEPTION_COLUMNS,
     IMPORT_COLUMNS,
     BatchResult,
+    OverreceiptPolicy,
     build_manual_import_rows,
     enrich_pending_import_rows,
 )
@@ -35,9 +36,11 @@ from .web.models import (
     AuditLog,
     Batch,
     BatchFile,
+    BatchOverreceiptRule,
     ExceptionRecord,
     InputVersion,
     Job,
+    OverreceiptRuleVersion,
     SplitRecord,
 )
 
@@ -181,7 +184,19 @@ def _load_compute_inputs(database: Database, batch_id: int):
             }
             for source in sources
         ]
-    return version_paths, source_data
+        overreceipt_policy = None
+        binding = session.get(BatchOverreceiptRule, batch.id)
+        if binding is not None:
+            rule = session.get(OverreceiptRuleVersion, binding.rule_version_id)
+            if rule is None:
+                raise RuntimeError("批次锁定的超收规则版本不存在")
+            overreceipt_policy = OverreceiptPolicy(
+                short_tail_limit=rule.short_tail_limit,
+                medium_tail_limit=rule.medium_tail_limit,
+                long_tail_limit=rule.long_tail_limit,
+                allowed_warehouses=frozenset(rule.allowed_warehouses or []),
+            )
+    return version_paths, source_data, overreceipt_policy
 
 
 def _execute_compute(
@@ -191,10 +206,17 @@ def _execute_compute(
     claim_token: str,
 ) -> None:
     _heartbeat(database, job_id, claim_token)
-    version_paths, sources = _load_compute_inputs(database, batch_id)
+    version_paths, sources, overreceipt_policy = _load_compute_inputs(
+        database, batch_id
+    )
     supplier_rows = read_supplier_workbook(version_paths["supplier"])
     product_rows = read_product_workbook(version_paths["product"])
     purchase_rows = read_purchase_workbook(version_paths["purchase"])
+    position_rows = (
+        read_position_workbook(version_paths["position"])
+        if overreceipt_policy is not None
+        else None
+    )
     _heartbeat(database, job_id, claim_token)
 
     requests = []
@@ -215,7 +237,13 @@ def _execute_compute(
             )
         )
 
-    batch_result = process_delivery_batch(requests, product_rows, purchase_rows)
+    batch_result = process_delivery_batch(
+        requests,
+        product_rows,
+        purchase_rows,
+        position_data=position_rows,
+        overreceipt_policy=overreceipt_policy,
+    )
     _heartbeat(database, job_id, claim_token)
     payloads = []
     for item in batch_result.items:
@@ -451,12 +479,16 @@ def _execute_export(
     temporary.mkdir(parents=True, exist_ok=False)
     output_names: dict[int, str] = {}
     used_names: set[str] = set()
+    merged_import_frames: list[pd.DataFrame] = []
+    merged_pending_frames: list[pd.DataFrame] = []
     try:
         for source in sources:
             _heartbeat(database, job_id, claim_token)
             result, import_rows, pending_rows = _prepare_export_result(
                 source, position_rows
             )
+            merged_import_frames.append(import_rows)
+            merged_pending_frames.append(pending_rows)
             output_name = f"{Path(source['original_name']).stem}_交货处理.xlsx"
             if output_name in used_names:
                 raise RuntimeError(f"导出文件名重复：{output_name}")
@@ -470,6 +502,35 @@ def _execute_export(
                 pending_rows,
             )
             output_names[source["id"]] = output_name
+
+        if len(sources) > 1:
+            merged_import_rows = pd.concat(
+                merged_import_frames,
+                ignore_index=True,
+            )
+            merged_pending_rows = pd.concat(
+                merged_pending_frames,
+                ignore_index=True,
+            )
+            delivery_total = sum(source["delivery_total"] for source in sources)
+            import_total = int(merged_import_rows["*本次交货量"].sum())
+            pending_total = int(merged_pending_rows["*本次交货量"].sum())
+            if delivery_total != import_total + pending_total:
+                raise RuntimeError("合并导出数量不守恒")
+            merged_result = BatchResult(
+                import_rows=merged_import_rows,
+                exception_rows=pd.DataFrame(columns=EXCEPTION_COLUMNS),
+                delivery_total=delivery_total,
+                import_total=import_total,
+                manual_total=pending_total,
+            )
+            write_delivery_workbook(
+                version_paths["template"],
+                temporary / f"batch-{batch_id}-merged.xlsx",
+                merged_result,
+                merged_import_rows,
+                merged_pending_rows,
+            )
 
         archive_path = temporary / f"batch-{batch_id}.zip"
         with ZipFile(archive_path, "w", ZIP_DEFLATED) as archive:
@@ -509,7 +570,10 @@ def _execute_export(
                     action="worker_export_succeeded",
                     entity_type="batch",
                     entity_id=str(batch.id),
-                    details={"file_count": len(sources)},
+                    details={
+                        "file_count": len(sources),
+                        "merged_workbook": len(sources) > 1,
+                    },
                 )
             )
             session.commit()
@@ -645,29 +709,41 @@ def _watch_stale_jobs(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    recover_stale_jobs(
-        args.database_url,
-        stale_after=timedelta(minutes=args.stale_minutes),
-    )
-    if args.once:
-        run_once(args.database_url, args.storage_root)
-        return 0
-    stale_after = timedelta(minutes=args.stale_minutes)
     stop_event = Event()
-    watcher = Thread(
-        target=_watch_stale_jobs,
-        args=(args.database_url, stale_after, stop_event),
-        name="delivery-note-stale-job-watcher",
-        daemon=True,
-    )
-    watcher.start()
-    try:
-        while True:
-            if run_once(args.database_url, args.storage_root) is None:
-                time.sleep(args.poll_interval)
-    finally:
+    previous_handlers = {}
+
+    def request_stop(_signum, _frame) -> None:
         stop_event.set()
-        watcher.join(timeout=5)
+
+    for signum in (signal.SIGTERM, signal.SIGINT):
+        previous_handlers[signum] = signal.signal(signum, request_stop)
+    try:
+        recover_stale_jobs(
+            args.database_url,
+            stale_after=timedelta(minutes=args.stale_minutes),
+        )
+        if args.once:
+            run_once(args.database_url, args.storage_root)
+            return 0
+        stale_after = timedelta(minutes=args.stale_minutes)
+        watcher = Thread(
+            target=_watch_stale_jobs,
+            args=(args.database_url, stale_after, stop_event),
+            name="delivery-note-stale-job-watcher",
+            daemon=True,
+        )
+        watcher.start()
+        try:
+            while not stop_event.is_set():
+                if run_once(args.database_url, args.storage_root) is None:
+                    stop_event.wait(args.poll_interval)
+        finally:
+            stop_event.set()
+            watcher.join(timeout=5)
+        return 0
+    finally:
+        for signum, previous_handler in previous_handlers.items():
+            signal.signal(signum, previous_handler)
 
 
 if __name__ == "__main__":

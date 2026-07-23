@@ -1,15 +1,19 @@
 from datetime import datetime, timedelta
 from io import BytesIO
 from pathlib import Path
+import subprocess
+import sys
 from tempfile import TemporaryDirectory
+import time
 import unittest
 from zipfile import ZipFile
 
-from fastapi.testclient import TestClient
 from openpyxl import Workbook, load_workbook
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from tests.asgi_client import SyncASGIClient
 from delivery_note.web.api import create_app
+from delivery_note.web.database import Database
 from delivery_note.web.models import Batch, BatchFile, ExceptionRecord, Job
 
 try:
@@ -35,7 +39,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             storage_root=self.storage_root,
             bootstrap_admin=("admin", "admin-pass"),
         )
-        self.client = TestClient(self.app)
+        self.client = SyncASGIClient(self.app)
         login = self.client.post(
             "/api/auth/login",
             json={"username": "admin", "password": "admin-pass"},
@@ -182,6 +186,9 @@ class WorkerIntegrationTests(unittest.TestCase):
         ).json()
         self.assertEqual(len(exceptions), 1)
         self.assertEqual(exceptions[0]["manual_quantity"], 60)
+        self.assertEqual(exceptions[0]["scale_position"], "短尾")
+        self.assertEqual(exceptions[0]["stocking_position"], "备货")
+        self.assertEqual(exceptions[0]["ordered_days"], 90)
 
         split = self.client.put(
             f"/api/exceptions/{exceptions[0]['id']}/split",
@@ -194,6 +201,9 @@ class WorkerIntegrationTests(unittest.TestCase):
             },
         )
         self.assertEqual(split.status_code, 200, split.text)
+        self.assertEqual(split.json()["scale_position"], "短尾")
+        self.assertEqual(split.json()["stocking_position"], "备货")
+        self.assertEqual(split.json()["ordered_days"], 90)
         export = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers
         )
@@ -205,7 +215,43 @@ class WorkerIntegrationTests(unittest.TestCase):
             f"/api/batches/{batch_id}", headers=self.headers
         ).json()
         self.assertTrue(completed["download_ready"])
+        self.assertTrue(completed["merged_download_ready"])
         self.assertTrue(all(item["download_ready"] for item in completed["files"]))
+        merged_response = self.client.get(
+            f"/api/batches/{batch_id}/download-merged", headers=self.headers
+        )
+        self.assertEqual(merged_response.status_code, 200, merged_response.text)
+        merged_book = load_workbook(
+            BytesIO(merged_response.content),
+            data_only=True,
+        )
+        merged_import_sheet = merged_book["交货导入"]
+        merged_pending_sheet = merged_book["待处理导入"]
+        self.assertEqual(
+            sum(
+                merged_import_sheet.cell(row, 4).value or 0
+                for row in range(3, merged_import_sheet.max_row + 1)
+            ),
+            125,
+        )
+        self.assertEqual(
+            sum(
+                merged_pending_sheet.cell(row, 4).value or 0
+                for row in range(3, merged_pending_sheet.max_row + 1)
+            ),
+            35,
+        )
+        merged_import_notes = [
+            merged_import_sheet.cell(row, 6).value
+            for row in range(3, merged_import_sheet.max_row + 1)
+        ]
+        self.assertTrue(merged_import_notes[0].endswith("-01-10箱"))
+        self.assertTrue(
+            all(note.endswith("-02-20箱") for note in merged_import_notes[1:])
+        )
+        self.assertTrue(
+            merged_pending_sheet.cell(3, 6).value.endswith("-02-20箱")
+        )
         archive_response = self.client.get(
             f"/api/batches/{batch_id}/download", headers=self.headers
         )
@@ -213,6 +259,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         with ZipFile(BytesIO(archive_response.content)) as archive:
             names = sorted(archive.namelist())
             self.assertEqual(len(names), 2)
+            self.assertFalse(any("merged" in name for name in names))
             second_book = load_workbook(
                 BytesIO(archive.read(names[1])), data_only=True
             )
@@ -233,6 +280,121 @@ class WorkerIntegrationTests(unittest.TestCase):
             f"/api/batches/{batch_id}/export", headers=self.headers
         )
         self.assertEqual(repeated.json()["id"], export_job_id)
+        self.assertEqual(repeated.json()["status"], "succeeded")
+
+        with self.app.state.database.session() as session:
+            stored_batch = session.get(Batch, batch_id)
+            merged_path = Path(stored_batch.zip_path).with_name(
+                f"batch-{batch_id}-merged.xlsx"
+            )
+        merged_path.unlink()
+        self.assertEqual(
+            self.client.get(
+                f"/api/batches/{batch_id}/download-merged",
+                headers=self.headers,
+            ).status_code,
+            404,
+        )
+        regenerated = self.client.post(
+            f"/api/batches/{batch_id}/export", headers=self.headers
+        )
+        self.assertEqual(regenerated.json()["id"], export_job_id)
+        self.assertEqual(regenerated.json()["status"], "queued")
+        self.assertEqual(run_once(self.database_url, self.storage_root), export_job_id)
+        self.assertEqual(
+            self.client.get(
+                f"/api/batches/{batch_id}/download-merged",
+                headers=self.headers,
+            ).status_code,
+            200,
+        )
+
+    def test_compute_uses_the_overreceipt_rule_locked_when_batch_was_created(self):
+        first_rule = self.client.post(
+            "/api/overreceipt-rule-versions",
+            headers=self.headers,
+            json={
+                "name": "允许短尾超收 50",
+                "short_tail_limit": 50,
+                "medium_tail_limit": 20,
+                "long_tail_limit": 10,
+                "allowed_warehouses": ["水鞋-广州仓"],
+            },
+        )
+        self.assertEqual(first_rule.status_code, 201, first_rule.text)
+        first = self.create_delivery(
+            self.root / "260717-狂飙-A交货单-发货10箱.xlsx", 80
+        )
+        second = self.create_delivery(
+            self.root / "260717-狂飙-B交货单-发货20箱.xlsx", 80
+        )
+        batch_id, compute_job_id = self.create_batch([first, second])
+
+        replacement_rule = self.client.post(
+            "/api/overreceipt-rule-versions",
+            headers=self.headers,
+            json={
+                "name": "停止自动超收",
+                "short_tail_limit": 0,
+                "medium_tail_limit": 0,
+                "long_tail_limit": 0,
+                "allowed_warehouses": [],
+            },
+        )
+        self.assertEqual(replacement_rule.status_code, 201, replacement_rule.text)
+
+        self.assertEqual(run_once(self.database_url, self.storage_root), compute_job_id)
+        batch = self.client.get(
+            f"/api/batches/{batch_id}", headers=self.headers
+        ).json()
+
+        self.assertEqual(batch["overreceipt_rule"]["id"], first_rule.json()["id"])
+        self.assertEqual(
+            [(item["import_total"], item["manual_total"]) for item in batch["files"]],
+            [(80, 0), (70, 10)],
+        )
+        self.assertEqual(
+            batch["files"][1]["import_total"] + batch["files"][1]["manual_total"],
+            80,
+        )
+        exceptions = self.client.get(
+            f"/api/batches/{batch_id}/exceptions", headers=self.headers
+        ).json()
+        self.assertEqual(exceptions[0]["reason"], "超出允许超收量")
+        self.assertEqual(exceptions[0]["manual_quantity"], 10)
+
+        export = self.client.post(
+            f"/api/batches/{batch_id}/export", headers=self.headers
+        )
+        self.assertEqual(export.status_code, 202, export.text)
+        self.assertEqual(
+            run_once(self.database_url, self.storage_root),
+            export.json()["id"],
+        )
+        archive_response = self.client.get(
+            f"/api/batches/{batch_id}/download", headers=self.headers
+        )
+        with ZipFile(BytesIO(archive_response.content)) as archive:
+            names = sorted(archive.namelist())
+            second_book = load_workbook(
+                BytesIO(archive.read(names[1])),
+                data_only=True,
+            )
+        import_sheet = second_book["交货导入"]
+        pending_sheet = second_book["待处理导入"]
+        self.assertEqual(
+            [import_sheet.cell(2, column).value for column in range(1, 8)],
+            IMPORT_COLUMNS,
+        )
+        self.assertEqual(
+            sum(
+                import_sheet.cell(row, 4).value or 0
+                for row in range(3, import_sheet.max_row + 1)
+            ),
+            70,
+        )
+        self.assertEqual(pending_sheet.cell(3, 4).value, 10)
+        self.assertEqual(pending_sheet.cell(3, 7).value, "超出允许超收量：10")
 
     def test_stale_job_recovers_and_failed_batch_persists_no_partial_results(self):
         valid = self.create_delivery(
@@ -308,6 +470,45 @@ class WorkerIntegrationTests(unittest.TestCase):
             self.assertEqual(job.claim_token, "new-claim")
             self.assertIsNone(job.error_message)
             self.assertEqual(batch.status, "running")
+
+
+class WorkerProcessLifecycleTests(unittest.TestCase):
+    def test_worker_exits_cleanly_on_sigterm(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            database_url = f"sqlite+pysqlite:///{root / 'worker.db'}"
+            database = Database(database_url)
+            database.create_schema()
+            database.dispose()
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "delivery_note.worker",
+                    "--database-url",
+                    database_url,
+                    "--storage-root",
+                    str(root / "storage"),
+                    "--poll-interval",
+                    "0.05",
+                ],
+                cwd=Path(__file__).resolve().parents[1],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                time.sleep(2)
+                self.assertIsNone(process.poll(), "Worker 在收到信号前意外退出")
+                process.terminate()
+                returncode = process.wait(timeout=5)
+                stdout, stderr = process.communicate()
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+        self.assertEqual(returncode, 0, f"stdout={stdout}\nstderr={stderr}")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,11 @@ import unittest
 import pandas as pd
 
 try:
+    from delivery_note.pipeline import OverreceiptPolicy
+except ImportError:
+    OverreceiptPolicy = None
+
+try:
     from delivery_note.application import (
         DeliveryRequest,
         SplitPart,
@@ -62,6 +67,30 @@ class DeliveryBatchTests(unittest.TestCase):
             source_name=source_name,
         )
 
+    @staticmethod
+    def positions():
+        return pd.DataFrame(
+            [
+                {
+                    "店铺-站点": "SEEKWAY:US",
+                    "积加SKU": "SKU-A",
+                    "MSKU": "MSKU-A",
+                    "规模定位": "短尾",
+                    "备货定位": "备货",
+                    "已下单可售天数": 30,
+                }
+            ]
+        )
+
+    @staticmethod
+    def overreceipt_policy():
+        return OverreceiptPolicy(
+            short_tail_limit=50,
+            medium_tail_limit=20,
+            long_tail_limit=10,
+            allowed_warehouses=frozenset({"水鞋-广州仓"}),
+        )
+
     def setUp(self):
         self.assertIsNotNone(process_delivery_batch, "批次处理服务尚未实现")
         if process_delivery_batch is None:
@@ -80,6 +109,23 @@ class DeliveryBatchTests(unittest.TestCase):
         self.assertEqual(batch.items[0].result.import_total, 80)
         self.assertEqual(batch.items[1].result.import_total, 20)
         self.assertEqual(batch.items[1].result.manual_total, 60)
+
+    def test_overreceipt_allowance_is_shared_in_request_order(self):
+        self.assertIsNotNone(OverreceiptPolicy, "超收规则尚未实现")
+        batch = process_delivery_batch(
+            [self.request("first", 80), self.request("second", 80)],
+            self.products(),
+            self.purchases(),
+            position_data=self.positions(),
+            overreceipt_policy=self.overreceipt_policy(),
+        )
+
+        self.assertEqual(batch.delivery_total, 160)
+        self.assertEqual(batch.import_total, 150)
+        self.assertEqual(batch.manual_total, 10)
+        self.assertEqual(batch.items[0].result.import_total, 80)
+        self.assertEqual(batch.items[1].result.import_total, 70)
+        self.assertEqual(batch.items[1].result.manual_total, 10)
 
     def test_changing_order_changes_only_which_source_consumes_balance(self):
         batch = process_delivery_batch(

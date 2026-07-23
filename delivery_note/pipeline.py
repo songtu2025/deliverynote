@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from typing import MutableMapping
 
 import pandas as pd
 
@@ -40,6 +41,9 @@ EXCEPTION_COLUMNS = [
     "异常原因",
 ]
 
+OVERRECEIPT_NOTE_PREFIX = "规则允许超收"
+OverreceiptKey = tuple[str, str, str]
+
 
 @dataclass(frozen=True)
 class BatchResult:
@@ -48,6 +52,44 @@ class BatchResult:
     delivery_total: int
     import_total: int
     manual_total: int
+
+
+@dataclass(frozen=True)
+class OverreceiptPolicy:
+    short_tail_limit: int
+    medium_tail_limit: int
+    long_tail_limit: int
+    allowed_warehouses: frozenset[str]
+
+    def __post_init__(self) -> None:
+        limits = (
+            self.short_tail_limit,
+            self.medium_tail_limit,
+            self.long_tail_limit,
+        )
+        if any(isinstance(limit, bool) or not isinstance(limit, int) for limit in limits):
+            raise ValueError("超收数量必须是整数")
+        if any(limit < 0 for limit in limits):
+            raise ValueError("超收数量不能小于 0")
+        warehouses = frozenset(
+            str(warehouse).strip()
+            for warehouse in self.allowed_warehouses
+            if str(warehouse).strip()
+        )
+        object.__setattr__(self, "allowed_warehouses", warehouses)
+
+    def limit_for(self, scale: str) -> int:
+        return {
+            "短尾": self.short_tail_limit,
+            "中尾": self.medium_tail_limit,
+            "长尾": self.long_tail_limit,
+        }.get(scale, 0)
+
+
+@dataclass
+class OverreceiptAllowance:
+    remaining: int
+    destination_warehouse: str
 
 
 def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> None:
@@ -148,7 +190,7 @@ def build_manual_import_rows(
         manual_quantity = int(exception["人工处理量"])
         site = "" if reason == "产品信息站点不唯一" else full_site
         note = reason
-        if reason == "超出采购未交量":
+        if reason in {"超出采购未交量", "超出允许超收量"}:
             note = f"{reason}：{manual_quantity}"
         elif reason == "产品信息未匹配" and original_site:
             note = f"{reason}；原始站点：{original_site}"
@@ -181,6 +223,83 @@ def _normalize_pending_site(value) -> str:
     if site.count(":") >= 2:
         return site.split(":", 1)[1]
     return site
+
+
+def _overreceipt_key(supplier, sku, site) -> OverreceiptKey:
+    return (
+        _normalize_position_text(supplier),
+        _normalize_position_text(sku),
+        _normalize_position_text(site),
+    )
+
+
+def build_overreceipt_allowances(
+    purchase_rows: pd.DataFrame,
+    position_rows: pd.DataFrame,
+    policy: OverreceiptPolicy,
+) -> dict[OverreceiptKey, OverreceiptAllowance]:
+    """Build one absolute overreceipt allowance per supplier, SKU and site."""
+
+    _require_columns(
+        purchase_rows,
+        {"单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"},
+        "采购需求",
+    )
+    _require_columns(position_rows, set(POSITION_SOURCE_COLUMNS), "排查表")
+
+    purchases = purchase_rows[purchase_rows["单据状态"].isin(PURCHASE_STATUSES)].copy()
+    purchases["未交量"] = pd.to_numeric(
+        purchases["未交量"], errors="coerce"
+    ).fillna(0)
+    purchases = purchases[purchases["未交量"] > 0]
+    if purchases.empty or not policy.allowed_warehouses:
+        return {}
+
+    positions = position_rows[POSITION_SOURCE_COLUMNS].copy()
+    positions["_site_key"] = positions["店铺-站点"].map(_normalize_position_text)
+    positions["_sku_key"] = positions["积加SKU"].map(_normalize_position_text)
+    position_groups = {
+        key: group
+        for key, group in positions.groupby(["_site_key", "_sku_key"], sort=False)
+    }
+
+    purchases["_supplier_key"] = purchases["供应商"].map(_normalize_position_text)
+    purchases["_sku_key"] = purchases["SKU"].map(_normalize_position_text)
+    purchases["_site_key"] = purchases["平台站点"].map(_normalize_position_text)
+    allowances: dict[OverreceiptKey, OverreceiptAllowance] = {}
+    group_columns = ["_supplier_key", "_sku_key", "_site_key"]
+    for key, purchase_group in purchases.groupby(group_columns, sort=False):
+        position_key = (_normalize_pending_site(key[2]), key[1])
+        position_group = position_groups.get(position_key)
+        if position_group is None or position_group.empty:
+            continue
+
+        scales = [
+            "" if pd.isna(value) else str(value).strip()
+            for value in position_group["规模定位"]
+        ]
+        if any(not scale for scale in scales) or len(set(scales)) != 1:
+            continue
+        limit = policy.limit_for(scales[0])
+        if limit <= 0:
+            continue
+
+        eligible_warehouses = sorted(
+            {
+                str(value).strip()
+                for value in purchase_group["目的仓"]
+                if not pd.isna(value)
+                and str(value).strip() in policy.allowed_warehouses
+            },
+            key=warehouse_sort_key,
+        )
+        if not eligible_warehouses:
+            continue
+        allowances[key] = OverreceiptAllowance(
+            remaining=limit,
+            destination_warehouse=eligible_warehouses[0],
+        )
+    return allowances
 
 
 def _position_value(value):
@@ -257,6 +376,9 @@ def process_data(
     purchase_rows: pd.DataFrame,
     supplier_name: str,
     supplier_code: str | None = None,
+    overreceipt_allowances: MutableMapping[
+        OverreceiptKey, OverreceiptAllowance
+    ] | None = None,
 ) -> BatchResult:
     """完成产品映射、采购需求汇总和交货数量分配。"""
     supplier_code = supplier_code or supplier_name
@@ -384,9 +506,44 @@ def process_data(
             if remaining == 0:
                 break
 
+        allowance_key = _overreceipt_key(
+            supplier_name,
+            delivery_row["SKU"],
+            full_site,
+        )
+        allowance = (
+            overreceipt_allowances.get(allowance_key)
+            if overreceipt_allowances is not None
+            else None
+        )
+        if remaining > 0 and allowance is not None and allowance.remaining > 0:
+            quantity = min(remaining, allowance.remaining)
+            import_rows.append(
+                {
+                    "*目的仓": allowance.destination_warehouse,
+                    "*供应商编码": supplier_code,
+                    "*SKU": delivery_row["SKU"],
+                    "*本次交货量": quantity,
+                    "*站点": full_site,
+                    "单据备注": "",
+                    "交货备注": f"{OVERRECEIPT_NOTE_PREFIX}：{quantity}",
+                }
+            )
+            allowance.remaining -= quantity
+            remaining -= quantity
+            allocated += quantity
+            last_destination_warehouse = allowance.destination_warehouse
+
         if remaining > 0:
-            reason = "超出采购未交量" if candidate_indexes else "未找到可交货采购需求"
-            if allocated > 0:
+            if allowance is not None:
+                reason = "超出允许超收量"
+            else:
+                reason = (
+                    "超出采购未交量"
+                    if candidate_indexes
+                    else "未找到可交货采购需求"
+                )
+            if allocated > 0 and allowance is None:
                 import_rows[-1]["交货备注"] = f"{reason}：{remaining}"
             _append_exception(
                 exceptions,

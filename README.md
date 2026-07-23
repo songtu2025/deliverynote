@@ -4,16 +4,23 @@
 
 后端保留原有 Python CLI，并与 Web 共用 pandas/openpyxl 业务逻辑。部署形态是 React + FastAPI + PostgreSQL + 单 Worker + Docker Compose，不依赖 Celery 或 Redis。
 
+当前产品定位是供不超过 5 人使用的内部小工具，保持单机、单 API、单 Worker 部署；不为横向扩容、微服务、高可用集群或移动端另行增加复杂度。
+
 ## 已实现功能
 
 - 管理员和操作员登录，权限分离。
-- 采购、商品、供应商、库位和导出模板五类版本管理。
+- 采购、商品、供应商、库位和导出模板五类资料目录，支持当前版本摘要、数据预览、原文件下载、替换上传和历史版本。
+- 库位资料支持服务端持久化编辑草稿、逐行新增/修改/删除、筛选、Excel 差异预览、校验和发布新版本。
+- 管理员维护按“基础资料、用户账号、操作记录”分区，当前资料、维护入口和已维护内容集中展示。
 - 创建批次、上传多个交货文件和调整处理顺序。
 - 按界面顺序共享并连续扣减采购余额。
+- 系统初始默认不使用超收规则；所有管理员和操作员都可按需发布不可变版本，按短尾/中尾/长尾配置绝对超收数量并维护允许仓库白名单。
+- 批次创建时锁定当时启用的超收规则；同一供应商、SKU、站点的超收额度按文件顺序在批次内共享，空定位、定位冲突和非白名单仓库均不自动超收。
 - 预检 Excel 内容、供应商识别和模板结构。
 - 查看异常，将一条待处理记录拆成可导入和仍待处理部分。
 - 后台计算、任务心跳、超时恢复和失败重试。
-- 每个来源文件单独导出，同时生成批次 ZIP。
+- 多文件批次同时生成按来源顺序拼接的合并 Excel，以及保留每个来源独立结果的批次 ZIP。
+- 批次详情使用可刷新、可前进/后退的独立 URL；所有业务时间固定按北京时间显示。
 - 保留原有单文件 CLI 和 Excel 模板格式。
 
 系统始终要求：
@@ -29,10 +36,13 @@ delivery_note/          Python 核心逻辑、FastAPI 和 Worker
 delivery_note/web/      数据库模型、认证和 API
 frontend/               React + TypeScript + Ant Design 前端
 tests/                  Python 单元与端到端测试
+scripts/                验收数据与成对备份运维脚本
+ops/systemd/            成对备份 service/timer 未安装示例
 compose.yaml            PostgreSQL、API、Worker、Web 编排
 Dockerfile              API 和 Worker 镜像
 .env.example            部署环境变量示例
 HANDOFF_WEB_UPGRADE.md   当前状态和 Codex CLI 续开发交接
+UI_UX_OPTIMIZATION_PLAN.md 操作流程与 UI 优化方案及实施状态
 AGENTS.md                Codex CLI 自动读取的项目规则
 ```
 
@@ -54,7 +64,11 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=设置一个强管理员密码
 WEB_PORT=8080
 CORS_ORIGINS=http://localhost:8080
+MAX_UPLOAD_BYTES=20971520
+IMPORT_CANDIDATE_TTL_SECONDS=900
 ```
+
+`MAX_UPLOAD_BYTES` 是单个上传文件的字节上限，默认 20 MiB；`IMPORT_CANDIDATE_TTL_SECONDS` 是库位草稿 Excel 导入预览的有效期，默认 900 秒。
 
 先检查 Compose 配置，再构建并启动：
 
@@ -88,12 +102,16 @@ ssh -L 8080:127.0.0.1:8080 用户名@服务器地址
 ## 首次使用
 
 1. 使用 `.env` 中的管理员账号登录。
-2. 在“管理员维护”中分别上传并启用采购、商品、供应商、库位和导出模板。
-3. 创建批次，上传一个或多个供应商交货文件。
-4. 调整文件顺序并执行预检。
-5. 启动计算，等待 Worker 完成任务。
-6. 审阅待处理记录，按需拆分。
-7. 生成单文件结果和批次 ZIP。
+2. 在“管理员维护 → 基础资料”中确认五类资料的当前版本、摘要和预览；缺失时上传并启用对应版本。
+3. 库位资料需要人工维护时进入“库位维护工作区”，系统会在服务器创建或继续唯一编辑草稿；逐行修改会自动保存，校验通过后再发布为新的当前版本。
+4. 系统初始默认不使用超收规则；如需自动超收，由任一管理员或操作员进入“超收规则”主动发布版本。仓库留空表示所有仓库都不允许超收。
+5. 创建批次，确认页面显示将锁定的超收规则，再上传一个或多个供应商交货文件。
+6. 调整文件顺序并执行预检。
+7. 启动计算，等待 Worker 完成任务。
+8. 审阅待处理记录，按需拆分。
+9. 生成导出；多文件批次可下载合并 Excel 或分文件 ZIP，也可单独下载每个来源结果。
+
+新版界面把上述操作组织为“准备文件 → 预检 → 计算结果 → 异常审校 → 导出下载”五步工作台。完整方案和实施状态见 [UI_UX_OPTIMIZATION_PLAN.md](UI_UX_OPTIMIZATION_PLAN.md)。
 
 输入文件不会保存在 Git 仓库中，需要在部署后通过管理页面上传。
 
@@ -117,6 +135,8 @@ python scripts/generate_acceptance_data.py --output-dir acceptance_data
 ```
 
 `acceptance_data/` 仅用于本机验收，不应提交到 Git。
+
+上述结果是不启用超收规则时的兼容基线。如果发布“短尾 50、中尾 20、长尾 10，允许水鞋-广州仓”的规则，当前脱敏数据的 SKU-A 为短尾，预期变为 `160 = 150 + 10`，第一个文件可导入 80，第二个文件可导入 70。
 
 ## 本地开发
 
@@ -184,7 +204,7 @@ npm run test
 npm run build
 ```
 
-当前基线是 Python 41/41 通过、前端 1/1 通过，生产构建成功。
+2026-07-23 在 `feature/admin-maintenance` 工作树完成的当前基线是 Python 131/131 通过、前端 8 个测试文件共 71/71 通过、`pip check` 无冲突，生产构建成功。前端测试默认串行执行，避免重型 jsdom 页面并行时触发 5 秒用例超时。构建仍有约 1.2 MB 单包体积提示，不影响当前功能。超收规则的专用迁移、operator 发布、唯一启用版本和批次锁定已在临时 PostgreSQL 17 验证；无规则与短尾 50 的脱敏双文件场景、合并 Excel、分文件 ZIP、A:G 和备注也已在独立 Compose 项目验证。管理员维护已用 Google Chrome 完成 PC 端验收；成对备份脚本另有 6/6 专用测试通过并完成独立恢复演练。定时异机备份仍未建立。
 
 ## 项目完成标准
 
@@ -208,7 +228,8 @@ npm run build
 
 - 管理员可以上传并启用五类输入版本。
 - 两份交货文件按界面顺序共享采购余额，预期数量与验收场景一致。
-- 预检、计算、异常拆分、数量守恒、单文件导出和批次 ZIP 全部通过。
+- 超收规则按锁定版本、规模定位、仓库白名单和文件顺序共享额度，规则外数量继续进入待处理。
+- 预检、计算、异常拆分、数量守恒、单文件导出、多文件合并 Excel 和分文件 ZIP 全部通过。
 - 原有 CLI、仓库优先级、锁仓匹配和模板 A:G 格式保持兼容。
 
 ### 运维门槛
@@ -218,7 +239,9 @@ npm run build
 - 数据库改表有可执行的迁移方案。
 - README、交接文档和实际部署命令保持一致。
 
-当前代码门槛可以自动验证；Linux 部署、真实业务和运维门槛仍需要在目标机器完成，完成前不要宣称生产可用。
+当前代码门槛已通过自动化验证；管理员维护和超收规则 PC 端 Chrome 验收、脱敏双文件业务场景均已通过。2026-07-22 已在业务静止窗口内对正式 PostgreSQL 与 `delivery_data` 生成成对备份并恢复到独立 Compose 项目；恢复前后业务表计数一致，50 个文件的路径/内容聚合校验值一致，恢复库迁移两次成功，10 个历史批次保持无规则兼容。恢复演练发现并修复了 Worker 不响应容器 SIGTERM 的问题，进程测试和 Compose 退出码均为 0。成对备份已复制到受控目录 `/root/backups/deliverynote/20260722-160803` 并再次通过 SHA-256 校验。
+
+2026-07-23 12:46（Asia/Shanghai）已从隔离工作树完成最新 API、Worker 和 Web 生产部署。线上资源为 `index-DzkyLbfg.js` / `index-BJrakn5L.css`；数据库容器 ID 和 `deliverynote_postgres_data` 卷保持不变。本机与外部 HTTPS `/health` 均成功，生产当前有 13 个批次和 0 个活动任务。真实 HTTPS Chrome 在模拟洛杉矶时区时验证了北京时间显示、批次独立 URL、详情刷新和浏览器返回；0 个失败响应、0 个控制台错误。批次 11 仍满足 `7732 = 7221 + 511`，其业务处置仍需业务员决定。定时异机成对备份尚未建立，因此本次功能上线不等于整个项目已完整生产可用。
 
 ## 原有单文件 CLI
 
@@ -233,9 +256,17 @@ python -m delivery_note.cli \
   --output-dir outputs
 ```
 
-CLI 每次只处理一个交货文件。需要在多个文件之间共享采购余额时，应使用 Web 批次流程。
+CLI 每次只处理一个交货文件，未显式传入运行时间时按北京时间生成输出目录名。需要在多个文件之间共享采购余额时，应使用 Web 批次流程。
 
 ## 更新、停止和备份
+
+已有 PostgreSQL 在首次部署超收规则代码前，先执行专用幂等迁移。推荐在新镜像的 API 容器中使用现有 `DATABASE_URL`：
+
+```bash
+python -m delivery_note.migrations.overreceipt_rules
+```
+
+该脚本只新增 `overreceipt_rule_versions` 和 `batch_overreceipt_rules` 两张表，可重复执行，不修改既有批次表。执行迁移前仍应完成 PostgreSQL 与文件卷的成对备份。
 
 更新代码：
 
@@ -258,7 +289,30 @@ docker compose down
 docker compose exec -T db pg_dump -U delivery_note delivery_note > delivery_note.sql
 ```
 
-还需要为 Docker 的 `delivery_data` 卷配置定期快照或文件备份。数据库和文件卷必须一起备份，单独恢复其中一项可能造成记录与文件不一致。
+仅执行上述命令不会包含上传文件。仓库提供了成对备份脚本，先用只读模式检查正式 Compose、活动任务、数据卷和镜像：
+
+```bash
+python scripts/backup_deliverynote.py \
+  --compose-file compose.yaml \
+  --env-file .env \
+  --project-name deliverynote \
+  --destination /srv/backups/deliverynote \
+  --check-only
+```
+
+正式执行时去掉 `--check-only`。脚本会先停止 Web/API 入口、等待已有任务结束，再停止 Worker；数据库保持运行。随后生成 PostgreSQL custom dump 和 `delivery_data` 只读归档，分别通过 `pg_restore --list`、tar 路径/链接/结构及 SHA-256 校验，最后恢复并等待全部服务运行。dump、归档和校验命令默认各有 1 小时硬超时，超时同样会恢复服务。只有所有步骤成功后，时间戳目录才会写入 `READY`；失败目录保留为 `.incomplete-*` 并写入 `FAILED.txt`，不能用于恢复。
+
+每个完整目录包含：
+
+```text
+database.dump
+delivery_data.tar.gz
+BACKUP-METADATA.json
+SHA256SUMS
+READY
+```
+
+`--retention-count` 默认为 `0`，表示不自动删除任何备份。只有显式设置正整数时，脚本才会清理超出数量、名称符合时间戳且含 `READY` 的旧完整目录，不会操作 Docker 卷或其他目录。systemd 示例位于 `ops/systemd/`，复制前必须调整工作目录、`.env` 路径和目标目录；在确认维护窗口、容量监控、异机落点和恢复抽检前不要启用 timer。异机同步应先传输数据和校验文件，最后传输 `READY`，或者先写远端临时目录再原子改名；目标端必须重新核对 `SHA256SUMS`。数据库和文件卷必须作为同一目录的一对进行保留和恢复，单独恢复其中一项可能造成记录与文件不一致。
 
 ## 安全提醒
 

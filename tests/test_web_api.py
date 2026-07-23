@@ -1,17 +1,22 @@
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier
 import unittest
+from unittest.mock import patch
 
-from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from tests.asgi_client import SyncASGIClient
 
 try:
+    import delivery_note.web.api as web_api_module
     from delivery_note.web.api import create_app
     from delivery_note.web.models import Batch, BatchFile, ExceptionRecord
 except ImportError:
+    web_api_module = None
     create_app = None
     Batch = None
     BatchFile = None
@@ -33,7 +38,7 @@ class WebApiTests(unittest.TestCase):
             storage_root=root / "storage",
             bootstrap_admin=("admin", "admin-pass"),
         )
-        self.client = TestClient(self.app)
+        self.client = SyncASGIClient(self.app)
 
     def tearDown(self):
         if hasattr(self, "client"):
@@ -182,6 +187,233 @@ class WebApiTests(unittest.TestCase):
         ]
         self.assertEqual(active_ids, [created_ids[1]])
 
+    def test_position_bootstrap_upload_is_allowed(self):
+        admin_headers = self.login("admin", "admin-pass")
+
+        response = self.client.post(
+            "/api/input-versions/position",
+            headers=admin_headers,
+            data={"name": "position-bootstrap", "activate": "true"},
+            files={
+                "file": (
+                    "position-bootstrap.xlsx",
+                    BytesIO(self.workbook_bytes("position")),
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertTrue(response.json()["active"])
+
+    def test_invalid_input_version_is_rejected_before_activation(self):
+        admin_headers = self.login("admin", "admin-pass")
+        response = self.client.post(
+            "/api/input-versions/purchase",
+            headers=admin_headers,
+            data={"name": "broken-purchase", "activate": "true"},
+            files={"file": ("broken.xlsx", BytesIO(b"not-an-excel-file"))},
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("输入版本校验失败", response.json()["detail"])
+        versions = self.client.get(
+            "/api/input-versions", headers=admin_headers
+        ).json()
+        self.assertEqual(versions, [])
+
+    def test_initial_state_creates_batches_without_overreceipt_rule(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+
+        rules = self.client.get(
+            "/api/overreceipt-rule-versions",
+            headers=admin_headers,
+        )
+        self.assertEqual(rules.status_code, 200, rules.text)
+        self.assertEqual(rules.json(), [])
+
+        created = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "默认关闭超收"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertIsNone(created.json()["overreceipt_rule"])
+
+        logs = self.client.get("/api/audit-logs", headers=admin_headers).json()
+        create_log = next(
+            log
+            for log in logs
+            if log["action"] == "create_batch"
+            and log["entity_id"] == str(created.json()["id"])
+        )
+        self.assertIsNone(create_log["details"]["overreceipt_rule_version_id"])
+
+    def test_operator_can_publish_activate_and_lock_immutable_overreceipt_rules(self):
+        admin_headers = self.login("admin", "admin-pass")
+        operator = self.create_operator(admin_headers)
+        self.upload_active_versions(admin_headers)
+        operator_headers = self.login("operator", "operator-pass")
+
+        warehouses = self.client.get(
+            "/api/overreceipt-rule-versions/warehouses",
+            headers=operator_headers,
+        )
+        self.assertEqual(warehouses.status_code, 200, warehouses.text)
+        self.assertEqual(warehouses.json(), ["水鞋-广州仓"])
+
+        first = self.client.post(
+            "/api/overreceipt-rule-versions",
+            headers=operator_headers,
+            json={
+                "name": "2026-07 短尾放宽",
+                "short_tail_limit": 50,
+                "medium_tail_limit": 20,
+                "long_tail_limit": 10,
+                "allowed_warehouses": ["水鞋-广州仓"],
+            },
+        )
+        self.assertEqual(first.status_code, 201, first.text)
+        self.assertTrue(first.json()["active"])
+        self.assertEqual(first.json()["created_by"], operator["id"])
+
+        locked_batch = self.client.post(
+            "/api/batches",
+            headers=operator_headers,
+            json={"name": "锁定超收规则 V1"},
+        )
+        self.assertEqual(locked_batch.status_code, 201, locked_batch.text)
+        self.assertEqual(
+            locked_batch.json()["overreceipt_rule"]["id"],
+            first.json()["id"],
+        )
+
+        second = self.client.post(
+            "/api/overreceipt-rule-versions",
+            headers=admin_headers,
+            json={
+                "name": "2026-08 收紧",
+                "short_tail_limit": 30,
+                "medium_tail_limit": 10,
+                "long_tail_limit": 0,
+                "allowed_warehouses": [],
+            },
+        )
+        self.assertEqual(second.status_code, 201, second.text)
+        self.assertTrue(second.json()["active"])
+
+        versions = self.client.get(
+            "/api/overreceipt-rule-versions",
+            headers=operator_headers,
+        )
+        self.assertEqual(versions.status_code, 200, versions.text)
+        by_id = {item["id"]: item for item in versions.json()}
+        self.assertFalse(by_id[first.json()["id"]]["active"])
+        self.assertTrue(by_id[second.json()["id"]]["active"])
+
+        reactivated = self.client.post(
+            f"/api/overreceipt-rule-versions/{first.json()['id']}/activate",
+            headers=operator_headers,
+        )
+        self.assertEqual(reactivated.status_code, 200, reactivated.text)
+        self.assertTrue(reactivated.json()["active"])
+
+        unchanged_batch = self.client.get(
+            f"/api/batches/{locked_batch.json()['id']}",
+            headers=operator_headers,
+        )
+        self.assertEqual(
+            unchanged_batch.json()["overreceipt_rule"]["id"],
+            first.json()["id"],
+        )
+
+        logs = self.client.get("/api/audit-logs", headers=admin_headers).json()
+        actions = [log for log in logs if log["entity_type"] == "overreceipt_rule"]
+        self.assertEqual(
+            [log["action"] for log in actions],
+            [
+                "activate_overreceipt_rule",
+                "publish_overreceipt_rule",
+                "publish_overreceipt_rule",
+            ],
+        )
+        self.assertEqual(actions[0]["user_id"], operator["id"])
+
+    def test_admin_can_disable_and_reset_operator_password(self):
+        admin_headers = self.login("admin", "admin-pass")
+        operator = self.create_operator(admin_headers)
+
+        disabled = self.client.put(
+            f"/api/users/{operator['id']}/status",
+            headers=admin_headers,
+            json={"active": False},
+        )
+        self.assertEqual(disabled.status_code, 200, disabled.text)
+        self.assertFalse(disabled.json()["active"])
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/login",
+                json={"username": "operator", "password": "operator-pass"},
+            ).status_code,
+            401,
+        )
+
+        self_deactivate = self.client.put(
+            "/api/users/1/status",
+            headers=admin_headers,
+            json={"active": False},
+        )
+        self.assertEqual(self_deactivate.status_code, 409)
+
+        enabled = self.client.put(
+            f"/api/users/{operator['id']}/status",
+            headers=admin_headers,
+            json={"active": True},
+        )
+        self.assertTrue(enabled.json()["active"])
+        reset = self.client.put(
+            f"/api/users/{operator['id']}/password",
+            headers=admin_headers,
+            json={"password": "operator-new-pass"},
+        )
+        self.assertEqual(reset.status_code, 204, reset.text)
+        self.assertEqual(
+            self.client.post(
+                "/api/auth/login",
+                json={"username": "operator", "password": "operator-pass"},
+            ).status_code,
+            401,
+        )
+        self.login("operator", "operator-new-pass")
+
+    def test_api_timestamps_include_an_explicit_utc_offset(self):
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        self.assertTrue(login.json()["expires_at"].endswith("Z"))
+        headers = {"Authorization": f"Bearer {login.json()['token']}"}
+
+        self.upload_active_versions(headers)
+        versions = self.client.get(
+            "/api/input-versions",
+            headers=headers,
+        ).json()
+        self.assertTrue(all(version["created_at"].endswith("Z") for version in versions))
+
+        created = self.client.post(
+            "/api/batches",
+            headers=headers,
+            json={"name": "北京时间边界测试"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertTrue(created.json()["created_at"].endswith("Z"))
+        self.assertTrue(created.json()["updated_at"].endswith("Z"))
+
+        logs = self.client.get("/api/audit-logs", headers=headers).json()
+        self.assertTrue(all(log["created_at"].endswith("Z") for log in logs))
+
     def test_versions_batch_order_preflight_and_compute_job(self):
         admin_headers = self.login("admin", "admin-pass")
         self.create_operator(admin_headers)
@@ -196,6 +428,11 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(created.status_code, 201, created.text)
         batch = created.json()
         self.assertEqual(batch["version_ids"], version_ids)
+        self.assertEqual(
+            {kind: item["name"] for kind, item in batch["versions"].items()},
+            {kind: f"{kind}-v1" for kind in INPUT_KINDS},
+        )
+        self.assertEqual(batch["jobs"], {})
         batch_id = batch["id"]
 
         first = self.client.post(
@@ -253,6 +490,109 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(job.status_code, 200, job.text)
         self.assertEqual(job.json()["kind"], "compute")
+        refreshed = self.client.get(
+            f"/api/batches/{batch_id}", headers=operator_headers
+        ).json()
+        self.assertEqual(refreshed["jobs"]["compute"]["id"], job.json()["id"])
+        self.assertEqual(refreshed["jobs"]["compute"]["status"], "queued")
+
+    def test_concurrent_batch_uploads_get_distinct_contiguous_orders(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "并发上传排序测试"},
+        ).json()["id"]
+        saved_uploads = Barrier(2)
+        original_save_upload = web_api_module._save_upload
+
+        async def synchronized_save_upload(*args, **kwargs):
+            await original_save_upload(*args, **kwargs)
+            saved_uploads.wait(timeout=5)
+
+        def upload(filename: str):
+            return self.client.post(
+                f"/api/batches/{batch_id}/files",
+                headers=admin_headers,
+                files={"file": (filename, BytesIO(self.delivery_bytes()))},
+            )
+
+        filenames = ("KuangBiao-A.xlsx", "KuangBiao-B.xlsx")
+        with (
+            patch.object(
+                web_api_module,
+                "_save_upload",
+                new=synchronized_save_upload,
+            ),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            responses = list(executor.map(upload, filenames))
+
+        self.assertEqual(
+            [response.status_code for response in responses],
+            [201, 201],
+            [response.text for response in responses],
+        )
+        batch = self.client.get(
+            f"/api/batches/{batch_id}", headers=admin_headers
+        ).json()
+        self.assertEqual(
+            [item["file_order"] for item in batch["files"]],
+            [1, 2],
+        )
+        self.assertEqual(
+            {item["original_name"] for item in batch["files"]},
+            set(filenames),
+        )
+
+    def test_delivery_file_can_be_deleted_before_compute(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "文件纠错测试"},
+        ).json()["id"]
+        first = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=admin_headers,
+            files={"file": ("260717-狂飙-A交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        ).json()
+        second = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=admin_headers,
+            files={"file": ("260717-狂飙-B交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        ).json()
+        with self.app.state.database.session() as session:
+            removed_path = Path(session.get(BatchFile, second["id"]).storage_path)
+        self.assertTrue(removed_path.is_file())
+
+        deleted = self.client.request(
+            "DELETE",
+            f"/api/batches/{batch_id}/files/{second['id']}",
+            headers=admin_headers,
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["status"], "draft")
+        self.assertEqual(
+            [(item["id"], item["file_order"]) for item in deleted.json()["files"]],
+            [(first["id"], 1)],
+        )
+        self.assertFalse(removed_path.exists())
+
+        self.client.post(
+            f"/api/batches/{batch_id}/preflight", headers=admin_headers
+        )
+        self.client.post(
+            f"/api/batches/{batch_id}/compute", headers=admin_headers
+        )
+        blocked = self.client.request(
+            "DELETE",
+            f"/api/batches/{batch_id}/files/{first['id']}",
+            headers=admin_headers,
+        )
+        self.assertEqual(blocked.status_code, 409)
 
     def test_preflight_rejects_invalid_excel_content(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -348,12 +688,20 @@ class WebApiTests(unittest.TestCase):
             [part["quantity"] for part in valid.json()["parts"]],
             [25, 15],
         )
-        summary = self.client.get(
+        batch_after_split = self.client.get(
             f"/api/batches/{batch_id}", headers=operator_headers
-        ).json()["summary"]
+        ).json()
+        summary = batch_after_split["summary"]
         self.assertEqual(
             (summary["delivery_total"], summary["import_total"], summary["manual_total"]),
             (40, 25, 15),
+        )
+        self.assertEqual(
+            (
+                batch_after_split["files"][0]["import_total"],
+                batch_after_split["files"][0]["manual_total"],
+            ),
+            (25, 15),
         )
 
         export = self.client.post(
