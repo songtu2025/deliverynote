@@ -333,6 +333,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const [stockingFilter, setStockingFilter] = useState<string>();
   const [reviewScope, setReviewScope] = useState<ReviewScope>("unfinished");
   const [reasonFilter, setReasonFilter] = useState<string>();
+  const [lockedDataOpen, setLockedDataOpen] = useState(false);
   const [splitForm] = Form.useForm<SplitFormValues>();
   const splitParts = Form.useWatch("parts", splitForm) ?? [];
   const pollingJob = useRef<number | null>(null);
@@ -855,7 +856,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
             },
             ...(showFileActions ? [{
               title: "操作",
-              width: canEditFiles ? 210 : 130,
+              width: canEditFiles ? 250 : 170,
               fixed: "right" as const,
               render: (_: unknown, file: BatchFile, index: number) => (
                 <Space>
@@ -876,11 +877,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                   )}
                   {file.download_ready && (
                     <Button
+                      aria-label="下载单文件结果"
                       size="small"
                       icon={<DownloadOutlined />}
                       onClick={() => void download(`/api/batch-files/${file.id}/download`, `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_交货处理.xlsx`)}
                     >
-                      下载
+                      下载单文件结果
                     </Button>
                   )}
                 </Space>
@@ -892,25 +894,37 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
 
       <Card
         title={<span className="locked-data-title"><LockOutlined /> 本批次锁定的基础资料与规则（不可修改）</span>}
-        className="section-card compact-card locked-data-card"
+        className={`section-card compact-card locked-data-card ${lockedDataOpen ? "" : "is-collapsed"}`}
+        extra={(
+          <Button
+            type="link"
+            size="small"
+            aria-expanded={lockedDataOpen}
+            onClick={() => setLockedDataOpen((open) => !open)}
+          >
+            {lockedDataOpen ? "收起锁定版本" : "查看锁定版本"}
+          </Button>
+        )}
       >
-        <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 6 }}>
-          {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
-            <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
-              <Tooltip title={version.original_name}>{version.name}</Tooltip>
+        {lockedDataOpen && (
+          <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 6 }}>
+            {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
+              <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
+                <Tooltip title={version.original_name}>{version.name}</Tooltip>
+              </Descriptions.Item>
+            ))}
+            <Descriptions.Item label="超收规则">
+              {batch.overreceipt_rule ? (
+                <span className="locked-overreceipt-rule">
+                  <strong>{batch.overreceipt_rule.name}</strong>
+                  <small>
+                    短尾 +{batch.overreceipt_rule.short_tail_limit} / 中尾 +{batch.overreceipt_rule.medium_tail_limit} / 长尾 +{batch.overreceipt_rule.long_tail_limit}
+                  </small>
+                </span>
+              ) : "未启用（不自动超收）"}
             </Descriptions.Item>
-          ))}
-          <Descriptions.Item label="超收规则">
-            {batch.overreceipt_rule ? (
-              <span className="locked-overreceipt-rule">
-                <strong>{batch.overreceipt_rule.name}</strong>
-                <small>
-                  短尾 +{batch.overreceipt_rule.short_tail_limit} / 中尾 +{batch.overreceipt_rule.medium_tail_limit} / 长尾 +{batch.overreceipt_rule.long_tail_limit}
-                </small>
-              </span>
-            ) : "未启用（不自动超收）"}
-          </Descriptions.Item>
-        </Descriptions>
+          </Descriptions>
+        )}
       </Card>
 
       {computed && (
@@ -1032,6 +1046,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           <Table<DeliveryException>
             rowKey="id"
             dataSource={filteredExceptions}
+            pagination={filteredExceptions.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
             locale={{ emptyText: <Empty description={
               exceptions.length
                 ? reviewScope === "unfinished"
@@ -1129,42 +1144,51 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
         footer={(
           <div className="drawer-footer">
-            <div className="drawer-review-navigation">
-              <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
-                <span>
-                  <Button
-                    disabled={!previousReviewTarget || reviewNavigationLocked}
-                    onClick={() => previousReviewTarget && openSplit(previousReviewTarget)}
-                  >
-                    上一条
-                  </Button>
-                </span>
-              </Tooltip>
-              <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
-                <span>
-                  <Button
-                    disabled={!nextReviewTarget || reviewNavigationLocked}
-                    onClick={() => nextReviewTarget && openSplit(nextReviewTarget)}
-                  >
-                    下一条
-                  </Button>
-                </span>
-              </Tooltip>
-            </div>
+            {filteredExceptions.length > 1 && (
+              <div className="drawer-review-navigation">
+                <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
+                  <span>
+                    <Button
+                      disabled={!previousReviewTarget || reviewNavigationLocked}
+                      onClick={() => previousReviewTarget && openSplit(previousReviewTarget)}
+                    >
+                      上一条
+                    </Button>
+                  </span>
+                </Tooltip>
+                <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
+                  <span>
+                    <Button
+                      disabled={!nextReviewTarget || reviewNavigationLocked}
+                      onClick={() => nextReviewTarget && openSplit(nextReviewTarget)}
+                    >
+                      下一条
+                    </Button>
+                  </span>
+                </Tooltip>
+              </div>
+            )}
             <div className="drawer-review-actions">
               <Button onClick={() => setSplitTarget(null)}>返回列表</Button>
+              {nextReviewTarget && (
+                <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+                  <Button
+                    aria-label="保存"
+                    disabled={!splitValid}
+                    loading={action === "split"}
+                    onClick={() => void saveSplit(false)}
+                  >
+                    保存
+                  </Button>
+                </Tooltip>
+              )}
               <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
                 <Button
-                  aria-label="保存"
+                  type="primary"
                   disabled={!splitValid}
                   loading={action === "split"}
-                  onClick={() => void saveSplit(false)}
+                  onClick={() => void saveSplit(Boolean(nextReviewTarget))}
                 >
-                  保存
-                </Button>
-              </Tooltip>
-              <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
-                <Button type="primary" disabled={!splitValid} loading={action === "split"} onClick={() => void saveSplit(true)}>
                   {nextReviewTarget ? "保存并处理下一条" : "保存并返回列表"}
                 </Button>
               </Tooltip>

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import OverreceiptRulesPage from "./OverreceiptRulesPage";
@@ -71,6 +71,17 @@ describe("OverreceiptRulesPage", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "允许超收仓库" }));
     fireEvent.click(await screen.findByText("水鞋-广州仓", { selector: ".ant-select-item-option-content" }));
     fireEvent.click(screen.getByRole("button", { name: "发布并用于新批次" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "确认发布不可变版本？" });
+    expect(within(dialog).getByText("2026-08 新规则")).toBeInTheDocument();
+    expect(within(dialog).getByText("短尾 +50 件")).toBeInTheDocument();
+    expect(within(dialog).getByText("中尾 +20 件")).toBeInTheDocument();
+    expect(within(dialog).getByText("长尾 +10 件")).toBeInTheDocument();
+    expect(within(dialog).getByText("水鞋-广州仓")).toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")
+    ).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
 
     await waitFor(() => {
       const post = vi.mocked(fetch).mock.calls.find(([, init]) => init?.method === "POST");
