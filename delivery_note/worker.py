@@ -479,12 +479,16 @@ def _execute_export(
     temporary.mkdir(parents=True, exist_ok=False)
     output_names: dict[int, str] = {}
     used_names: set[str] = set()
+    merged_import_frames: list[pd.DataFrame] = []
+    merged_pending_frames: list[pd.DataFrame] = []
     try:
         for source in sources:
             _heartbeat(database, job_id, claim_token)
             result, import_rows, pending_rows = _prepare_export_result(
                 source, position_rows
             )
+            merged_import_frames.append(import_rows)
+            merged_pending_frames.append(pending_rows)
             output_name = f"{Path(source['original_name']).stem}_交货处理.xlsx"
             if output_name in used_names:
                 raise RuntimeError(f"导出文件名重复：{output_name}")
@@ -498,6 +502,35 @@ def _execute_export(
                 pending_rows,
             )
             output_names[source["id"]] = output_name
+
+        if len(sources) > 1:
+            merged_import_rows = pd.concat(
+                merged_import_frames,
+                ignore_index=True,
+            )
+            merged_pending_rows = pd.concat(
+                merged_pending_frames,
+                ignore_index=True,
+            )
+            delivery_total = sum(source["delivery_total"] for source in sources)
+            import_total = int(merged_import_rows["*本次交货量"].sum())
+            pending_total = int(merged_pending_rows["*本次交货量"].sum())
+            if delivery_total != import_total + pending_total:
+                raise RuntimeError("合并导出数量不守恒")
+            merged_result = BatchResult(
+                import_rows=merged_import_rows,
+                exception_rows=pd.DataFrame(columns=EXCEPTION_COLUMNS),
+                delivery_total=delivery_total,
+                import_total=import_total,
+                manual_total=pending_total,
+            )
+            write_delivery_workbook(
+                version_paths["template"],
+                temporary / f"batch-{batch_id}-merged.xlsx",
+                merged_result,
+                merged_import_rows,
+                merged_pending_rows,
+            )
 
         archive_path = temporary / f"batch-{batch_id}.zip"
         with ZipFile(archive_path, "w", ZIP_DEFLATED) as archive:
@@ -537,7 +570,10 @@ def _execute_export(
                     action="worker_export_succeeded",
                     entity_type="batch",
                     entity_id=str(batch.id),
-                    details={"file_count": len(sources)},
+                    details={
+                        "file_count": len(sources),
+                        "merged_workbook": len(sources) > 1,
+                    },
                 )
             )
             session.commit()

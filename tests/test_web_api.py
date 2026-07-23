@@ -386,6 +386,34 @@ class WebApiTests(unittest.TestCase):
         )
         self.login("operator", "operator-new-pass")
 
+    def test_api_timestamps_include_an_explicit_utc_offset(self):
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        self.assertTrue(login.json()["expires_at"].endswith("Z"))
+        headers = {"Authorization": f"Bearer {login.json()['token']}"}
+
+        self.upload_active_versions(headers)
+        versions = self.client.get(
+            "/api/input-versions",
+            headers=headers,
+        ).json()
+        self.assertTrue(all(version["created_at"].endswith("Z") for version in versions))
+
+        created = self.client.post(
+            "/api/batches",
+            headers=headers,
+            json={"name": "北京时间边界测试"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertTrue(created.json()["created_at"].endswith("Z"))
+        self.assertTrue(created.json()["updated_at"].endswith("Z"))
+
+        logs = self.client.get("/api/audit-logs", headers=headers).json()
+        self.assertTrue(all(log["created_at"].endswith("Z") for log in logs))
+
     def test_versions_batch_order_preflight_and_compute_job(self):
         admin_headers = self.login("admin", "admin-pass")
         self.create_operator(admin_headers)

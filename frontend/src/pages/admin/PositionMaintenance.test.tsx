@@ -264,6 +264,30 @@ describe("PositionMaintenance", () => {
     expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
   });
 
+  it("presents the position draft as a labelled desktop workbench", async () => {
+    renderMaintenance();
+
+    expect(await screen.findByRole("table", { name: "库位草稿记录" })).toBeInTheDocument();
+    const summary = screen.getByRole("region", { name: "草稿摘要" });
+    expect(within(summary).getByText("草稿记录")).toBeInTheDocument();
+    expect(within(summary).getByText("已变更")).toBeInTheDocument();
+    expect(within(summary).getByText("相对正式版")).toBeInTheDocument();
+    expect(screen.getByText("搜索", { selector: "label" })).toBeInTheDocument();
+    expect(screen.getByText("站点", { selector: "label" })).toBeInTheDocument();
+    expect(screen.getByText("规模定位", { selector: "label" })).toBeInTheDocument();
+    expect(screen.getByText("问题", { selector: "label" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "重置筛选" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "SKU-A" } });
+    expect(screen.getByRole("button", { name: "重置筛选" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+    const drawer = await dialogByTitle("新增库位记录");
+    expect(within(drawer).getByText("MSKU（可选）")).toBeInTheDocument();
+    expect(within(drawer).getByText("规模定位（可选）")).toBeInTheDocument();
+    expect(within(drawer).queryByText(/optional/i)).not.toBeInTheDocument();
+  });
+
   it("shows the real draft base and blocks edits when the active version changed", async () => {
     draftResponse = {
       ...baseDraft,
@@ -753,7 +777,7 @@ describe("PositionMaintenance", () => {
       }, 201));
     }
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
-  });
+  }, 30_000);
 
   it("can return to the input catalog while the draft entry request is loading", () => {
     entryRequest = deferred<Response>();

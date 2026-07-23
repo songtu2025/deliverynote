@@ -193,6 +193,50 @@ describe("AdminPage", () => {
     expect(requestCount("GET", "/api/audit-logs")).toBe(1);
   });
 
+  it("offers labelled audit filters and a clear result count", () => {
+    const records: AuditLog[] = [
+      {
+        id: 1,
+        user_id: 1,
+        action: "create_user",
+        entity_type: "user",
+        entity_id: "2",
+        details: {},
+        created_at: "2026-07-21T09:00:00"
+      },
+      {
+        id: 2,
+        user_id: null,
+        action: "worker_compute_failed",
+        entity_type: "batch",
+        entity_id: "7",
+        details: {},
+        created_at: "2026-07-21T09:10:00"
+      },
+      {
+        id: 3,
+        user_id: 2,
+        action: "publish_overreceipt_rule",
+        entity_type: "overreceipt_rule",
+        entity_id: "4",
+        details: {},
+        created_at: "2026-07-21T09:20:00"
+      }
+    ];
+    render(<AuditLogPanel auditLogs={records} users={[admin, operator]} loading={false} error={null} onRetry={vi.fn()} />);
+
+    expect(screen.getByRole("table", { name: "操作记录" })).toBeInTheDocument();
+    expect(screen.getByText("搜索", { selector: "label" })).toBeInTheDocument();
+    expect(screen.getByText("操作类型", { selector: "label" })).toBeInTheDocument();
+    expect(screen.getByText("操作人", { selector: "label" })).toBeInTheDocument();
+    expect(screen.getByText("显示 3 / 3 条")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索操作记录"), { target: { value: "批次 #7" } });
+    expect(screen.getByText("显示 1 / 3 条")).toBeInTheDocument();
+    expect(screen.getByText("计算失败")).toBeInTheDocument();
+    expect(screen.queryByText("创建用户")).not.toBeInTheDocument();
+  });
+
   it("keeps only the latest StrictMode load results when earlier requests settle last", async () => {
     const staleUsers = deferred<Response>();
     const freshUsers = deferred<Response>();
@@ -347,6 +391,10 @@ describe("AdminPage", () => {
 
     const adminRow = screen.getByText("admin").closest("tr");
     expect(adminRow).not.toBeNull();
+    expect(screen.getByRole("table", { name: "内部账号" })).toBeInTheDocument();
+    expect(screen.getByText("共 2 个账号")).toBeInTheDocument();
+    expect(screen.getByText("1 个管理员")).toBeInTheDocument();
+    expect(screen.getByText("1 个操作员")).toBeInTheDocument();
     expect(within(adminRow!).getByRole("button", { name: "停用 admin" })).toBeDisabled();
     expect(within(adminRow!).getByText("当前账号不可停用")).toBeInTheDocument();
   });

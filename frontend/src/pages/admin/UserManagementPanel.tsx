@@ -15,6 +15,7 @@ import {
   message
 } from "antd";
 import { KeyOutlined, PlusOutlined } from "@ant-design/icons";
+import type { TableProps } from "antd";
 
 import { api, expireSession } from "../../api";
 import type { Role, User } from "../../types";
@@ -29,6 +30,10 @@ interface UserManagementPanelProps {
 
 type UserAction = "create" | "status" | "password" | null;
 
+const USER_TABLE_COMPONENTS: NonNullable<TableProps<User>["components"]> = {
+  table: (props) => <table {...props} aria-label="内部账号" />
+};
+
 export function UserManagementPanel({
   currentUser,
   users,
@@ -41,6 +46,9 @@ export function UserManagementPanel({
   const [action, setAction] = useState<UserAction>(null);
   const [userForm] = Form.useForm<{ username: string; password: string; role: Role }>();
   const [passwordForm] = Form.useForm<{ password: string }>();
+  const adminCount = users.filter((user) => user.role === "admin").length;
+  const operatorCount = users.filter((user) => user.role === "operator").length;
+  const disabledCount = users.filter((user) => !user.active).length;
 
   const createUser = async () => {
     let values: { username: string; password: string; role: Role };
@@ -136,6 +144,12 @@ export function UserManagementPanel({
             管理员可维护基础资料和账号；操作员仅处理交货批次。停用账号会使其现有登录立即失效。
           </Typography.Paragraph>
         </div>
+        <div className="user-summary" role="status" aria-label="账号摘要">
+          <Tag>共 {users.length} 个账号</Tag>
+          <Tag color="processing">{adminCount} 个管理员</Tag>
+          <Tag>{operatorCount} 个操作员</Tag>
+          {disabledCount > 0 && <Tag color="warning">{disabledCount} 个已停用</Tag>}
+        </div>
       </div>
 
       {error && <Alert className="inline-alert" type="error" showIcon title="无法读取用户账号" description={error} />}
@@ -144,16 +158,28 @@ export function UserManagementPanel({
         rowKey="id"
         loading={loading}
         dataSource={users}
+        components={USER_TABLE_COMPONENTS}
         pagination={false}
-        scroll={{ x: 760 }}
         locale={{ emptyText: error ? "读取失败" : "暂无内部账号" }}
         columns={[
-          { title: "用户名", dataIndex: "username", width: 220 },
+          {
+            title: "用户名",
+            dataIndex: "username",
+            width: 220,
+            render: (username: string, user) => (
+              <div className="user-name-cell">
+                <strong>{username}</strong>
+                {user.id === currentUser.id && <Tag color="blue">当前账号</Tag>}
+              </div>
+            )
+          },
           {
             title: "角色",
             dataIndex: "role",
             width: 150,
-            render: (role: Role) => role === "admin" ? "管理员" : "操作员"
+            render: (role: Role) => role === "admin"
+              ? <Tag color="processing">管理员</Tag>
+              : <Tag>操作员</Tag>
           },
           {
             title: "状态",

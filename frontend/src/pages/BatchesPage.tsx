@@ -21,6 +21,7 @@ import {
 } from "@ant-design/icons";
 
 import { api } from "../api";
+import { beijingDateTimeParts, formatBeijingDateTime } from "../dateTime";
 import type { Batch, InputVersion, OverreceiptRuleVersion } from "../types";
 
 export const STATUS_LABELS: Record<string, string> = {
@@ -67,13 +68,8 @@ function nextAction(batch: Batch): string {
 }
 
 function todayBatchName(): string {
-  const parts = new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day} 交货批次`;
+  const parts = beijingDateTimeParts();
+  return `${parts.year}-${parts.month}-${parts.day} 交货批次`;
 }
 
 export function StatusTag({ status }: { status: string }) {
@@ -149,7 +145,7 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
   };
 
   return (
-    <div className="page-shell">
+    <div className="page-shell batch-list-page">
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>交货批次</Typography.Title>
@@ -201,32 +197,46 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
         }
       />
 
-      <div className="table-toolbar">
-        <Input
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder="搜索批次名称"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          style={{ width: 280 }}
-        />
-        <Select
-          allowClear
-          placeholder="全部状态"
-          options={STATUS_OPTIONS}
-          value={statusFilter}
-          onChange={setStatusFilter}
-          style={{ width: 160 }}
-        />
+      <div className="table-toolbar batch-list-toolbar">
+        <div className="table-filter-field">
+          <label htmlFor="batch-search">搜索</label>
+          <Input
+            id="batch-search"
+            aria-label="搜索"
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="搜索批次名称"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </div>
+        <div className="table-filter-field">
+          <label htmlFor="batch-status-filter">状态</label>
+          <Select
+            id="batch-status-filter"
+            aria-label="状态"
+            allowClear
+            placeholder="全部状态"
+            options={STATUS_OPTIONS}
+            value={statusFilter}
+            onChange={setStatusFilter}
+          />
+        </div>
+        <Typography.Text className="batch-result-count" type="secondary">
+          共 {filtered.length} 个批次
+        </Typography.Text>
       </div>
 
       <Table<Batch>
+        className="batch-list-table"
         rowKey="id"
         loading={loading}
         dataSource={filtered}
+        components={{
+          table: (props) => <table {...props} aria-label="交货批次列表" />
+        }}
         locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "暂无批次"} /> }}
         pagination={{ pageSize: 12, showSizeChanger: false }}
-        scroll={{ x: 920 }}
         columns={[
           {
             title: "批次",
@@ -241,36 +251,59 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
             title: "状态",
             dataIndex: "status",
             width: 130,
-            render: (value: string) => <StatusTag status={value} />
+            render: (value: string) => (
+              <div className="batch-table-value">
+                <span className="batch-cell-label">状态</span>
+                <StatusTag status={value} />
+              </div>
+            )
           },
           {
             title: "文件 / 数量",
             width: 190,
             render: (_, batch) => (
-              <span className="batch-volume">
-                {batch.file_count} 个文件
-                {batch.summary && batch.summary.delivery_total > 0
-                  ? ` · 交货 ${batch.summary.delivery_total}`
-                  : ""}
-              </span>
+              <div className="batch-table-value">
+                <span className="batch-cell-label">文件 / 数量</span>
+                <span className="batch-volume">
+                  {batch.file_count} 个文件
+                  {batch.summary && batch.summary.delivery_total > 0
+                    ? " · 交货 " + batch.summary.delivery_total
+                    : ""}
+                </span>
+              </div>
             )
           },
           {
             title: "下一步",
             width: 170,
-            render: (_, batch) => <span className="next-action">{nextAction(batch)}</span>
+            render: (_, batch) => (
+              <div className="batch-table-value">
+                <span className="batch-cell-label">下一步</span>
+                <span className="next-action">{nextAction(batch)}</span>
+              </div>
+            )
           },
           {
             title: "更新时间",
             dataIndex: "updated_at",
             width: 190,
-            render: (value: string) => new Date(value).toLocaleString("zh-CN")
+            render: (value: string) => (
+              <div className="batch-table-value">
+                <span className="batch-cell-label">更新时间</span>
+                <span>{formatBeijingDateTime(value)}</span>
+              </div>
+            )
           },
           {
             title: "操作",
             width: 100,
             render: (_, batch) => (
-              <Button type="link" onClick={() => onOpen(batch.id)}>
+              <Button
+                className="batch-open-action"
+                type="link"
+                aria-label={"打开 " + batch.name}
+                onClick={() => onOpen(batch.id)}
+              >
                 <Space size={4}>打开<RightOutlined /></Space>
               </Button>
             )
@@ -284,6 +317,7 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
         onCancel={() => setCreating(false)}
         onOk={() => void create()}
         okText="创建并上传文件"
+        cancelText="取消"
       >
         <Form form={form} layout="vertical">
           <Form.Item

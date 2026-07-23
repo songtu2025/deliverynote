@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=1 --fileParallelism=false"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

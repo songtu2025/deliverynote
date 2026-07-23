@@ -8,7 +8,6 @@ import {
   Input,
   Layout,
   Menu,
-  Space,
   Typography,
   message,
   theme
@@ -31,6 +30,33 @@ import type { User } from "./types";
 const USER_KEY = "delivery-note-user";
 
 type LoginResponse = { token: string; user: User };
+type WorkspacePage = "batches" | "overreceipt" | "admin";
+type WorkspaceRoute = {
+  page: WorkspacePage;
+  batchId: number | null;
+};
+
+function readWorkspaceRoute(): WorkspaceRoute {
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  const batchMatch = pathname.match(/^\/batches\/([1-9]\d*)$/);
+  if (batchMatch) {
+    return { page: "batches", batchId: Number(batchMatch[1]) };
+  }
+  if (pathname === "/overreceipt") {
+    return { page: "overreceipt", batchId: null };
+  }
+  if (pathname === "/admin") {
+    return { page: "admin", batchId: null };
+  }
+  return { page: "batches", batchId: null };
+}
+
+function workspacePath(route: WorkspaceRoute): string {
+  if (route.batchId !== null) return `/batches/${route.batchId}`;
+  if (route.page === "overreceipt") return "/overreceipt";
+  if (route.page === "admin") return "/admin";
+  return "/batches";
+}
 
 function readStoredUser(): User | null {
   if (!getToken()) {
@@ -92,8 +118,41 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
 }
 
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
-  const [page, setPage] = useState<"batches" | "overreceipt" | "admin">("batches");
-  const [batchId, setBatchId] = useState<number | null>(null);
+  const [route, setRoute] = useState<WorkspaceRoute>(() => readWorkspaceRoute());
+  const { page, batchId } = route;
+  const batchFocused = batchId !== null;
+  const roleLabel = user.role === "admin" ? "管理员" : "操作员";
+  const userInitial = user.username.trim().slice(0, 1).toUpperCase() || "U";
+
+  const navigate = (nextRoute: WorkspaceRoute, replace = false) => {
+    const path = workspacePath(nextRoute);
+    if (window.location.pathname !== path) {
+      window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+    }
+    setRoute(nextRoute);
+  };
+
+  useEffect(() => {
+    const handlePopState = () => setRoute(readWorkspaceRoute());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (page === "admin" && user.role !== "admin") {
+      navigate({ page: "batches", batchId: null }, true);
+      return;
+    }
+    const canonicalPath = workspacePath(route);
+    if (window.location.pathname !== canonicalPath) {
+      window.history.replaceState({}, "", canonicalPath);
+    }
+  }, [page, route, user.role]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [page, batchId]);
+
   const menuItems = [
     { key: "batches", icon: <ApartmentOutlined />, label: "批次处理" },
     { key: "overreceipt", icon: <SafetyCertificateOutlined />, label: "超收规则" },
@@ -103,8 +162,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   ];
 
   return (
-    <Layout className="app-layout">
-      <Layout.Sider width={236} breakpoint="lg" collapsedWidth={72} theme="light">
+    <Layout className={`app-layout ${batchFocused ? "batch-focus-layout" : ""}`}>
+      {!batchFocused && <Layout.Sider width={236} breakpoint="lg" collapsedWidth={72} theme="light">
         <div className="brand">
           <span className="brand-mark">DN</span>
           <span className="brand-name">交货处理</span>
@@ -114,29 +173,47 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           selectedKeys={[page]}
           items={menuItems}
           onClick={({ key }) => {
-            setPage(key as "batches" | "overreceipt" | "admin");
-            setBatchId(null);
+            navigate({
+              page: key as WorkspacePage,
+              batchId: null
+            });
           }}
         />
-      </Layout.Sider>
+      </Layout.Sider>}
       <Layout>
         <Layout.Header className="app-header">
-          <Space>
-            <span className="user-chip">{user.username} · {user.role === "admin" ? "管理员" : "操作员"}</span>
-            <Button type="text" icon={<LogoutOutlined />} onClick={onLogout}>
+          <div className="account-controls" role="group" aria-label="当前用户">
+            <div className="account-identity">
+              <span className="account-avatar" aria-hidden="true">{userInitial}</span>
+              <span className="account-copy">
+                <strong>{user.username}</strong>
+                <small>{roleLabel}</small>
+              </span>
+            </div>
+            <Button
+              className="account-logout"
+              aria-label="退出登录"
+              icon={<LogoutOutlined />}
+              onClick={onLogout}
+            >
               退出
             </Button>
-          </Space>
+          </div>
         </Layout.Header>
         <Layout.Content className="app-content">
           {batchId !== null ? (
-            <BatchDetail batchId={batchId} onBack={() => setBatchId(null)} />
+            <BatchDetail
+              batchId={batchId}
+              onBack={() => navigate({ page: "batches", batchId: null })}
+            />
           ) : page === "admin" && user.role === "admin" ? (
             <AdminPage currentUser={user} />
           ) : page === "overreceipt" ? (
             <OverreceiptRulesPage />
           ) : (
-            <BatchesPage onOpen={setBatchId} />
+            <BatchesPage
+              onOpen={(id) => navigate({ page: "batches", batchId: id })}
+            />
           )}
         </Layout.Content>
       </Layout>

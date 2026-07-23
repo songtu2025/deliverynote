@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
 import re
@@ -107,6 +107,12 @@ POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
 )
 
 
+def _utc_isoformat(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 class LoginPayload(BaseModel):
     username: str
     password: str
@@ -199,7 +205,7 @@ def _version_json(version: InputVersion) -> dict:
         "original_name": version.original_name,
         "active": version.active,
         "created_by": version.created_by,
-        "created_at": version.created_at.isoformat(),
+        "created_at": _utc_isoformat(version.created_at),
     }
 
 
@@ -213,7 +219,7 @@ def _overreceipt_rule_json(version: OverreceiptRuleVersion) -> dict:
         "allowed_warehouses": version.allowed_warehouses,
         "active": version.active,
         "created_by": version.created_by,
-        "created_at": version.created_at.isoformat(),
+        "created_at": _utc_isoformat(version.created_at),
     }
 
 
@@ -306,8 +312,8 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
         "revision": draft.revision,
         "created_by": draft.created_by,
         "updated_by": draft.updated_by,
-        "created_at": draft.created_at.isoformat(),
-        "updated_at": draft.updated_at.isoformat(),
+        "created_at": _utc_isoformat(draft.created_at),
+        "updated_at": _utc_isoformat(draft.updated_at),
         "row_count": len(active_rows),
         "modified_count": sum(row.change_type != "unchanged" for row in rows),
         "diff": draft_diff(session, draft),
@@ -378,6 +384,17 @@ def _batch_summary(batch: Batch, session: Session, sources: list[BatchFile]) -> 
     }
 
 
+def _merged_export_path(batch: Batch) -> Path | None:
+    if not batch.zip_path:
+        return None
+    return Path(batch.zip_path).with_name(f"batch-{batch.id}-merged.xlsx")
+
+
+def _merged_export_ready(batch: Batch, source_count: int) -> bool:
+    path = _merged_export_path(batch)
+    return source_count > 1 and path is not None and path.is_file()
+
+
 def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
     sources = session.scalars(
         select(BatchFile)
@@ -406,8 +423,9 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         ),
         "error_message": batch.error_message,
         "download_ready": bool(batch.zip_path),
-        "created_at": batch.created_at.isoformat(),
-        "updated_at": batch.updated_at.isoformat(),
+        "merged_download_ready": _merged_export_ready(batch, len(sources)),
+        "created_at": _utc_isoformat(batch.created_at),
+        "updated_at": _utc_isoformat(batch.updated_at),
         "file_count": len(sources),
         "summary": _batch_summary(batch, session, sources),
     }
@@ -436,10 +454,10 @@ def _job_json(job: Job) -> dict:
         "attempts": job.attempts,
         "error_message": job.error_message,
         "download_ready": bool(job.output_path),
-        "created_at": job.created_at.isoformat(),
-        "claimed_at": job.claimed_at.isoformat() if job.claimed_at else None,
-        "heartbeat_at": job.heartbeat_at.isoformat() if job.heartbeat_at else None,
-        "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        "created_at": _utc_isoformat(job.created_at),
+        "claimed_at": _utc_isoformat(job.claimed_at) if job.claimed_at else None,
+        "heartbeat_at": _utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None,
+        "finished_at": _utc_isoformat(job.finished_at) if job.finished_at else None,
     }
 
 
@@ -839,7 +857,7 @@ def create_app(
         )
         _audit(session, user.id, "login", "user", user.id)
         session.commit()
-        return {"token": token, "expires_at": expires_at.isoformat(), "user": _user_json(user)}
+        return {"token": token, "expires_at": _utc_isoformat(expires_at), "user": _user_json(user)}
 
     @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
     def logout(
@@ -2315,6 +2333,21 @@ def create_app(
             raise HTTPException(status_code=404, detail="批次不存在")
         if batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
+        source_count = session.scalar(
+            select(func.count())
+            .select_from(BatchFile)
+            .where(BatchFile.batch_id == batch.id)
+        )
+        existing = session.scalar(
+            select(Job).where(Job.batch_id == batch.id, Job.kind == "export")
+        )
+        if (
+            existing is not None
+            and existing.status == "succeeded"
+            and source_count > 1
+            and not _merged_export_ready(batch, source_count)
+        ):
+            existing.status = "stale"
         try:
             job = queue_job(batch, "export", user, session)
             session.commit()
@@ -2337,6 +2370,27 @@ def create_app(
         if not batch.zip_path or not Path(batch.zip_path).is_file():
             raise HTTPException(status_code=404, detail="批次导出尚未生成")
         return FileResponse(batch.zip_path, filename=Path(batch.zip_path).name)
+
+    @app.get("/api/batches/{batch_id}/download-merged")
+    def download_merged_batch(
+        batch_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        batch = get_batch_or_404(batch_id, session)
+        source_count = session.scalar(
+            select(func.count())
+            .select_from(BatchFile)
+            .where(BatchFile.batch_id == batch.id)
+        )
+        merged_path = _merged_export_path(batch)
+        if (
+            source_count <= 1
+            or merged_path is None
+            or not merged_path.is_file()
+        ):
+            raise HTTPException(status_code=404, detail="批次合并导出尚未生成")
+        return FileResponse(merged_path, filename=merged_path.name)
 
     @app.get("/api/batch-files/{file_id}/download")
     def download_batch_file(
@@ -2363,7 +2417,7 @@ def create_app(
                 "entity_type": log.entity_type,
                 "entity_id": log.entity_id,
                 "details": log.details,
-                "created_at": log.created_at.isoformat(),
+                "created_at": _utc_isoformat(log.created_at),
             }
             for log in logs
         ]

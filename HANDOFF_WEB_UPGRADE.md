@@ -1,11 +1,11 @@
 # 供应链交货处理系统 Linux/Codex CLI 交接
 
-- 更新时间：2026-07-22 19:27（Asia/Shanghai）
+- 更新时间：2026-07-23 12:51（Asia/Shanghai）
 - 仓库：`https://github.com/songtu2025/deliverynote.git`
 - 默认分支：`master`
 - 实现基线提交：`ebde9ea Initial delivery note web application`
 
-## 0. 2026-07-22 19:27 最新接续状态（新会话先看）
+## 0. 2026-07-23 12:51 最新接续状态（新会话先看）
 
 ### 0.1 唯一正确的继续工作目录
 
@@ -21,8 +21,8 @@ git diff --check
 - 当前超收功能提交：`66b44e3 feat: add versioned overreceipt rules`；Worker SIGTERM 修复提交：`e410a7e fix: stop worker gracefully`；仓库正式名称修复提交：`0b4ba6b fix: use canonical local warehouse name`。
 - 成对备份工作流提交：`13a7b96 feat: add paired backup workflow`。脚本和 systemd 示例已提交，但正式 timer 与异机目标尚未配置。
 - `/root/deliverynote` 主工作区位于 `master`，包含用户尚未整理的未提交改动。除非任务明确要求合并两个工作区，否则不要在那里开发，不要覆盖、还原或删除其中任何文件。
-- 原 16 个未提交路径已逐文件审查并在完整验证后提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。本交接文档提交后工作树应保持干净。
-- 2026-07-22 16:43 已完成正式迁移和全栈重建；18:02 又从提交 `0b4ba6b` 部署仓库正式名称修复，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`。系统初始默认无规则；业务随后由 `admin` 发布了首个正式版本并完成一个规则批次。
+- 原 16 个维护改动已提交为 `067fb86 feat: strengthen admin data maintenance`；批次并发上传与草稿恢复审计修复提交为 `455b759`；超收规则实现提交为 `66b44e3`。此后完成的 PC UI、图标、结果操作区、多文件合并导出、独立 URL 和北京时间处理已整理为本分支当前发布快照。
+- 2026-07-23 12:46 已从本隔离工作树完成最新生产部署，线上资源为 `index-DzkyLbfg.js` / `index-BJrakn5L.css`。数据库容器 ID 与 `deliverynote_postgres_data` 卷未变化；部署前后活动任务均为 0。
 - 用户已要求停用 Superpowers 插件；后续会话不要调用 `superpowers:*` 技能。
 
 ### 0.2 本轮已完成的代码工作
@@ -42,20 +42,24 @@ git diff --check
 13. 已新增专用幂等迁移 `python -m delivery_note.migrations.overreceipt_rules`，只创建规则版本表和批次绑定表，不修改既有批次表。
 14. 独立恢复栈停机时稳定发现 Worker 作为容器 PID 1 不响应默认 SIGTERM，Compose 最终将其强制结束为 137。新增显式 SIGTERM/SIGINT 处理：空闲轮询可立即退出，处理中会在 Docker 宽限期内继续当前 `run_once`，完成后停止；进程级回归测试和空闲恢复栈 Compose 停机均验证退出码为 0。
 15. 新增 `scripts/backup_deliverynote.py`，把 PostgreSQL custom dump 与 `delivery_data` 只读归档固化为同一原子完成目录；脚本先关闭入口并排空任务，成功或失败都会恢复服务，同时校验 dump、tar 路径、SHA-256 和完整标记。默认保留数量为 0，不自动删除备份；`ops/systemd/` 只提供未安装示例。
+16. 多文件批次导出同时生成按来源顺序拼接的合并 Excel 和原有分文件 ZIP；ZIP 仍只含每个交货单的独立工作簿，来源单文件下载保持不变。旧批次缺少合并文件时可重新生成同一个导出任务补齐。批次页面已把合并/ZIP 操作收拢到流程区并删除底部重复导出卡片。
+17. 批次列表、规则页和管理页使用独立 URL；打开批次会进入 `/batches/{id}`，页面刷新仍恢复同一批次，浏览器前进/后退同步页面。Nginx 已有 SPA fallback，无需新增服务端路由。
+18. 数据库、登录过期和任务租约继续使用 UTC 计算，不迁移历史时间；API 对系统时间统一输出显式 UTC `Z`，前端把新旧时间固定转换为 `Asia/Shanghai`，批次默认名称和库位版本默认名称也按北京时间生成。CLI 未显式传入时间时同样按北京时间生成输出目录。
 
 ### 0.3 最近一次完整验证证据
 
 ```text
-Python unittest: 129/129 passed
+Python unittest: 131/131 passed
 Python pip check: passed
-Frontend Vitest: 7 files, 61/61 passed
+Frontend Vitest: 8 files, 71/71 passed (`npm run test`, serial by default)
 Frontend production build: passed
 git diff --check: passed
 Docker Compose config: passed
 Temporary PostgreSQL concurrent upload: passed (`[201, 201]`, orders `[1, 2]`)
 Temporary PostgreSQL overreceipt migration/version lock: passed (one active rule; batch remained on V1 after V2 publish)
 Isolated overreceipt business QA: passed (no rule `160 = 100 + 60`; short-tail 50 `160 = 150 + 10`; A:G and notes passed)
-Production Chrome QA: passed (`index-DDAEHKYt.js` / `index-gXYtaLj0.css`, canonical warehouse name, no failed responses or console errors)
+Production Chrome QA: passed (`index-DzkyLbfg.js` / `index-BJrakn5L.css`; Los Angeles browser timezone still showed Beijing time; `/batches/13` refresh/back passed; no failed responses or console errors)
+Isolated merged-export QA: passed (`160 = 100 + 60`, merged workbook, 2-member ZIP, individual byte match, real browser downloads)
 Paired production backup/restore drill: passed (all DB counts matched; 50/50 files and aggregate SHA-256 matched; migration ran twice)
 Paired backup script unit tests: 6/6 passed (success, archive failure recovery, timeout, safe tar links/retention, check-only)
 Production backup script check-only: passed (4 services running, 0 active jobs, volume/images resolved)
@@ -76,19 +80,18 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 ```
 
 最近前端构建仍有单包大于 500 kB 的 Vite 提示，不是构建失败，暂不应优先引入复杂拆包。
-本地和线上当前构建资源均为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`。
+本地和线上当前构建资源均为 `index-DzkyLbfg.js` / `index-BJrakn5L.css`。
 
 ### 0.4 正式环境状态
 
 - 正式地址：`https://deliverynote.seekwaygroup.com/`
-- 最近部署时间：2026-07-22 18:02（Asia/Shanghai）；16:43 完成全栈部署，18:02 部署正式仓库名称修复。
-- 部署来源：`/root/deliverynote/.worktrees/admin-maintenance` 提交 `0b4ba6b`。18:02 的 Web 更新因 Compose 依赖同时用缓存镜像重建了 API；Worker 保持 16:43 的实例，数据库保持原实例。
-- 当前线上前端资源：`/assets/index-DDAEHKYt.js`、`/assets/index-gXYtaLj0.css`。
+- 最近部署时间：2026-07-23 12:46（Asia/Shanghai），从 `/root/deliverynote/.worktrees/admin-maintenance` 当前已验证工作树完成 API、Worker 和 Web 重建。
+- 当前线上前端资源：`/assets/index-DzkyLbfg.js`、`/assets/index-BJrakn5L.css`。
 - 本机与外部 HTTPS `/health` 均返回 `{"status":"ok"}`；`db`、`api`、`worker`、`web` 均运行，API 健康。部署稳定后的日志没有 traceback、异常或失败请求。
-- 真实 HTTPS Chrome 验收已通过：登录、规则页、仓库下拉、本地表单刷新不保存、批次列表、规则批次详情和退出均正常；页面显示正式名称“供应商成品本地仓”，不再显示旧称，测试产生 0 个规则写请求、0 个失败响应和 0 个控制台错误。
-- 生产当前为 11 个批次、1 个超收规则版本、1 个批次规则绑定、0 个 queued/running 任务。`admin` 于 16:59:51 发布 `2026-07-22版本`（短尾 50 / 中尾 20 / 长尾 10），白名单 5 个仓库并排除“供应商成品本地仓”。批次 11 锁定该版本并计算成功：`7732 = 7221 + 511`；同一来源文件的无规则批次 10 为 `7732 = 6834 + 898`。
+- 真实 HTTPS Chrome 验收已通过：模拟浏览器为 `America/Los_Angeles` 时，API 的 UTC 时间仍按 `Asia/Shanghai` 显示；打开批次 13 后 URL 为 `/batches/13`，刷新保持同一详情，浏览器返回回到 `/batches`。测试只调用登录、读取和退出，产生 0 个失败响应和 0 个控制台错误。
+- 生产当前为 13 个批次、0 个 queued/running 任务。批次 11 仍满足 `7732 = 7221 + 511`，历史 ZIP 和单文件下载均可读取；单文件批次不提供合并下载，`download-merged` 返回预期 404。
 - 18:10 以只读 API 和现有下载结果完成批次 11 技术复核：8 条待处理记录合计 511，其中 7 条共 447 为“超出允许超收量”、1 条 64 为“未找到可交货采购需求”，没有人工拆分。ZIP 只有 1 个 xlsx 成员且与单文件下载逐字节一致；工作簿可打开，`交货导入`/`待处理导入`、正式 A:G、辅助 H:J、`65 行/7221` 可导入、`8 行/511` 待处理均通过。规则超收导入为 13 行共 387，备注数量逐行一致；产生超额待处理的 3 个短尾键和 4 个中尾键都已耗尽对应 50/20 共享额度，无采购需求键未获得超收。
-- 本次技术复核只调用登录、读取、下载和退出，没有调用计算、导出、拆分或规则写接口；复核后仍为 1 个规则、1 个绑定、11 个批次和 0 个活动任务。API 请求均为 2xx，Worker 最近 15 分钟无错误日志。
+- 本次部署后复核只调用登录、读取、现有下载和退出，没有调用计算、导出、拆分或规则写接口；复核后仍为 0 个活动任务。除单文件合并端点的预期 404 外，请求均成功，Worker 与 API 日志没有 traceback。
 - 数据库容器保持部署前 ID `c85a2cffddd88ee98e2518d880659aa7b26d563f91390212aad3d15805c1459c`，继续挂载 `deliverynote_postgres_data`；部署没有删除或重建数据库卷。不要执行 `docker compose down -v`。
 - 成对备份已从临时目录复制到持久受控目录 `/root/backups/deliverynote/20260722-160803`，目录权限为 `0700`、文件权限为 `0600`，`database.dump` 和 `delivery_data.tar.gz` 的 SHA-256 已再次验证。源临时备份和恢复 QA 数据卷也仍保留。
 
@@ -100,7 +103,7 @@ WEB_PORT=18080 docker compose --env-file /root/deliverynote/.env -p deliverynote
 
 ### 0.6 新会话可直接粘贴的启动指令
 
-> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。超收功能提交为 `66b44e3`，仓库正式名称修复为 `0b4ba6b`，成对备份工作流提交为 `13a7b96`；后端 129/129、前端 61/61、pip check、build、Compose config、并发上传、隔离超收业务/浏览器 QA、成对备份恢复、旧批次兼容和 Worker 停机均已通过。2026-07-22 18:02 已部署最新 Web，线上资源为 `index-DDAEHKYt.js` / `index-gXYtaLj0.css`，页面只使用正式名称“供应商成品本地仓”。生产当前有 11 个批次、1 个规则版本、1 个规则绑定和 0 个活动任务；批次 11 锁定首个正式规则并满足 `7732 = 7221 + 511`。18:10 已只读核对 8 条待处理记录、单文件/ZIP、A:G/H:J、规则额度、备注和数量守恒，技术结果通过且未触发业务写入；业务员仍需决定 511 的实际处置。成对备份脚本及 systemd 示例已实现并通过 6/6 专用测试、正式只读预检和独立恢复栈真实备份；QA 备份位于 `/tmp/deliverynote-paired-backup-integration/20260722-192607`，两项 SHA-256、50 个文件、权限和服务恢复均通过，QA 容器已恢复为停止且卷保留。timer 仍未安装，异机目标和保留周期未配置。正式持久备份位于 `/root/backups/deliverynote/20260722-160803`，但它早于首条规则和批次 11。下一步配置异机落点后做正式受控备份、同步和异机恢复抽检。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
+> 请在 `/root/deliverynote/.worktrees/admin-maintenance` 继续任务。先完整阅读 `AGENTS.md`、`README.md`、`HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 和 `git diff --check`。不要进入或覆盖 `/root/deliverynote` 主工作区，那里有用户未提交改动。后端 131/131、前端 71/71、pip check、build、Compose config、合并 Excel/分文件 ZIP 独立业务与 Chrome QA、生产只读 Chrome 和历史下载兼容均已通过。2026-07-23 12:46 已部署最新 API、Worker 和 Web，线上资源为 `index-DzkyLbfg.js` / `index-BJrakn5L.css`；批次详情 URL 可刷新/返回，所有页面业务时间固定显示北京时间，数据库容器和卷保持不变。生产当前有 13 个批次和 0 个活动任务；批次 11 仍满足 `7732 = 7221 + 511`。合并结果只为多文件批次生成，旧多文件导出可重新生成补齐，ZIP 继续只含独立来源结果。业务员仍需决定批次 11 的 511 件实际处置；timer、异机目标与异机恢复抽检仍未完成。不要调用 Superpowers 插件，不要破坏共享采购余额、数量守恒、锁仓、仓库顺序、CLI 和 A:G 导出兼容规则，不要删除任何部署或恢复数据卷。
 
 ## 1. 接手时先做什么
 
@@ -134,7 +137,7 @@ git log -3 --oneline --decorate
 - FastAPI 登录、用户、输入版本、批次、任务、异常、拆分和下载接口。
 - PostgreSQL/SQLite SQLAlchemy 模型。
 - 独立 Worker、任务租约、心跳、超时回收和失败重试。
-- 每个来源文件单独导出及批次 ZIP。
+- 每个来源文件单独导出及批次 ZIP；多文件批次另有按来源顺序拼接的合并 Excel。
 - React + TypeScript + Ant Design 操作界面。
 - 五步批次工作台、数量守恒摘要、异常筛选和右侧拆分审校。
 - 输入资料就绪门槛、上传校验、用户启停/密码重置和操作记录。
@@ -149,8 +152,8 @@ git log -3 --oneline --decorate
 最近验证结果：
 
 ```text
-Python unittest: 129/129 passed
-Frontend Vitest: 7 files, 61/61 passed
+Python unittest: 131/131 passed
+Frontend Vitest: 8 files, 71/71 passed
 Frontend production build: passed
 pip check: passed
 Compose YAML static check: passed
@@ -166,7 +169,7 @@ HTTPS health, login, read API and logout smoke test: passed
 
 本轮流程与 UI 方案见 `UI_UX_OPTIMIZATION_PLAN.md`。既有批次工作台浏览器验收记录见 `design-qa.md` 和 `design/qa/`；本轮管理员维护只以 1280–1920px PC 端为验收范围。Google Chrome 已完成 1280×800、1440×900 和 1920×1080 PC 验收，脱敏截图与证据保存在 `design/admin-maintenance-qa/`。验收中发现并修复了多条发布警告把弹窗底部操作推离首屏的问题；最终复审又补上了库位草稿基线保护，维护期间不再允许替换当前库位版本，发布时会再次校验基线，创建/恢复草稿也统一按“版本行 → 草稿行”加锁并在等待后重新读取当前版本。不再把平板和移动端作为本轮完成门槛。
 
-2026-07-22 16:43 已从 `feature/admin-maintenance` 工作树完成生产超收表迁移和全栈重建；18:02 从提交 `0b4ba6b` 部署仓库正式名称修复，线上资源为 `index-DDAEHKYt.js` 和 `index-gXYtaLj0.css`。数据库容器与卷、Worker 实例均保持不变，API 因 Web 的 Compose 依赖用缓存镜像重建并恢复健康。真实 HTTPS Chrome 验证页面只显示“供应商成品本地仓”，仓库下拉、本地未提交表单刷新、当前规则、11 个批次及批次 11 详情均正常，0 个规则写请求、失败响应和控制台错误。生产现有 1 个规则版本和 1 个批次绑定；批次 11 锁定首个规则并满足 `7732 = 7221 + 511`。18:10 已进一步完成待处理汇总和下载工作簿的只读技术复核；技术输出通过，但业务员仍需逐条决定 511 的实际处置，定时异机备份也未建立，不能据此宣称整个项目已完整生产可用。
+2026-07-23 12:46 已从 `feature/admin-maintenance` 隔离工作树完成最新生产部署，线上资源为 `index-DzkyLbfg.js` 和 `index-BJrakn5L.css`。数据库容器与卷保持不变，API、Worker 和 Web 已重建并恢复健康。真实 HTTPS Chrome 在非北京时间浏览器环境验证了北京时间显示、批次独立 URL、详情刷新和浏览器返回，没有失败响应或控制台错误。批次 11 仍满足 `7732 = 7221 + 511`。多文件合并 Excel 与分文件 ZIP 已在独立 QA 完成真实业务和浏览器下载验收；技术输出通过，但业务员仍需逐条决定批次 11 的 511 件实际处置，定时异机备份也未建立，不能据此宣称整个项目已完整生产可用。
 
 本次自动化验证实际使用：
 
@@ -282,7 +285,7 @@ curl http://127.0.0.1:8080/health
 5. 执行计算，确认任务从 `queued`、`running` 到 `succeeded`。
 6. 用采购余额不足的样例确认第一个文件先消耗余额，第二个文件只获得剩余量。
 7. 对一条待处理记录进行拆分，确认拆分前后数量守恒。
-8. 导出两个来源结果和批次 ZIP，打开 Excel 检查表头、样式和数量。
+8. 导出两个来源结果、合并 Excel 和分文件 ZIP，打开 Excel 检查表头、样式、来源顺序和数量。
 9. 查看 `api`、`worker` 日志，确认没有 traceback 或重复领取。
 10. 重启服务后再次登录，确认 PostgreSQL 数据和上传文件仍存在。
 
@@ -302,7 +305,7 @@ docker compose up -d
 - Compose 只启动一个 Worker。这是当前确认范围，不要在没有并发测试前直接扩容多个 Worker。
 - Web 只绑定 `127.0.0.1`，正式访问需要外部 HTTPS 反向代理。
 - 数据库仍主要通过 SQLAlchemy `create_all()` 建表；本次超收新增表已有 `python -m delivery_note.migrations.overreceipt_rules` 专用幂等迁移，但尚无通用 migration history。
-- 自动文件过期清理、数据库定时备份和文件卷备份尚未实现。
+- 自动文件过期清理尚未实现；数据库与文件卷成对备份脚本已经实现并通过恢复演练，但正式定时器、异机落点和异机恢复抽检尚未配置。
 - 管理员账号只在数据库不存在同名用户时创建。修改 `.env` 不会重置已有管理员密码。
 - PostgreSQL 已通过 Linux Compose 真实运行、登录和数据读取冒烟验收；脱敏双文件业务流程和同机成对备份恢复已通过。定时与异机备份仍未建立。
 - 前端生产构建存在单包约 1.1 MB 的体积提示，当前不影响功能，不要为了消除提示优先引入复杂拆包。

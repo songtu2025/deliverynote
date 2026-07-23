@@ -17,6 +17,11 @@ import {
 import { CheckCircleFilled, ReloadOutlined } from "@ant-design/icons";
 
 import { api } from "../api";
+import {
+  formatBeijingDate,
+  formatBeijingDateTime,
+  formatBeijingTime
+} from "../dateTime";
 import type { OverreceiptRuleVersion } from "../types";
 
 type RuleForm = {
@@ -35,7 +40,7 @@ const DEFAULT_LIMITS = {
 
 function RuleLimits({ rule }: { rule: OverreceiptRuleVersion }) {
   return (
-    <Space wrap>
+    <Space className="rule-limit-list" wrap>
       <Tag color="green">短尾 +{rule.short_tail_limit}</Tag>
       <Tag color="blue">中尾 +{rule.medium_tail_limit}</Tag>
       <Tag>长尾 +{rule.long_tail_limit}</Tag>
@@ -144,11 +149,17 @@ export default function OverreceiptRulesPage() {
             </div>
             <div className="overreceipt-warehouse-list">
               <Typography.Text type="secondary">允许超收仓库（精确匹配）</Typography.Text>
-              <Space wrap>
-                {activeRule.allowed_warehouses.map((warehouse) => (
-                  <Tag key={warehouse}>{warehouse}</Tag>
-                ))}
-              </Space>
+              {activeRule.allowed_warehouses.length ? (
+                <Space wrap>
+                  {activeRule.allowed_warehouses.map((warehouse) => (
+                    <Tag key={warehouse}>{warehouse}</Tag>
+                  ))}
+                </Space>
+              ) : (
+                <Typography.Text className="overreceipt-empty-warehouse">
+                  未开放任何仓库
+                </Typography.Text>
+              )}
             </div>
             <Tag color="success" icon={<CheckCircleFilled />}>正在用于新批次</Tag>
           </div>
@@ -158,9 +169,9 @@ export default function OverreceiptRulesPage() {
       </Card>
 
       <div className="overreceipt-layout">
-        <Card title="发布新版本" className="section-card">
+        <Card title="发布新版本" className="section-card overreceipt-publish-card">
           <Alert
-            className="section-card"
+            className="section-card overreceipt-publish-note"
             type="info"
             showIcon
             title="发布后不可修改"
@@ -186,13 +197,13 @@ export default function OverreceiptRulesPage() {
             </Form.Item>
             <div className="overreceipt-limit-grid">
               <Form.Item label="短尾允许超收" name="short_tail_limit" rules={[{ required: true }]}>
-                <InputNumber min={0} precision={0} />
+                <InputNumber min={0} precision={0} suffix="件" />
               </Form.Item>
               <Form.Item label="中尾允许超收" name="medium_tail_limit" rules={[{ required: true }]}>
-                <InputNumber min={0} precision={0} />
+                <InputNumber min={0} precision={0} suffix="件" />
               </Form.Item>
               <Form.Item label="长尾允许超收" name="long_tail_limit" rules={[{ required: true }]}>
-                <InputNumber min={0} precision={0} />
+                <InputNumber min={0} precision={0} suffix="件" />
               </Form.Item>
             </div>
             <Form.Item
@@ -206,7 +217,12 @@ export default function OverreceiptRulesPage() {
                 options={warehouses.map((warehouse) => ({ value: warehouse, label: warehouse }))}
               />
             </Form.Item>
-            <Button type="primary" onClick={() => void publish()} loading={submitting}>
+            <Button
+              className="overreceipt-publish-action"
+              type="primary"
+              onClick={() => void publish()}
+              loading={submitting}
+            >
               发布并用于新批次
             </Button>
           </Form>
@@ -214,43 +230,63 @@ export default function OverreceiptRulesPage() {
 
         <Card title="不可变版本记录" className="section-card overreceipt-history-card">
           <Table<OverreceiptRuleVersion>
+            className="overreceipt-history-table"
             rowKey="id"
             loading={loading}
             dataSource={rules}
+            components={{
+              table: (props) => <table {...props} aria-label="超收规则不可变版本" />
+            }}
             pagination={false}
             locale={{ emptyText: <Empty description="暂无规则版本" /> }}
-            scroll={{ x: 760 }}
+            tableLayout="fixed"
             columns={[
               {
                 title: "版本",
                 dataIndex: "name",
+                width: 145,
                 render: (name: string, rule) => (
-                  <Space orientation="vertical" size={2}>
+                  <Space className="overreceipt-version-cell" orientation="vertical" size={2}>
                     <Typography.Text strong>{name}</Typography.Text>
                     {rule.active && <Tag color="success">当前启用</Tag>}
+                    <span className="overreceipt-mobile-meta">
+                      {rule.allowed_warehouses.length
+                        ? rule.allowed_warehouses.join("、")
+                        : "未开放任何仓库"}
+                      <small>{formatBeijingDateTime(rule.created_at)}</small>
+                    </span>
                   </Space>
                 )
               },
               {
                 title: "额度",
+                width: 160,
                 render: (_, rule) => <RuleLimits rule={rule} />
               },
               {
                 title: "允许仓库",
-                render: (_, rule) => rule.allowed_warehouses.join("、")
+                render: (_, rule) => rule.allowed_warehouses.length
+                  ? rule.allowed_warehouses.join("、")
+                  : <Typography.Text type="secondary">未开放任何仓库</Typography.Text>
               },
               {
                 title: "发布时间",
                 dataIndex: "created_at",
-                width: 190,
-                render: (value: string) => new Date(value).toLocaleString("zh-CN")
+                width: 150,
+                render: (value: string) => (
+                  <span className="overreceipt-published-at">
+                    {formatBeijingDate(value)}
+                    <small>{formatBeijingTime(value)}</small>
+                  </span>
+                )
               },
               {
                 title: "操作",
-                width: 110,
+                width: 96,
                 render: (_, rule) => rule.active ? null : (
                   <Button
                     type="link"
+                    aria-label={"重新启用 " + rule.name}
                     loading={activatingId === rule.id}
                     onClick={() => void activate(rule)}
                   >

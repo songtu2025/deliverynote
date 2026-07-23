@@ -30,6 +30,7 @@ export interface Batch {
   overreceipt_rule?: OverreceiptRuleVersion | null;
   error_message: string | null;
   download_ready: boolean;
+  merged_download_ready: boolean;
   created_at: string;
   updated_at: string;
   file_count: number;

@@ -24,6 +24,7 @@ import {
 } from "antd";
 import type { UploadProps } from "antd";
 import {
+  AimOutlined,
   ArrowDownOutlined,
   ArrowLeftOutlined,
   ArrowUpOutlined,
@@ -32,13 +33,16 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   ExportOutlined,
+  LockOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  RightOutlined,
   SafetyCertificateOutlined,
   SearchOutlined
 } from "@ant-design/icons";
 
 import { api, download } from "../api";
+import { formatBeijingDateTime } from "../dateTime";
 import type {
   Batch,
   BatchFile,
@@ -140,6 +144,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const splitParts = Form.useWatch("parts", splitForm) ?? [];
   const pollingJob = useRef<number | null>(null);
   const announcedJobs = useRef(new Set<number>());
+  const reviewSection = useRef<HTMLDivElement | null>(null);
 
   const load = async (silent = false) => {
     if (!silent) setLoading(true);
@@ -374,12 +379,17 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const canEditFiles = ["draft", "preflight_ready", "failed"].includes(batch.status);
   const computed = batch.status === "succeeded" || batch.download_ready;
   const exportJob = batch.jobs?.export;
-  const reviewStarted = exceptions.some((item) => item.status !== "pending");
   const showFileActions = canEditFiles || files.some((file) => file.download_ready);
-  const currentStep = batch.download_ready
-    ? 4
-    : batch.status === "succeeded"
-      ? totals.manual_total <= 0 ? 4 : reviewStarted ? 3 : 2
+  const needsReview = computed && totals.manual_total > 0;
+  const hasMultipleFiles = files.length > 1;
+  const mergedDownloadReady = hasMultipleFiles && batch.merged_download_ready;
+  const needsMergedGeneration = (
+    batch.download_ready
+    && hasMultipleFiles
+    && !mergedDownloadReady
+  );
+  const currentStep = computed
+    ? needsReview ? 3 : 4
       : batch.status === "queued" || batch.status === "running"
         ? 2
         : batch.status === "preflight_ready"
@@ -394,6 +404,11 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     { title: "导出下载", content: batch.download_ready ? "文件已生成" : "等待生成" }
   ];
 
+  const focusReview = () => {
+    reviewSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    reviewSection.current?.focus({ preventScroll: true });
+  };
+
   return (
     <div className="page-shell batch-workbench">
       <div className="batch-heading">
@@ -405,7 +420,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
             <Typography.Title level={2}>{batch.name}</Typography.Title>
             <StatusTag status={batch.status} />
           </div>
-          <Typography.Text type="secondary">批次 #{batch.id} · 更新于 {new Date(batch.updated_at).toLocaleString("zh-CN")}</Typography.Text>
+          <Typography.Text type="secondary">批次 #{batch.id} · 更新于 {formatBeijingDateTime(batch.updated_at)}</Typography.Text>
         </div>
         <Space wrap className="batch-primary-actions">
           {canEditFiles && (
@@ -440,6 +455,96 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       <div className="workflow-surface">
         <Steps current={currentStep} status={batch.status === "failed" ? "error" : "process"} responsive={false} items={workflowItems} />
       </div>
+
+      {computed && (
+        <section
+          className={`stage-guidance ${needsReview ? "" : "stage-guidance-results"}`}
+          aria-labelledby="current-stage-title"
+        >
+          <AimOutlined className="stage-guidance-icon" />
+          <div className="stage-guidance-copy">
+            <strong id="current-stage-title">
+              当前阶段：{needsReview ? "异常审校" : "导出下载"}
+            </strong>
+            <span>
+              {needsReview
+                ? `发现 ${totals.manual_total} 件超出规则或需要判断的记录，请先完成拆分审校。`
+                : "计算结果已确认，可直接生成或下载处理结果。"}
+            </span>
+          </div>
+          {needsReview && (
+            <div className="stage-guidance-primary">
+              <span>下一步（唯一主操作）</span>
+              <Button aria-label={`拆分审校（${totals.manual_total}）`} type="primary" size="large" onClick={focusReview}>
+                拆分审校（{totals.manual_total}）<RightOutlined />
+              </Button>
+            </div>
+          )}
+          <div className="stage-guidance-secondary">
+            <span>{batch.download_ready && !needsMergedGeneration ? "下载处理结果" : "生成处理结果"}</span>
+            <div className="export-action-buttons">
+              {batch.download_ready && !needsMergedGeneration ? (
+                hasMultipleFiles ? (
+                  <>
+                    <Button
+                      type={needsReview ? "default" : "primary"}
+                      icon={<DownloadOutlined />}
+                      onClick={() => void download(
+                        `/api/batches/${batch.id}/download-merged`,
+                        `${batch.name}_合并处理.xlsx`
+                      )}
+                    >
+                      下载合并结果
+                    </Button>
+                    <Button
+                      icon={<DownloadOutlined />}
+                      onClick={() => void download(
+                        `/api/batches/${batch.id}/download`,
+                        `${batch.name}_分文件.zip`
+                      )}
+                    >
+                      下载分文件 ZIP
+                    </Button>
+                  </>
+                ) : (
+                  files[0]?.download_ready && (
+                    <Button
+                      type={needsReview ? "default" : "primary"}
+                      icon={<DownloadOutlined />}
+                      onClick={() => void download(
+                        `/api/batch-files/${files[0].id}/download`,
+                        `${files[0].original_name.replace(/\.(xls|xlsx)$/i, "")}_交货处理.xlsx`
+                      )}
+                    >
+                      下载处理结果
+                    </Button>
+                  )
+                )
+              ) : (
+                <Button
+                  icon={<ExportOutlined />}
+                  disabled={Boolean(activeJob)}
+                  loading={action === "export" || activeJob?.kind === "export"}
+                  onClick={() => void startExport()}
+                >
+                  {exportJob?.status === "stale"
+                    ? "重新生成导出"
+                    : needsMergedGeneration
+                      ? "生成合并结果"
+                      : "生成导出"}
+                </Button>
+              )}
+            </div>
+            <small>
+              {hasMultipleFiles
+                ? batch.download_ready && !needsMergedGeneration
+                  ? "合并 Excel 按来源顺序汇总；ZIP 保留每张交货单的独立文件。"
+                  : "将同时生成合并 Excel 和分文件 ZIP；待处理记录仍保留在待处理工作表。"
+                : "单个来源直接下载对应处理结果；待处理记录仍保留在待处理工作表。"}
+            </small>
+          </div>
+        </section>
+      )}
 
       {batch.error_message && (
         <Alert
@@ -554,7 +659,10 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         />
       </Card>
 
-      <Card title="本批次锁定的基础资料与规则" className="section-card compact-card">
+      <Card
+        title={<span className="locked-data-title"><LockOutlined /> 本批次锁定的基础资料与规则（不可修改）</span>}
+        className="section-card compact-card locked-data-card"
+      >
         <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 6 }}>
           {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
             <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
@@ -575,173 +683,142 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       </Card>
 
       {computed && (
-        <Card title="待处理审校" className="section-card">
+        <div ref={reviewSection} tabIndex={-1} className="review-section-anchor">
+        <Card
+          title={`待处理审校（共 ${exceptions.length} 条）`}
+          extra={<span className="toolbar-count">当前显示 {filteredExceptions.length} 条</span>}
+          className="section-card exception-review-card"
+        >
           <div className="table-toolbar exception-toolbar">
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder="搜索来源、SKU、站点、目的仓或排仓信息"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              style={{ width: 280 }}
-            />
-            <Select
-              aria-label="站点筛选"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="全部站点"
-              options={siteOptions}
-              value={siteFilter}
-              onChange={setSiteFilter}
-              style={{ width: 190 }}
-            />
-            <Select
-              aria-label="规模定位筛选"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="全部规模定位"
-              options={scaleOptions}
-              value={scaleFilter}
-              onChange={setScaleFilter}
-              style={{ width: 150 }}
-            />
-            <Select
-              aria-label="备货定位筛选"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder="全部备货定位"
-              options={stockingOptions}
-              value={stockingFilter}
-              onChange={setStockingFilter}
-              style={{ width: 150 }}
-            />
-            <Select
-              allowClear
-              placeholder="全部原因"
-              options={reasonOptions}
-              value={reasonFilter}
-              onChange={setReasonFilter}
-              style={{ minWidth: 180 }}
-            />
-            <Select
-              allowClear
-              placeholder="全部状态"
-              options={Object.entries(EXCEPTION_STATUS).map(([value, item]) => ({ value, label: item.label }))}
-              value={statusFilter}
-              onChange={setStatusFilter}
-              style={{ width: 140 }}
-            />
-            <span className="toolbar-count">共 {exceptions.length} 条，当前显示 {filteredExceptions.length} 条</span>
+            <div className="exception-filter-field exception-search-field">
+              <label htmlFor="exception-search">搜索</label>
+              <Input
+                id="exception-search"
+                aria-label="搜索待处理记录"
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder="搜索来源、SKU、站点或目的仓"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </div>
+            <div className="exception-filter-field">
+              <label htmlFor="exception-site-filter">站点</label>
+              <Select
+                id="exception-site-filter"
+                aria-label="站点筛选"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="全部站点"
+                options={siteOptions}
+                value={siteFilter}
+                onChange={setSiteFilter}
+              />
+            </div>
+            <div className="exception-filter-field">
+              <label htmlFor="exception-scale-filter">规模定位</label>
+              <Select
+                id="exception-scale-filter"
+                aria-label="规模定位筛选"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="全部规模定位"
+                options={scaleOptions}
+                value={scaleFilter}
+                onChange={setScaleFilter}
+              />
+            </div>
+            <div className="exception-filter-field">
+              <label htmlFor="exception-stocking-filter">备货定位</label>
+              <Select
+                id="exception-stocking-filter"
+                aria-label="备货定位筛选"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="全部备货定位"
+                options={stockingOptions}
+                value={stockingFilter}
+                onChange={setStockingFilter}
+              />
+            </div>
+            <div className="exception-filter-field">
+              <label htmlFor="exception-reason-filter">原因</label>
+              <Select
+                id="exception-reason-filter"
+                aria-label="原因筛选"
+                allowClear
+                placeholder="全部原因"
+                options={reasonOptions}
+                value={reasonFilter}
+                onChange={setReasonFilter}
+              />
+            </div>
+            <div className="exception-filter-field exception-status-field">
+              <label htmlFor="exception-status-filter">状态</label>
+              <Select
+                id="exception-status-filter"
+                aria-label="状态筛选"
+                allowClear
+                placeholder="全部状态"
+                options={Object.entries(EXCEPTION_STATUS).map(([value, item]) => ({ value, label: item.label }))}
+                value={statusFilter}
+                onChange={setStatusFilter}
+              />
+            </div>
           </div>
           <Table<DeliveryException>
             rowKey="id"
             dataSource={filteredExceptions}
-            scroll={{ x: 1420 }}
+            scroll={{ x: 1020 }}
             locale={{ emptyText: <Empty description={exceptions.length ? "没有匹配的待处理记录" : "本批次没有待处理记录"} /> }}
             columns={[
               {
                 title: "来源文件",
                 dataIndex: "batch_file_id",
-                width: 180,
+                width: 170,
                 ellipsis: true,
                 render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
               },
-              { title: "SKU", dataIndex: "sku", width: 110 },
-              { title: "站点", dataIndex: "full_site", width: 180, ellipsis: true },
-              { title: "目的仓", dataIndex: "destination", width: 140, ellipsis: true },
+              { title: "SKU", dataIndex: "sku", width: 80 },
+              { title: "站点", dataIndex: "full_site", width: 145, ellipsis: true },
+              { title: "目的仓", dataIndex: "destination", width: 130, ellipsis: true },
               {
-                title: "排仓参考",
-                children: [
-                  {
-                    title: "规模定位",
-                    dataIndex: "scale_position",
-                    width: 105,
-                    ellipsis: true,
-                    render: (value: string | number) => <PositionValue value={value} />
-                  },
-                  {
-                    title: "备货定位",
-                    dataIndex: "stocking_position",
-                    width: 105,
-                    ellipsis: true,
-                    render: (value: string | number) => <PositionValue value={value} />
-                  },
-                  {
-                    title: "已下单可售天数",
-                    dataIndex: "ordered_days",
-                    width: 135,
-                    ellipsis: true,
-                    render: (value: string | number) => <PositionValue value={value} />
-                  }
-                ]
+                title: "规模定位",
+                dataIndex: "scale_position",
+                width: 90,
+                ellipsis: true,
+                render: (value: string | number, record) => (
+                  <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}；已下单可售天数：${formatPositionValue(record.ordered_days)}`}>
+                    <span><PositionValue value={value} /></span>
+                  </Tooltip>
+                )
               },
               {
                 title: "待处理量",
                 dataIndex: "manual_quantity",
-                width: 100,
+                width: 85,
                 render: (value: number) => <strong className="pending-value">{value}</strong>
               },
-              { title: "原因", dataIndex: "reason", width: 160, ellipsis: true },
+              { title: "原因", dataIndex: "reason", width: 140, ellipsis: true },
               {
                 title: "状态",
                 dataIndex: "status",
-                width: 100,
+                width: 80,
                 render: (value: string) => <ExceptionStatusTag status={value} />
               },
               {
                 title: "操作",
-                width: 105,
+                width: 100,
                 fixed: "right",
                 render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>拆分审校</Button>
               }
             ]}
           />
         </Card>
-      )}
-
-      {computed && (
-        <Card title="导出下载" className="section-card export-card">
-          <div className="export-content">
-            <div>
-              <Typography.Title level={4}>每个来源文件独立生成结果，并同时打包批次 ZIP</Typography.Title>
-              <Typography.Paragraph type="secondary">
-                可导入数量写入“交货导入”，仍待处理数量写入“待处理导入”；两者之和始终等于交货总量。
-              </Typography.Paragraph>
-              {totals.manual_total > 0 && (
-                <Alert
-                  type="warning"
-                  showIcon
-                  title={`仍有 ${totals.manual_total} 件待处理，可保留在待处理工作表中导出。`}
-                />
-              )}
-              {exportJob?.status === "stale" && (
-                <Alert className="export-stale-alert" type="info" showIcon title="拆分已修改，原导出已失效，请重新生成。" />
-              )}
-            </div>
-            <Space orientation="vertical" align="end">
-              <Button
-                icon={<ExportOutlined />}
-                disabled={Boolean(activeJob)}
-                loading={action === "export" || activeJob?.kind === "export"}
-                onClick={() => void startExport()}
-              >
-                {exportJob?.status === "stale" ? "重新生成导出" : "生成导出"}
-              </Button>
-              {batch.download_ready && (
-                <Button
-                  type="primary"
-                  icon={<DownloadOutlined />}
-                  onClick={() => void download(`/api/batches/${batch.id}/download`, `${batch.name}.zip`)}
-                >
-                  下载批次 ZIP
-                </Button>
-              )}
-            </Space>
-          </div>
-        </Card>
+        </div>
       )}
 
       <Drawer

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
@@ -60,9 +60,17 @@ describe("BatchesPage", () => {
 
     await screen.findByText("基础资料已就绪");
     expect(screen.getByRole("button", { name: /新建批次/ })).toBeEnabled();
+    expect(screen.getByLabelText("搜索")).toHaveAttribute("placeholder", "搜索批次名称");
+    expect(screen.getByLabelText("状态")).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "交货批次列表" })).toBeInTheDocument();
     expect(screen.getByText("审校待处理")).toBeInTheDocument();
     expect(screen.getByText("2 个文件 · 交货 160")).toBeInTheDocument();
     expect(screen.getByText("新批次将锁定超收规则：短尾超收 V1")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("新建批次"));
+    const dialog = await screen.findByRole("dialog", { name: "新建交货批次" });
+    const cancel = within(dialog).getByRole("button", { name: /取\s*消/ });
+    fireEvent.click(cancel);
 
     fireEvent.click(screen.getByRole("button", { name: "2026-07-21 交货批次" }));
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(7));

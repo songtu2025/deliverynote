@@ -215,7 +215,43 @@ class WorkerIntegrationTests(unittest.TestCase):
             f"/api/batches/{batch_id}", headers=self.headers
         ).json()
         self.assertTrue(completed["download_ready"])
+        self.assertTrue(completed["merged_download_ready"])
         self.assertTrue(all(item["download_ready"] for item in completed["files"]))
+        merged_response = self.client.get(
+            f"/api/batches/{batch_id}/download-merged", headers=self.headers
+        )
+        self.assertEqual(merged_response.status_code, 200, merged_response.text)
+        merged_book = load_workbook(
+            BytesIO(merged_response.content),
+            data_only=True,
+        )
+        merged_import_sheet = merged_book["交货导入"]
+        merged_pending_sheet = merged_book["待处理导入"]
+        self.assertEqual(
+            sum(
+                merged_import_sheet.cell(row, 4).value or 0
+                for row in range(3, merged_import_sheet.max_row + 1)
+            ),
+            125,
+        )
+        self.assertEqual(
+            sum(
+                merged_pending_sheet.cell(row, 4).value or 0
+                for row in range(3, merged_pending_sheet.max_row + 1)
+            ),
+            35,
+        )
+        merged_import_notes = [
+            merged_import_sheet.cell(row, 6).value
+            for row in range(3, merged_import_sheet.max_row + 1)
+        ]
+        self.assertTrue(merged_import_notes[0].endswith("-01-10箱"))
+        self.assertTrue(
+            all(note.endswith("-02-20箱") for note in merged_import_notes[1:])
+        )
+        self.assertTrue(
+            merged_pending_sheet.cell(3, 6).value.endswith("-02-20箱")
+        )
         archive_response = self.client.get(
             f"/api/batches/{batch_id}/download", headers=self.headers
         )
@@ -223,6 +259,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         with ZipFile(BytesIO(archive_response.content)) as archive:
             names = sorted(archive.namelist())
             self.assertEqual(len(names), 2)
+            self.assertFalse(any("merged" in name for name in names))
             second_book = load_workbook(
                 BytesIO(archive.read(names[1])), data_only=True
             )
@@ -243,6 +280,34 @@ class WorkerIntegrationTests(unittest.TestCase):
             f"/api/batches/{batch_id}/export", headers=self.headers
         )
         self.assertEqual(repeated.json()["id"], export_job_id)
+        self.assertEqual(repeated.json()["status"], "succeeded")
+
+        with self.app.state.database.session() as session:
+            stored_batch = session.get(Batch, batch_id)
+            merged_path = Path(stored_batch.zip_path).with_name(
+                f"batch-{batch_id}-merged.xlsx"
+            )
+        merged_path.unlink()
+        self.assertEqual(
+            self.client.get(
+                f"/api/batches/{batch_id}/download-merged",
+                headers=self.headers,
+            ).status_code,
+            404,
+        )
+        regenerated = self.client.post(
+            f"/api/batches/{batch_id}/export", headers=self.headers
+        )
+        self.assertEqual(regenerated.json()["id"], export_job_id)
+        self.assertEqual(regenerated.json()["status"], "queued")
+        self.assertEqual(run_once(self.database_url, self.storage_root), export_job_id)
+        self.assertEqual(
+            self.client.get(
+                f"/api/batches/{batch_id}/download-merged",
+                headers=self.headers,
+            ).status_code,
+            200,
+        )
 
     def test_compute_uses_the_overreceipt_rule_locked_when_batch_was_created(self):
         first_rule = self.client.post(

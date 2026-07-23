@@ -4,15 +4,17 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from openpyxl import Workbook, load_workbook
 
 try:
-    from delivery_note.cli import main, run_batch
+    from delivery_note.cli import BEIJING_TIMEZONE, main, run_batch
     from delivery_note.pipeline import IMPORT_COLUMNS
 except ImportError:
     main = None
     run_batch = None
+    BEIJING_TIMEZONE = None
     IMPORT_COLUMNS = None
 
 
@@ -204,6 +206,27 @@ class RunBatchOutputTests(unittest.TestCase):
             output_book.sheetnames, ["交货导入", "待处理导入"]
         )
         self.assertIsNone(output_book["待处理导入"]["A3"].value)
+
+    def test_default_output_directory_timestamp_uses_beijing_time(self):
+        with TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            delivery, purchase, product, supplier, position, template = (
+                self.create_inputs(directory_path, 150)
+            )
+            with patch("delivery_note.cli.datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = datetime(2026, 7, 23, 0, 5, 6)
+                output_path, _result = run_batch(
+                    delivery,
+                    purchase,
+                    product,
+                    supplier,
+                    position,
+                    template,
+                    directory_path / "outputs",
+                )
+
+        mocked_datetime.now.assert_called_once_with(BEIJING_TIMEZONE)
+        self.assertEqual(output_path.parent.name, "20260723_000506")
 
 
 if __name__ == "__main__":

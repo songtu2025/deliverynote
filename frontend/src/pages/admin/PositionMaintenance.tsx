@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   Checkbox,
-  Descriptions,
   Drawer,
   Form,
   Input,
@@ -22,10 +21,7 @@ import {
 } from "antd";
 import {
   ArrowLeftOutlined,
-  CopyOutlined,
-  DeleteOutlined,
   DownloadOutlined,
-  EditOutlined,
   PlusOutlined,
   ReloadOutlined,
   UploadOutlined
@@ -33,6 +29,7 @@ import {
 import type { FormInstance, TableProps, UploadProps } from "antd";
 
 import { ApiError, api, download } from "../../api";
+import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
 import type {
   InputVersion,
   PositionDiff,
@@ -78,16 +75,13 @@ const REVISION_CONFLICT_DETAILS = [
   "草稿已被其他管理员更新，请刷新后重试",
   "草稿写入发生并发冲突，请刷新后重试"
 ];
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN");
-}
+const POSITION_TABLE_COMPONENTS: NonNullable<TableProps<PositionDraftRow>["components"]> = {
+  table: (props) => <table {...props} aria-label="库位草稿记录" />
+};
 
 function defaultVersionName(): string {
-  const date = new Date();
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `position-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+  const parts = beijingDateTimeParts();
+  return `position-${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}`;
 }
 
 function rowValues(row: PositionDraftRow): PositionRowValues {
@@ -173,7 +167,8 @@ function RowEditorDrawer({
   return (
     <Drawer
       title={editingRow ? `编辑库位记录：${editingRow.jiaji_sku}` : "新增库位记录"}
-      size="large"
+      size={680}
+      rootClassName="position-row-drawer"
       open={open}
       destroyOnHidden
       closable={!saving}
@@ -196,35 +191,37 @@ function RowEditorDrawer({
         title="保存后立即写入服务器草稿"
         description="店铺-站点和积加 SKU 为必填；其他字段保留现有自定义文本。"
       />
-      <Form<PositionRowValues> form={form} layout="vertical" requiredMark="optional" onValuesChange={onDirty}>
-        <Form.Item
-          label="店铺-站点"
-          name="store_site"
-          extra="用于与待处理数据的站点精确匹配，例如 SEEKWAY:US。"
-          rules={[{ required: true, whitespace: true, message: "请输入店铺-站点" }]}
-        >
-          <Input aria-label="店铺-站点" placeholder="例如：SEEKWAY:US" />
-        </Form.Item>
-        <Form.Item
-          label="积加 SKU"
-          name="jiaji_sku"
-          extra="与店铺-站点共同组成主要匹配键。"
-          rules={[{ required: true, whitespace: true, message: "请输入积加 SKU" }]}
-        >
-          <Input aria-label="积加 SKU" placeholder="例如：SKU-A" />
-        </Form.Item>
-        <Form.Item label="MSKU" name="msku" extra="同一站点和积加 SKU 有多行时，MSKU 必须填写且唯一。">
-          <Input aria-label="MSKU" placeholder="可留空" />
-        </Form.Item>
-        <Form.Item label="规模定位" name="scale_position" extra="常用值为短尾、中尾、长尾；已有自定义值可以继续保留。">
-          <AutoComplete aria-label="规模定位" options={SCALE_OPTIONS} placeholder="选择常用值或输入自定义值" />
-        </Form.Item>
-        <Form.Item label="备货定位" name="stocking_position" extra="用于补充待处理导出中的备货定位。">
-          <Input aria-label="备货定位" placeholder="例如：备货" />
-        </Form.Item>
-        <Form.Item label="已下单可售天数" name="ordered_days" extra="保留源资料文本，常见值为数字天数。">
-          <Input aria-label="已下单可售天数" placeholder="例如：90" />
-        </Form.Item>
+      <Form<PositionRowValues> className="position-row-form" form={form} layout="vertical" onValuesChange={onDirty}>
+        <div className="position-row-field-grid">
+          <Form.Item
+            label="店铺-站点"
+            name="store_site"
+            extra="用于与待处理数据的站点精确匹配，例如 SEEKWAY:US。"
+            rules={[{ required: true, whitespace: true, message: "请输入店铺-站点" }]}
+          >
+            <Input aria-label="店铺-站点" placeholder="例如：SEEKWAY:US" />
+          </Form.Item>
+          <Form.Item
+            label="积加 SKU"
+            name="jiaji_sku"
+            extra="与店铺-站点共同组成主要匹配键。"
+            rules={[{ required: true, whitespace: true, message: "请输入积加 SKU" }]}
+          >
+            <Input aria-label="积加 SKU" placeholder="例如：SKU-A" />
+          </Form.Item>
+          <Form.Item label="MSKU（可选）" name="msku" extra="同一站点和积加 SKU 有多行时，MSKU 必须填写且唯一。">
+            <Input aria-label="MSKU" placeholder="可留空" />
+          </Form.Item>
+          <Form.Item label="规模定位（可选）" name="scale_position" extra="常用值为短尾、中尾、长尾；已有自定义值可以继续保留。">
+            <AutoComplete aria-label="规模定位" options={SCALE_OPTIONS} placeholder="选择常用值或输入自定义值" />
+          </Form.Item>
+          <Form.Item label="备货定位（可选）" name="stocking_position" extra="用于补充待处理导出中的备货定位。">
+            <Input aria-label="备货定位" placeholder="例如：备货" />
+          </Form.Item>
+          <Form.Item label="已下单可售天数（可选）" name="ordered_days" extra="保留源资料文本，常见值为数字天数。">
+            <Input aria-label="已下单可售天数" placeholder="例如：90" />
+          </Form.Item>
+        </div>
       </Form>
     </Drawer>
   );
@@ -822,16 +819,16 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   };
 
   const rowColumns = useMemo<NonNullable<TableProps<PositionDraftRow>["columns"]>>(() => [
-    { title: "店铺-站点", dataIndex: "store_site", width: 170, fixed: "left" },
-    { title: "积加 SKU", dataIndex: "jiaji_sku", width: 150 },
-    { title: "MSKU", dataIndex: "msku", width: 150, render: (value: string) => value || "—" },
-    { title: "规模定位", dataIndex: "scale_position", width: 110, render: (value: string) => value || "—" },
-    { title: "备货定位", dataIndex: "stocking_position", width: 120, render: (value: string) => value || "—" },
-    { title: "已下单可售天数", dataIndex: "ordered_days", width: 150, render: (value: string) => value || "—" },
+    { title: "店铺-站点", dataIndex: "store_site", width: 130, ellipsis: true },
+    { title: "积加 SKU", dataIndex: "jiaji_sku", width: 120, ellipsis: true },
+    { title: "MSKU", dataIndex: "msku", width: 120, ellipsis: true, render: (value: string) => value || "—" },
+    { title: "规模定位", dataIndex: "scale_position", width: 90, ellipsis: true, render: (value: string) => value || "—" },
+    { title: "备货定位", dataIndex: "stocking_position", width: 100, ellipsis: true, render: (value: string) => value || "—" },
+    { title: "可售天数", dataIndex: "ordered_days", width: 95, ellipsis: true, render: (value: string) => value || "—" },
     {
       title: "修改状态",
       dataIndex: "change_type",
-      width: 110,
+      width: 90,
       render: (value: PositionDraftRow["change_type"]) => {
         const definitions = {
           unchanged: { color: "default", label: "未变化" },
@@ -846,7 +843,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     {
       title: "问题",
       dataIndex: "issues",
-      width: 100,
+      width: 80,
       render: (issues: PositionIssue[]) => issues.length === 0
         ? <Typography.Text type="secondary">无</Typography.Text>
         : <Tag color={issues.some((issue) => issue.severity === "error") ? "error" : "warning"}>{issues.length} 项</Tag>
@@ -854,23 +851,22 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     {
       title: "操作",
       key: "actions",
-      width: 210,
-      fixed: "right",
+      width: 150,
       render: (_, row) => (
-        <Space size={2}>
+        <Space size={0}>
           <Button
+            size="small"
             type="link"
             aria-label={rowActionLabel("编辑", row)}
-            icon={<EditOutlined />}
             disabled={actionsDisabled}
             onClick={() => openEditRow(row)}
           >
             编辑
           </Button>
           <Button
+            size="small"
             type="link"
             aria-label={rowActionLabel("复制", row)}
-            icon={<CopyOutlined />}
             disabled={actionsDisabled}
             loading={busyAction === "copy"}
             onClick={() => void copyRow(row)}
@@ -899,10 +895,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             }}
           >
             <Button
+              size="small"
               type="link"
               danger
               aria-label={rowActionLabel("删除", row)}
-              icon={<DeleteOutlined />}
               disabled={actionsDisabled}
               loading={busyAction === "delete"}
             >
@@ -953,18 +949,28 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     || publishValidation.error_count > 0
     || (publishValidation.warning_count > 0 && !warningsConfirmed)
     || !publishName.trim();
+  const hasActiveFilters = Boolean(search.trim() || site.trim() || scale.trim() || issueFilter !== "all" || onlyModified);
+
+  const resetFilters = () => {
+    setSearch("");
+    setSite("");
+    setScale("");
+    setIssueFilter("all");
+    setOnlyModified(false);
+    setPage(1);
+  };
 
   return (
     <div className="position-maintenance">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 20, marginBottom: 18 }}>
-        <div>
+      <div className="position-workspace-heading">
+        <div className="position-workspace-title">
           <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} disabled={busyAction !== null} onClick={requestBack}>
             返回基础资料
           </Button>
           <Typography.Title level={2} style={{ margin: 0 }}>库位/排仓网页维护</Typography.Title>
           <Typography.Text type="secondary">草稿基线：{draft.base_version_name}。网页修改只保存在服务器草稿，发布前不影响正式数据。</Typography.Text>
         </div>
-        <Space wrap style={{ justifyContent: "flex-end" }}>
+        <Space wrap className="position-workspace-actions">
           <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void downloadDraft()}>下载草稿</Button>
           <Upload accept=".xls,.xlsx" showUploadList={false} disabled={actionsDisabled} customRequest={previewImport}>
             <Button
@@ -1007,7 +1013,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       </div>
 
       <Alert
-        className="inline-alert"
+        className="inline-alert position-save-status"
         type="success"
         showIcon
         title="草稿已自动保存"
@@ -1015,7 +1021,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
           <Space wrap separator={<span aria-hidden="true">·</span>}>
             <span>已保存到服务器</span>
             <span>修订号 {draft.revision}</span>
-            <span>最后更新 {formatDate(draft.updated_at)}</span>
+            <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>
             <span>最后编辑人：用户 #{draft.updated_by}</span>
           </Space>
         )}
@@ -1044,59 +1050,94 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       {actionError && <Alert className="inline-alert" type="error" showIcon closable title="操作失败" description={actionError} onClose={() => setActionError(null)} />}
       {importError && <Alert className="inline-alert" type="error" showIcon closable title="Excel 替换未完成" description={importError} onClose={() => setImportError(null)} />}
 
-      <Card style={{ marginBottom: 16 }}>
-        <Descriptions
-          size="small"
-          column={2}
-          items={[
-            { key: "rows", label: "草稿行数", children: draft.row_count },
-            { key: "modified", label: "变更记录", children: draft.modified_count },
-            { key: "errors", label: "错误", children: <Tag color={draft.error_count > 0 ? "error" : "default"}>{draft.error_count}</Tag> },
-            { key: "warnings", label: "警告", children: <Tag color={draft.warning_count > 0 ? "warning" : "default"}>{draft.warning_count}</Tag> },
-            { key: "diff", label: "相对正式版", span: 2, children: <DiffTags diff={diff} /> }
-          ]}
-        />
-      </Card>
+      <section className="position-summary-strip" aria-label="草稿摘要">
+        <div className="position-summary-metric">
+          <span>草稿记录</span>
+          <strong>{draft.row_count}</strong>
+          <small>服务器草稿</small>
+        </div>
+        <div className="position-summary-metric">
+          <span>已变更</span>
+          <strong>{draft.modified_count}</strong>
+          <small>待发布记录</small>
+        </div>
+        <div className={`position-summary-metric${draft.error_count > 0 ? " is-error" : ""}`}>
+          <span>错误</span>
+          <strong>{draft.error_count}</strong>
+          <small>{draft.error_count > 0 ? "发布前必须修正" : "无阻断项"}</small>
+        </div>
+        <div className={`position-summary-metric${draft.warning_count > 0 ? " is-warning" : ""}`}>
+          <span>警告</span>
+          <strong>{draft.warning_count}</strong>
+          <small>{draft.warning_count > 0 ? "发布前需要确认" : "无需确认"}</small>
+        </div>
+        <div className="position-summary-diff">
+          <span>相对正式版</span>
+          <DiffTags diff={diff} />
+        </div>
+      </section>
 
       <Card
-        title="草稿记录"
+        className="position-records-card"
+        title={<span>草稿记录 <small>共 {rowsTotal} 条</small></span>}
         extra={<Button aria-label="新增记录" type="primary" icon={<PlusOutlined />} disabled={actionsDisabled} onClick={openNewRow}>新增记录</Button>}
       >
-        <div className="table-toolbar">
-          <Input.Search
-            aria-label="搜索草稿"
-            allowClear
-            value={search}
-            placeholder="搜索站点、SKU、MSKU 或定位"
-            style={{ width: 280 }}
-            onChange={(event) => { setPage(1); setSearch(event.target.value); }}
-          />
-          <Input
-            aria-label="站点筛选"
-            allowClear
-            value={site}
-            placeholder="站点精确筛选"
-            style={{ width: 180 }}
-            onChange={(event) => { setPage(1); setSite(event.target.value); }}
-          />
-          <Input
-            aria-label="规模定位筛选"
-            allowClear
-            value={scale}
-            placeholder="规模定位精确筛选"
-            style={{ width: 180 }}
-            onChange={(event) => { setPage(1); setScale(event.target.value); }}
-          />
-          <Select
-            aria-label="问题筛选"
-            value={issueFilter}
-            style={{ width: 130 }}
-            options={[{ value: "all", label: "全部问题" }, { value: "errors", label: "仅错误" }]}
-            onChange={(value) => { setPage(1); setIssueFilter(value); }}
-          />
-          <Checkbox checked={onlyModified} onChange={(event) => { setPage(1); setOnlyModified(event.target.checked); }}>
-            仅看已修改
-          </Checkbox>
+        <div className="table-toolbar position-filter-toolbar">
+          <div className="position-filter-field position-filter-search">
+            <label htmlFor="position-search">搜索</label>
+            <Input.Search
+              id="position-search"
+              aria-label="搜索草稿"
+              allowClear
+              value={search}
+              placeholder="站点、SKU、MSKU 或定位"
+              onChange={(event) => { setPage(1); setSearch(event.target.value); }}
+            />
+          </div>
+          <div className="position-filter-field">
+            <label htmlFor="position-site-filter">站点</label>
+            <Input
+              id="position-site-filter"
+              aria-label="站点筛选"
+              allowClear
+              value={site}
+              placeholder="精确筛选"
+              onChange={(event) => { setPage(1); setSite(event.target.value); }}
+            />
+          </div>
+          <div className="position-filter-field">
+            <label htmlFor="position-scale-filter">规模定位</label>
+            <Input
+              id="position-scale-filter"
+              aria-label="规模定位筛选"
+              allowClear
+              value={scale}
+              placeholder="精确筛选"
+              onChange={(event) => { setPage(1); setScale(event.target.value); }}
+            />
+          </div>
+          <div className="position-filter-field">
+            <label htmlFor="position-issue-filter">问题</label>
+            <Select
+              id="position-issue-filter"
+              aria-label="问题筛选"
+              value={issueFilter}
+              options={[{ value: "all", label: "全部问题" }, { value: "errors", label: "仅错误" }]}
+              onChange={(value) => { setPage(1); setIssueFilter(value); }}
+            />
+          </div>
+          <div className="position-filter-field position-filter-scope">
+            <span>范围</span>
+            <Checkbox checked={onlyModified} onChange={(event) => { setPage(1); setOnlyModified(event.target.checked); }}>
+              仅看已修改
+            </Checkbox>
+          </div>
+          {hasActiveFilters && (
+            <Button aria-label="重置筛选" icon={<ReloadOutlined />} onClick={resetFilters}>重置</Button>
+          )}
+        </div>
+        <div className="position-selection-bar">
+          <Typography.Text type="secondary">已选择 {selectedRowIds.length} 条</Typography.Text>
           <Popconfirm
             fresh
             open={bulkDeleteConfirmOpen}
@@ -1142,13 +1183,14 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
           loading={rowsLoading}
           columns={rowColumns}
           dataSource={rows}
+          components={POSITION_TABLE_COMPONENTS}
           rowSelection={{
             selectedRowKeys: selectedRowIds,
             preserveSelectedRowKeys: false,
             getCheckboxProps: () => ({ disabled: actionsDisabled }),
             onChange: (keys) => setSelectedRowIds(keys.map(Number))
           }}
-          scroll={{ x: 1400 }}
+          scroll={{ x: 1020 }}
           locale={{ emptyText: rowsError ? "读取失败" : "草稿中没有符合条件的记录" }}
           pagination={{
             current: page,

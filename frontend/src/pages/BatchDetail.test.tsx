@@ -9,6 +9,8 @@ const jsonResponse = (payload: unknown) => new Response(JSON.stringify(payload),
 });
 
 describe("BatchDetail", () => {
+  let batchPayload: Record<string, any>;
+
   beforeEach(() => {
     const version = (id: number, kind: string) => ({
       id,
@@ -19,7 +21,7 @@ describe("BatchDetail", () => {
       created_by: 1,
       created_at: "2026-07-21T08:00:00"
     });
-    const batch = {
+    batchPayload = {
       id: 7,
       name: "2026-07-21 交货批次",
       status: "succeeded",
@@ -46,6 +48,7 @@ describe("BatchDetail", () => {
       jobs: {},
       error_message: null,
       download_ready: false,
+      merged_download_ready: false,
       created_at: "2026-07-21T08:00:00",
       updated_at: "2026-07-21T09:00:00",
       file_count: 2,
@@ -118,12 +121,19 @@ describe("BatchDetail", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/api/batches/7/exceptions")) return jsonResponse(exceptions);
-      if (url.endsWith("/api/batches/7")) return jsonResponse(batch);
+      if (url.endsWith("/api/batches/7")) return jsonResponse(batchPayload);
+      if (url.endsWith("/api/batches/7/download-merged")) {
+        return new Response("merged", { status: 200 });
+      }
+      if (url.endsWith("/api/batches/7/download")) {
+        return new Response("zip", { status: 200 });
+      }
       throw new Error(`Unexpected request: ${url}`);
     }));
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -132,14 +142,11 @@ describe("BatchDetail", () => {
 
     await screen.findByText("160 = 100 + 60");
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
-    expect(screen.getByText("计算结果").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
-    expect(screen.getByRole("columnheader", { name: "排仓参考" })).toBeInTheDocument();
+    expect(screen.getByText("异常审校").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
+    expect(screen.getByText("当前阶段：异常审校")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "拆分审校（60）" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "备货定位" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "已下单可售天数" })).toBeInTheDocument();
     expect(screen.getByText("短尾")).toBeInTheDocument();
-    expect(screen.getByText("备货")).toBeInTheDocument();
-    expect(screen.getByText("90")).toBeInTheDocument();
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "拆分审校" })[0]);
@@ -165,6 +172,8 @@ describe("BatchDetail", () => {
 
     await screen.findByText("SKU-A");
     expect(screen.getByText("SKU-B")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "原因筛选" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "状态筛选" })).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "站点筛选" }));
     fireEvent.click(await screen.findByText("AMAZON:SEEKWAY:US", { selector: ".ant-select-item-option-content" }));
@@ -181,5 +190,43 @@ describe("BatchDetail", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
     fireEvent.click(await screen.findByText("中尾", { selector: ".ant-select-item-option-content" }));
     await screen.findByText("没有匹配的待处理记录");
+  }, 30_000);
+
+  it("offers merged and per-file downloads without a duplicate export card", async () => {
+    batchPayload.download_ready = true;
+    batchPayload.merged_download_ready = true;
+    batchPayload.files = batchPayload.files.map((file: Record<string, unknown>) => ({
+      ...file,
+      download_ready: true
+    }));
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => "blob:test")
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn()
+    });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    const mergedButton = await screen.findByRole("button", { name: /下载合并结果/ });
+    const zipButton = screen.getByRole("button", { name: /下载分文件 ZIP/ });
+    expect(container.querySelector(".export-card")).not.toBeInTheDocument();
+
+    fireEvent.click(mergedButton);
+    fireEvent.click(zipButton);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/batches/7/download-merged",
+        expect.any(Object)
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/batches/7/download",
+        expect.any(Object)
+      );
+    });
   }, 30_000);
 });

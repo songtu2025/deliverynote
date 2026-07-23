@@ -15,6 +15,15 @@ const firstRule = {
   created_at: "2026-07-22T08:00:00"
 };
 
+const previousRule = {
+  ...firstRule,
+  id: 0,
+  name: "2026-06 基线规则",
+  allowed_warehouses: [],
+  active: false,
+  created_at: "2026-06-22T08:00:00"
+};
+
 const jsonResponse = (payload: unknown, status = 200) => new Response(
   JSON.stringify(payload),
   { status, headers: { "Content-Type": "application/json" } }
@@ -29,7 +38,7 @@ describe("OverreceiptRulesPage", () => {
         return jsonResponse(["供应商成品本地仓", "水鞋-广州仓"]);
       }
       if (url.endsWith("/api/overreceipt-rule-versions") && method === "GET") {
-        return jsonResponse([firstRule]);
+        return jsonResponse([firstRule, previousRule]);
       }
       if (url.endsWith("/api/overreceipt-rule-versions") && method === "POST") {
         return jsonResponse({ ...firstRule, id: 2, name: "2026-08 新规则" }, 201);
@@ -52,6 +61,9 @@ describe("OverreceiptRulesPage", () => {
     expect(screen.getAllByText("长尾 +10").length).toBeGreaterThan(0);
     expect(screen.getByText("供应商成品本地仓")).toBeInTheDocument();
     expect(screen.queryByText("供应链成品仓")).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "超收规则不可变版本" })).toBeInTheDocument();
+    expect(screen.getAllByText("未开放任何仓库").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "重新启用 2026-06 基线规则" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("规则版本名称"), {
       target: { value: "2026-08 新规则" }
