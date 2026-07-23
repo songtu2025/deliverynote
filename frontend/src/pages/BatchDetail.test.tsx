@@ -279,9 +279,13 @@ describe("BatchDetail", () => {
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
+    expect(await screen.findByRole("columnheader", { name: "审校依据" })).toBeInTheDocument();
+
     const excessRow = (await screen.findByText("SKU-A")).closest("tr");
     expect(excessRow).not.toBeNull();
-    expect(within(excessRow!).getByText("查看已分配、超出及规则命中")).toBeInTheDocument();
+    expect(excessRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("已分配 20");
+    expect(excessRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("超出 60");
+    expect(excessRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("未命中超收规则");
     fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理" }));
     let drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("采购量与超出量")).toBeInTheDocument();
@@ -292,7 +296,9 @@ describe("BatchDetail", () => {
 
     const noPurchaseRow = screen.getByText("SKU-B").closest("tr");
     expect(noPurchaseRow).not.toBeNull();
-    expect(within(noPurchaseRow!).getByText("核对供应商、SKU、站点和目的仓")).toBeInTheDocument();
+    expect(noPurchaseRow!.querySelector(".exception-evidence-cell")).toHaveTextContent(
+      "需核对 供应商、SKU、站点、目的仓"
+    );
     fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("核对锁定采购版本")).toBeInTheDocument();
@@ -301,7 +307,9 @@ describe("BatchDetail", () => {
 
     const ambiguousRow = screen.getByText("SKU-C").closest("tr");
     expect(ambiguousRow).not.toBeNull();
-    expect(within(ambiguousRow!).getByText("从候选项中选择完整站点")).toBeInTheDocument();
+    expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("候选站点");
+    expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("AMAZON:OTHER:US");
+    expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("AMAZON:SEEKWAY:US");
     fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("选择候选站点")).toBeInTheDocument();
@@ -313,7 +321,9 @@ describe("BatchDetail", () => {
 
     const allowanceRow = screen.getByText("SKU-D").closest("tr");
     expect(allowanceRow).not.toBeNull();
-    expect(within(allowanceRow!).getByText("查看采购分配、超收与剩余额度")).toBeInTheDocument();
+    expect(allowanceRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("正常采购 20");
+    expect(allowanceRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("使用超收 50");
+    expect(allowanceRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("剩余 0");
     fireEvent.click(within(allowanceRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("超收额度使用情况")).toBeInTheDocument();
