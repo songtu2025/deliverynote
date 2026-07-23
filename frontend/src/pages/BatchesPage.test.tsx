@@ -56,7 +56,7 @@ describe("BatchesPage", () => {
 
   it("shows readiness and the next batch action", async () => {
     const onOpen = vi.fn();
-    render(<BatchesPage onOpen={onOpen} />);
+    const { container } = render(<BatchesPage onOpen={onOpen} />);
 
     await screen.findByText("基础资料已就绪");
     expect(screen.getByRole("button", { name: /新建批次/ })).toBeEnabled();
@@ -66,6 +66,7 @@ describe("BatchesPage", () => {
     expect(screen.getByText("审校待处理")).toBeInTheDocument();
     expect(screen.getByText("2 个文件 · 交货 160")).toBeInTheDocument();
     expect(screen.getByText("新批次将锁定超收规则：短尾超收 V1")).toBeInTheDocument();
+    expect(container.querySelector(".ant-pagination")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByText("新建批次"));
     const dialog = await screen.findByRole("dialog", { name: "新建交货批次" });

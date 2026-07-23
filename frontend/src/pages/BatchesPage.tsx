@@ -236,7 +236,7 @@ export default function BatchesPage({ onOpen }: { onOpen: (id: number) => void }
           table: (props) => <table {...props} aria-label="交货批次列表" />
         }}
         locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "暂无批次"} /> }}
-        pagination={{ pageSize: 12, showSizeChanger: false }}
+        pagination={filtered.length > 12 ? { pageSize: 12, showSizeChanger: false } : false}
         columns={[
           {
             title: "批次",

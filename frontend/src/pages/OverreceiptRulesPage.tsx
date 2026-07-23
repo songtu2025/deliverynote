@@ -7,6 +7,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Select,
   Space,
   Table,
@@ -80,8 +81,7 @@ export default function OverreceiptRulesPage() {
 
   const activeRule = useMemo(() => rules.find((rule) => rule.active), [rules]);
 
-  const publish = async () => {
-    const values = await form.validateFields();
+  const publish = async (values: RuleForm) => {
     setSubmitting(true);
     try {
       await api<OverreceiptRuleVersion>("/api/overreceipt-rule-versions", {
@@ -93,8 +93,50 @@ export default function OverreceiptRulesPage() {
       await load();
     } catch (publishError) {
       message.error(publishError instanceof Error ? publishError.message : "发布失败");
+      throw publishError;
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const confirmPublish = async () => {
+    try {
+      const values = await form.validateFields();
+      Modal.confirm({
+        title: "确认发布不可变版本？",
+        content: (
+          <div className="overreceipt-confirm-summary">
+            <Typography.Text strong>{values.name}</Typography.Text>
+            <Space wrap>
+              <Tag color="green">短尾 +{values.short_tail_limit} 件</Tag>
+              <Tag color="blue">中尾 +{values.medium_tail_limit} 件</Tag>
+              <Tag>长尾 +{values.long_tail_limit} 件</Tag>
+            </Space>
+            <div className="overreceipt-confirm-warehouses">
+              <Typography.Text type="secondary">允许超收仓库（精确匹配）</Typography.Text>
+              {values.allowed_warehouses.length ? (
+                <Space wrap>
+                  {values.allowed_warehouses.map((warehouse) => (
+                    <Tag key={warehouse}>{warehouse}</Tag>
+                  ))}
+                </Space>
+              ) : (
+                <Typography.Text type="warning">
+                  未开放任何仓库（不会自动超收）
+                </Typography.Text>
+              )}
+            </div>
+            <Typography.Text type="secondary">
+              发布后不可修改，仅影响此后新建批次。
+            </Typography.Text>
+          </div>
+        ),
+        okText: "确认发布",
+        cancelText: "返回修改",
+        onOk: () => publish(values)
+      });
+    } catch {
+      // Ant Design 已在表单字段旁展示校验结果。
     }
   };
 
@@ -220,7 +262,7 @@ export default function OverreceiptRulesPage() {
             <Button
               className="overreceipt-publish-action"
               type="primary"
-              onClick={() => void publish()}
+              onClick={() => void confirmPublish()}
               loading={submitting}
             >
               发布并用于新批次

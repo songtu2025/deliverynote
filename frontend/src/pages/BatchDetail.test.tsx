@@ -202,7 +202,7 @@ describe("BatchDetail", () => {
   });
 
   it("shows quantity conservation and prevents an invalid split", async () => {
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     await screen.findByText("160 = 100 + 60");
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
@@ -211,8 +211,11 @@ describe("BatchDetail", () => {
     expect(screen.getByRole("button", { name: "查看并处理（60）" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
+    expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
+    expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
 
     await screen.findByText("审校处理 · SKU-A");
@@ -331,6 +334,7 @@ describe("BatchDetail", () => {
 
     const mergedButton = await screen.findByRole("button", { name: /下载合并结果/ });
     const zipButton = screen.getByRole("button", { name: /下载分文件 ZIP/ });
+    expect(screen.getAllByRole("button", { name: "下载单文件结果" })).toHaveLength(2);
     expect(container.querySelector(".export-card")).not.toBeInTheDocument();
 
     fireEvent.click(mergedButton);
@@ -346,6 +350,27 @@ describe("BatchDetail", () => {
         expect.any(Object)
       );
     });
+  }, 30_000);
+
+  it("keeps only the necessary footer actions for a single review item", async () => {
+    exceptionPayload = [exceptionPayload[0]];
+    batchPayload.summary = {
+      delivery_total: 160,
+      import_total: 100,
+      manual_total: 60,
+      conserved: true
+    };
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    const row = (await screen.findByText("SKU-A")).closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByRole("button", { name: "查看并处理" }));
+
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).queryByRole("button", { name: "上一条" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "下一条" })).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存并返回列表" })).toBeInTheDocument();
   }, 30_000);
 
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {

@@ -301,6 +301,14 @@ button, input { font: inherit; }
 }
 .overreceipt-publish-note .ant-alert-description { line-height: 1.65; }
 .overreceipt-publish-action { min-width: 180px; }
+.overreceipt-confirm-summary,
+.overreceipt-confirm-warehouses {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.overreceipt-confirm-summary { padding-top: 4px; }
+.overreceipt-confirm-summary .ant-tag { margin-inline-end: 0; }
 .overreceipt-history-table .ant-table-thead > tr > th {
   padding: 12px 10px;
   background: #f7f9f8;
@@ -444,6 +452,7 @@ button, input { font: inherit; }
 .locked-data-title .anticon { color: #176b5b; }
 .locked-data-card .ant-card-head { min-height: 48px; }
 .locked-data-card .ant-card-body { padding-top: 10px; padding-bottom: 6px; }
+.locked-data-card.is-collapsed .ant-card-body { display: none; }
 .locked-data-card .ant-descriptions-item { padding-bottom: 3px; }
 
 .review-section-anchor { scroll-margin-top: 18px; outline: none; }
@@ -704,6 +713,7 @@ button, input { font: inherit; }
   align-items: center;
   gap: 8px;
 }
+.drawer-review-actions:only-child { margin-left: auto; }
 .resolution-choice {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
