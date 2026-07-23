@@ -1,218 +1,290 @@
-# Batch Workbench Design QA
+# DeliveryNote PC 界面验收报告
 
-## Comparison Target
+| 文档属性 | 说明 |
+| --- | --- |
+| 报告状态 | 已完成的范围验收记录 |
+| 验收对象 | DeliveryNote PC Web |
+| 功能源码基线 | Git tree `85bc74b6915def6a0711d5a1e2bcce1a90746d9e` |
+| 生产前端资源 | `index-DzkyLbfg.js` / `index-BJrakn5L.css` |
+| 最后完整复核 | 2026-07-23（Asia/Shanghai） |
+| 需求基线 | [DeliveryNote PC 界面规范](UI_UX_OPTIMIZATION_PLAN.md) |
 
-- Source visual truth: `/root/.codex/generated_images/019f8893-842e-7d70-8b17-e99b0f6936e0/exec-e4ae502c-2321-49c6-8991-4963d6c0ab89.png`
-- Source pixels: `1487 x 1058`
-- Intended source viewport: `1440 x 1024`
-- Implementation screenshot: `/tmp/deliverynote-batch-workbench-design-qa-20260722/02-workbench-top-1440x1024.png`
-- Focused review screenshot: `/tmp/deliverynote-batch-workbench-design-qa-20260722/03-workbench-review-1440x1024.png`
-- Full-view comparison: `/tmp/deliverynote-batch-workbench-design-qa-20260722/source-vs-implementation-final.png`
-- Implementation CSS viewport: `1440 x 1024`
-- Device scale factor: `1`
-- Density normalization: the source was rendered at `1440 x 1024` beside the native `1440 x 1024` implementation capture. The source and target aspect ratios differ by less than 0.1%.
-- State: operator viewing computed batch `QA 短尾规则 160`, with `160` delivered, `150` importable, and `10` pending under locked rule `QA V1 短尾 50`.
+## 1. 验收结论
 
-## Findings
+当前版本通过已定义的 PC 核心流程、管理员维护流程、自动化测试和生产烟雾检查，可以作为少量内部用户的现有操作基线。
 
-- No actionable P0, P1, or P2 differences remain.
-- [P3] The real Ant Design controls and production text metrics make the pending-review table begin slightly lower than in the generated mock at the same viewport. The review heading, all six labeled filters, and the table header remain visible above the fold; the primary action scrolls directly to the complete table.
+本结论仅适用于本报告列出的范围，不表示：
 
-## Required Fidelity Surfaces
+- 已完成手机端适配；
+- 已获得完整 WCAG 合规认证；
+- 已完成压力、容量、高可用或灾难恢复认证；
+- 历史批次中的全部待处理数量已获得业务确认；
+- 任何后续提交无需重新验收。
 
-- Fonts and typography: implementation retains the product font stack `Inter, Microsoft YaHei, sans-serif`; title, stage heading, metrics, helper text, and table hierarchy match the selected direction. Dynamic file names use controlled ellipsis with the full value available from the table cell title.
-- Spacing and layout rhythm: focused batch detail removes the global sidebar, aligns the page margins and full-width workbench to the source, and matches its compact sequence of title, steps, action guidance, metrics, files, locked data, and review table. Section gaps remain consistently `18px`.
-- Colors and visual tokens: existing `#176b5b` primary green, pale green guidance surface, neutral gray workspace, semantic pending amber, light borders, and restrained shadows match the selected visual direction and the established product tokens.
-- Image quality and asset fidelity: the target contains no raster imagery. All visible icons use the existing Ant Design icon library; no placeholder imagery, custom SVG, emoji, or CSS-drawn substitute was introduced.
-- Copy and content: the current stage is `异常审校`, the main action is `拆分审校（10）`, export remains explicitly secondary, and the quantity equation remains `160 = 150 + 10`. Locked versions and the immutable overreceipt rule remain visible.
-- Accessibility: all six review filters have visible labels and accessible names. Chrome's accessibility tree reported no unnamed button, link, textbox, combobox, checkbox, or switch in the tested state. This is targeted evidence, not a claim of full accessibility conformance.
-- Responsiveness: existing breakpoints were preserved and extended for the guidance and filter grids. The verified desktop viewport has zero document horizontal overflow and zero review-table horizontal overflow.
+### 1.1 结果标记
 
-## Primary Interactions Tested
+| 标记 | 含义 |
+| --- | --- |
+| 通过 | 要求已有自动化、浏览器或持久证据支持 |
+| 部分覆盖 | 已验证主要行为，但仍有明确未覆盖项 |
+| 不适用 | 不属于当前 PC 内部工具的验收范围 |
 
-- Opened the synthetic QA batch from the batch list.
-- Activated `拆分审校（10）`; the page scrolled and focus moved to the review section (`scrollY 396`).
-- Opened the reason filter, selected `超出允许超收量`, and confirmed one matching row.
-- Opened the `拆分审校 · SKU-A` drawer, verified its source/position/conservation fields and save control, then closed it without saving.
-- Did not generate an export, save a split, delete data, or mutate a batch.
-- Browser console errors: `0`.
+## 2. 验收范围
 
-## Comparison History
+### 2.1 已覆盖
 
-### Pass 1
+- 登录、退出、权限入口和右上角账号区；
+- 批次列表、新建批次与独立批次路由；
+- 多文件来源顺序、计算状态、数量摘要和待处理筛选；
+- 待处理拆分抽屉；
+- 单来源、合并 Excel 和分文件 ZIP 下载入口；
+- 超收规则当前状态、发布与历史版本；
+- 五类基础资料目录；
+- 库位服务器草稿、Excel 替换、校验、发布和冲突保护；
+- 用户账号和最近 200 条操作记录；
+- 北京时间显示；
+- 1280×800、1440×900、1920×1080 PC 视口。
 
-- Earlier P2 finding: the persistent sidebar narrowed the batch workbench and pushed the pending-review table too far below the source composition.
-- Earlier P2 finding: the steps, metrics, and source-file card were vertically looser than the selected mock.
-- Fixes: added a batch-detail focus layout without the global sidebar; placed the account controls as a lightweight overlay; tightened workflow, guidance, metrics, file-table, and locked-data spacing; retained the established design tokens.
-- Post-fix evidence: `/tmp/deliverynote-batch-workbench-design-qa-20260722/source-vs-implementation-final.png` and `/tmp/deliverynote-batch-workbench-design-qa-20260722/03-workbench-review-1440x1024.png`.
+### 2.2 未覆盖
 
-### Pass 2
+- 手机端专项布局；
+- 屏幕阅读器完整流程；
+- 全页面纯键盘遍历；
+- 自动化颜色对比度审计；
+- 大数据量分页与性能压测；
+- 多 API、多 Worker 或集群部署；
+- 灾难恢复演练。
 
-- The full-view comparison and focused review capture show no remaining P0/P1/P2 mismatches.
-- All critical review headers are within the viewport: `来源文件`, `SKU`, `站点`, `目的仓`, `规模定位`, `待处理量`, `原因`, `状态`, `操作`.
-- Final production assets verified in QA: `index-C86k-3FA.js` and `index-C1RqHEqO.css`.
+## 3. 环境与证据
 
-## Follow-up Polish
+### 3.1 证据层级
 
-- Optional P3: if operators prefer even more review-table content above the fold, the locked-data card could become a disclosure row in a later iteration. It is intentionally left expanded here so batch version and rule provenance remain immediately visible.
+| 层级 | 说明 |
+| --- | --- |
+| E1 | 自动化测试：组件、API、核心业务或 Worker |
+| E2 | 隔离 QA 环境中的真实 Chrome 操作、截图与结构化记录 |
+| E3 | 正式环境只读或低风险烟雾检查 |
 
-Batch workbench result: passed
+单一截图不用于证明数据一致性；单一组件测试不用于证明真实浏览器布局；单一健康检查不用于证明完整业务流程。
 
-# Batch List and Overreceipt UI Design QA
+### 3.2 隔离 QA 环境
 
-## Comparison Target
+管理员维护证据来自隔离 Docker Compose QA 项目和脱敏数据：
 
-- Source visual truth: `/tmp/deliverynote-other-ui-audit-20260722/01-batch-list-desktop.png`, `/tmp/deliverynote-other-ui-audit-20260722/02-overreceipt-rules-top.png`, and `/tmp/deliverynote-other-ui-audit-20260722/07-batch-list-mobile.png`.
-- Implementation screenshots: `/tmp/deliverynote-other-ui-implementation-20260722/01-batch-list-desktop.png`, `/tmp/deliverynote-other-ui-implementation-20260722/02-overreceipt-rules-top.png`, `/tmp/deliverynote-other-ui-implementation-20260722/07-batch-list-mobile.png`, `/tmp/deliverynote-other-ui-implementation-20260722/08-batch-cards-mobile.png`, `/tmp/deliverynote-other-ui-implementation-20260722/09-overreceipt-rules-mobile.png`, and `/tmp/deliverynote-other-ui-implementation-20260722/10-overreceipt-history-mobile.png`.
-- CSS viewports: desktop `1440 x 1000`; mobile `390 x 844`.
-- Device scale factor: native `1x` for both source and implementation captures; no density normalization was required.
-- State: admin user in the isolated QA stack, with two synthetic batches, two immutable overreceipt rule versions, and one active warehouse whitelist.
+| 项目 | 值 |
+| --- | --- |
+| 浏览器 | Google Chrome `146.0.7680.71` |
+| 视口 | 1280×800、1440×900、1920×1080 |
+| 生产数据变更 | 无 |
+| 页面整体横向溢出 | 0 px |
+| 并发冲突回归 | PostgreSQL 环境 24 次迭代 |
+| QA 正式版本 | 验收后保持不变 |
+| QA 草稿 | 验收后已放弃 |
 
-## Findings
+### 3.3 持久证据
 
-- No actionable P0, P1, or P2 differences remain.
-- [P3] The desktop overreceipt history table reports `671px` scroll width inside a `669px` client width because of Ant Design table-border rounding. All five columns and the action remain visible, the page has no horizontal overflow, and no user content is hidden.
+证据目录：
 
-## Required Fidelity Surfaces
+```text
+design/admin-maintenance-qa/
+```
 
-- Fonts and typography: the product font stack remains `Inter, Microsoft YaHei, sans-serif`; the established heading, label, helper-text, and table hierarchy is unchanged.
-- Spacing and layout rhythm: the batch list uses labeled compact filters and a bordered desktop table; mobile batches become readable stacked cards. The overreceipt publish and history surfaces use the same compact card rhythm as the rest of the product.
-- Colors and visual tokens: the existing green/neutral palette, semantic status colors, borders, radii, and shadows are reused without introducing a parallel visual language.
-- Image quality and asset fidelity: these screens contain no raster image assets. Existing Ant Design icons remain in use; no custom SVG, placeholder, emoji, or CSS-drawn asset was added.
-- Copy and content: business meaning is unchanged. Added copy is limited to visible filter labels, quantity units, accessible names, result count, and the explicit `未开放任何仓库` empty state.
-- Accessibility: both tables have accessible names; filters have visible labels; row actions have record-specific labels. Chrome's accessibility tree reported `0` unnamed buttons, links, text boxes, comboboxes, checkboxes, or switches in the tested states.
-- Responsiveness: document horizontal overflow is `0px` at both viewports. Batch tables measured `1146/1146px` on desktop and `308/308px` on mobile; the rule table measured `274/274px` on mobile.
+| 文件 | 证据内容 |
+| --- | --- |
+| `01-base-data-catalog-1440x900.png` | 1440×900 基础资料目录 |
+| `02-base-data-catalog-1920x1080.png` | 1920×1080 基础资料目录 |
+| `02b-base-data-catalog-1280x800.png` | 1280×800 基础资料目录 |
+| `03-draft-workspace-1440x900.png` | 库位服务器草稿工作台 |
+| `04-create-drawer-1440x900.png` | 新增记录抽屉 |
+| `05-edit-drawer-1440x900.png` | 编辑记录抽屉 |
+| `06-excel-diff-1440x900.png` | Excel 整表替换预览 |
+| `07-publish-errors-1440x900.png` | 发布错误阻断 |
+| `08-publish-warnings-1440x900.png` | 发布警告确认 |
+| `09-user-accounts-1440x900.png` | 用户账号 |
+| `10-audit-log-1440x900.png` | 操作记录 |
+| `audit-evidence.json` | QA 环境、步骤、修复和安全结果 |
+| `capture-metrics.json` | 视口、页面宽度和草稿清理指标 |
 
-## Primary Interactions Tested
+这些文件不包含真实密码、Token 或业务 Excel。
 
-- Searched the batch list for `无超收` and confirmed exactly one matching row, then restored the full result set.
-- Opened the new-batch modal and closed it with `取消`; no batch was created.
-- Navigated among batch list, overreceipt rules, base-data maintenance, user maintenance, and audit records.
-- Confirmed workspace navigation resets retained page scroll and lands the destination screen at its top.
-- Browser write requests: `0`; failed responses: `0`; console errors: `0`.
+批次工作台的早期截图只存在于开发临时目录，不作为持久证据引用；相关结论由自动化测试和生产浏览器复核支持。这一限制在报告中明确保留，不用不可复核路径补足证据。
 
-## Comparison History
+## 4. 需求追踪矩阵
 
-### Pass 1
+### 4.1 导航、账号与时间
 
-- P2: the mobile sidebar and vertically stacked readiness list consumed the first screen, leaving the actual batch list below the fold.
-- P2: the desktop overreceipt history action column was clipped by the fixed-width table.
-- P2: switching workspaces retained the previous scroll offset and could land the user in the middle of the overreceipt form.
-- Fixes: reduced the mobile sidebar, condensed readiness into a two-column grid, converted mobile rows to complete labeled cards, removed the forced history-table width, compacted rule metadata, and reset workspace scroll on navigation.
+| 需求 | 结果 | 证据 |
+| --- | :---: | --- |
+| `UI-NAV-001`、`UI-NAV-002` | 通过 | E1 `frontend/src/App.test.tsx`；角色入口组件测试 |
+| `UI-NAV-003`、`UI-NAV-004` | 通过 | E1 `App.test.tsx` 覆盖 URL 恢复和 `popstate`；E3 刷新、前进、后退复核 |
+| `UI-SHELL-001`、`UI-SHELL-002` | 通过 | E1 `App.test.tsx`；E2 管理页面截图 |
+| `UI-SHELL-003` | 通过 | E1 `App.test.tsx` 覆盖服务端登出、本地会话清理和返回登录页 |
+| `UI-SHELL-004` | 通过 | E1 `frontend/src/dateTime.test.ts`；E3 使用 `America/Los_Angeles` 浏览器时区复核 |
+| `UI-SHELL-005` | 通过 | E1 各页面加载、空状态与错误状态测试 |
 
-### Pass 2
+### 4.2 批次列表与详情
 
-- The first real batch card is now visible above the fold on mobile, with all row data and the `打开` action preserved.
-- Every immutable-rule column and action is visible on desktop; mobile history cards preserve the same information without horizontal scrolling.
-- Mobile overreceipt navigation now starts at the page heading and active-rule summary.
-- Final browser evidence: `10` screenshots, `0` unnamed interactive controls, `0` write requests, `0` failed responses, and `0` console errors.
+| 需求 | 结果 | 证据 |
+| --- | :---: | --- |
+| `UI-LIST-001`–`UI-LIST-005` | 通过 | E1 `frontend/src/pages/BatchesPage.test.tsx`；E3 批次列表与新建弹窗复核 |
+| `UI-BATCH-001`–`UI-BATCH-005` | 通过 | E1 `frontend/src/pages/BatchDetail.test.tsx`、`App.test.tsx`；E3 批次详情、刷新与返回 |
+| `UI-BATCH-006`–`UI-BATCH-010` | 通过 | E1 `BatchDetail.test.tsx` 与后端批次/Worker 测试；E3 页面状态复核 |
+| `UI-BATCH-011`、`UI-BATCH-012` | 通过 | E1 待处理主操作、搜索及六类筛选测试；E3 原因筛选复核 |
+| `UI-BATCH-013`、`UI-BATCH-014` | 通过 | E1 拆分抽屉与请求状态测试；后端拆分守恒测试 |
+| `UI-EXPORT-001`–`UI-EXPORT-005` | 通过 | E1 `BatchDetail.test.tsx`、`tests/test_worker.py`；E3 合并 Excel 与分文件 ZIP 下载 |
 
-final result: passed
+补充验证：
 
-# Base Data Workspace Design QA
+- 多文件合并下载与分文件 ZIP 位于同一结果操作区；
+- 页面不存在重复的底部导出卡片；
+- 合并工作簿包含按来源顺序形成的导入和待处理数据；
+- ZIP 只保留逐来源工作簿，不混入合并文件；
+- 来源下载、批次合并下载和 ZIP 的文案可区分。
 
-## Comparison Target
+### 4.3 基础资料与库位草稿
 
-- Source visual truth: `/root/.codex/generated_images/019f8893-842e-7d70-8b17-e99b0f6936e0/exec-874ba06f-dbee-44e2-8dd0-846ac9cfb70c.png`.
-- Source pixels: `1487 x 1058`.
-- Implementation screenshot: `/tmp/deliverynote-base-data-ui-qa-20260723/01-position-ready-workspace-1487x1058.png`.
-- Upload-drawer screenshot: `/tmp/deliverynote-base-data-ui-qa-20260723/04-purchase-upload-drawer.png`.
-- Same-size comparison input: `/tmp/deliverynote-base-data-ui-qa-20260723/06-reference-vs-implementation.png` (source first, implementation second).
-- CSS viewport: `1487 x 1058`; device scale factor: `1`.
-- Density normalization: none. Both source and implementation were reviewed at native `1487 x 1058` pixels.
-- State: admin user in the isolated QA stack, viewing the only active QA input (`库位/排仓数据`) in its ready-state preview. The source uses active purchase data; the selected-version, preview-tab, expanded-context, and table states are equivalent, while the record labels and readiness count reflect real QA data.
+| 需求 | 结果 | 证据 |
+| --- | :---: | --- |
+| `UI-DATA-001`–`UI-DATA-004` | 通过 | E1 `frontend/src/pages/admin/InputDataPanel.test.tsx`；E2 三档基础资料截图 |
+| `UI-DATA-005` | 通过 | E1 前端入口测试与 `tests/test_position_drafts.py` 强制草稿流程测试 |
+| `UI-DRAFT-001`–`UI-DRAFT-005` | 通过 | E1 `PositionMaintenance.test.tsx`；E2 草稿工作台及新增/编辑抽屉 |
+| `UI-DRAFT-006` | 通过 | E1 Excel 导入预览测试；E2 `06-excel-diff-1440x900.png` |
+| `UI-DRAFT-007`、`UI-DRAFT-009` | 通过 | E1 发布状态测试；E2 发布错误与警告截图 |
+| `UI-DRAFT-008` | 通过 | E1 `tests/test_position_drafts.py`；E2 PostgreSQL 冲突检查 24 次 |
 
-## Findings
+安全结果：
 
-- No actionable P0, P1, or P2 visual differences remain.
-- [P3] The real product retains its administrator page title and top-level tabs, whereas the generated source collapses that context into a breadcrumb. This intentionally preserves established navigation and makes the implementation begin lower; the compacted base-data workspace still shows the complete first preview row above the fold.
+- 草稿建立后正式版本发生变化时，旧草稿不能覆盖新版本；
+- 发布事务再次校验草稿基线；
+- Excel 替换先展示增、改、删、错误和警告；
+- 多条警告时内容区域滚动，底部操作保持可达；
+- 验收未改变 QA 当前正式版本，临时草稿已清理。
 
-## Required Fidelity Surfaces
+### 4.4 超收规则、用户与审计
 
-- Fonts and typography: the existing `Inter, Microsoft YaHei, sans-serif` stack and established heading, label, helper-text, metric, and table hierarchy remain unchanged.
-- Spacing and layout rhythm: the five data types form one equal-width horizontal rail; the selected version, size, creator, time, and actions share one compact header; required fields and business impact share one disclosure band; the full-width tab workspace follows without a permanent side catalog.
-- Colors and visual tokens: the existing `#176b5b` green, neutral workspace gray, pale ready-state tint, warning amber, borders, and restrained radii are reused. No parallel theme was introduced.
-- Image quality and asset fidelity: the screen contains no raster content. Visible controls use the existing Ant Design icon library; no placeholder image, emoji, handwritten SVG, or CSS-drawn icon was introduced.
-- Copy and content: the five source-data purposes, required fields, version-lock impact, active/inactive states, filenames, creator metadata, and position-maintenance action retain their business meaning.
-- Accessibility: each data-type card has a stateful accessible name; tabs, preview/history tables, status region, drawer fields, and action buttons remain named. Chrome's accessibility tree reported `0` unnamed buttons, links, text boxes, comboboxes, checkboxes, or switches in the tested state.
-- Desktop behavior: the verified `1487 x 1058` viewport has no positive document horizontal overflow. Mobile behavior was not redesigned or claimed, per user direction.
+| 需求 | 结果 | 证据 |
+| --- | :---: | --- |
+| `UI-RULE-001`–`UI-RULE-006` | 通过 | E1 `frontend/src/pages/OverreceiptRulesPage.test.tsx` 与后端规则测试；E3 规则页面复核 |
+| `UI-ADMIN-001`–`UI-ADMIN-003` | 通过 | E1 `frontend/src/pages/AdminPage.test.tsx`；E2 `09-user-accounts-1440x900.png` |
+| `UI-AUDIT-001`、`UI-AUDIT-002` | 通过 | E1 `AdminPage.test.tsx`；E2 `10-audit-log-1440x900.png` |
+| `UI-AUDIT-003` | 通过 | E1 `tests/test_position_drafts.py`、`AdminPage.test.tsx`；E2 操作记录截图 |
 
-## Primary Interactions Tested
+“恢复/继续库位草稿”的审计事件已专项复核：
 
-- Selected all five data types and confirmed title, active card, preview-tab reset, open context band, and zero positive document overflow after every switch.
-- Collapsed and reopened the required-fields/business-impact disclosure.
-- Switched among data preview, version history, and quality check; the active QA position version exposed `38` version rows with `8` visible on the current page.
-- Opened and closed the first-version upload drawer for purchase data without choosing a file or submitting.
-- Entered the position web-maintenance route, verified the `库位草稿记录` table, and returned to base data. The only browser write was the expected QA draft initialization `POST /api/input-drafts/position`; no version was published.
-- Browser evidence: `0` failed responses, `0` console errors, and `0` unnamed interactive controls.
+- 重复进入现有草稿时写入 `resume_input_draft`；
+- 事件记录操作用户、草稿实体 ID 和正式基线版本；
+- 前端将事件显示为“继续库位草稿”，不暴露内部英文动作名；
+- 相关回归测试为 `test_resuming_existing_draft_records_the_admin_action` 和 `shows draft audit labels and resolves operator names`。
 
-## Comparison History
+行级自动保存不制造高频审计噪音；草稿创建、继续、Excel 导入、发布和放弃等业务节点保留可理解事件。
 
-### Pass 1
+### 4.5 可访问性与视口
 
-- P2: the rail retained an extra container and version-name row, making the five choices taller than the selected source.
-- P2: the expanded context duplicated a summary row above required fields and business impact.
-- P2: four position metric cards repeated information already present in the active-version header and pushed the preview table below the fold.
-- Fixes: flattened and shortened the data-type rail, hid redundant version names from cards, tightened the status header, combined open context content into one band, and moved position metrics into the preview summary.
-- Browser functionality passed before visual compaction; the first pass used QA assets `index-BV5TQoTl.js` and `index-Bl_vswW6.css`.
+| 需求 | 结果 | 证据 |
+| --- | :---: | --- |
+| `UI-A11Y-001`、`UI-A11Y-002` | 通过 | E1 页面测试按可读名称查询控件；E2 表单与筛选截图 |
+| `UI-A11Y-003`、`UI-A11Y-004` | 通过 | E2 可见焦点与文字状态复核 |
+| `UI-A11Y-005` | 部分覆盖 | 已复核主要弹窗/抽屉；未完成全站纯键盘遍历 |
+| `UI-VIEW-001`–`UI-VIEW-004` | 通过 | E2 1280×800、1440×900、1920×1080 截图与 0 px 页面溢出指标 |
 
-### Pass 2
+## 5. 自动化验证结果
 
-- The same-size comparison shows the intended information hierarchy and a complete first preview row above the fold.
-- Final isolated QA assets: `index-DAoqjyPZ.js` and `index-7i915fyY.css`.
-- Focused component tests: `14/14` passed. Full frontend suite: `64/64` passed. Frontend production build passed with only the existing chunk-size advisory.
+最后完整执行结果：
 
-Base data workspace result: passed
+| 检查 | 结果 |
+| --- | --- |
+| Frontend Vitest | 8 个测试文件，71/71 通过 |
+| Frontend production build | 通过 |
+| Python `unittest` | 131/131 通过 |
+| `pip check` | 通过 |
+| Docker Compose config | 通过 |
+| `git diff --check` | 通过 |
 
-# Top-right Account Controls Design QA
+前端测试文件：
 
-## Comparison Target
+```text
+frontend/src/App.test.tsx
+frontend/src/dateTime.test.ts
+frontend/src/pages/AdminPage.test.tsx
+frontend/src/pages/BatchDetail.test.tsx
+frontend/src/pages/BatchesPage.test.tsx
+frontend/src/pages/OverreceiptRulesPage.test.tsx
+frontend/src/pages/admin/InputDataPanel.test.tsx
+frontend/src/pages/admin/PositionMaintenance.test.tsx
+```
 
-- Selected visual source: `/root/.codex/generated_images/019f8893-842e-7d70-8b17-e99b0f6936e0/call_IyLFlkKPhRNwDTD2z4WpkArO.png`.
-- Source pixels: `1487 x 1058`.
-- Implementation screenshot: `/tmp/deliverynote-topbar-ui-qa-20260723/01-admin-workspace-account-controls-1487x1058.png`.
-- Focused and full-state comparison input: `/tmp/deliverynote-topbar-ui-qa-20260723/02-selected-vs-implementation.png`.
-- CSS viewport: `1487 x 1058`; device scale factor: `1`.
-- Density normalization: none. Source and implementation were compared at the same native pixel dimensions.
-- State: admin user in the isolated QA stack, viewing the administrator base-data workspace. The selected source contains active position data while QA contains its current real readiness state; the review scope is the unchanged header and the top-right account controls.
+后端业务、API 与 Worker 结果来自 `tests/` 完整测试集，不只运行单个定向用例。
 
-## Findings
+生产构建仍有单包超过 500 kB 的提示，不是构建失败；当前没有把拆包列为小规模内部使用的发布阻断项。
 
-- No actionable P0, P1, or P2 differences remain in the targeted top-right surface.
-- [P3] The real QA page has a browser scrollbar because its current base-data content exceeds the viewport; the generated source does not depict one. The account controls remain aligned to the content edge with the established `28px` header inset.
+## 6. 真实浏览器场景
 
-## Required Fidelity Surfaces
+### 6.1 批次流程
 
-- Structure: the previous flat `admin · 管理员` string is now a bounded identity surface with a separate outlined logout action. No dropdown, menu, profile page, or new permission behavior was introduced.
-- Typography: the username and role use two lines with restrained `14px`/`11px` hierarchy. The final username weight was reduced after comparison so it no longer appears heavier than the selected visual.
-- Spacing and geometry: the identity surface is `126 x 48px`, avatar `34 x 34px`, logout action `94 x 40px`, and the two surfaces use the selected separated-cluster rhythm.
-- Colors and visual tokens: the existing `#176b5b` primary green, white surfaces, neutral borders, `8px` radius, and product typography stack are reused.
-- Asset fidelity: the avatar is the real user initial and the logout action uses the existing Ant Design `LogoutOutlined` icon. No custom SVG, emoji, placeholder, or CSS-drawn icon was added.
-- Accessibility: the cluster is named `当前用户`; the logout button is named `退出登录`; Chrome confirmed a visible `3px solid` focus outline and reported `0` unnamed interactive controls in the tested page.
-- Desktop behavior: the verified page had no positive horizontal overflow. Mobile was not redesigned or claimed, per user direction.
+已执行：
 
-## Primary Interactions Tested
+- 打开批次列表并进入批次详情；
+- 点击当前主操作定位待处理区域；
+- 使用原因、规模定位和备货定位筛选；
+- 打开并关闭拆分抽屉而不保存；
+- 下载合并 Excel 和分文件 ZIP；
+- 刷新保持当前 `/batches/{id}`；
+- 浏览器返回回到批次列表；
+- 检查失败请求与控制台错误。
 
-- Loaded the QA workspace as the real admin account and navigated to administrator maintenance.
-- Verified avatar `A`, username `admin`, role `管理员`, visible label `退出`, and accessible name `退出登录`.
-- Moved focus to logout and confirmed the existing visible focus treatment.
-- Activated logout in Chrome, confirmed `POST /api/auth/logout`, verified both stored token and user were cleared, and observed the login form.
-- Re-authenticated and left the verified administrator preview open.
-- Browser evidence: `0` failed responses, `0` console errors, and `0` unnamed interactive controls.
+### 6.2 管理员维护
 
-## Comparison History
+已执行：
 
-### Pass 1
+- 查看五类基础资料及其状态；
+- 创建或恢复服务器草稿；
+- 新增、编辑和筛选库位记录；
+- 预览 Excel 整表替换差异；
+- 验证错误阻断发布；
+- 验证警告显式确认；
+- 验证正式版本变化时的草稿冲突保护；
+- 查看用户账号；
+- 查看草稿和版本相关审计事件；
+- 放弃 QA 草稿并确认正式版本不变。
 
-- P2: the inherited header line height placed the avatar initial against the bottom of its square instead of centering it.
-- P2: the logout action was visibly tighter than the selected visual and made the two-part account cluster feel unbalanced.
-- Fixes: set an explicit avatar line height, widened the logout surface, and tuned the separation between identity and action.
+### 6.3 时间与账号
 
-### Pass 2
+已执行：
 
-- P2: the username remained heavier than the selected visual in the same-image focused comparison.
-- Fix: reduced username weight while preserving clear hierarchy over the role label.
-- Final isolated QA assets: `index-CvZ_LMth.js` and `index-BiMsXO3P.css`.
-- Account regression tests: `5/5` passed. Full frontend suite: `65/65` passed. Production build and Docker Compose configuration checks passed; the build retains only the existing chunk-size advisory.
+- 在浏览器时区 `America/Los_Angeles` 下查看业务时间；
+- 确认 API 显式 UTC 时间在页面按 `Asia/Shanghai` 显示；
+- 查看头像首字母、用户名和中文角色；
+- 触发退出并确认服务端登出、本地会话清理和登录页返回。
 
-final result: passed
+## 7. 验收期间关闭的问题
+
+| 问题 | 风险 | 修复 | 复核 |
+| --- | --- | --- | --- |
+| 发布库位版本时，多条警告会把 1440×900 弹窗底部操作推离视口 | 操作人员无法完成或取消发布 | 限制内容区高度并滚动，保留标题和底部操作 | E2 `07`、`08` 截图 |
+| 草稿建立后正式版本变化，旧草稿可能覆盖较新版本 | 数据版本被意外回退 | 维护期间阻止替换，发布事务复核基线并提供放弃出口 | E1 后端测试；E2 PostgreSQL 冲突检查 |
+| 批次详情刷新回到列表 | 工作上下文丢失 | 使用独立批次 URL 并从路由恢复详情 | E1 `App.test.tsx`；E3 浏览器刷新 |
+| 导出区重复且结果形态不清楚 | 下载入口冗余、用户难以选择 | 合并为结果操作区，区分合并 Excel、分文件 ZIP 和来源结果 | E1 `BatchDetail.test.tsx`；E3 下载复核 |
+| 浏览器时区改变页面业务时间 | 不同电脑看到不同业务日期 | API 明确 UTC，前端固定转换北京时间 | E1 `dateTime.test.ts`；E3 非北京时间浏览器 |
+
+## 8. 残余风险
+
+| 风险 | 当前判断 | 后续触发条件 |
+| --- | --- | --- |
+| 未完成完整 WCAG 审计 | 当前内部 PC 使用可接受，但不宣称合规 | 出现正式无障碍要求 |
+| 批次流程缺少仓库内持久截图 | 自动化和生产浏览器已覆盖，视觉历史证据较弱 | 下一次批次 UI 大改时补充脱敏截图 |
+| 前端单包约 1.2 MB | 当前人数和网络环境未显示功能影响 | 实测首屏性能影响操作 |
+| 无手机端 | 明确不在当前范围 | 业务提出移动使用场景 |
+| 操作记录仅最近 200 条 | 满足当前页面口径 | 需要完整审计检索 |
+| 无自动化 CI | 依赖发布前人工执行矩阵 | 协作人数或发布频率上升 |
+
+## 9. 后续变更的最低复核
+
+1. 在变更说明中列出受影响的 `UI-*` 需求编号；
+2. 运行前端完整测试和生产构建；
+3. 在 1280×800 与 1440×900 检查受影响页面；
+4. 检查页面横向溢出、表格操作列、弹窗和抽屉底部操作；
+5. 检查按钮、筛选器、表格和图标操作的可读名称；
+6. 复核登录失效、刷新、返回和下载；
+7. 涉及时间时使用非北京时间浏览器时区；
+8. 涉及接口、数量、拆分、超收或导出时运行 Python 完整测试；
+9. 只记录实际完成的验证，不把未执行项目写成通过。
