@@ -288,6 +288,16 @@ def list_draft_rows(session: Session, draft_id: int) -> list[PositionDraftRow]:
     )
 
 
+def load_draft_frames(
+    session: Session,
+    draft: InputDraft,
+) -> tuple[list[PositionDraftRow], pd.DataFrame, pd.DataFrame]:
+    """一次加载草稿行、基础版本和当前数据。"""
+
+    rows = list_draft_rows(session, draft.id)
+    return rows, _base_frame(session, draft), _frame_from_rows(rows)
+
+
 def _base_values_for_row(
     session: Session,
     draft: InputDraft,
@@ -359,6 +369,28 @@ def mutate_draft_row(
     touch_draft(draft, user_id)
     _flush_revision(session)
     return row
+
+
+def delete_draft_rows(
+    session: Session,
+    draft: InputDraft,
+    expected_revision: int,
+    user_id: int,
+    rows: list[PositionDraftRow],
+) -> None:
+    """在一次草稿修订中删除多条记录。"""
+
+    require_revision(draft, expected_revision)
+    if any(row.draft_id != draft.id for row in rows):
+        raise ValueError("草稿行不存在")
+    for row in rows:
+        if row.base_row_number is None:
+            session.delete(row)
+        else:
+            row.deleted = True
+            row.change_type = "deleted"
+    touch_draft(draft, user_id)
+    _flush_revision(session)
 
 
 def replace_draft_from_frame(

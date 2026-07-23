@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from openpyxl import Workbook
+from sqlalchemy import event
 
 from delivery_note.pipeline import IMPORT_COLUMNS
 from tests.asgi_client import SyncASGIClient
@@ -14,13 +15,19 @@ from tests.asgi_client import SyncASGIClient
 try:
     import delivery_note.web.api as web_api_module
     from delivery_note.web.api import create_app
-    from delivery_note.web.models import Batch, BatchFile, ExceptionRecord
+    from delivery_note.web.models import (
+        Batch,
+        BatchFile,
+        ExceptionRecord,
+        SplitRecord,
+    )
 except ImportError:
     web_api_module = None
     create_app = None
     Batch = None
     BatchFile = None
     ExceptionRecord = None
+    SplitRecord = None
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
@@ -121,6 +128,25 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 201, response.text)
             version_ids[kind] = response.json()["id"]
         return version_ids
+
+    def get_with_query_count(
+        self,
+        path: str,
+        headers: dict[str, str],
+    ):
+        statement_count = 0
+
+        def count_statement(*_args):
+            nonlocal statement_count
+            statement_count += 1
+
+        engine = self.app.state.database.engine
+        event.listen(engine, "before_cursor_execute", count_statement)
+        try:
+            response = self.client.get(path, headers=headers)
+        finally:
+            event.remove(engine, "before_cursor_execute", count_statement)
+        return response, statement_count
 
     def test_login_and_admin_role_are_enforced(self):
         bad_login = self.client.post(
@@ -495,6 +521,82 @@ class WebApiTests(unittest.TestCase):
         ).json()
         self.assertEqual(refreshed["jobs"]["compute"]["id"], job.json()["id"])
         self.assertEqual(refreshed["jobs"]["compute"]["status"], "queued")
+
+    def test_batch_reads_bulk_load_exception_splits(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "批量读取测试"},
+        ).json()["id"]
+
+        with self.app.state.database.session() as session:
+            batch = session.get(Batch, batch_id)
+            batch.status = "succeeded"
+            source = BatchFile(
+                batch_id=batch_id,
+                original_name="批量读取测试.xlsx",
+                storage_path="unused.xlsx",
+                file_order=1,
+                supplier_name="KuangBiao",
+                supplier_code="GYS-023",
+                delivery_total=10,
+                import_total=0,
+                manual_total=10,
+                import_rows=[],
+            )
+            session.add(source)
+            session.flush()
+            for index in range(10):
+                exception = ExceptionRecord(
+                    batch_file_id=source.id,
+                    sku="SKU-A",
+                    original_site="US",
+                    full_site="AMAZON:SEEKWAY:US",
+                    destination="水鞋-广州仓",
+                    delivery_quantity=1,
+                    allocated_quantity=0,
+                    manual_quantity=1,
+                    reason=f"批量读取测试 {index}",
+                    status="resolved",
+                )
+                session.add(exception)
+                session.flush()
+                session.add(
+                    SplitRecord(
+                        exception_id=exception.id,
+                        quantity=1,
+                        destination="水鞋-广州仓",
+                        site="AMAZON:SEEKWAY:US",
+                        supplier_code="GYS-023",
+                        sku="SKU-A",
+                        resolved=True,
+                    )
+                )
+            session.commit()
+
+        detail, detail_queries = self.get_with_query_count(
+            f"/api/batches/{batch_id}",
+            admin_headers,
+        )
+        listed, list_queries = self.get_with_query_count(
+            "/api/batches",
+            admin_headers,
+        )
+        exceptions, exception_queries = self.get_with_query_count(
+            f"/api/batches/{batch_id}/exceptions",
+            admin_headers,
+        )
+
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(listed.status_code, 200, listed.text)
+        self.assertEqual(exceptions.status_code, 200, exceptions.text)
+        self.assertEqual(detail.json()["summary"]["import_total"], 10)
+        self.assertEqual(len(exceptions.json()), 10)
+        self.assertLessEqual(detail_queries, 15)
+        self.assertLessEqual(list_queries, 8)
+        self.assertLessEqual(exception_queries, 8)
 
     def test_concurrent_batch_uploads_get_distinct_contiguous_orders(self):
         admin_headers = self.login("admin", "admin-pass")

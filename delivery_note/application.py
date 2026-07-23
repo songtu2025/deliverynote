@@ -139,33 +139,59 @@ def project_split(
     )
 
 
+def _purchase_row_indexes(
+    purchases: pd.DataFrame,
+) -> dict[tuple[object, object, object, object], list[object]]:
+    """按采购匹配键预建稳定的原始行索引。"""
+
+    purchases.loc[:, "未交量"] = pd.to_numeric(
+        purchases["未交量"],
+        errors="coerce",
+    ).fillna(0)
+    status_column = "状态" if "状态" in purchases.columns else "单据状态"
+    active_rows = purchases.loc[
+        purchases[status_column].isin(PURCHASE_STATUSES),
+        ["供应商", "SKU", "平台站点", "目的仓"],
+    ]
+    grouped: dict[
+        tuple[object, object, object, object],
+        list[object],
+    ] = {}
+    for index, supplier, sku, site, destination in active_rows.itertuples(
+        index=True,
+        name=None,
+    ):
+        key = (supplier, sku, site, destination)
+        grouped.setdefault(key, []).append(index)
+    return grouped
+
+
 def _consume_purchase_rows(
     purchases: pd.DataFrame,
     imports: pd.DataFrame,
     supplier_name: str,
+    purchase_indexes: dict[
+        tuple[object, object, object, object],
+        list[object],
+    ],
 ) -> None:
-    """Apply allocations to the shared purchase snapshot in stable row order."""
+    """按稳定行序扣减批次共享的采购余额。"""
 
     if imports.empty:
         return
-    numeric = pd.to_numeric(purchases["未交量"], errors="coerce").fillna(0)
-    purchases.loc[:, "未交量"] = numeric
 
     for _, imported in imports.iterrows():
         if str(imported["交货备注"]).startswith(OVERRECEIPT_NOTE_PREFIX):
             continue
         remaining = int(imported["*本次交货量"])
-        mask = (
-            purchases["状态"].isin(PURCHASE_STATUSES)
-            if "状态" in purchases.columns
-            else purchases["单据状态"].isin(PURCHASE_STATUSES)
+        key = (
+            supplier_name,
+            imported["*SKU"],
+            imported["*站点"],
+            imported["*目的仓"],
         )
-        mask &= purchases["供应商"].eq(supplier_name)
-        mask &= purchases["SKU"].eq(imported["*SKU"])
-        mask &= purchases["平台站点"].eq(imported["*站点"])
-        mask &= purchases["目的仓"].eq(imported["*目的仓"])
 
-        for index in purchases.index[mask]:
+        for index in purchase_indexes.get(key, []):
             available = max(0, int(purchases.at[index, "未交量"]))
             consumed = min(available, remaining)
             purchases.at[index, "未交量"] = available - consumed
@@ -183,9 +209,10 @@ def process_delivery_batch(
     position_data: pd.DataFrame | None = None,
     overreceipt_policy: OverreceiptPolicy | None = None,
 ) -> DeliveryBatchResult:
-    """Process every source against one shared, in-memory purchase snapshot."""
+    """让同批次文件共享一份内存采购余额快照。"""
 
     shared_purchases = purchase_data.copy(deep=True)
+    purchase_indexes = None
     overreceipt_allowances = None
     if overreceipt_policy is not None:
         if position_data is None:
@@ -216,7 +243,14 @@ def process_delivery_batch(
             delivery.supplier_code,
             overreceipt_allowances=overreceipt_allowances,
         )
-        _consume_purchase_rows(shared_purchases, result.import_rows, delivery.supplier_name)
+        if purchase_indexes is None:
+            purchase_indexes = _purchase_row_indexes(shared_purchases)
+        _consume_purchase_rows(
+            shared_purchases,
+            result.import_rows,
+            delivery.supplier_name,
+            purchase_indexes,
+        )
         if document_note:
             import_rows = result.import_rows.copy()
             import_rows["单据备注"] = document_note

@@ -181,7 +181,9 @@ describe("App", () => {
       paddingRight: listStyle.paddingRight
     };
 
-    fireEvent.click(screen.getByRole("button", { name: "路由测试批次" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "路由测试批次" })
+    );
     await screen.findByRole("heading", { name: "路由测试批次" });
     const account = screen.getByRole("group", { name: "当前用户" });
     const header = account.closest(".app-header") as HTMLElement;

@@ -427,6 +427,13 @@ def process_data(
     products = products[
         ["SKU", "原始站点", "完整站点", "锁仓MKSU"]
     ].drop_duplicates()
+    product_groups = {
+        key: group
+        for key, group in products.groupby(
+            ["SKU", "原始站点"],
+            sort=False,
+        )
+    }
 
     purchases = purchase_rows[
         purchase_rows["单据状态"].isin(PURCHASE_STATUSES)
@@ -441,16 +448,28 @@ def process_data(
         .sum()
         .reset_index(drop=True)
     )
+    need_indexes = {}
+    for key, group in needs.groupby(["SKU", "平台站点"], sort=False):
+        indexes = group.index.tolist()
+        indexes.sort(
+            key=lambda index: warehouse_sort_key(
+                str(needs.at[index, "目的仓"])
+            )
+        )
+        need_indexes[key] = indexes
 
     import_rows: list[dict] = []
     exceptions: list[dict] = []
 
     for _, delivery_row in delivery.iterrows():
-        product_matches = products[
-            products["SKU"].eq(delivery_row["SKU"])
-            & products["原始站点"].eq(delivery_row["原始站点"])
-        ]
-        full_sites = product_matches["完整站点"].drop_duplicates().tolist()
+        product_matches = product_groups.get(
+            (delivery_row["SKU"], delivery_row["原始站点"])
+        )
+        full_sites = (
+            product_matches["完整站点"].drop_duplicates().tolist()
+            if product_matches is not None
+            else []
+        )
         if len(full_sites) > 1:
             locked_sites = product_matches.loc[
                 product_matches["锁仓MKSU"].astype(str).str.strip().eq("锁"),
@@ -484,12 +503,9 @@ def process_data(
             continue
 
         full_site = full_sites[0]
-        candidate_indexes = needs.index[
-            needs["SKU"].eq(delivery_row["SKU"])
-            & needs["平台站点"].eq(full_site)
-        ].tolist()
-        candidate_indexes.sort(
-            key=lambda index: warehouse_sort_key(str(needs.at[index, "目的仓"]))
+        candidate_indexes = need_indexes.get(
+            (delivery_row["SKU"], full_site),
+            [],
         )
 
         remaining = delivery_quantity

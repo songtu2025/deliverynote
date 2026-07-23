@@ -467,6 +467,11 @@ describe("PositionMaintenance", () => {
     await screen.findByText("SKU-A");
 
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "old" } });
+    await waitFor(() => {
+      expect(requests("GET", "/api/input-drafts/7/rows?").some(([input]) =>
+        new URL(String(input), "http://test").searchParams.get("search") === "old"
+      )).toBe(true);
+    });
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "new" } });
     expect(await screen.findByText("LATEST-SKU")).toBeInTheDocument();
     slow.resolve(jsonResponse({ rows: [{ ...baseRow, id: 201, jiaji_sku: "STALE-SKU" }], total: 1, offset: 0, limit: 20 }));
@@ -489,6 +494,25 @@ describe("PositionMaintenance", () => {
         && url.includes("only_modified=true")
         && url.includes("offset=20")
       )).toBe(true);
+    });
+  });
+
+  it("debounces rapid text filters before requesting rows", async () => {
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+
+    const search = screen.getByLabelText("搜索草稿");
+    fireEvent.change(search, { target: { value: "s" } });
+    fireEvent.change(search, { target: { value: "sk" } });
+    fireEvent.change(search, { target: { value: "sku" } });
+
+    await waitFor(() => {
+      const values = requests("GET", "/api/input-drafts/7/rows?")
+        .map(([input]) =>
+          new URL(String(input), "http://test").searchParams.get("search")
+        )
+        .filter(Boolean);
+      expect(values).toEqual(["sku"]);
     });
   });
 
