@@ -7,7 +7,7 @@
 | 最后核对 | 2026-07-23（Asia/Shanghai） |
 | 生产仓库 | `https://github.com/songtu2025/deliverynote.git` |
 | 默认分支 | `master` |
-| 功能基线 | `master@71d51d8`，Git tree `85bc74b6915def6a0711d5a1e2bcce1a90746d9e` |
+| 功能基线 | `master@75bd085`，Git tree `5ac215401475bfe32d30197b24472ca64e0fadc1` |
 
 本文记录会随部署变化的运行状态和安全操作步骤。稳定的产品范围、业务契约、权限和文件格式以 [README](README.md) 为准。
 
@@ -63,14 +63,14 @@ deliverynote_postgres_data
 | 项目 | 已核对值 |
 | --- | --- |
 | 正式地址 | `https://deliverynote.seekwaygroup.com/` |
-| 最近部署时间 | 2026-07-23 12:46（Asia/Shanghai） |
-| 部署源码树 | 与 `master@71d51d8` 完全一致 |
-| 功能分支最终提交 | `feature/admin-maintenance@072b316` |
-| 前端 JavaScript | `index-DzkyLbfg.js` |
-| 前端 CSS | `index-BJrakn5L.css` |
+| 最近部署时间 | 2026-07-23 16:43（Asia/Shanghai） |
+| 部署源码树 | 与 `master@75bd085` 完全一致 |
+| 最新发布分支提交 | `fix/topbar-account-consistency@ee1d626` |
+| 前端 JavaScript | `index-pW2kxPpw.js` |
+| 前端 CSS | `index-CbzC7nbw.css` |
 | Web 回环端口 | `127.0.0.1:18080` |
 
-PR #1 通过 Squash merge 合入 `master`。`71d51d8` 与功能分支最终提交 `072b316` 的 Git tree 相同；合并没有触发重复部署，因为生产已运行同一源码树。
+PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏。PR #3 的 Squash 提交 `75bd085` 与已验证分支提交 `ee1d626` 的 Git tree 完全一致。
 
 ### 3.2 服务状态
 
@@ -85,17 +85,18 @@ PR #1 通过 Squash merge 合入 `master`。`71d51d8` 与功能分支最终提�
 
 ### 3.3 验证基线
 
-2026-07-23 功能合并前完整执行：
+2026-07-23 当前验证记录：
 
 | 检查 | 结果 |
 | --- | --- |
-| Python `unittest` | 131/131 通过 |
-| Frontend Vitest | 8 个测试文件，71/71 通过 |
+| Python `unittest` | 功能基线 131/131 通过；本次纯前端修复未重跑 |
+| Frontend Vitest | 8 个测试文件，72/72 通过 |
 | `pip check` | 通过 |
 | Frontend production build | 通过 |
 | Docker Compose config | 通过 |
 | `git diff --check` | 通过 |
 | 正式 HTTPS `/health` | 通过 |
+| 正式 Chrome 顶栏对比 | 批次列表与批次详情计算样式一致，失败响应和控制台错误均为 0 |
 
 前端构建存在约 1.2 MB 单包提示，不是构建失败。当前少量 PC 用户场景未因此出现已知功能问题。
 
