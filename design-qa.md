@@ -4,8 +4,8 @@
 | --- | --- |
 | 报告状态 | 已完成的范围验收记录 |
 | 验收对象 | DeliveryNote PC Web |
-| 功能源码基线 | Git tree `5ac215401475bfe32d30197b24472ca64e0fadc1` |
-| 生产前端资源 | `index-pW2kxPpw.js` / `index-CbzC7nbw.css` |
+| 功能源码基线 | Git tree `1f8f79d2fe8f3a7f95c77b0309e2bc8adbece9f8` |
+| 生产前端资源 | `index-23iQ8O9q.js` / `index-BRp-kQxB.css` |
 | 最后完整复核 | 2026-07-23（Asia/Shanghai） |
 | 需求基线 | [DeliveryNote PC 界面规范](UI_UX_OPTIMIZATION_PLAN.md) |
 
@@ -36,7 +36,7 @@
 - 登录、退出、权限入口和右上角账号区；
 - 批次列表、新建批次与独立批次路由；
 - 多文件来源顺序、计算状态、数量摘要和待处理筛选；
-- 待处理拆分抽屉；
+- 待处理拆分抽屉、原因指导和歧义站点候选单选；
 - 单来源、合并 Excel 和分文件 ZIP 下载入口；
 - 超收规则当前状态、发布与历史版本；
 - 五类基础资料目录；
@@ -130,7 +130,7 @@ design/admin-maintenance-qa/
 | `UI-BATCH-001`–`UI-BATCH-005` | 通过 | E1 `frontend/src/pages/BatchDetail.test.tsx`、`App.test.tsx`；E3 批次详情、刷新与返回 |
 | `UI-BATCH-006`–`UI-BATCH-010` | 通过 | E1 `BatchDetail.test.tsx` 与后端批次/Worker 测试；E3 页面状态复核 |
 | `UI-BATCH-011`、`UI-BATCH-012` | 通过 | E1 待处理主操作、搜索及六类筛选测试；E3 原因筛选复核 |
-| `UI-BATCH-013`、`UI-BATCH-014` | 通过 | E1 拆分抽屉与请求状态测试；后端拆分守恒测试 |
+| `UI-BATCH-013`、`UI-BATCH-014` | 通过 | E1 拆分抽屉、原因指导、候选站点单选与请求状态测试；后端拆分守恒和精确分配明细测试 |
 | `UI-EXPORT-001`–`UI-EXPORT-005` | 通过 | E1 `BatchDetail.test.tsx`、`tests/test_worker.py`；E3 合并 Excel 与分文件 ZIP 下载 |
 
 补充验证：
@@ -140,6 +140,11 @@ design/admin-maintenance-qa/
 - 合并工作簿包含按来源顺序形成的导入和待处理数据；
 - ZIP 只保留逐来源工作簿，不混入合并文件；
 - 来源下载、批次合并下载和 ZIP 的文案可区分。
+- “未找到可交货采购需求”提示核对批次锁定采购版本中的供应商、SKU、站点和目的仓；
+- “超出采购未交量”展示已分配量、超出量及本批次超收规则命中状态；
+- “产品信息站点不唯一”使用候选站点单选，不再要求手工复制完整站点；
+- “超出允许超收量”展示本条正常采购分配、本条超收分配和处理后剩余额度；
+- 历史批次缺少精确分配明细时显示明确空态，不使用规则上限倒推。
 
 ### 4.3 基础资料与库位草稿
 
@@ -193,7 +198,7 @@ design/admin-maintenance-qa/
 
 | 检查 | 结果 |
 | --- | --- |
-| Frontend Vitest | 8 个测试文件，72/72 通过 |
+| Frontend Vitest | 8 个测试文件，73/73 通过 |
 | Frontend production build | 通过 |
 | Python `unittest` | 131/131 通过 |
 | `pip check` | 通过 |
@@ -227,6 +232,8 @@ frontend/src/pages/admin/PositionMaintenance.test.tsx
 - 点击当前主操作定位待处理区域；
 - 使用原因、规模定位和备货定位筛选；
 - 打开并关闭拆分抽屉而不保存；
+- 在隔离 QA 中逐一打开四类原因指导，选择候选站点并核对超收分配明细；
+- 在正式环境读取现有旧批次并打开采购匹配指导，不保存拆分；
 - 下载合并 Excel 和分文件 ZIP；
 - 刷新保持当前 `/batches/{id}`；
 - 浏览器返回回到批次列表；
@@ -267,6 +274,7 @@ frontend/src/pages/admin/PositionMaintenance.test.tsx
 | 导出区重复且结果形态不清楚 | 下载入口冗余、用户难以选择 | 合并为结果操作区，区分合并 Excel、分文件 ZIP 和来源结果 | E1 `BatchDetail.test.tsx`；E3 下载复核 |
 | 浏览器时区改变页面业务时间 | 不同电脑看到不同业务日期 | API 明确 UTC，前端固定转换北京时间 | E1 `dateTime.test.ts`；E3 非北京时间浏览器 |
 | 批次详情账号顶栏与其他页面视觉不一致 | 登录状态在不同页面缺少统一感 | 移除批次专属顶栏覆盖，继续复用统一账号组件 | E1 `App.test.tsx` 计算样式对比；E3 正式 Chrome 1440×900 复核 |
+| 待处理原因只显示结果，缺少下一步核对依据 | 操作人员需要反复查找资料或手工复制候选站点 | 增加四类原因指导、数量/额度明细和候选站点单选 | E1 `BatchDetail.test.tsx` 与后端分配/迁移测试；E2 四类 QA 浏览器验收；E3 正式旧批次复核 |
 
 ## 8. 残余风险
 
