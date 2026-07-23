@@ -7,7 +7,7 @@
 | 最后核对 | 2026-07-23（Asia/Shanghai） |
 | 生产仓库 | `https://github.com/songtu2025/deliverynote.git` |
 | 默认分支 | `master` |
-| 功能基线 | `master@f322736`，Git tree `1f8f79d2fe8f3a7f95c77b0309e2bc8adbece9f8` |
+| 功能基线 | `master@a14eea8`，Git tree `a580a3588b25b143e16b908f25c4fb7ae2d21013` |
 
 本文记录会随部署变化的运行状态和安全操作步骤。稳定的产品范围、业务契约、权限和文件格式以 [README](README.md) 为准。
 
@@ -63,14 +63,14 @@ deliverynote_postgres_data
 | 项目 | 已核对值 |
 | --- | --- |
 | 正式地址 | `https://deliverynote.seekwaygroup.com/` |
-| 最近部署时间 | 2026-07-23 17:20（Asia/Shanghai） |
-| 部署源码树 | 与 `master@f322736` 完全一致 |
-| 最新发布分支提交 | `feature/review-reason-guidance@24dd029` |
-| 前端 JavaScript | `index-23iQ8O9q.js` |
-| 前端 CSS | `index-BRp-kQxB.css` |
+| 最近部署时间 | 2026-07-23 23:04（Asia/Shanghai） |
+| 部署源码树 | 与 `master@a14eea8` 完全一致 |
+| 最新发布分支提交 | `fix/code-review-followups@c46136e` |
+| 前端 JavaScript | `index-BmuUso4L.js` |
+| 前端 CSS | `index-CrS6zE_W.css` |
 | Web 回环端口 | `127.0.0.1:18080` |
 
-PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏，PR #6 增加待处理原因指导、歧义站点单选和精确超收分配明细。PR #6 的 Squash 提交 `f322736` 与已验证分支提交 `24dd029` 的 Git tree 完全一致。
+PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏，PR #6 增加待处理原因指导、歧义站点单选和精确超收分配明细。PR #13 修复超收规则发布失败时的未处理 Promise，将锁定版本改为默认展开，并为前端慢速删除用例设置明确超时。PR #13 的 Merge 提交 `a14eea8` 与已验证分支提交 `c46136e` 的 Git tree 完全一致。
 
 ### 3.2 服务状态
 
@@ -79,6 +79,7 @@ PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次�
 - `db`、`api`、`worker`、`web` 共 4 个容器运行；
 - PostgreSQL 和 API 健康检查通过；
 - 正式 HTTPS `/health` 返回成功；
+- 本次仅重新构建并替换无状态 `web` 容器，`api`、`worker`、`db` 未替换；
 - 生产数据卷仍为 `deliverynote_postgres_data` 与 `deliverynote_delivery_data`。
 
 这些结果是带日期的快照，不替代变更前的现场检查。
@@ -90,7 +91,7 @@ PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次�
 | 检查 | 结果 |
 | --- | --- |
 | Python `unittest` | 131/131 通过 |
-| Frontend Vitest | 8 个测试文件，73/73 通过 |
+| Frontend Vitest | 8 个测试文件，77/77 通过 |
 | `pip check` | 通过 |
 | Frontend production build | 通过 |
 | Docker Compose config | 通过 |
@@ -99,6 +100,8 @@ PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次�
 | 正式 Chrome 顶栏对比 | 批次列表与批次详情计算样式一致，失败响应和控制台错误均为 0 |
 | 审校原因指导 QA | 四类原因、候选站点单选和超收分配明细通过；页面及抽屉横向溢出均为 0 |
 | 正式 Chrome 审校复核 | 真实旧批次正常加载并显示采购核对提示；失败响应、控制台错误和浏览器业务写入均为 0 |
+| PR #13 部署后认证只读验收 | 批次 14 锁定版本默认展开、收起与重开正常；超收规则确认框可打开并取消；失败响应、控制台错误和浏览器业务写入均为 0 |
+| PR #13 部署后日志 | Web/API 无新增 5xx、异常栈或运行时错误；重试脚本仅产生 1 次已失效会话注销 401 |
 
 前端构建存在约 1.2 MB 单包提示，不是构建失败。当前少量 PC 用户场景未因此出现已知功能问题。
 
