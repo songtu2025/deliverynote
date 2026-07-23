@@ -70,6 +70,7 @@ type PendingLeave = "close" | "back" | null;
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
 const ROW_PAGE_SIZE = 20;
+const FILTER_DEBOUNCE_MS = 300;
 const SCALE_OPTIONS = ["短尾", "中尾", "长尾"].map((value) => ({ value }));
 const REVISION_CONFLICT_DETAILS = [
   "草稿已被其他管理员更新，请刷新后重试",
@@ -78,6 +79,19 @@ const REVISION_CONFLICT_DETAILS = [
 const POSITION_TABLE_COMPONENTS: NonNullable<TableProps<PositionDraftRow>["components"]> = {
   table: (props) => <table {...props} aria-label="库位草稿记录" />
 };
+
+function useDebouncedValue(value: string): string {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedValue(value);
+    }, FILTER_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
+  return debouncedValue;
+}
 
 function defaultVersionName(): string {
   const parts = beijingDateTimeParts();
@@ -357,6 +371,9 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [search, setSearch] = useState("");
   const [site, setSite] = useState("");
   const [scale, setScale] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
+  const debouncedSite = useDebouncedValue(site);
+  const debouncedScale = useDebouncedValue(scale);
   const [issueFilter, setIssueFilter] = useState<"all" | "errors">("all");
   const [onlyModified, setOnlyModified] = useState(false);
   const [page, setPage] = useState(1);
@@ -487,9 +504,9 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       offset: String((page - 1) * pageSize),
       limit: String(pageSize)
     });
-    if (search.trim()) params.set("search", search.trim());
-    if (site.trim()) params.set("site", site.trim());
-    if (scale.trim()) params.set("scale_position", scale.trim());
+    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+    if (debouncedSite.trim()) params.set("site", debouncedSite.trim());
+    if (debouncedScale.trim()) params.set("scale_position", debouncedScale.trim());
     if (issueFilter === "errors") params.set("only_errors", "true");
     if (onlyModified) params.set("only_modified", "true");
     setRowsLoading(true);
@@ -511,7 +528,17 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         if (request === rowsRequestRef.current) setRowsLoading(false);
       });
     return undefined;
-  }, [draft?.id, issueFilter, onlyModified, page, pageSize, refreshRowsKey, scale, search, site]);
+  }, [
+    debouncedScale,
+    debouncedSearch,
+    debouncedSite,
+    draft?.id,
+    issueFilter,
+    onlyModified,
+    page,
+    pageSize,
+    refreshRowsKey
+  ]);
 
   const acceptRevision = (revision: number) => {
     revisionRef.current = revision;

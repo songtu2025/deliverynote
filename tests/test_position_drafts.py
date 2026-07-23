@@ -13,6 +13,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import delivery_note.web.position_drafts as position_drafts_module
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
 from delivery_note.pipeline import POSITION_SOURCE_COLUMNS
@@ -1404,6 +1405,21 @@ class PositionDraftApiTests(unittest.TestCase):
             {"added": 0, "modified": 0, "deleted": 0, "unchanged": 1},
         )
 
+    def test_draft_summary_reads_the_base_workbook_once(self):
+        self.create_draft()
+        with patch.object(
+            position_drafts_module,
+            "read_position_workbook",
+            wraps=position_drafts_module.read_position_workbook,
+        ) as read_workbook:
+            response = self.client.get(
+                "/api/input-drafts/position",
+                headers=self.admin_headers,
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(read_workbook.call_count, 1)
+
     def test_resuming_existing_draft_records_the_admin_action(self):
         created = self.create_draft()
 
@@ -1760,6 +1776,16 @@ class PositionDraftApiTests(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 201, invalid.text)
         invalid_id = invalid.json()["row"]["id"]
+        valid = self.client.post(
+            f"/api/input-drafts/{draft['id']}/rows",
+            headers=self.admin_headers,
+            json={
+                "revision": invalid.json()["revision"],
+                **self.valid_row,
+            },
+        )
+        self.assertEqual(valid.status_code, 201, valid.text)
+        valid_id = valid.json()["row"]["id"]
         errors = self.list_rows(draft["id"], only_errors="true")
         self.assertEqual(errors["total"], 1)
         self.assertEqual(errors["rows"][0]["id"], invalid_id)
@@ -1769,23 +1795,31 @@ class PositionDraftApiTests(unittest.TestCase):
             f"/api/input-drafts/{draft['id']}/rows/bulk-delete",
             headers=self.admin_headers,
             json={
-                "revision": invalid.json()["revision"],
-                "row_ids": [invalid_id, 999],
+                "revision": valid.json()["revision"],
+                "row_ids": [invalid_id, valid_id, 999],
             },
         )
         self.assertEqual(failed.status_code, 404, failed.text)
         self.assertEqual(self.list_rows(draft["id"], only_errors="true")["total"], 1)
+        self.assertEqual(self.list_rows(draft["id"])["total"], 3)
 
         deleted = self.client.post(
             f"/api/input-drafts/{draft['id']}/rows/bulk-delete",
             headers=self.admin_headers,
             json={
-                "revision": invalid.json()["revision"],
-                "row_ids": [invalid_id],
+                "revision": valid.json()["revision"],
+                "row_ids": [invalid_id, valid_id],
             },
         )
         self.assertEqual(deleted.status_code, 200, deleted.text)
-        self.assertEqual(deleted.json()["deleted_ids"], [invalid_id])
+        self.assertEqual(
+            deleted.json()["deleted_ids"],
+            [invalid_id, valid_id],
+        )
+        self.assertEqual(
+            deleted.json()["revision"],
+            valid.json()["revision"] + 1,
+        )
         self.assertEqual(self.list_rows(draft["id"], only_errors="true")["total"], 0)
 
     def test_stale_revision_returns_409_without_partial_changes(self):

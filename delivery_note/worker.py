@@ -375,20 +375,42 @@ def _load_export_inputs(database: Database, batch_id: int):
             .where(BatchFile.batch_id == batch.id)
             .order_by(BatchFile.file_order)
         ).all()
+        source_ids = [source.id for source in sources]
+        exceptions = (
+            session.scalars(
+                select(ExceptionRecord)
+                .where(ExceptionRecord.batch_file_id.in_(source_ids))
+                .order_by(
+                    ExceptionRecord.batch_file_id,
+                    ExceptionRecord.id,
+                )
+            ).all()
+            if source_ids
+            else []
+        )
+        exception_ids = [exception.id for exception in exceptions]
+        parts = (
+            session.scalars(
+                select(SplitRecord)
+                .where(SplitRecord.exception_id.in_(exception_ids))
+                .order_by(SplitRecord.exception_id, SplitRecord.id)
+            ).all()
+            if exception_ids
+            else []
+        )
+        exceptions_by_source: dict[int, list[ExceptionRecord]] = {}
+        for exception in exceptions:
+            exceptions_by_source.setdefault(
+                exception.batch_file_id,
+                [],
+            ).append(exception)
+        parts_by_exception: dict[int, list[SplitRecord]] = {}
+        for part in parts:
+            parts_by_exception.setdefault(part.exception_id, []).append(part)
         payloads = []
         for source in sources:
-            exceptions = session.scalars(
-                select(ExceptionRecord)
-                .where(ExceptionRecord.batch_file_id == source.id)
-                .order_by(ExceptionRecord.id)
-            ).all()
             exception_payloads = []
-            for exception in exceptions:
-                parts = session.scalars(
-                    select(SplitRecord)
-                    .where(SplitRecord.exception_id == exception.id)
-                    .order_by(SplitRecord.id)
-                ).all()
+            for exception in exceptions_by_source.get(source.id, []):
                 exception_payloads.append(
                     {
                         "row": _exception_dict(exception),
@@ -402,7 +424,10 @@ def _load_export_inputs(database: Database, batch_id: int):
                                 delivery_note=part.delivery_note,
                                 resolved=part.resolved,
                             )
-                            for part in parts
+                            for part in parts_by_exception.get(
+                                exception.id,
+                                [],
+                            )
                         ],
                     }
                 )

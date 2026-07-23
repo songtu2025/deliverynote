@@ -73,14 +73,14 @@ from .position_drafts import (
     ROW_FIELDS,
     DraftConflict,
     create_or_resume_draft,
-    draft_diff,
+    delete_draft_rows,
     discard_draft,
     list_draft_rows,
+    load_draft_frames,
     mutate_draft_row,
     publish_draft,
     replace_draft_from_frame,
     require_revision,
-    validate_draft,
 )
 
 
@@ -286,8 +286,22 @@ def _issue_summary(issues: list[dict]) -> dict:
     }
 
 
+def _draft_analysis(
+    session: Session,
+    draft: InputDraft,
+) -> tuple[list[PositionDraftRow], dict[str, int], list[dict]]:
+    """一次生成草稿摘要所需的行、差异和校验结果。"""
+
+    rows, base_frame, current_frame = load_draft_frames(session, draft)
+    issues = [
+        *validate_position_frame(current_frame),
+        *position_change_warnings(base_frame, current_frame),
+    ]
+    return rows, position_diff(base_frame, current_frame), issues
+
+
 def _draft_json(session: Session, draft: InputDraft) -> dict:
-    rows = list_draft_rows(session, draft.id)
+    rows, diff, issues = _draft_analysis(session, draft)
     active_rows = [row for row in rows if not row.deleted]
     base_version = session.get(InputVersion, draft.base_version_id)
     active_version = session.scalar(
@@ -296,7 +310,7 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
             InputVersion.active.is_(True),
         )
     )
-    issue_summary = _issue_summary(validate_draft(session, draft))
+    issue_summary = _issue_summary(issues)
     return {
         "id": draft.id,
         "kind": draft.kind,
@@ -316,23 +330,59 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
         "updated_at": _utc_isoformat(draft.updated_at),
         "row_count": len(active_rows),
         "modified_count": sum(row.change_type != "unchanged" for row in rows),
-        "diff": draft_diff(session, draft),
+        "diff": diff,
         **issue_summary,
     }
 
 
-def _file_totals(source: BatchFile, session: Session | None = None) -> tuple[int, int]:
-    if session is None:
-        return source.import_total, source.manual_total
+def _split_records_by_exception(
+    session: Session,
+    exceptions: list[ExceptionRecord],
+) -> dict[int, list[SplitRecord]]:
+    exception_ids = [exception.id for exception in exceptions]
+    if not exception_ids:
+        return {}
+    records = session.scalars(
+        select(SplitRecord)
+        .where(SplitRecord.exception_id.in_(exception_ids))
+        .order_by(SplitRecord.exception_id, SplitRecord.id)
+    ).all()
+    grouped: dict[int, list[SplitRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.exception_id, []).append(record)
+    return grouped
+
+
+def _batch_exception_data(
+    session: Session,
+    sources: list[BatchFile],
+) -> tuple[
+    dict[int, list[ExceptionRecord]],
+    dict[int, list[SplitRecord]],
+]:
+    source_ids = [source.id for source in sources]
+    if not source_ids:
+        return {}, {}
+    exceptions = session.scalars(
+        select(ExceptionRecord)
+        .where(ExceptionRecord.batch_file_id.in_(source_ids))
+        .order_by(ExceptionRecord.batch_file_id, ExceptionRecord.id)
+    ).all()
+    grouped: dict[int, list[ExceptionRecord]] = {}
+    for exception in exceptions:
+        grouped.setdefault(exception.batch_file_id, []).append(exception)
+    return grouped, _split_records_by_exception(session, exceptions)
+
+
+def _file_totals(
+    source: BatchFile,
+    exceptions: list[ExceptionRecord],
+    splits_by_exception: dict[int, list[SplitRecord]],
+) -> tuple[int, int]:
     import_total = source.import_total
     manual_total = 0
-    exceptions = session.scalars(
-        select(ExceptionRecord).where(ExceptionRecord.batch_file_id == source.id)
-    ).all()
     for exception in exceptions:
-        parts = session.scalars(
-            select(SplitRecord).where(SplitRecord.exception_id == exception.id)
-        ).all()
+        parts = splits_by_exception.get(exception.id, [])
         if not parts:
             manual_total += exception.manual_quantity
             continue
@@ -341,8 +391,20 @@ def _file_totals(source: BatchFile, session: Session | None = None) -> tuple[int
     return import_total, manual_total
 
 
-def _file_json(source: BatchFile, session: Session | None = None) -> dict:
-    import_total, manual_total = _file_totals(source, session)
+def _file_json(
+    source: BatchFile,
+    exceptions: list[ExceptionRecord] | None = None,
+    splits_by_exception: dict[int, list[SplitRecord]] | None = None,
+) -> dict:
+    if exceptions is None or splits_by_exception is None:
+        import_total = source.import_total
+        manual_total = source.manual_total
+    else:
+        import_total, manual_total = _file_totals(
+            source,
+            exceptions,
+            splits_by_exception,
+        )
     return {
         "id": source.id,
         "batch_id": source.batch_id,
@@ -358,24 +420,26 @@ def _file_json(source: BatchFile, session: Session | None = None) -> dict:
     }
 
 
-def _batch_summary(batch: Batch, session: Session, sources: list[BatchFile]) -> dict:
+def _batch_summary(
+    sources: list[BatchFile],
+    exceptions_by_source: dict[int, list[ExceptionRecord]],
+    splits_by_exception: dict[int, list[SplitRecord]],
+) -> dict:
     delivery_total = sum(source.delivery_total for source in sources)
     import_total = sum(source.import_total for source in sources)
     manual_total = 0
-    exceptions = session.scalars(
-        select(ExceptionRecord)
-        .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
-        .where(BatchFile.batch_id == batch.id)
-    ).all()
-    for exception in exceptions:
-        parts = session.scalars(
-            select(SplitRecord).where(SplitRecord.exception_id == exception.id)
-        ).all()
-        if not parts:
-            manual_total += exception.manual_quantity
-            continue
-        import_total += sum(part.quantity for part in parts if part.resolved)
-        manual_total += sum(part.quantity for part in parts if not part.resolved)
+    for source in sources:
+        for exception in exceptions_by_source.get(source.id, []):
+            parts = splits_by_exception.get(exception.id, [])
+            if not parts:
+                manual_total += exception.manual_quantity
+                continue
+            import_total += sum(
+                part.quantity for part in parts if part.resolved
+            )
+            manual_total += sum(
+                part.quantity for part in parts if not part.resolved
+            )
     return {
         "delivery_total": delivery_total,
         "import_total": import_total,
@@ -401,6 +465,10 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         .where(BatchFile.batch_id == batch.id)
         .order_by(BatchFile.file_order)
     ).all()
+    exceptions_by_source, splits_by_exception = _batch_exception_data(
+        session,
+        sources,
+    )
     overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
     overreceipt_rule = (
         session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
@@ -427,10 +495,21 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         "created_at": _utc_isoformat(batch.created_at),
         "updated_at": _utc_isoformat(batch.updated_at),
         "file_count": len(sources),
-        "summary": _batch_summary(batch, session, sources),
+        "summary": _batch_summary(
+            sources,
+            exceptions_by_source,
+            splits_by_exception,
+        ),
     }
     if include_files:
-        result["files"] = [_file_json(source, session) for source in sources]
+        result["files"] = [
+            _file_json(
+                source,
+                exceptions_by_source.get(source.id, []),
+                splits_by_exception,
+            )
+            for source in sources
+        ]
         result["versions"] = {
             kind: _version_json(version)
             for kind, field in VERSION_FIELDS.items()
@@ -531,14 +610,9 @@ def _exception_position_values(
 
 def _exception_json(
     exception: ExceptionRecord,
-    session: Session,
+    parts: list[SplitRecord],
     position_values: dict[str, str | int | float] | None = None,
 ) -> dict:
-    parts = session.scalars(
-        select(SplitRecord)
-        .where(SplitRecord.exception_id == exception.id)
-        .order_by(SplitRecord.id)
-    ).all()
     position_values = position_values or {}
     return {
         "id": exception.id,
@@ -1555,22 +1629,22 @@ def create_app(
         draft = get_draft_or_404(draft_id, session)
         if len(payload.row_ids) != len(set(payload.row_ids)):
             raise HTTPException(status_code=400, detail="批量删除行不可重复")
-        rows = [session.get(PositionDraftRow, row_id) for row_id in payload.row_ids]
-        if any(row is None or row.draft_id != draft.id for row in rows):
+        rows = session.scalars(
+            select(PositionDraftRow).where(
+                PositionDraftRow.draft_id == draft.id,
+                PositionDraftRow.id.in_(payload.row_ids),
+            )
+        ).all()
+        if len(rows) != len(payload.row_ids):
             raise HTTPException(status_code=404, detail="草稿行不存在")
         try:
-            expected_revision = payload.revision
-            for row_id in payload.row_ids:
-                mutate_draft_row(
-                    session,
-                    draft,
-                    expected_revision,
-                    admin.id,
-                    {},
-                    row_id=row_id,
-                    delete=True,
-                )
-                expected_revision = draft.revision
+            delete_draft_rows(
+                session,
+                draft,
+                payload.revision,
+                admin.id,
+                rows,
+            )
             commit_once(session)
         except DraftConflict as error:
             rollback_draft_conflict(session, error)
@@ -1741,11 +1815,12 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         draft = get_draft_or_404(draft_id, session)
+        _rows, diff, issues = _draft_analysis(session, draft)
         return {
             "draft_id": draft.id,
             "revision": draft.revision,
-            "diff": draft_diff(session, draft),
-            **_issue_summary(validate_draft(session, draft)),
+            "diff": diff,
+            **_issue_summary(issues),
         }
 
     @app.post(
@@ -2190,8 +2265,16 @@ def create_app(
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         ).all()
         position_values = _exception_position_values(exceptions, batch, session)
+        splits_by_exception = _split_records_by_exception(
+            session,
+            exceptions,
+        )
         return [
-            _exception_json(exception, session, position_values.get(exception.id))
+            _exception_json(
+                exception,
+                splits_by_exception.get(exception.id, []),
+                position_values.get(exception.id),
+            )
             for exception in exceptions
         ]
 
@@ -2321,7 +2404,12 @@ def create_app(
             },
         )
         session.commit()
-        return _exception_json(exception, session, position_values.get(exception.id))
+        splits = _split_records_by_exception(session, [exception])
+        return _exception_json(
+            exception,
+            splits.get(exception.id, []),
+            position_values.get(exception.id),
+        )
 
     @app.post("/api/batches/{batch_id}/export", status_code=status.HTTP_202_ACCEPTED)
     def start_export(
