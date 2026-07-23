@@ -67,13 +67,6 @@ const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
   resolved: { label: "已处理", color: "success" }
 };
 
-const EXCEPTION_REVIEW_HINTS: Record<string, string> = {
-  "未找到可交货采购需求": "核对供应商、SKU、站点和目的仓",
-  "超出采购未交量": "查看已分配、超出及规则命中",
-  "产品信息站点不唯一": "从候选项中选择完整站点",
-  "超出允许超收量": "查看采购分配、超收与剩余额度"
-};
-
 type SplitFormValues = { parts: SplitPart[] };
 
 function wait(milliseconds: number) {
@@ -90,13 +83,95 @@ function ExceptionStatusTag({ status }: { status: string }) {
 }
 
 function ExceptionReason({ reason }: { reason: string }) {
-  const hint = EXCEPTION_REVIEW_HINTS[reason];
   return (
     <div className="exception-reason-cell">
       <strong>{reason}</strong>
-      {hint && <span>{hint}</span>}
     </div>
   );
+}
+
+function candidateSites(fullSite: string): string[] {
+  return Array.from(new Set(
+    fullSite
+      .split("、")
+      .map((site) => site.trim())
+      .filter(Boolean)
+  ));
+}
+
+function EvidenceMetric({ label, value }: { label: string; value: number }) {
+  return (
+    <span className="exception-evidence-metric" aria-label={`${label} ${value}`}>
+      <span>{label} </span>
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function ExceptionEvidence({
+  exception,
+  hasOverreceiptRule
+}: {
+  exception: DeliveryException;
+  hasOverreceiptRule: boolean;
+}) {
+  if (exception.reason === "未找到可交货采购需求") {
+    return (
+      <div className="exception-evidence-cell exception-evidence-check">
+        <strong>需核对 </strong>
+        <span>供应商、SKU、站点、目的仓</span>
+      </div>
+    );
+  }
+
+  if (exception.reason === "超出采购未交量") {
+    return (
+      <div className="exception-evidence-cell">
+        <EvidenceMetric label="已分配" value={exception.allocated_quantity} />
+        <EvidenceMetric label="超出" value={exception.manual_quantity} />
+        <span className="exception-evidence-state">
+          {hasOverreceiptRule ? "未命中超收规则" : "本批次未启用超收规则"}
+        </span>
+      </div>
+    );
+  }
+
+  if (exception.reason === "产品信息站点不唯一") {
+    return (
+      <div className="exception-evidence-cell">
+        <strong className="exception-evidence-label">候选站点</strong>
+        <div className="exception-evidence-sites">
+          {candidateSites(exception.full_site).map((site) => (
+            <span className="exception-evidence-site" key={site}>{site}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (exception.reason === "超出允许超收量") {
+    const hasExactBreakdown = (
+      exception.purchase_allocated_quantity !== null
+      && exception.overreceipt_allocated_quantity !== null
+      && exception.overreceipt_remaining_quantity !== null
+    );
+    if (!hasExactBreakdown) {
+      return (
+        <div className="exception-evidence-cell">
+          <span className="exception-evidence-state">历史批次暂无额度明细</span>
+        </div>
+      );
+    }
+    return (
+      <div className="exception-evidence-cell">
+        <EvidenceMetric label="正常采购" value={exception.purchase_allocated_quantity!} />
+        <EvidenceMetric label="使用超收" value={exception.overreceipt_allocated_quantity!} />
+        <EvidenceMetric label="剩余" value={exception.overreceipt_remaining_quantity!} />
+      </div>
+    );
+  }
+
+  return <span className="muted">查看异常原因后处理</span>;
 }
 
 function formatPositionValue(value: string | number): string {
@@ -460,12 +535,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
   const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
   const splitCandidateSites = splitTarget?.reason === "产品信息站点不唯一"
-    ? Array.from(new Set(
-        splitTarget.full_site
-          .split("、")
-          .map((site) => site.trim())
-          .filter(Boolean)
-      ))
+    ? candidateSites(splitTarget.full_site)
     : [];
   const splitValid = Boolean(
     splitTarget
@@ -889,19 +959,18 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           <Table<DeliveryException>
             rowKey="id"
             dataSource={filteredExceptions}
-            scroll={{ x: 1110 }}
             locale={{ emptyText: <Empty description={exceptions.length ? "没有匹配的待处理记录" : "本批次没有待处理记录"} /> }}
             columns={[
               {
                 title: "来源文件",
                 dataIndex: "batch_file_id",
-                width: 170,
+                width: 145,
                 ellipsis: true,
                 render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
               },
               { title: "SKU", dataIndex: "sku", width: 80 },
-              { title: "站点", dataIndex: "full_site", width: 145, ellipsis: true },
-              { title: "目的仓", dataIndex: "destination", width: 130, ellipsis: true },
+              { title: "站点", dataIndex: "full_site", width: 115, ellipsis: true },
+              { title: "目的仓", dataIndex: "destination", width: 105, ellipsis: true },
               {
                 title: "规模定位",
                 dataIndex: "scale_position",
@@ -916,25 +985,34 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               {
                 title: "待处理量",
                 dataIndex: "manual_quantity",
-                width: 85,
+                width: 80,
                 render: (value: number) => <strong className="pending-value">{value}</strong>
               },
               {
-                title: "原因",
+                title: "异常原因",
                 dataIndex: "reason",
-                width: 220,
+                width: 140,
                 render: (reason: string) => <ExceptionReason reason={reason} />
+              },
+              {
+                title: "审校依据",
+                width: 280,
+                render: (_, record) => (
+                  <ExceptionEvidence
+                    exception={record}
+                    hasOverreceiptRule={Boolean(batch?.overreceipt_rule)}
+                  />
+                )
               },
               {
                 title: "状态",
                 dataIndex: "status",
-                width: 80,
+                width: 75,
                 render: (value: string) => <ExceptionStatusTag status={value} />
               },
               {
                 title: "操作",
-                width: 110,
-                fixed: "right",
+                width: 105,
                 render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
               }
             ]}
