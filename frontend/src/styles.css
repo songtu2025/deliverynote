@@ -461,6 +461,22 @@ button, input { font: inherit; }
 .exception-filter-field .ant-input-affix-wrapper { width: 100%; }
 .toolbar-count { margin-left: auto; color: #66736f; font-size: 13px; }
 .position-reference-value { color: #2f5149; font-weight: 650; }
+.exception-reason-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  line-height: 1.35;
+}
+.exception-reason-cell strong {
+  color: #273b36;
+  font-size: 13px;
+  font-weight: 650;
+}
+.exception-reason-cell span {
+  color: #66736f;
+  font-size: 12px;
+}
 
 .split-source {
   padding-bottom: 16px;

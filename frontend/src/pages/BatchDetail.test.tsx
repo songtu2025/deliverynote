@@ -190,12 +190,12 @@ describe("BatchDetail", () => {
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
     expect(screen.getByText("异常审校").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
     expect(screen.getByText("当前阶段：异常审校")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "拆分审校（60）" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看并处理（60）" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "拆分审校" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
 
     await screen.findByText("拆分审校 · SKU-A");
     const drawer = screen.getByRole("dialog");
@@ -281,7 +281,8 @@ describe("BatchDetail", () => {
 
     const excessRow = (await screen.findByText("SKU-A")).closest("tr");
     expect(excessRow).not.toBeNull();
-    fireEvent.click(within(excessRow!).getByRole("button", { name: "拆分审校" }));
+    expect(within(excessRow!).getByText("查看已分配、超出及规则命中")).toBeInTheDocument();
+    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理" }));
     let drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("采购量与超出量")).toBeInTheDocument();
     expect(within(drawer).getByText("已分配量")).toBeInTheDocument();
@@ -291,7 +292,8 @@ describe("BatchDetail", () => {
 
     const noPurchaseRow = screen.getByText("SKU-B").closest("tr");
     expect(noPurchaseRow).not.toBeNull();
-    fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: "拆分审校" }));
+    expect(within(noPurchaseRow!).getByText("核对供应商、SKU、站点和目的仓")).toBeInTheDocument();
+    fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("核对锁定采购版本")).toBeInTheDocument();
     expect(within(drawer).getByText(/供应商、SKU、站点和目的仓/)).toBeInTheDocument();
@@ -299,7 +301,8 @@ describe("BatchDetail", () => {
 
     const ambiguousRow = screen.getByText("SKU-C").closest("tr");
     expect(ambiguousRow).not.toBeNull();
-    fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "拆分审校" }));
+    expect(within(ambiguousRow!).getByText("从候选项中选择完整站点")).toBeInTheDocument();
+    fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("选择候选站点")).toBeInTheDocument();
     const siteChoice = within(drawer).getByRole("radio", { name: "AMAZON:SEEKWAY:US" });
@@ -310,7 +313,8 @@ describe("BatchDetail", () => {
 
     const allowanceRow = screen.getByText("SKU-D").closest("tr");
     expect(allowanceRow).not.toBeNull();
-    fireEvent.click(within(allowanceRow!).getByRole("button", { name: "拆分审校" }));
+    expect(within(allowanceRow!).getByText("查看采购分配、超收与剩余额度")).toBeInTheDocument();
+    fireEvent.click(within(allowanceRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("超收额度使用情况")).toBeInTheDocument();
     expect(within(drawer).getByText("正常采购分配")).toBeInTheDocument();
