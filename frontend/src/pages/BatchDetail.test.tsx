@@ -10,6 +10,7 @@ const jsonResponse = (payload: unknown) => new Response(JSON.stringify(payload),
 
 describe("BatchDetail", () => {
   let batchPayload: Record<string, any>;
+  let exceptionPayload: Record<string, any>[];
 
   beforeEach(() => {
     const version = (id: number, kind: string) => ({
@@ -82,7 +83,7 @@ describe("BatchDetail", () => {
         }
       ]
     };
-    const exceptions = [
+    exceptionPayload = [
       {
         id: 30,
         batch_file_id: 11,
@@ -164,10 +165,27 @@ describe("BatchDetail", () => {
         parts: []
       }
     ];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/api/batches/7/exceptions")) return jsonResponse(exceptions);
+      if (url.endsWith("/api/batches/7/exceptions")) return jsonResponse(exceptionPayload);
       if (url.endsWith("/api/batches/7")) return jsonResponse(batchPayload);
+      const splitMatch = url.match(/\/api\/exceptions\/(\d+)\/split$/);
+      if (splitMatch && init?.method === "PUT") {
+        const exceptionId = Number(splitMatch[1]);
+        const parts = JSON.parse(String(init.body)).parts as Array<{ resolved: boolean }>;
+        const resolvedCount = parts.filter((part) => part.resolved).length;
+        const updated = {
+          ...exceptionPayload.find((item) => item.id === exceptionId)!,
+          parts,
+          status: resolvedCount === parts.length
+            ? "resolved"
+            : resolvedCount
+              ? "partial"
+              : "pending"
+        };
+        exceptionPayload = exceptionPayload.map((item) => item.id === exceptionId ? updated : item);
+        return jsonResponse(updated);
+      }
       if (url.endsWith("/api/batches/7/download-merged")) {
         return new Response("merged", { status: 200 });
       }
@@ -197,7 +215,7 @@ describe("BatchDetail", () => {
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
 
-    await screen.findByText("拆分审校 · SKU-A");
+    await screen.findByText("审校处理 · SKU-A");
     const drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("规模定位")).toBeInTheDocument();
     expect(within(drawer).getByText("短尾")).toBeInTheDocument();
@@ -205,7 +223,7 @@ describe("BatchDetail", () => {
     expect(within(drawer).getByText("备货")).toBeInTheDocument();
     expect(within(drawer).getByText("已下单可售天数")).toBeInTheDocument();
     expect(within(drawer).getByText("90")).toBeInTheDocument();
-    const saveButton = screen.getByRole("button", { name: "保存拆分" });
+    const saveButton = screen.getByRole("button", { name: "保存" });
     expect(saveButton).toBeEnabled();
     const quantity = screen.getByRole("spinbutton", { name: "数量" });
     fireEvent.change(quantity, { target: { value: "59" } });
@@ -219,7 +237,7 @@ describe("BatchDetail", () => {
     await screen.findByText("SKU-A");
     expect(screen.getByText("SKU-B")).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "原因筛选" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "状态筛选" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "审校概览" })).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "站点筛选" }));
     fireEvent.click(await screen.findByText("AMAZON:SEEKWAY:US", { selector: ".ant-select-item-option-content" }));
@@ -235,7 +253,43 @@ describe("BatchDetail", () => {
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
     fireEvent.click(await screen.findByText("中尾", { selector: ".ant-select-item-option-content" }));
-    await screen.findByText("没有匹配的待处理记录");
+    await screen.findByText("当前没有未完成记录");
+  }, 30_000);
+
+  it("summarizes unfinished work and saves directly into the next exception", async () => {
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    const overview = await screen.findByRole("region", { name: "审校概览" });
+    expect(within(overview).getByRole("button", { name: "未完成 4 条，待处理 107 件" })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(within(overview).getByRole("button", { name: "已处理 0 条" })).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "全部 4 条" })).toBeInTheDocument();
+
+    const excessRow = (await screen.findByText("SKU-A")).closest("tr");
+    expect(excessRow).not.toBeNull();
+    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理" }));
+
+    let drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("第 1 / 4 条")).toBeInTheDocument();
+    expect(within(drawer).getByRole("radio", { name: "继续保留待处理" })).toBeChecked();
+    fireEvent.click(within(drawer).getByRole("radio", { name: "可正式导入" }));
+    const saveAndNext = within(drawer).getByRole("button", { name: "保存并处理下一条" });
+    await waitFor(() => expect(saveAndNext).toBeEnabled());
+    fireEvent.click(saveAndNext);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/exceptions/30/split",
+        expect.objectContaining({ method: "PUT" })
+      );
+    });
+    drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText("审校处理 · SKU-B")).toBeInTheDocument();
+    expect(within(drawer).getByText("第 1 / 3 条")).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "未完成 3 条，待处理 47 件" })).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "已处理 1 条" })).toBeInTheDocument();
   }, 30_000);
 
   it("offers merged and per-file downloads without a duplicate export card", async () => {
