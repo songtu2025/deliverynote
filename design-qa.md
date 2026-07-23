@@ -4,8 +4,8 @@
 | --- | --- |
 | 报告状态 | 已完成的范围验收记录 |
 | 验收对象 | DeliveryNote PC Web |
-| 功能源码基线 | Git tree `85bc74b6915def6a0711d5a1e2bcce1a90746d9e` |
-| 生产前端资源 | `index-DzkyLbfg.js` / `index-BJrakn5L.css` |
+| 功能源码基线 | Git tree `5ac215401475bfe32d30197b24472ca64e0fadc1` |
+| 生产前端资源 | `index-pW2kxPpw.js` / `index-CbzC7nbw.css` |
 | 最后完整复核 | 2026-07-23（Asia/Shanghai） |
 | 需求基线 | [DeliveryNote PC 界面规范](UI_UX_OPTIMIZATION_PLAN.md) |
 
@@ -193,7 +193,7 @@ design/admin-maintenance-qa/
 
 | 检查 | 结果 |
 | --- | --- |
-| Frontend Vitest | 8 个测试文件，71/71 通过 |
+| Frontend Vitest | 8 个测试文件，72/72 通过 |
 | Frontend production build | 通过 |
 | Python `unittest` | 131/131 通过 |
 | `pip check` | 通过 |
@@ -254,6 +254,7 @@ frontend/src/pages/admin/PositionMaintenance.test.tsx
 - 在浏览器时区 `America/Los_Angeles` 下查看业务时间；
 - 确认 API 显式 UTC 时间在页面按 `Asia/Shanghai` 显示；
 - 查看头像首字母、用户名和中文角色；
+- 对比批次列表与批次详情的顶栏定位、高度、背景、底边框、内边距和账号组件尺寸；
 - 触发退出并确认服务端登出、本地会话清理和登录页返回。
 
 ## 7. 验收期间关闭的问题
@@ -265,6 +266,7 @@ frontend/src/pages/admin/PositionMaintenance.test.tsx
 | 批次详情刷新回到列表 | 工作上下文丢失 | 使用独立批次 URL 并从路由恢复详情 | E1 `App.test.tsx`；E3 浏览器刷新 |
 | 导出区重复且结果形态不清楚 | 下载入口冗余、用户难以选择 | 合并为结果操作区，区分合并 Excel、分文件 ZIP 和来源结果 | E1 `BatchDetail.test.tsx`；E3 下载复核 |
 | 浏览器时区改变页面业务时间 | 不同电脑看到不同业务日期 | API 明确 UTC，前端固定转换北京时间 | E1 `dateTime.test.ts`；E3 非北京时间浏览器 |
+| 批次详情账号顶栏与其他页面视觉不一致 | 登录状态在不同页面缺少统一感 | 移除批次专属顶栏覆盖，继续复用统一账号组件 | E1 `App.test.tsx` 计算样式对比；E3 正式 Chrome 1440×900 复核 |
 
 ## 8. 残余风险
 
