@@ -89,9 +89,12 @@ describe("BatchDetail", () => {
         sku: "SKU-A",
         original_site: "US",
         full_site: "AMAZON:SEEKWAY:US",
-        destination: "水鞋-广州仓",
+        destination: "水鞋-东莞仓",
         delivery_quantity: 80,
         allocated_quantity: 20,
+        purchase_allocated_quantity: 20,
+        overreceipt_allocated_quantity: 0,
+        overreceipt_remaining_quantity: null,
         manual_quantity: 60,
         reason: "超出采购未交量",
         status: "pending",
@@ -109,12 +112,55 @@ describe("BatchDetail", () => {
         destination: "水鞋-东莞仓",
         delivery_quantity: 20,
         allocated_quantity: 0,
+        purchase_allocated_quantity: 0,
+        overreceipt_allocated_quantity: 0,
+        overreceipt_remaining_quantity: null,
         manual_quantity: 20,
         reason: "未找到可交货采购需求",
         status: "pending",
         scale_position: "中尾",
         stocking_position: "不备货",
         ordered_days: 60,
+        parts: []
+      },
+      {
+        id: 32,
+        batch_file_id: 11,
+        sku: "SKU-C",
+        original_site: "US",
+        full_site: "AMAZON:OTHER:US、AMAZON:SEEKWAY:US",
+        destination: "",
+        delivery_quantity: 12,
+        allocated_quantity: 0,
+        purchase_allocated_quantity: 0,
+        overreceipt_allocated_quantity: 0,
+        overreceipt_remaining_quantity: null,
+        manual_quantity: 12,
+        reason: "产品信息站点不唯一",
+        status: "pending",
+        scale_position: "",
+        stocking_position: "",
+        ordered_days: "",
+        parts: []
+      },
+      {
+        id: 33,
+        batch_file_id: 11,
+        sku: "SKU-D",
+        original_site: "US",
+        full_site: "AMAZON:SEEKWAY:US",
+        destination: "水鞋-广州仓",
+        delivery_quantity: 85,
+        allocated_quantity: 70,
+        purchase_allocated_quantity: 20,
+        overreceipt_allocated_quantity: 50,
+        overreceipt_remaining_quantity: 0,
+        manual_quantity: 15,
+        reason: "超出允许超收量",
+        status: "pending",
+        scale_position: "短尾",
+        stocking_position: "备货",
+        ordered_days: 90,
         parts: []
       }
     ];
@@ -146,7 +192,7 @@ describe("BatchDetail", () => {
     expect(screen.getByText("当前阶段：异常审校")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "拆分审校（60）" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
-    expect(screen.getByText("短尾")).toBeInTheDocument();
+    expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "拆分审校" })[0]);
@@ -228,5 +274,51 @@ describe("BatchDetail", () => {
         expect.any(Object)
       );
     });
+  }, 30_000);
+
+  it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    const excessRow = (await screen.findByText("SKU-A")).closest("tr");
+    expect(excessRow).not.toBeNull();
+    fireEvent.click(within(excessRow!).getByRole("button", { name: "拆分审校" }));
+    let drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("采购量与超出量")).toBeInTheDocument();
+    expect(within(drawer).getByText("已分配量")).toBeInTheDocument();
+    expect(within(drawer).getByText("超出量")).toBeInTheDocument();
+    expect(within(drawer).getByText("未命中本批次超收规则")).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+
+    const noPurchaseRow = screen.getByText("SKU-B").closest("tr");
+    expect(noPurchaseRow).not.toBeNull();
+    fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: "拆分审校" }));
+    drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("核对锁定采购版本")).toBeInTheDocument();
+    expect(within(drawer).getByText(/供应商、SKU、站点和目的仓/)).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+
+    const ambiguousRow = screen.getByText("SKU-C").closest("tr");
+    expect(ambiguousRow).not.toBeNull();
+    fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "拆分审校" }));
+    drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("选择候选站点")).toBeInTheDocument();
+    const siteChoice = within(drawer).getByRole("radio", { name: "AMAZON:SEEKWAY:US" });
+    fireEvent.click(siteChoice);
+    expect(siteChoice).toBeChecked();
+    expect(within(drawer).queryByRole("textbox", { name: "完整站点" })).not.toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+
+    const allowanceRow = screen.getByText("SKU-D").closest("tr");
+    expect(allowanceRow).not.toBeNull();
+    fireEvent.click(within(allowanceRow!).getByRole("button", { name: "拆分审校" }));
+    drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("超收额度使用情况")).toBeInTheDocument();
+    expect(within(drawer).getByText("正常采购分配")).toBeInTheDocument();
+    expect(within(drawer).getByText("本条使用超收额度")).toBeInTheDocument();
+    expect(within(drawer).getByText("剩余额度")).toBeInTheDocument();
+    const guidance = within(drawer).getByRole("region", { name: "原因指导" });
+    expect(within(guidance).getByText("20")).toBeInTheDocument();
+    expect(within(guidance).getByText("50")).toBeInTheDocument();
+    expect(within(guidance).getByText("0")).toBeInTheDocument();
   }, 30_000);
 });

@@ -208,6 +208,18 @@ class ExceptionRecord(Base):
     destination: Mapped[str] = mapped_column(String(255), default="")
     delivery_quantity: Mapped[int] = mapped_column(Integer)
     allocated_quantity: Mapped[int] = mapped_column(Integer)
+    purchase_allocated_quantity: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    overreceipt_allocated_quantity: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    overreceipt_remaining_quantity: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
     manual_quantity: Mapped[int] = mapped_column(Integer)
     reason: Mapped[str] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), default="pending")

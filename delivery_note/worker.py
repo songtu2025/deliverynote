@@ -310,6 +310,17 @@ def _execute_compute(
                         destination=str(exception["目的仓"] or ""),
                         delivery_quantity=int(exception["交货量"]),
                         allocated_quantity=int(exception["已自动分配量"]),
+                        purchase_allocated_quantity=int(
+                            exception["正常采购分配量"]
+                        ),
+                        overreceipt_allocated_quantity=int(
+                            exception["超收规则分配量"]
+                        ),
+                        overreceipt_remaining_quantity=(
+                            None
+                            if pd.isna(exception["超收剩余额度"])
+                            else int(exception["超收剩余额度"])
+                        ),
                         manual_quantity=int(exception["人工处理量"]),
                         reason=str(exception["异常原因"]),
                         status="pending",

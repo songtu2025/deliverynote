@@ -307,6 +307,9 @@ class AllocationTests(unittest.TestCase):
         )
         self.assertEqual(result.exception_rows.iloc[0]["异常原因"], "超出允许超收量")
         self.assertEqual(result.exception_rows.iloc[0]["人工处理量"], 15)
+        self.assertEqual(result.exception_rows.iloc[0]["正常采购分配量"], 100)
+        self.assertEqual(result.exception_rows.iloc[0]["超收规则分配量"], 50)
+        self.assertEqual(result.exception_rows.iloc[0]["超收剩余额度"], 0)
 
     def test_blank_scale_does_not_create_overreceipt_allowance(self):
         positions = self.positions()
