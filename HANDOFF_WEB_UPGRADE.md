@@ -7,7 +7,7 @@
 | 最后核对 | 2026-07-23（Asia/Shanghai） |
 | 生产仓库 | `https://github.com/songtu2025/deliverynote.git` |
 | 默认分支 | `master` |
-| 功能基线 | `master@75bd085`，Git tree `5ac215401475bfe32d30197b24472ca64e0fadc1` |
+| 功能基线 | `master@f322736`，Git tree `1f8f79d2fe8f3a7f95c77b0309e2bc8adbece9f8` |
 
 本文记录会随部署变化的运行状态和安全操作步骤。稳定的产品范围、业务契约、权限和文件格式以 [README](README.md) 为准。
 
@@ -63,14 +63,14 @@ deliverynote_postgres_data
 | 项目 | 已核对值 |
 | --- | --- |
 | 正式地址 | `https://deliverynote.seekwaygroup.com/` |
-| 最近部署时间 | 2026-07-23 16:43（Asia/Shanghai） |
-| 部署源码树 | 与 `master@75bd085` 完全一致 |
-| 最新发布分支提交 | `fix/topbar-account-consistency@ee1d626` |
-| 前端 JavaScript | `index-pW2kxPpw.js` |
-| 前端 CSS | `index-CbzC7nbw.css` |
+| 最近部署时间 | 2026-07-23 17:20（Asia/Shanghai） |
+| 部署源码树 | 与 `master@f322736` 完全一致 |
+| 最新发布分支提交 | `feature/review-reason-guidance@24dd029` |
+| 前端 JavaScript | `index-23iQ8O9q.js` |
+| 前端 CSS | `index-BRp-kQxB.css` |
 | Web 回环端口 | `127.0.0.1:18080` |
 
-PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏。PR #3 的 Squash 提交 `75bd085` 与已验证分支提交 `ee1d626` 的 Git tree 完全一致。
+PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏，PR #6 增加待处理原因指导、歧义站点单选和精确超收分配明细。PR #6 的 Squash 提交 `f322736` 与已验证分支提交 `24dd029` 的 Git tree 完全一致。
 
 ### 3.2 服务状态
 
@@ -89,14 +89,16 @@ PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次�
 
 | 检查 | 结果 |
 | --- | --- |
-| Python `unittest` | 功能基线 131/131 通过；本次纯前端修复未重跑 |
-| Frontend Vitest | 8 个测试文件，72/72 通过 |
+| Python `unittest` | 131/131 通过 |
+| Frontend Vitest | 8 个测试文件，73/73 通过 |
 | `pip check` | 通过 |
 | Frontend production build | 通过 |
 | Docker Compose config | 通过 |
 | `git diff --check` | 通过 |
 | 正式 HTTPS `/health` | 通过 |
 | 正式 Chrome 顶栏对比 | 批次列表与批次详情计算样式一致，失败响应和控制台错误均为 0 |
+| 审校原因指导 QA | 四类原因、候选站点单选和超收分配明细通过；页面及抽屉横向溢出均为 0 |
+| 正式 Chrome 审校复核 | 真实旧批次正常加载并显示采购核对提示；失败响应、控制台错误和浏览器业务写入均为 0 |
 
 前端构建存在约 1.2 MB 单包提示，不是构建失败。当前少量 PC 用户场景未因此出现已知功能问题。
 
@@ -204,7 +206,7 @@ WEB_PORT=18080 docker compose \
 
 ### 5.4 数据库迁移
 
-当前只有超收规则专用幂等迁移：
+当前使用一个专用幂等迁移维护超收规则表与待处理分配明细字段：
 
 ```bash
 WEB_PORT=18080 docker compose \
@@ -213,7 +215,13 @@ WEB_PORT=18080 docker compose \
   python -m delivery_note.migrations.overreceipt_rules
 ```
 
-迁移只允许使用当前仓库已审查的模块。不要直接对生产数据库执行临时 DDL，也不要删除已有表或列。
+该迁移创建缺失的超收规则表，并在 `exceptions` 中确保以下三个可空整数字段存在：
+
+- `purchase_allocated_quantity`：本条正常采购分配量；
+- `overreceipt_allocated_quantity`：本条超收规则分配量；
+- `overreceipt_remaining_quantity`：本条处理后的共享额度余量。
+
+历史待处理记录保持空值，页面明确显示“历史批次暂无额度明细”，不使用规则上限倒推。迁移不改写历史数量，也不改变 Excel 异常明细列或 A:G 导出。迁移只允许使用当前仓库已审查的模块；不要直接对生产数据库执行临时 DDL，也不要删除已有表或列。
 
 ### 5.5 更新服务
 
@@ -285,7 +293,7 @@ WEB_PORT=18080 docker compose \
 | 含数据库结构或数据语义变化 | 不自动回退；先确认旧代码与当前结构兼容 |
 | 批次计算或导出错误 | 保留现场与文件，不直接修改生产数据库“修结果” |
 
-超收规则迁移为向前兼容的加法迁移。代码回退时不要尝试删除其表结构或历史版本。
+超收规则表和待处理分配明细字段均为向前兼容的加法迁移。代码回退时不要尝试删除其表结构、历史版本或可空字段。
 
 任何回退都必须：
 
