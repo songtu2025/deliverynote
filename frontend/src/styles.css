@@ -531,6 +531,14 @@ button, input { font: inherit; }
   font-size: 13px;
   font-weight: 650;
 }
+.exception-identifier-value {
+  display: block;
+  color: #273b36;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.exception-sku-value { font-weight: 650; }
+.exception-site-value { font-size: 13px; }
 .exception-evidence-cell {
   display: flex;
   min-width: 0;
