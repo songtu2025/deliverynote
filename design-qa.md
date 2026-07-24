@@ -4,9 +4,9 @@
 | --- | --- |
 | 报告状态 | 已完成的范围验收记录 |
 | 验收对象 | DeliveryNote PC Web |
-| 功能源码基线 | Git tree `1f8f79d2fe8f3a7f95c77b0309e2bc8adbece9f8` |
-| 生产前端资源 | `index-23iQ8O9q.js` / `index-BRp-kQxB.css` |
-| 最后完整复核 | 2026-07-23（Asia/Shanghai） |
+| 功能源码基线 | Git tree `729713a9499722c54047799834b1c7afed42604e` |
+| 生产前端资源 | `index-BchohicX.js` / `index-CrS6zE_W.css` |
+| 最后完整复核 | 2026-07-24（Asia/Shanghai） |
 | 需求基线 | [DeliveryNote PC 界面规范](UI_UX_OPTIMIZATION_PLAN.md) |
 
 ## 1. 验收结论
@@ -198,9 +198,10 @@ design/admin-maintenance-qa/
 
 | 检查 | 结果 |
 | --- | --- |
-| Frontend Vitest | 8 个测试文件，73/73 通过 |
+| Ruff 0.15.22 | `delivery_note`、`tests`、`scripts` 通过 |
+| Frontend Vitest | 8 个测试文件，80/80 通过 |
 | Frontend production build | 通过 |
-| Python `unittest` | 131/131 通过 |
+| Python `unittest` | 139/139 通过 |
 | `pip check` | 通过 |
 | Docker Compose config | 通过 |
 | `git diff --check` | 通过 |
@@ -238,6 +239,11 @@ frontend/src/pages/admin/PositionMaintenance.test.tsx
 - 刷新保持当前 `/batches/{id}`；
 - 浏览器返回回到批次列表；
 - 检查失败请求与控制台错误。
+
+PR #19 部署后使用生产批次 14 复核异步加载：批次概览约 308 ms
+可见，此时异常区域保持加载态；40 条异常约 2.64 s 完成。热缓存后的异常
+接口 10 次请求中位数为 46.28 ms，P95 为 54.24 ms。浏览器业务写入、
+失败响应和控制台错误均为 0。
 
 ### 6.2 管理员维护
 
@@ -283,9 +289,10 @@ frontend/src/pages/admin/PositionMaintenance.test.tsx
 | 未完成完整 WCAG 审计 | 当前内部 PC 使用可接受，但不宣称合规 | 出现正式无障碍要求 |
 | 批次流程缺少仓库内持久截图 | 自动化和生产浏览器已覆盖，视觉历史证据较弱 | 下一次批次 UI 大改时补充脱敏截图 |
 | 前端单包约 1.2 MB | 当前人数和网络环境未显示功能影响 | 实测首屏性能影响操作 |
+| 异常数据冷启动仍需读取 Excel | 概览不再受阻，当前操作体验可接受 | 冷启动继续影响实际操作时再评估预计算快照 |
 | 无手机端 | 明确不在当前范围 | 业务提出移动使用场景 |
 | 操作记录仅最近 200 条 | 满足当前页面口径 | 需要完整审计检索 |
-| 无自动化 CI | 依赖发布前人工执行矩阵 | 协作人数或发布频率上升 |
+| CI 不自动部署 | 自动质量检查与生产发布保持隔离 | 需要自动部署时另行评估权限与回退 |
 
 ## 9. 后续变更的最低复核
 

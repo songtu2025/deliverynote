@@ -4,10 +4,10 @@
 | --- | --- |
 | 文档状态 | 当前生产 Runbook 与开发交接基线 |
 | 适用读者 | 部署维护人员、故障处理人员、后续开发人员 |
-| 最后核对 | 2026-07-23（Asia/Shanghai） |
+| 最后核对 | 2026-07-24（Asia/Shanghai） |
 | 生产仓库 | `https://github.com/songtu2025/deliverynote.git` |
 | 默认分支 | `master` |
-| 功能基线 | `master@a14eea8`，Git tree `a580a3588b25b143e16b908f25c4fb7ae2d21013` |
+| 生产功能基线 | `master@e30da3d`，Git tree `729713a9499722c54047799834b1c7afed42604e` |
 
 本文记录会随部署变化的运行状态和安全操作步骤。稳定的产品范围、业务契约、权限和文件格式以 [README](README.md) 为准。
 
@@ -63,14 +63,14 @@ deliverynote_postgres_data
 | 项目 | 已核对值 |
 | --- | --- |
 | 正式地址 | `https://deliverynote.seekwaygroup.com/` |
-| 最近部署时间 | 2026-07-23 23:04（Asia/Shanghai） |
-| 部署源码树 | 与 `master@a14eea8` 完全一致 |
-| 最新发布分支提交 | `fix/code-review-followups@c46136e` |
-| 前端 JavaScript | `index-BmuUso4L.js` |
+| 最近部署时间 | 2026-07-24 11:36（Asia/Shanghai） |
+| 部署源码树 | 与 `master@e30da3d` 的 Git tree 完全一致 |
+| 最新发布分支提交 | `agent/optimize-exception-review-loading@6e12cdb` |
+| 前端 JavaScript | `index-BchohicX.js` |
 | 前端 CSS | `index-CrS6zE_W.css` |
 | Web 回环端口 | `127.0.0.1:18080` |
 
-PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏，PR #6 增加待处理原因指导、歧义站点单选和精确超收分配明细。PR #13 修复超收规则发布失败时的未处理 Promise，将锁定版本改为默认展开，并为前端慢速删除用例设置明确超时。PR #13 的 Merge 提交 `a14eea8` 与已验证分支提交 `c46136e` 的 Git tree 完全一致。
+PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次详情与其他页面的账号顶栏，PR #6 增加待处理原因指导、歧义站点单选和精确超收分配明细。PR #13 修复审校工作流问题。PR #15 通过批量查询和预建匹配索引优化批次读路径，PR #16–#17 将基础资料摘要与 20 行预览合并读取，PR #18 将超收仓库选项改为按需加载，PR #19 将批次概览与异常定位解耦，并加入有容量限制、并发安全的库位资料缓存。
 
 ### 3.2 服务状态
 
@@ -79,19 +79,20 @@ PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次�
 - `db`、`api`、`worker`、`web` 共 4 个容器运行；
 - PostgreSQL 和 API 健康检查通过；
 - 正式 HTTPS `/health` 返回成功；
-- 本次仅重新构建并替换无状态 `web` 容器，`api`、`worker`、`db` 未替换；
+- PR #19 部署重新构建并替换 `api`、`worker`、`web`，`db` 未替换；
 - 生产数据卷仍为 `deliverynote_postgres_data` 与 `deliverynote_delivery_data`。
 
 这些结果是带日期的快照，不替代变更前的现场检查。
 
 ### 3.3 验证基线
 
-2026-07-23 当前验证记录：
+2026-07-24 当前验证记录：
 
 | 检查 | 结果 |
 | --- | --- |
-| Python `unittest` | 131/131 通过 |
-| Frontend Vitest | 8 个测试文件，77/77 通过 |
+| Ruff 0.15.22 | `delivery_note`、`tests`、`scripts` 通过 |
+| Python `unittest` | 139/139 通过 |
+| Frontend Vitest | 8 个测试文件，80/80 通过 |
 | `pip check` | 通过 |
 | Frontend production build | 通过 |
 | Docker Compose config | 通过 |
@@ -102,6 +103,9 @@ PR #1 建立完整功能基线，PR #2 重构仓库文档，PR #3 统一批次�
 | 正式 Chrome 审校复核 | 真实旧批次正常加载并显示采购核对提示；失败响应、控制台错误和浏览器业务写入均为 0 |
 | PR #13 部署后认证只读验收 | 批次 14 锁定版本默认展开、收起与重开正常；超收规则确认框可打开并取消；失败响应、控制台错误和浏览器业务写入均为 0 |
 | PR #13 部署后日志 | Web/API 无新增 5xx、异常栈或运行时错误；重试脚本仅产生 1 次已失效会话注销 401 |
+| PR #19 批次 14 冷启动验收 | 概览约 308 ms 可见，40 条异常约 2.64 s 完成；加载期间，概览仍可操作 |
+| PR #19 异常接口热缓存 | 10 次中位数 46.28 ms，P95 54.24 ms |
+| PR #19 浏览器与日志 | 新资源加载成功；失败响应、控制台错误和浏览器业务写入均为 0；API/Web 无 5xx |
 
 前端构建存在约 1.2 MB 单包提示，不是构建失败。当前少量 PC 用户场景未因此出现已知功能问题。
 
@@ -174,6 +178,7 @@ git diff --check
 - `git status -sb` 无意外改动；
 - `git diff --check` 通过；
 - 与改动范围对应的自动化测试已通过；
+- Python 变更已通过 Ruff；
 - Python 依赖变更时 `pip check` 通过；
 - 前端变更时测试与生产构建通过；
 - Compose 或环境变更时 `docker compose config` 通过；
@@ -382,7 +387,7 @@ WEB_PORT=18080 docker compose \
 | 导入预览为进程内 Token | 接受重启后预览失效 | 需要多 API 或长时间恢复预览 |
 | 无通用 migration history | 维护专用幂等迁移 | 数据结构变更频率明显增加 |
 | 审计只显示最近 200 条 | 满足当前追溯范围 | 业务要求完整检索或合规留存 |
-| 无 GitHub Actions CI | 发布前人工执行验证矩阵 | 发布频率或协作人数上升 |
+| GitHub Actions 仅做质量检查 | 保持生产发布人工确认 | 需要自动部署时另行评估权限与回退 |
 | 前端单包较大 | 当前不做专项拆包 | 实测加载性能影响操作 |
 | 无手机端 | PC 为唯一验收范围 | 业务明确提出移动端场景 |
 | 无自动备份任务 | 遵循用户当前决定 | 用户重新提出恢复点要求 |
@@ -397,8 +402,9 @@ WEB_PORT=18080 docker compose \
 2. 由业务人员确认历史批次的业务性质和未结数量；
 3. 修改业务逻辑前建立可复现测试；
 4. 以最小变更修复，并执行对应验证矩阵；
-5. 只有达到上表触发条件后，才评估架构扩展。
+5. 仅约束新增或修改代码，不为历史格式执行无业务收益的全仓重写；
+6. 只有达到上表触发条件后，才评估架构扩展。
 
 ## 13. 新会话启动模板
 
-> 请在独立 worktree 中继续任务。先完整阅读 `AGENTS.md`、`README.md` 和 `HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb` 与 `git diff --check`。不要进入、覆盖或清理 `/root/deliverynote` 主工作区，其中有用户未提交改动。保持单机、单 API、单 Worker 和 PC 范围；不做 ERP 回写，不跨批次扣减采购余额。修改业务逻辑前先读相关测试与调用链，保持文件顺序共享余额、数量守恒、供应商成品本地仓优先、锁仓、拆分、CLI 和 A:G 导出兼容。不要调用 Superpowers 插件，不要删除 Docker 数据卷。
+> 请在独立 worktree 中继续任务。先完整阅读 `AGENTS.md`、`README.md` 和 `HANDOFF_WEB_UPGRADE.md`，运行 `git status -sb`、Ruff 与 `git diff --check`。不要进入、覆盖或清理 `/root/deliverynote` 主工作区，其中有用户未提交改动。保持单机、单 API、单 Worker 和 PC 范围；不做 ERP 回写，不跨批次扣减采购余额。修改业务逻辑前先读相关测试与调用链，保持文件顺序共享余额、数量守恒、供应商成品本地仓优先、锁仓、拆分、CLI 和 A:G 导出兼容。不要调用 Superpowers 插件，不要删除 Docker 数据卷。

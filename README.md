@@ -282,7 +282,8 @@ docker compose down
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
+python -m ruff check delivery_note tests scripts
 python -m unittest discover -s tests -v
 python -m pip check
 ```
@@ -302,6 +303,10 @@ npm run build
 docker compose config
 git diff --check
 ```
+
+仓库中的 `.github/workflows/ci.yml` 会在 PR 和 `master` 推送时自动执行
+Ruff、后端测试、前端测试与构建、依赖检查和 Compose 配置校验。CI
+不连接生产环境，也不自动部署。
 
 涉及共享余额或超收规则时，还应执行脱敏业务验收：
 
@@ -351,7 +356,7 @@ CLI 每次处理一份交货文件。需要在多份文件之间共享采购余�
 - 库位 Excel 导入预览 Token 保存在 API 进程内；
 - 数据库主要由 SQLAlchemy `create_all()` 建表，超收规则使用独立幂等迁移；
 - 操作记录只读取最近 200 条；
-- 仓库当前没有 GitHub Actions CI；
+- GitHub Actions 只负责质量检查，生产发布继续按 Runbook 手工确认；
 - 前端生产构建存在单包体积提示，但不改变当前少量内部用户的功能口径。
 
 这些边界不是对未来扩展的承诺。只有真实使用规模或业务要求发生变化时，才评估相应架构调整。

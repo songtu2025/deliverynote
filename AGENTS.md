@@ -23,6 +23,8 @@
 ## 实现方式
 
 - 遵循 KISS，只做当前任务需要的最小修改。
+- Python 代码遵循 PEP8；新增或修改的注释与 docstring 使用中文。
+- 不为清理历史格式而全仓重写，只约束当前新增或修改的代码。
 - Web、CLI 和 Worker 共用 `delivery_note` 核心逻辑，不复制采购匹配代码。
 - 修复缺陷时先写或定位能够复现问题的测试，再实现修复。
 - 不引入 Redis、Celery、微服务拆分或没有明确需求的平台组件。
@@ -34,6 +36,7 @@ Python 变更：
 
 ```bash
 source .venv/bin/activate
+python -m ruff check delivery_note tests scripts
 python -m unittest discover -s tests -v
 python -m pip check
 ```
