@@ -141,6 +141,11 @@ export interface InputVersionPreview {
   limit: number;
 }
 
+export interface InputVersionInspection {
+  summary: InputVersionSummary;
+  preview: InputVersionPreview;
+}
+
 export type PositionChangeType = "unchanged" | "added" | "modified" | "deleted";
 
 export interface PositionDiff {

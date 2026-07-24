@@ -1,13 +1,16 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.styles import PatternFill
 
-from delivery_note.excel_io import read_position_workbook
+from delivery_note.excel_io import PRODUCT_COLUMNS, read_position_workbook
 from delivery_note.input_inspection import (
     inspect_input_version,
+    inspect_input_version_with_preview,
     position_change_warnings,
     position_diff,
     preview_input_version,
@@ -64,6 +67,70 @@ class InputInspectionTests(unittest.TestCase):
         self.assertEqual(preview["limit"], 1)
         self.assertEqual(preview["columns"], POSITION_SOURCE_COLUMNS)
         self.assertEqual(preview["rows"][0]["已下单可售天数"], "many")
+
+    def test_combined_position_inspection_reads_the_workbook_once(self):
+        write_position_workbook(self.path, self.frame)
+
+        with patch(
+            "delivery_note.input_inspection.read_position_workbook",
+            wraps=read_position_workbook,
+        ) as read_workbook:
+            result = inspect_input_version_with_preview(
+                "position",
+                self.path,
+                offset=0,
+                limit=50,
+            )
+
+        self.assertEqual(read_workbook.call_count, 1)
+        self.assertEqual(result["summary"]["row_count"], 1)
+        self.assertEqual(result["preview"]["total"], 1)
+        self.assertEqual(result["preview"]["rows"][0]["积加SKU"], "SKU-A")
+
+    def test_combined_product_inspection_streams_only_required_columns(self):
+        path = self.root / "product.xlsx"
+        source_columns = [
+            "其他字段",
+            "锁仓MKSU",
+            "SKU",
+            "店铺/站点",
+            "品类A",
+        ]
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(source_columns)
+        sheet.append(["忽略", "锁", "SKU-A", "SEEKWAY:US", "水鞋"])
+        sheet.append(["忽略", "", "SKU-B", "SEEKWAY:CA", "配件"])
+        sheet["A100"].fill = PatternFill(fill_type="solid", fgColor="FFFF00")
+        workbook.save(path)
+
+        with patch(
+            "delivery_note.input_inspection.read_product_workbook",
+            side_effect=AssertionError("产品预览不应全量读取 DataFrame"),
+        ):
+            result = inspect_input_version_with_preview(
+                "product",
+                path,
+                offset=1,
+                limit=1,
+            )
+
+        expected_columns = [
+            column for column in source_columns if column in PRODUCT_COLUMNS
+        ]
+        self.assertEqual(result["summary"]["row_count"], 2)
+        self.assertEqual(result["summary"]["columns"], expected_columns)
+        self.assertEqual(result["preview"]["total"], 2)
+        self.assertEqual(result["preview"]["columns"], expected_columns)
+        self.assertEqual(
+            result["preview"]["rows"],
+            [{
+                "锁仓MKSU": None,
+                "SKU": "SKU-B",
+                "店铺/站点": "SEEKWAY:CA",
+                "品类A": "配件",
+            }],
+        )
 
     def test_written_position_workbook_round_trips(self):
         write_position_workbook(self.path, self.frame)
