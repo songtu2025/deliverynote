@@ -71,12 +71,22 @@ describe("OverreceiptRulesPage", () => {
     expect(screen.getByRole("table", { name: "超收规则不可变版本" })).toBeInTheDocument();
     expect(screen.getAllByText("未开放任何仓库").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "重新启用 2026-06 基线规则" })).toBeInTheDocument();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) => (
+        String(input).endsWith("/api/overreceipt-rule-versions/warehouses")
+      ))
+    ).toBe(false);
 
     fireEvent.change(screen.getByLabelText("规则版本名称"), {
       target: { value: "2026-08 新规则" }
     });
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "允许超收仓库" }));
     fireEvent.click(await screen.findByText("水鞋-广州仓", { selector: ".ant-select-item-option-content" }));
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([input]) => (
+        String(input).endsWith("/api/overreceipt-rule-versions/warehouses")
+      ))
+    ).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "发布并用于新批次" }));
 
     const dialog = await screen.findByRole("dialog", { name: "确认发布不可变版本？" });

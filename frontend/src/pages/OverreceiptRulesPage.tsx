@@ -53,6 +53,8 @@ export default function OverreceiptRulesPage() {
   const [rules, setRules] = useState<OverreceiptRuleVersion[]>([]);
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [warehousesLoading, setWarehousesLoading] = useState(false);
+  const [warehousesLoaded, setWarehousesLoaded] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activatingId, setActivatingId] = useState<number>();
   const [error, setError] = useState<string | null>(null);
@@ -63,18 +65,28 @@ export default function OverreceiptRulesPage() {
     setLoading(true);
     setError(null);
     try {
-      const [ruleRows, warehouseRows] = await Promise.all([
-        api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions"),
-        api<string[]>("/api/overreceipt-rule-versions/warehouses")
-      ]);
+      const ruleRows = await api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions");
       setRules(ruleRows);
-      setWarehouses(warehouseRows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "读取超收规则失败");
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const loadWarehouses = useCallback(async () => {
+    if (warehousesLoaded || warehousesLoading) return;
+    setWarehousesLoading(true);
+    try {
+      const rows = await api<string[]>("/api/overreceipt-rule-versions/warehouses");
+      setWarehouses(rows);
+      setWarehousesLoaded(true);
+    } catch (loadError) {
+      message.error(loadError instanceof Error ? loadError.message : "读取仓库选项失败");
+    } finally {
+      setWarehousesLoading(false);
+    }
+  }, [warehousesLoaded, warehousesLoading]);
 
   useEffect(() => {
     void load();
@@ -167,7 +179,15 @@ export default function OverreceiptRulesPage() {
             所有操作员均可发布规则；批次创建后锁定当时版本，历史结果可复现。
           </Typography.Text>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={() => {
+            setWarehouses([]);
+            setWarehousesLoaded(false);
+            void load();
+          }}
+          loading={loading}
+        >
           刷新
         </Button>
       </div>
@@ -257,8 +277,12 @@ export default function OverreceiptRulesPage() {
               <Select
                 mode="multiple"
                 allowClear
+                loading={warehousesLoading}
                 placeholder="选择允许超收的目的仓"
                 options={warehouses.map((warehouse) => ({ value: warehouse, label: warehouse }))}
+                onOpenChange={(open) => {
+                  if (open) void loadWarehouses();
+                }}
               />
             </Form.Item>
             <Button
