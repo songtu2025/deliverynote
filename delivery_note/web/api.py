@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
@@ -104,6 +105,30 @@ ROLES = {"admin", "operator"}
 POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
+
+
+class _PositionFrameCache:
+    """按最近使用顺序缓存不可变的库位资料版本。"""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("库位资料缓存容量必须大于 0")
+        self._max_entries = max_entries
+        self._frames: OrderedDict[int, pd.DataFrame] = OrderedDict()
+        self._lock = Lock()
+
+    def get(self, version_id: int, path: Path) -> pd.DataFrame:
+        with self._lock:
+            frame = self._frames.get(version_id)
+            if frame is not None:
+                self._frames.move_to_end(version_id)
+                return frame
+
+            frame = read_position_workbook(path)
+            self._frames[version_id] = frame
+            if len(self._frames) > self._max_entries:
+                self._frames.popitem(last=False)
+            return frame
 
 
 def _utc_isoformat(value: datetime) -> str:
@@ -556,7 +581,7 @@ def _exception_position_values(
     exceptions: list[ExceptionRecord],
     batch: Batch,
     session: Session,
-    position_frame_cache: dict[int, pd.DataFrame],
+    position_frame_cache: _PositionFrameCache,
 ) -> dict[int, dict[str, str | int | float]]:
     if not exceptions:
         return {}
@@ -580,10 +605,10 @@ def _exception_position_values(
         columns=IMPORT_COLUMNS,
     )
     try:
-        position_rows = position_frame_cache.get(version.id)
-        if position_rows is None:
-            position_rows = read_position_workbook(Path(version.storage_path))
-            position_frame_cache[version.id] = position_rows
+        position_rows = position_frame_cache.get(
+            version.id,
+            Path(version.storage_path),
+        )
         enriched = enrich_pending_import_rows(
             pending_rows,
             position_rows,
@@ -710,6 +735,7 @@ def create_app(
     bootstrap_admin: tuple[str, str] | None = None,
     max_upload_bytes: int | None = None,
     import_candidate_ttl_seconds: int | None = None,
+    position_frame_cache_size: int | None = None,
 ) -> FastAPI:
     database = Database(
         database_url
@@ -732,6 +758,13 @@ def create_app(
     )
     if configured_import_candidate_ttl <= 0:
         raise ValueError("IMPORT_CANDIDATE_TTL_SECONDS 必须大于 0")
+    configured_position_frame_cache_size = (
+        position_frame_cache_size
+        if position_frame_cache_size is not None
+        else int(os.getenv("POSITION_FRAME_CACHE_SIZE", "8"))
+    )
+    if configured_position_frame_cache_size <= 0:
+        raise ValueError("POSITION_FRAME_CACHE_SIZE 必须大于 0")
     import_candidate_root = storage / "temporary" / "position-imports"
     import_candidate_root.mkdir(parents=True, exist_ok=True)
     startup_expiry_cutoff = (
@@ -750,7 +783,9 @@ def create_app(
     batch_file_upload_lock = Lock()
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
-    position_frame_cache: dict[int, pd.DataFrame] = {}
+    position_frame_cache = _PositionFrameCache(
+        configured_position_frame_cache_size
+    )
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -778,6 +813,7 @@ def create_app(
     app.state.storage_root = storage
     app.state.max_upload_bytes = configured_max_upload_bytes
     app.state.import_candidate_ttl_seconds = configured_import_candidate_ttl
+    app.state.position_frame_cache_size = configured_position_frame_cache_size
     app.state.position_import_candidates = import_candidates
     app.add_middleware(
         CORSMiddleware,

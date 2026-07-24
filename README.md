@@ -227,6 +227,7 @@ flowchart LR
 | `CORS_ORIGINS` | 否 | `http://localhost:8080` | 允许访问 API 的 Web 来源 |
 | `MAX_UPLOAD_BYTES` | 否 | `20971520` | 单次上传大小上限，单位为字节 |
 | `IMPORT_CANDIDATE_TTL_SECONDS` | 否 | `900` | 库位 Excel 导入预览的有效秒数 |
+| `POSITION_FRAME_CACHE_SIZE` | 否 | `8` | API 进程缓存的库位资料版本数量 |
 
 `.env` 包含凭据，不得提交到 Git。
 

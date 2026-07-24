@@ -344,8 +344,8 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const load = async (silent = false) => {
     if (!silent) {
       setLoading(true);
-      setExceptionsLoading(true);
     }
+    setExceptionsLoading(true);
     try {
       const batchRequest = api<Batch>(`/api/batches/${batchId}`).then((result) => {
         setBatch(result);
@@ -360,8 +360,8 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     } finally {
       if (!silent) {
         setLoading(false);
-        setExceptionsLoading(false);
       }
+      setExceptionsLoading(false);
     }
   };
 

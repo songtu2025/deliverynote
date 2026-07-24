@@ -27,6 +27,7 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
       IMPORT_CANDIDATE_TTL_SECONDS: ${IMPORT_CANDIDATE_TTL_SECONDS:-900}
+      POSITION_FRAME_CACHE_SIZE: ${POSITION_FRAME_CACHE_SIZE:-8}
     volumes:
       - delivery_data:/data
     depends_on:
