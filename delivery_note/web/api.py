@@ -556,6 +556,7 @@ def _exception_position_values(
     exceptions: list[ExceptionRecord],
     batch: Batch,
     session: Session,
+    position_frame_cache: dict[int, pd.DataFrame],
 ) -> dict[int, dict[str, str | int | float]]:
     if not exceptions:
         return {}
@@ -579,9 +580,13 @@ def _exception_position_values(
         columns=IMPORT_COLUMNS,
     )
     try:
+        position_rows = position_frame_cache.get(version.id)
+        if position_rows is None:
+            position_rows = read_position_workbook(Path(version.storage_path))
+            position_frame_cache[version.id] = position_rows
         enriched = enrich_pending_import_rows(
             pending_rows,
-            read_position_workbook(Path(version.storage_path)),
+            position_rows,
         )
     except (OSError, ValueError) as error:
         raise HTTPException(
@@ -745,6 +750,7 @@ def create_app(
     batch_file_upload_lock = Lock()
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
+    position_frame_cache: dict[int, pd.DataFrame] = {}
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -2298,7 +2304,12 @@ def create_app(
             .where(BatchFile.batch_id == batch_id)
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         ).all()
-        position_values = _exception_position_values(exceptions, batch, session)
+        position_values = _exception_position_values(
+            exceptions,
+            batch,
+            session,
+            position_frame_cache,
+        )
         splits_by_exception = _split_records_by_exception(
             session,
             exceptions,
@@ -2343,7 +2354,12 @@ def create_app(
         )
         if export_job and export_job.status in {"queued", "running"}:
             raise HTTPException(status_code=409, detail="导出任务运行期间不可修改拆分")
-        position_values = _exception_position_values([exception], batch, session)
+        position_values = _exception_position_values(
+            [exception],
+            batch,
+            session,
+            position_frame_cache,
+        )
         previous_parts = session.scalars(
             select(SplitRecord)
             .where(SplitRecord.exception_id == exception.id)

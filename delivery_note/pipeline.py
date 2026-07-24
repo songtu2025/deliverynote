@@ -344,6 +344,22 @@ def enrich_pending_import_rows(
     positions["_site_key"] = positions["店铺-站点"].map(_normalize_position_text)
     positions["_sku_key"] = positions["积加SKU"].map(_normalize_position_text)
     positions = positions[positions["_site_key"].ne("") & positions["_sku_key"].ne("")]
+    pending_keys = {
+        (
+            _normalize_pending_site(site),
+            _normalize_position_text(sku),
+        )
+        for site, sku in zip(result["*站点"], result["*SKU"])
+    }
+    positions = positions[
+        [
+            (site_key, sku_key) in pending_keys
+            for site_key, sku_key in zip(
+                positions["_site_key"],
+                positions["_sku_key"],
+            )
+        ]
+    ]
     groups = {
         key: group.copy()
         for key, group in positions.groupby(["_site_key", "_sku_key"], sort=False)

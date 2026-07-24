@@ -236,6 +236,29 @@ describe("BatchDetail", () => {
     expect(screen.getByText("1", { selector: ".split-conservation strong" })).toBeInTheDocument();
   }, 30_000);
 
+  it("shows the batch overview before exception enrichment finishes", async () => {
+    let finishExceptions: (response: Response) => void = () => undefined;
+    const delayedExceptions = new Promise<Response>((resolve) => {
+      finishExceptions = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/batches/7/exceptions")) return delayedExceptions;
+      if (url.endsWith("/api/batches/7")) {
+        return Promise.resolve(jsonResponse(batchPayload));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
+    expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
+
+    finishExceptions(jsonResponse(exceptionPayload));
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+  });
+
   it("filters pending rows by site, scale position, and stocking position", async () => {
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 

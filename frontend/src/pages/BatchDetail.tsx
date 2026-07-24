@@ -325,6 +325,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const [batch, setBatch] = useState<Batch | null>(null);
   const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exceptionsLoading, setExceptionsLoading] = useState(true);
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [query, setQuery] = useState("");
@@ -341,18 +342,26 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const reviewSection = useRef<HTMLDivElement | null>(null);
 
   const load = async (silent = false) => {
-    if (!silent) setLoading(true);
+    if (!silent) {
+      setLoading(true);
+      setExceptionsLoading(true);
+    }
     try {
-      const [batchResult, exceptionRows] = await Promise.all([
-        api<Batch>(`/api/batches/${batchId}`),
-        api<DeliveryException[]>(`/api/batches/${batchId}/exceptions`)
-      ]);
-      setBatch(batchResult);
-      setExceptions(exceptionRows);
+      const batchRequest = api<Batch>(`/api/batches/${batchId}`).then((result) => {
+        setBatch(result);
+        if (!silent) setLoading(false);
+      });
+      const exceptionsRequest = api<DeliveryException[]>(
+        `/api/batches/${batchId}/exceptions`
+      ).then(setExceptions);
+      await Promise.all([batchRequest, exceptionsRequest]);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取批次失败");
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent) {
+        setLoading(false);
+        setExceptionsLoading(false);
+      }
     }
   };
 
@@ -933,6 +942,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           title={`待处理审校（共 ${exceptions.length} 条）`}
           extra={<span className="toolbar-count">当前显示 {filteredExceptions.length} 条</span>}
           className="section-card exception-review-card"
+          loading={exceptionsLoading}
         >
           <section className="review-overview" aria-label="审校概览">
             <div className="review-overview-copy">

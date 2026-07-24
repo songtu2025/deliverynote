@@ -636,16 +636,33 @@ class WebApiTests(unittest.TestCase):
             "/api/batches",
             admin_headers,
         )
-        exceptions, exception_queries = self.get_with_query_count(
-            f"/api/batches/{batch_id}/exceptions",
-            admin_headers,
-        )
+        original_reader = web_api_module.read_position_workbook
+        with patch.object(
+            web_api_module,
+            "read_position_workbook",
+            wraps=original_reader,
+        ) as reader:
+            exceptions, exception_queries = self.get_with_query_count(
+                f"/api/batches/{batch_id}/exceptions",
+                admin_headers,
+            )
+            repeated_exceptions = self.client.get(
+                f"/api/batches/{batch_id}/exceptions",
+                headers=admin_headers,
+            )
 
         self.assertEqual(detail.status_code, 200, detail.text)
         self.assertEqual(listed.status_code, 200, listed.text)
         self.assertEqual(exceptions.status_code, 200, exceptions.text)
+        self.assertEqual(
+            repeated_exceptions.status_code,
+            200,
+            repeated_exceptions.text,
+        )
         self.assertEqual(detail.json()["summary"]["import_total"], 10)
         self.assertEqual(len(exceptions.json()), 10)
+        self.assertEqual(repeated_exceptions.json(), exceptions.json())
+        self.assertEqual(reader.call_count, 1)
         self.assertLessEqual(detail_queries, 15)
         self.assertLessEqual(list_queries, 8)
         self.assertLessEqual(exception_queries, 8)
