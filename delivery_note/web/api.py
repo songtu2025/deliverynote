@@ -1287,7 +1287,7 @@ def create_app(
                 version.kind,
                 Path(version.storage_path),
                 0,
-                50,
+                20,
             )["summary"]
         except Exception as error:
             raise HTTPException(
@@ -1301,7 +1301,7 @@ def create_app(
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
         offset: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        limit: Annotated[int, Query(ge=1, le=200)] = 20,
     ):
         version = session.get(InputVersion, version_id)
         if version is None:
@@ -1325,7 +1325,7 @@ def create_app(
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
         offset: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        limit: Annotated[int, Query(ge=1, le=200)] = 20,
     ):
         version = session.get(InputVersion, version_id)
         if version is None:

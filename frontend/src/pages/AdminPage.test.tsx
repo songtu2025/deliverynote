@@ -110,7 +110,7 @@ describe("AdminPage", () => {
             rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
             total: 1,
             offset: 0,
-            limit: 50
+            limit: 20
           }
         });
       }

@@ -124,7 +124,7 @@ describe("InputDataPanel", () => {
             rows: emptyPurchasePreview ? [] : [{ SKU: "PURCHASE-SKU", 未交量: 100, 已锁定: true, 需复核: false }],
             total: emptyPurchasePreview ? 0 : 1,
             offset: 0,
-            limit: 50
+            limit: 20
           }
         });
       }
@@ -148,7 +148,7 @@ describe("InputDataPanel", () => {
             rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
             total: 1,
             offset: 0,
-            limit: 50
+            limit: 20
           }
         });
       }

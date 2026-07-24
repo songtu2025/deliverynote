@@ -1177,11 +1177,11 @@ class PositionDraftApiTests(unittest.TestCase):
             headers=self.admin_headers,
         )
         preview = self.client.get(
-            f"/api/input-versions/{version_id}/preview?limit=20",
+            f"/api/input-versions/{version_id}/preview",
             headers=self.admin_headers,
         )
         inspection = self.client.get(
-            f"/api/input-versions/{version_id}/inspection?limit=20",
+            f"/api/input-versions/{version_id}/inspection",
             headers=self.admin_headers,
         )
         download = self.client.get(
@@ -1194,6 +1194,7 @@ class PositionDraftApiTests(unittest.TestCase):
         self.assertEqual(preview.status_code, 200, preview.text)
         self.assertEqual(preview.json()["rows"][0]["积加SKU"], "SKU-A")
         self.assertEqual(preview.json()["total"], 1)
+        self.assertEqual(preview.json()["limit"], 20)
         self.assertEqual(inspection.status_code, 200, inspection.text)
         self.assertEqual(
             inspection.json()["summary"]["metrics"]["sites"],
@@ -1203,6 +1204,7 @@ class PositionDraftApiTests(unittest.TestCase):
             inspection.json()["preview"]["rows"][0]["积加SKU"],
             "SKU-A",
         )
+        self.assertEqual(inspection.json()["preview"]["limit"], 20)
         self.assertEqual(download.status_code, 200, download.text)
         self.assertIn("position-v1.xlsx", download.headers["content-disposition"])
         self.assertGreater(len(download.content), 0)
