@@ -38,10 +38,9 @@ from ..excel_io import (
     validate_template_workbook,
 )
 from ..input_inspection import (
-    inspect_input_version,
+    inspect_input_version_with_preview,
     position_change_warnings,
     position_diff,
-    preview_input_version,
     validate_position_frame,
     write_position_workbook,
 )
@@ -1284,7 +1283,36 @@ def create_app(
         if version is None:
             raise HTTPException(status_code=404, detail="输入版本不存在")
         try:
-            return inspect_input_version(version.kind, Path(version.storage_path))
+            return inspect_input_version_with_preview(
+                version.kind,
+                Path(version.storage_path),
+                0,
+                50,
+            )["summary"]
+        except Exception as error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"输入版本读取失败：{error}",
+            ) from error
+
+    @app.get("/api/input-versions/{version_id}/inspection")
+    def input_version_inspection(
+        version_id: int,
+        _admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        version = session.get(InputVersion, version_id)
+        if version is None:
+            raise HTTPException(status_code=404, detail="输入版本不存在")
+        try:
+            return inspect_input_version_with_preview(
+                version.kind,
+                Path(version.storage_path),
+                offset,
+                limit,
+            )
         except Exception as error:
             raise HTTPException(
                 status_code=400,
@@ -1303,12 +1331,12 @@ def create_app(
         if version is None:
             raise HTTPException(status_code=404, detail="输入版本不存在")
         try:
-            return preview_input_version(
+            return inspect_input_version_with_preview(
                 version.kind,
                 Path(version.storage_path),
                 offset,
                 limit,
-            )
+            )["preview"]
         except Exception as error:
             raise HTTPException(
                 status_code=400,

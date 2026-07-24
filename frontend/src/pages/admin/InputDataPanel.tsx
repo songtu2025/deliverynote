@@ -28,6 +28,7 @@ import { api, download } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
 import type {
   InputVersion,
+  InputVersionInspection,
   InputVersionPreview,
   InputVersionPreviewValue,
   InputVersionSummary,
@@ -134,10 +135,9 @@ export function InputDataPanel({
     let cancelled = false;
     const versionId = activeVersion.id;
     setInspectionLoading(true);
-    void Promise.all([
-      api<InputVersionSummary>(`/api/input-versions/${versionId}/summary`),
-      api<InputVersionPreview>(`/api/input-versions/${versionId}/preview`)
-    ]).then(([nextSummary, nextPreview]) => {
+    void api<InputVersionInspection>(
+      `/api/input-versions/${versionId}/inspection`
+    ).then(({ summary: nextSummary, preview: nextPreview }) => {
       if (cancelled) return;
       setSummary(nextSummary);
       setPreview(nextPreview);

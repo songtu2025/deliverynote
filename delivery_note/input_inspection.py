@@ -3,9 +3,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from .excel_io import (
+    PRODUCT_COLUMNS,
+    PURCHASE_COLUMNS,
     read_position_workbook,
     read_product_workbook,
     read_purchase_workbook,
@@ -18,6 +20,10 @@ from .pipeline import POSITION_SOURCE_COLUMNS
 POSITION_KEY = ["店铺-站点", "积加SKU", "MSKU"]
 _POSITION_VALUES = [column for column in POSITION_SOURCE_COLUMNS if column not in POSITION_KEY]
 _KNOWN_SCALES = {"短尾", "中尾", "长尾"}
+_STREAMING_COLUMNS = {
+    "product": PRODUCT_COLUMNS,
+    "purchase": PURCHASE_COLUMNS,
+}
 
 
 def _read_template_workbook(path: Path) -> pd.DataFrame:
@@ -52,8 +58,13 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def inspect_input_version(kind: str, path: Path) -> dict:
-    frame = _read_frame(kind, path)
+def _stream_json_safe(value: Any) -> Any:
+    if value == "":
+        return None
+    return _json_safe(value)
+
+
+def _inspect_frame(kind: str, frame: pd.DataFrame) -> dict:
     result = {
         "kind": kind,
         "row_count": len(frame),
@@ -71,8 +82,12 @@ def inspect_input_version(kind: str, path: Path) -> dict:
     return result
 
 
-def preview_input_version(kind: str, path: Path, offset: int, limit: int) -> dict:
-    frame = _read_frame(kind, path)
+def _preview_frame(
+    kind: str,
+    frame: pd.DataFrame,
+    offset: int,
+    limit: int,
+) -> dict:
     page = frame.iloc[offset : offset + limit]
     columns = [str(column) for column in frame.columns]
     rows = [
@@ -90,6 +105,125 @@ def preview_input_version(kind: str, path: Path, offset: int, limit: int) -> dic
         "offset": offset,
         "limit": limit,
     }
+
+
+def _stream_xlsx_inspection(
+    kind: str,
+    path: Path,
+    offset: int,
+    limit: int,
+) -> dict:
+    """流式读取预览行，同时计算有效数据总行数。"""
+
+    expected_columns = _STREAMING_COLUMNS[kind]
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.worksheets[0]
+        values = sheet.iter_rows(values_only=True)
+        header = next(values, ())
+        header_names = [
+            "" if value is None else str(value)
+            for value in header
+        ]
+        expected_set = set(expected_columns)
+        selected_columns = [
+            (index, name)
+            for index, name in enumerate(header_names)
+            if name in expected_set
+        ]
+        found = {name for _index, name in selected_columns}
+        missing = [
+            column for column in expected_columns if column not in found
+        ]
+        if missing:
+            raise ValueError(f"缺少必要字段：{', '.join(missing)}")
+
+        page_rows: list[tuple[int, dict[str, Any]]] = []
+        last_data_offset = -1
+        for row_offset, row in enumerate(values):
+            selected_values = [
+                row[index] if index < len(row) else None
+                for index, _name in selected_columns
+            ]
+            if any(value not in (None, "") for value in selected_values):
+                last_data_offset = row_offset
+            if offset <= row_offset < offset + limit:
+                page_rows.append(
+                    (
+                        row_offset,
+                        {
+                            name: _stream_json_safe(value)
+                            for (_index, name), value in zip(
+                                selected_columns,
+                                selected_values,
+                            )
+                        },
+                    )
+                )
+
+        total = last_data_offset + 1
+        columns = [name for _index, name in selected_columns]
+        preview = {
+            "kind": kind,
+            "columns": columns,
+            "rows": [
+                row
+                for row_offset, row in page_rows
+                if row_offset < total
+            ],
+            "total": total,
+            "offset": offset,
+            "limit": limit,
+        }
+        summary = {
+            "kind": kind,
+            "row_count": total,
+            "columns": columns,
+            "metrics": {},
+            "issues": [],
+        }
+        return {"summary": summary, "preview": preview}
+    finally:
+        workbook.close()
+
+
+def inspect_input_version(kind: str, path: Path) -> dict:
+    return _inspect_frame(kind, _read_frame(kind, path))
+
+
+def inspect_input_version_with_preview(
+    kind: str,
+    path: Path,
+    offset: int,
+    limit: int,
+) -> dict:
+    """一次读取基础资料并生成摘要与分页预览。"""
+
+    path = Path(path)
+    if (
+        kind in _STREAMING_COLUMNS
+        and path.suffix.lower() in {".xlsx", ".xlsm"}
+    ):
+        return _stream_xlsx_inspection(kind, path, offset, limit)
+    frame = _read_frame(kind, path)
+    return {
+        "summary": _inspect_frame(kind, frame),
+        "preview": _preview_frame(kind, frame, offset, limit),
+    }
+
+
+def preview_input_version(
+    kind: str,
+    path: Path,
+    offset: int,
+    limit: int,
+) -> dict:
+    return inspect_input_version_with_preview(
+        kind,
+        path,
+        offset,
+        limit,
+    )["preview"]
 
 
 def _text_values(frame: pd.DataFrame, column: str) -> pd.Series:

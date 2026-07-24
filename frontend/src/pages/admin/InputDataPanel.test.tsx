@@ -108,48 +108,48 @@ describe("InputDataPanel", () => {
       const url = String(input);
       const method = init?.method ?? "GET";
 
-      if (url.endsWith("/api/input-versions/1/summary")) {
+      if (url.endsWith("/api/input-versions/1/inspection")) {
         if (failInspection) return jsonResponse({ detail: "采购文件无法解析" }, 400);
         return jsonResponse({
-          kind: "purchase",
-          row_count: 2,
-          columns: ["SKU", "未交量"],
-          metrics: {},
-          issues: []
+          summary: {
+            kind: "purchase",
+            row_count: 2,
+            columns: ["SKU", "未交量"],
+            metrics: {},
+            issues: []
+          },
+          preview: {
+            kind: "purchase",
+            columns: ["SKU", "未交量", "已锁定", "需复核"],
+            rows: emptyPurchasePreview ? [] : [{ SKU: "PURCHASE-SKU", 未交量: 100, 已锁定: true, 需复核: false }],
+            total: emptyPurchasePreview ? 0 : 1,
+            offset: 0,
+            limit: 50
+          }
         });
       }
-      if (url.endsWith("/api/input-versions/1/preview")) {
+      if (url.endsWith("/api/input-versions/3/inspection")) {
         return jsonResponse({
-          kind: "purchase",
-          columns: ["SKU", "未交量", "已锁定", "需复核"],
-          rows: emptyPurchasePreview ? [] : [{ SKU: "PURCHASE-SKU", 未交量: 100, 已锁定: true, 需复核: false }],
-          total: emptyPurchasePreview ? 0 : 1,
-          offset: 0,
-          limit: 50
-        });
-      }
-      if (url.endsWith("/api/input-versions/3/summary")) {
-        return jsonResponse({
-          kind: "position",
-          row_count: 1,
-          columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"],
-          metrics: { sites: 1, skus: 1, mskus: 1 },
-          issues: [{
-            severity: "warning",
-            code: "empty_stocking",
-            message: "备货定位不能为空",
-            row_numbers: [2, 3]
-          }]
-        });
-      }
-      if (url.endsWith("/api/input-versions/3/preview")) {
-        return jsonResponse({
-          kind: "position",
-          columns: ["店铺-站点", "积加SKU", "MSKU"],
-          rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
-          total: 1,
-          offset: 0,
-          limit: 50
+          summary: {
+            kind: "position",
+            row_count: 1,
+            columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"],
+            metrics: { sites: 1, skus: 1, mskus: 1 },
+            issues: [{
+              severity: "warning",
+              code: "empty_stocking",
+              message: "备货定位不能为空",
+              row_numbers: [2, 3]
+            }]
+          },
+          preview: {
+            kind: "position",
+            columns: ["店铺-站点", "积加SKU", "MSKU"],
+            rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
+            total: 1,
+            offset: 0,
+            limit: 50
+          }
         });
       }
       if (url.endsWith("/api/input-versions/purchase") && method === "POST") {
@@ -302,10 +302,10 @@ describe("InputDataPanel", () => {
     expect(await screen.findByText("SEEKWAY:US")).toBeInTheDocument();
 
     const requestedUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-    expect(requestedUrls).toContain("/api/input-versions/1/summary");
-    expect(requestedUrls).toContain("/api/input-versions/1/preview");
-    expect(requestedUrls).toContain("/api/input-versions/3/summary");
-    expect(requestedUrls).toContain("/api/input-versions/3/preview");
+    expect(requestedUrls).toContain("/api/input-versions/1/inspection");
+    expect(requestedUrls).toContain("/api/input-versions/3/inspection");
+    expect(requestedUrls.some((url) => url.endsWith("/summary"))).toBe(false);
+    expect(requestedUrls.some((url) => url.endsWith("/preview"))).toBe(false);
     expect(requestedUrls.some((url) => url.includes("/2/"))).toBe(false);
     expect(requestedUrls.some((url) => url.includes("/4/"))).toBe(false);
   });

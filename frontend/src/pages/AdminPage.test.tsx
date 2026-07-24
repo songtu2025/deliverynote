@@ -95,23 +95,23 @@ describe("AdminPage", () => {
       }
 
       if (url.endsWith("/api/input-versions") && method === "GET") return jsonResponse(versions);
-      if (url.endsWith("/api/input-versions/31/summary")) {
+      if (url.endsWith("/api/input-versions/31/inspection")) {
         return jsonResponse({
-          kind: "position",
-          row_count: 1,
-          columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"],
-          metrics: { sites: 1, skus: 1, mskus: 1 },
-          issues: []
-        });
-      }
-      if (url.endsWith("/api/input-versions/31/preview")) {
-        return jsonResponse({
-          kind: "position",
-          columns: ["店铺-站点", "积加SKU", "MSKU"],
-          rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
-          total: 1,
-          offset: 0,
-          limit: 50
+          summary: {
+            kind: "position",
+            row_count: 1,
+            columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"],
+            metrics: { sites: 1, skus: 1, mskus: 1 },
+            issues: []
+          },
+          preview: {
+            kind: "position",
+            columns: ["店铺-站点", "积加SKU", "MSKU"],
+            rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
+            total: 1,
+            offset: 0,
+            limit: 50
+          }
         });
       }
 

@@ -1180,6 +1180,10 @@ class PositionDraftApiTests(unittest.TestCase):
             f"/api/input-versions/{version_id}/preview?limit=20",
             headers=self.admin_headers,
         )
+        inspection = self.client.get(
+            f"/api/input-versions/{version_id}/inspection?limit=20",
+            headers=self.admin_headers,
+        )
         download = self.client.get(
             f"/api/input-versions/{version_id}/download",
             headers=self.admin_headers,
@@ -1190,16 +1194,26 @@ class PositionDraftApiTests(unittest.TestCase):
         self.assertEqual(preview.status_code, 200, preview.text)
         self.assertEqual(preview.json()["rows"][0]["积加SKU"], "SKU-A")
         self.assertEqual(preview.json()["total"], 1)
+        self.assertEqual(inspection.status_code, 200, inspection.text)
+        self.assertEqual(
+            inspection.json()["summary"]["metrics"]["sites"],
+            1,
+        )
+        self.assertEqual(
+            inspection.json()["preview"]["rows"][0]["积加SKU"],
+            "SKU-A",
+        )
         self.assertEqual(download.status_code, 200, download.text)
         self.assertIn("position-v1.xlsx", download.headers["content-disposition"])
         self.assertGreater(len(download.content), 0)
 
-        for query in ("offset=-1", "limit=0", "limit=201"):
-            invalid = self.client.get(
-                f"/api/input-versions/{version_id}/preview?{query}",
-                headers=self.admin_headers,
-            )
-            self.assertEqual(invalid.status_code, 422, invalid.text)
+        for suffix in ("preview", "inspection"):
+            for query in ("offset=-1", "limit=0", "limit=201"):
+                invalid = self.client.get(
+                    f"/api/input-versions/{version_id}/{suffix}?{query}",
+                    headers=self.admin_headers,
+                )
+                self.assertEqual(invalid.status_code, 422, invalid.text)
 
     def test_shared_upload_limit_accepts_boundary_and_rejects_overflow_without_files(self):
         purchase_workbook = Workbook()
@@ -1302,7 +1316,7 @@ class PositionDraftApiTests(unittest.TestCase):
         )
 
     def test_missing_inspection_and_draft_resources_return_404(self):
-        for suffix in ("summary", "preview", "download"):
+        for suffix in ("summary", "inspection", "preview", "download"):
             response = self.client.get(
                 f"/api/input-versions/999/{suffix}",
                 headers=self.admin_headers,
@@ -1349,6 +1363,11 @@ class PositionDraftApiTests(unittest.TestCase):
         row_id = self.list_rows(draft["id"])["rows"][0]["id"]
         forbidden_requests = (
             ("GET", f"/api/input-versions/{self.version['id']}/summary", {}),
+            (
+                "GET",
+                f"/api/input-versions/{self.version['id']}/inspection",
+                {},
+            ),
             ("GET", f"/api/input-versions/{self.version['id']}/preview", {}),
             ("GET", f"/api/input-versions/{self.version['id']}/download", {}),
             ("POST", "/api/input-drafts/position", {}),
