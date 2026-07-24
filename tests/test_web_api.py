@@ -275,6 +275,58 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertIsNone(create_log["details"]["overreceipt_rule_version_id"])
 
+    def test_overreceipt_warehouses_cache_the_active_purchase_version(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        original_reader = web_api_module.read_purchase_workbook
+
+        with patch.object(
+            web_api_module,
+            "read_purchase_workbook",
+            wraps=original_reader,
+        ) as reader:
+            first = self.client.get(
+                "/api/overreceipt-rule-versions/warehouses",
+                headers=admin_headers,
+            )
+            second = self.client.get(
+                "/api/overreceipt-rule-versions/warehouses",
+                headers=admin_headers,
+            )
+
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(first.json(), ["水鞋-广州仓"])
+        self.assertEqual(second.json(), first.json())
+        self.assertEqual(reader.call_count, 1)
+
+        uploaded = self.client.post(
+            "/api/input-versions/purchase",
+            headers=admin_headers,
+            data={"name": "purchase-v2", "activate": "true"},
+            files={
+                "file": (
+                    "purchase-v2.xlsx",
+                    BytesIO(self.workbook_bytes("purchase")),
+                )
+            },
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+
+        with patch.object(
+            web_api_module,
+            "read_purchase_workbook",
+            wraps=original_reader,
+        ) as reader:
+            third = self.client.get(
+                "/api/overreceipt-rule-versions/warehouses",
+                headers=admin_headers,
+            )
+
+        self.assertEqual(third.status_code, 200, third.text)
+        self.assertEqual(third.json(), first.json())
+        self.assertEqual(reader.call_count, 1)
+
     def test_operator_can_publish_activate_and_lock_immutable_overreceipt_rules(self):
         admin_headers = self.login("admin", "admin-pass")
         operator = self.create_operator(admin_headers)

@@ -744,6 +744,7 @@ def create_app(
     import_candidates_lock = Lock()
     batch_file_upload_lock = Lock()
     overreceipt_rule_lock = Lock()
+    overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -1136,6 +1137,9 @@ def create_app(
         )
         if purchase_version is None:
             return []
+        cached = overreceipt_warehouse_cache.get(purchase_version.id)
+        if cached is not None:
+            return list(cached)
         try:
             purchases = read_purchase_workbook(Path(purchase_version.storage_path))
         except (OSError, ValueError) as error:
@@ -1149,7 +1153,9 @@ def create_app(
             for value in active["目的仓"]
             if not pd.isna(value) and str(value).strip()
         }
-        return sorted(warehouses, key=warehouse_sort_key)
+        sorted_warehouses = tuple(sorted(warehouses, key=warehouse_sort_key))
+        overreceipt_warehouse_cache[purchase_version.id] = sorted_warehouses
+        return list(sorted_warehouses)
 
     @app.get("/api/overreceipt-rule-versions")
     def list_overreceipt_rule_versions(
