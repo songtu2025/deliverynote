@@ -236,6 +236,81 @@ describe("BatchDetail", () => {
     expect(screen.getByText("1", { selector: ".split-conservation strong" })).toBeInTheDocument();
   }, 30_000);
 
+  it("shows the batch overview before exception enrichment finishes", async () => {
+    let finishExceptions: (response: Response) => void = () => undefined;
+    const delayedExceptions = new Promise<Response>((resolve) => {
+      finishExceptions = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/batches/7/exceptions")) return delayedExceptions;
+      if (url.endsWith("/api/batches/7")) {
+        return Promise.resolve(jsonResponse(batchPayload));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
+    expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
+
+    finishExceptions(jsonResponse(exceptionPayload));
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+  });
+
+  it("shows exception loading during a silent job refresh", async () => {
+    let finishRefresh: (response: Response) => void = () => undefined;
+    const delayedRefresh = new Promise<Response>((resolve) => {
+      finishRefresh = resolve;
+    });
+    let exceptionRequests = 0;
+    batchPayload.jobs = {
+      compute: {
+        id: 88,
+        kind: "compute",
+        status: "running"
+      }
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/jobs/88")) {
+        return Promise.resolve(jsonResponse({
+          id: 88,
+          kind: "compute",
+          status: "succeeded"
+        }));
+      }
+      if (url.endsWith("/api/batches/7/exceptions")) {
+        exceptionRequests += 1;
+        return exceptionRequests === 1
+          ? Promise.resolve(jsonResponse(exceptionPayload))
+          : delayedRefresh;
+      }
+      if (url.endsWith("/api/batches/7")) {
+        return Promise.resolve(jsonResponse(batchPayload));
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+
+    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
+    await waitFor(() => expect(exceptionRequests).toBe(2));
+    await waitFor(() => {
+      expect(
+        container.querySelector(".exception-review-card.ant-card-loading")
+      ).toBeInTheDocument();
+    });
+
+    finishRefresh(jsonResponse(exceptionPayload));
+    await waitFor(() => {
+      expect(
+        container.querySelector(".exception-review-card.ant-card-loading")
+      ).not.toBeInTheDocument();
+    });
+  });
+
   it("filters pending rows by site, scale position, and stocking position", async () => {
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
