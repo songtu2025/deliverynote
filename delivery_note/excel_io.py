@@ -62,7 +62,12 @@ def _excel_value(value: Any) -> Any:
     return value.item() if hasattr(value, "item") else value
 
 
-def _populate_import_sheet(sheet, import_rows: pd.DataFrame) -> None:
+def _populate_import_sheet(
+    sheet,
+    import_rows: pd.DataFrame,
+    *,
+    preserve_example_row: bool = False,
+) -> None:
     if list(import_rows.columns) != IMPORT_COLUMNS:
         raise ValueError("正式导入数据字段与官方模板不一致")
 
@@ -76,21 +81,21 @@ def _populate_import_sheet(sheet, import_rows: pd.DataFrame) -> None:
     row_height = sheet.row_dimensions[3].height
     if sheet.max_row > 3:
         sheet.delete_rows(4, sheet.max_row - 3)
-    for column in range(1, 8):
-        sheet.cell(row=3, column=column).value = None
+    first_data_row = 4 if preserve_example_row else 3
+    if not preserve_example_row:
+        for column in range(1, 8):
+            sheet.cell(row=3, column=column).value = None
 
     for row_offset, values in enumerate(import_rows.itertuples(index=False, name=None)):
-        row_number = 3 + row_offset
+        row_number = first_data_row + row_offset
         if row_number > 3:
             sheet.row_dimensions[row_number].height = row_height
         for column, value in enumerate(values, start=1):
             cell = sheet.cell(row=row_number, column=column)
             cell._style = copy(styles[column - 1])
             cell.value = _excel_value(value)
-    if not import_rows.empty:
-        sheet.cell(row=3, column=4).number_format = "0"
-        for row_number in range(4, 3 + len(import_rows)):
-            sheet.cell(row=row_number, column=4).number_format = "0"
+    for row_number in range(first_data_row, first_data_row + len(import_rows)):
+        sheet.cell(row=row_number, column=4).number_format = "0"
 
 
 def write_import_workbook(
@@ -257,7 +262,11 @@ def write_delivery_workbook(
     pending_sheet.protection = copy(import_sheet.protection)
 
     _set_default_cells_unlocked(workbook)
-    _populate_import_sheet(import_sheet, import_rows)
+    _populate_import_sheet(
+        import_sheet,
+        import_rows,
+        preserve_example_row=True,
+    )
     _populate_import_sheet(pending_sheet, pending_rows[IMPORT_COLUMNS])
     _populate_pending_position_columns(pending_sheet, pending_rows)
     _protect_header_only(import_sheet)

@@ -158,6 +158,10 @@ class ExcelOutputTests(unittest.TestCase):
             template_sheet.append(
                 ["示例仓", "示例供应商", "示例SKU", 1, "示例站点", "", ""]
             )
+            for cell in template_sheet[3]:
+                cell.font = Font(name="宋体", size=10, color="808080")
+                cell.fill = PatternFill("solid", fgColor="FFF2CC")
+            template_sheet.row_dimensions[3].height = 24
             template_sheet.protection.sheet = True
             template_book.save(template_path)
             pending_rows = pd.DataFrame(
@@ -197,12 +201,20 @@ class ExcelOutputTests(unittest.TestCase):
             self.assertFalse(protection.formatRows)
             self.assertFalse(protection.selectLockedCells)
         self.assertEqual(workbook["交货导入"]["A1"].value, "模板提示")
-        self.assertEqual(workbook["交货导入"]["A3"].value, "仓A")
+        self.assertEqual(workbook["交货导入"]["A3"].value, "示例仓")
+        self.assertEqual(workbook["交货导入"]["A4"].value, "仓A")
+        self.assertEqual(workbook["交货导入"]["D4"].value, 80)
+        self.assertEqual(workbook["交货导入"]["A3"].font.name, "宋体")
+        self.assertEqual(workbook["交货导入"]["A3"].font.size, 10)
+        self.assertEqual(workbook["交货导入"]["A3"].font.color.rgb, "00808080")
+        self.assertEqual(workbook["交货导入"]["A3"].fill.fill_type, "solid")
+        self.assertEqual(workbook["交货导入"]["A3"].fill.fgColor.rgb, "00FFF2CC")
+        self.assertEqual(workbook["交货导入"].row_dimensions[3].height, 24)
         self.assertTrue(workbook["交货导入"].protection.sheet)
         self.assertTrue(workbook["交货导入"]["A1"].protection.locked)
         self.assertTrue(workbook["交货导入"]["A2"].protection.locked)
         self.assertFalse(workbook["交货导入"]["A3"].protection.locked)
-        self.assertFalse(workbook["交货导入"]["G3"].protection.locked)
+        self.assertFalse(workbook["交货导入"]["G4"].protection.locked)
         default_protection_id = workbook._cell_styles[0].protectionId
         self.assertFalse(workbook._protections[default_protection_id].locked)
         self.assertEqual(workbook["待处理导入"]["A1"].value, "模板提示")

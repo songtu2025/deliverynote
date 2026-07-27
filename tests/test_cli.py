@@ -151,7 +151,7 @@ class RunBatchOutputTests(unittest.TestCase):
             self.assertTrue(output_path.is_file())
             output_files = list(output_path.parent.glob("*.xlsx"))
             output_book = load_workbook(output_path, data_only=True)
-            import_note = output_book["交货导入"]["F3"].value
+            import_note = output_book["交货导入"]["F4"].value
             pending_sheet = output_book["待处理导入"]
             pending_row = [pending_sheet.cell(3, column).value for column in range(1, 8)]
 
