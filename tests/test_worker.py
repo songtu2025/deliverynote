@@ -227,10 +227,11 @@ class WorkerIntegrationTests(unittest.TestCase):
         )
         merged_import_sheet = merged_book["交货导入"]
         merged_pending_sheet = merged_book["待处理导入"]
+        self.assertEqual(merged_import_sheet.cell(3, 1).value, "示例仓")
         self.assertEqual(
             sum(
                 merged_import_sheet.cell(row, 4).value or 0
-                for row in range(3, merged_import_sheet.max_row + 1)
+                for row in range(4, merged_import_sheet.max_row + 1)
             ),
             125,
         )
@@ -243,7 +244,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         )
         merged_import_notes = [
             merged_import_sheet.cell(row, 6).value
-            for row in range(3, merged_import_sheet.max_row + 1)
+            for row in range(4, merged_import_sheet.max_row + 1)
         ]
         self.assertTrue(merged_import_notes[0].endswith("-01-10箱"))
         self.assertTrue(
@@ -268,7 +269,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         pending_sheet = second_book["待处理导入"]
         import_total = sum(
             import_sheet.cell(row, 4).value or 0
-            for row in range(3, import_sheet.max_row + 1)
+            for row in range(4, import_sheet.max_row + 1)
         )
         pending_total = sum(
             pending_sheet.cell(row, 4).value or 0
@@ -392,7 +393,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         self.assertEqual(
             sum(
                 import_sheet.cell(row, 4).value or 0
-                for row in range(3, import_sheet.max_row + 1)
+                for row in range(4, import_sheet.max_row + 1)
             ),
             70,
         )
