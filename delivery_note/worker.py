@@ -364,6 +364,21 @@ def _exception_dict(exception: ExceptionRecord) -> dict:
     }
 
 
+def _consolidate_import_rows(import_rows: pd.DataFrame) -> pd.DataFrame:
+    """合并除数量外完全相同的导入行，避免积加忽略后续重复记录。"""
+
+    group_columns = [
+        column for column in IMPORT_COLUMNS if column != "*本次交货量"
+    ]
+    consolidated = import_rows.groupby(
+        group_columns,
+        as_index=False,
+        sort=False,
+        dropna=False,
+    )["*本次交货量"].sum()
+    return consolidated[IMPORT_COLUMNS]
+
+
 def _load_export_inputs(database: Database, batch_id: int):
     with database.session() as session:
         batch = session.get(Batch, batch_id)
@@ -473,6 +488,7 @@ def _prepare_export_result(source: dict, position_rows: pd.DataFrame):
             pending_frames.append(pending)
 
     import_rows = pd.concat(import_frames, ignore_index=True)
+    import_rows = _consolidate_import_rows(import_rows)
     pending_rows = (
         pd.concat(pending_frames, ignore_index=True)
         if pending_frames
