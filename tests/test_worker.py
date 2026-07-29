@@ -276,6 +276,15 @@ class WorkerIntegrationTests(unittest.TestCase):
             for row in range(3, pending_sheet.max_row + 1)
         )
         self.assertEqual((import_total, pending_total), (45, 35))
+        import_records = [
+            [
+                import_sheet.cell(row, column).value
+                for column in range(1, 8)
+            ]
+            for row in range(4, import_sheet.max_row + 1)
+        ]
+        self.assertEqual(len(import_records), 1)
+        self.assertEqual(import_records[0][3], 45)
         self.assertIsNone(run_once(self.database_url, self.storage_root))
         repeated = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers
