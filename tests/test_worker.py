@@ -195,8 +195,17 @@ class WorkerIntegrationTests(unittest.TestCase):
             headers=self.headers,
             json={
                 "parts": [
-                    {"quantity": 25, "destination": "水鞋-广州仓", "resolved": True},
-                    {"quantity": 35, "resolved": False},
+                    {
+                        "quantity": 25,
+                        "destination": "水鞋-广州仓",
+                        "delivery_note": "超出采购未交量",
+                        "resolved": True,
+                    },
+                    {
+                        "quantity": 35,
+                        "delivery_note": "超出采购未交量",
+                        "resolved": False,
+                    },
                 ]
             },
         )
@@ -285,6 +294,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         ]
         self.assertEqual(len(import_records), 1)
         self.assertEqual(import_records[0][3], 45)
+        self.assertEqual(import_records[0][6], "超出采购未交量：60")
         self.assertIsNone(run_once(self.database_url, self.storage_root))
         repeated = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers

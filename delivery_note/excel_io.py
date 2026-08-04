@@ -22,9 +22,28 @@ PRODUCT_COLUMNS = ["SKU", "店铺/站点", "品类A", "锁仓MKSU"]
 SUPPLIER_COLUMNS = ["供应商编号", "供应商名称", "状态"]
 
 
+def _is_delivery_header(values: list[Any]) -> bool:
+    """判断候选行是否符合交货单表头结构。"""
+
+    sku_columns = [
+        value for value in values if str(value).strip().upper().endswith("SKU")
+    ]
+    site_columns = [value for value in values if str(value).endswith("站")]
+    return len(sku_columns) == 1 and bool(site_columns)
+
+
 def read_delivery_workbook(path: Path) -> pd.DataFrame:
-    sheet = pd.read_excel(path, sheet_name="汇总", skiprows=3)
-    return normalize_delivery_sheet(sheet)
+    raw_sheet = pd.read_excel(path, sheet_name="汇总", header=None)
+    for header_index in (3, 1):
+        if header_index >= len(raw_sheet.index):
+            continue
+        headers = raw_sheet.iloc[header_index].tolist()
+        if not _is_delivery_header(headers):
+            continue
+        sheet = raw_sheet.iloc[header_index + 1 :].copy()
+        sheet.columns = headers
+        return normalize_delivery_sheet(sheet)
+    raise ValueError("交货单汇总表第 2 行或第 4 行未找到有效表头")
 
 
 def read_product_workbook(path: Path) -> pd.DataFrame:

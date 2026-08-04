@@ -61,6 +61,32 @@ class ExcelInputTests(unittest.TestCase):
             ],
         )
 
+    def test_read_delivery_workbook_with_second_row_header(self):
+        self.assertIsNotNone(read_delivery_workbook, "交货单读取函数尚未实现")
+        if read_delivery_workbook is None:
+            return
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "第二行表头交货单.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "汇总"
+            sheet.append(["交货单标题"])
+            sheet.append(["SKU", "CA站", "US站", "总计"])
+            sheet.append(["SKU-A", 5, 10, 15])
+            sheet.append(["总计", 5, 10, 15])
+            workbook.save(path)
+
+            result = read_delivery_workbook(path)
+
+        self.assertEqual(
+            result.to_dict("records"),
+            [
+                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 5},
+                {"SKU": "SKU-A", "原始站点": "US", "交货量": 10},
+            ],
+        )
+
 
     def test_read_added_supplier_xls(self):
         self.assertIsNotNone(read_supplier_workbook, "供应商资料读取函数尚未实现")
