@@ -87,6 +87,24 @@ class ExcelInputTests(unittest.TestCase):
             ],
         )
 
+    def test_read_delivery_workbook_rejects_missing_supported_header(self):
+        self.assertIsNotNone(read_delivery_workbook, "交货单读取函数尚未实现")
+        if read_delivery_workbook is None:
+            return
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "无有效表头交货单.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "汇总"
+            sheet.append(["交货单标题"])
+            sheet.append(["商品", "US", "数量"])
+            sheet.append(["SKU-A", 10, 10])
+            sheet.append(["明细", "US", "数量"])
+            workbook.save(path)
+
+            with self.assertRaisesRegex(ValueError, "第 2 行或第 4 行"):
+                read_delivery_workbook(path)
 
     def test_read_added_supplier_xls(self):
         self.assertIsNotNone(read_supplier_workbook, "供应商资料读取函数尚未实现")
