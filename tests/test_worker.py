@@ -9,6 +9,7 @@ import unittest
 from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
+import pandas as pd
 
 from delivery_note.pipeline import IMPORT_COLUMNS
 from tests.asgi_client import SyncASGIClient
@@ -17,11 +18,40 @@ from delivery_note.web.database import Database
 from delivery_note.web.models import Batch, BatchFile, ExceptionRecord, Job
 
 try:
-    from delivery_note.worker import _fail_job, recover_stale_jobs, run_once
+    from delivery_note.worker import (
+        _consolidate_import_rows,
+        _fail_job,
+        recover_stale_jobs,
+        run_once,
+    )
 except ImportError:
+    _consolidate_import_rows = None
     _fail_job = None
     recover_stale_jobs = None
     run_once = None
+
+
+class WorkerExportConsolidationTests(unittest.TestCase):
+    def test_multiple_delivery_notes_are_preserved_in_stable_order(self):
+        self.assertIsNotNone(_consolidate_import_rows, "导入行合并函数尚未实现")
+        if _consolidate_import_rows is None:
+            return
+
+        rows = pd.DataFrame(
+            [
+                ["仓A", "GYS-001", "SKU-A", 10, "站点A", "单据A", "原因"],
+                ["仓A", "GYS-001", "SKU-A", 5, "站点A", "单据A", "原因：5"],
+                ["仓A", "GYS-001", "SKU-A", 3, "站点A", "单据A", "其他备注"],
+                ["仓A", "GYS-001", "SKU-A", 2, "站点A", "单据A", "原因"],
+            ],
+            columns=IMPORT_COLUMNS,
+        )
+
+        result = _consolidate_import_rows(rows)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["*本次交货量"], 20)
+        self.assertEqual(result.iloc[0]["交货备注"], "原因：5；其他备注")
 
 
 class WorkerIntegrationTests(unittest.TestCase):
@@ -195,8 +225,17 @@ class WorkerIntegrationTests(unittest.TestCase):
             headers=self.headers,
             json={
                 "parts": [
-                    {"quantity": 25, "destination": "水鞋-广州仓", "resolved": True},
-                    {"quantity": 35, "resolved": False},
+                    {
+                        "quantity": 25,
+                        "destination": "水鞋-广州仓",
+                        "delivery_note": "超出采购未交量",
+                        "resolved": True,
+                    },
+                    {
+                        "quantity": 35,
+                        "delivery_note": "超出采购未交量",
+                        "resolved": False,
+                    },
                 ]
             },
         )
@@ -285,6 +324,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         ]
         self.assertEqual(len(import_records), 1)
         self.assertEqual(import_records[0][3], 45)
+        self.assertEqual(import_records[0][6], "超出采购未交量：60")
         self.assertIsNone(run_once(self.database_url, self.storage_root))
         repeated = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers

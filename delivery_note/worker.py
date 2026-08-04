@@ -364,18 +364,43 @@ def _exception_dict(exception: ExceptionRecord) -> dict:
     }
 
 
+def _merge_delivery_notes(values: pd.Series) -> str:
+    """按原顺序合并有效备注，并保留带数量的详细版本。"""
+
+    notes: list[str] = []
+    for value in values:
+        if pd.isna(value):
+            continue
+        note = str(value)
+        if note.strip() and note not in notes:
+            notes.append(note)
+    detailed_notes = [
+        note
+        for note in notes
+        if not any(other.startswith(f"{note}：") for other in notes)
+    ]
+    return "；".join(detailed_notes)
+
+
 def _consolidate_import_rows(import_rows: pd.DataFrame) -> pd.DataFrame:
-    """合并除数量外完全相同的导入行，避免积加忽略后续重复记录。"""
+    """合并业务身份相同的导入行，避免积加忽略后续记录。"""
 
     group_columns = [
-        column for column in IMPORT_COLUMNS if column != "*本次交货量"
+        column
+        for column in IMPORT_COLUMNS
+        if column not in {"*本次交货量", "交货备注"}
     ]
     consolidated = import_rows.groupby(
         group_columns,
         as_index=False,
         sort=False,
         dropna=False,
-    )["*本次交货量"].sum()
+    ).agg(
+        {
+            "*本次交货量": "sum",
+            "交货备注": _merge_delivery_notes,
+        }
+    )
     return consolidated[IMPORT_COLUMNS]
 
 
