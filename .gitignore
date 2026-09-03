@@ -48,3 +48,9 @@ Thumbs.db
 
 # Internal requirement source files
 需求/
+
+# Non-production review and planning artifacts
+design-qa.md
+design/admin-maintenance-qa/
+docs/BULK_EXCEPTION_REVIEW_PROPOSAL.md
+docs/superpowers/
