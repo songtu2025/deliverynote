@@ -279,6 +279,12 @@ docker compose down
 
 建议使用 Python 3.11 和 Node.js 22。
 
+Python 依赖分为两个清单：
+
+- `requirements.txt` 是生产运行依赖，Docker 镜像只安装该文件；
+- `requirements-dev.txt` 继承 `requirements.txt`，再加入本地开发、测试和 CI 需要的工具；
+- 只被测试代码使用的包放入 `requirements-dev.txt`；生产代码直接导入的包应写入 `requirements.txt`，不要只依赖间接依赖。
+
 后端与核心逻辑：
 
 ```bash
