@@ -1576,7 +1576,7 @@ def create_app(
                 "configured": False,
                 "base_url": os.getenv(
                     "GERPGO_API_BASE_URL",
-                    "https://openapi.gerpgo.com",
+                    "https://open.gerpgo.com",
                 ).strip(),
                 "app_id_hint": "",
                 "has_app_id": False,

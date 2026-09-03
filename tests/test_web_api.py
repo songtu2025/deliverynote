@@ -470,6 +470,19 @@ class WebApiTests(unittest.TestCase):
         self.assertNotIn("app_key", audit["details"])
         self.assertNotIn("secret-key", str(audit))
 
+    @patch.dict("os.environ", {}, clear=True)
+    def test_unconfigured_gerpgo_uses_official_default_url(self):
+        admin_headers = self.login("admin", "admin-pass")
+
+        response = self.client.get(
+            "/api/admin/integrations/gerpgo",
+            headers=admin_headers,
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["configured"])
+        self.assertEqual(response.json()["base_url"], "https://open.gerpgo.com")
+
     def test_operator_cannot_update_gerpgo_config(self):
         admin_headers = self.login("admin", "admin-pass")
         operator = self.create_operator(admin_headers)

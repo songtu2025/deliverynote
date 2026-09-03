@@ -36,7 +36,7 @@ describe("IntegrationConfigPanel", () => {
     await act(async () => {
       resolveConfig(jsonResponse({
         configured: true,
-        base_url: "https://openapi.gerpgo.com",
+        base_url: "https://open.gerpgo.com",
         app_id_hint: "ap***01",
         has_app_id: true,
         has_app_key: true,
@@ -50,7 +50,7 @@ describe("IntegrationConfigPanel", () => {
   it("shows masked environment configuration without exposing the key", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({
       configured: true,
-      base_url: "https://openapi.gerpgo.com",
+      base_url: "https://open.gerpgo.com",
       app_id_hint: "ap***01",
       has_app_id: true,
       has_app_key: true,
@@ -79,7 +79,7 @@ describe("IntegrationConfigPanel", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse({
         configured: false,
-        base_url: "https://openapi.gerpgo.com",
+        base_url: "https://open.gerpgo.com",
         app_id_hint: "",
         has_app_id: false,
         has_app_key: false,
@@ -87,7 +87,7 @@ describe("IntegrationConfigPanel", () => {
       }))
       .mockResolvedValueOnce(jsonResponse({
         configured: true,
-        base_url: "https://openapi.gerpgo.com",
+        base_url: "https://open.gerpgo.com",
         app_id_hint: "ap***01",
         has_app_id: true,
         has_app_key: true,
@@ -118,7 +118,7 @@ describe("IntegrationConfigPanel", () => {
     );
     expect(saveCall).toBeDefined();
     expect(JSON.parse(String(saveCall?.[1]?.body))).toEqual({
-      base_url: "https://openapi.gerpgo.com",
+      base_url: "https://open.gerpgo.com",
       app_id: "app-001",
       app_key: "secret-key"
     });
@@ -132,7 +132,7 @@ describe("IntegrationConfigPanel", () => {
     vi.mocked(fetch)
       .mockResolvedValueOnce(jsonResponse({
         configured: false,
-        base_url: "https://openapi.gerpgo.com",
+        base_url: "https://open.gerpgo.com",
         app_id_hint: "",
         has_app_id: false,
         has_app_key: false,

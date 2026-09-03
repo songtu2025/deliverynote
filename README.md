@@ -93,7 +93,7 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 | `MAX_UPLOAD_BYTES` | `20971520` | 单次上传大小上限，单位为字节 |
 | `IMPORT_CANDIDATE_TTL_SECONDS` | `900` | 库位导入预览有效时间 |
 | `POSITION_FRAME_CACHE_SIZE` | `8` | API 进程缓存的库位版本数量 |
-| `GERPGO_API_BASE_URL` | `https://openapi.gerpgo.com` | 积加 OpenAPI 地址 |
+| `GERPGO_API_BASE_URL` | `https://open.gerpgo.com` | 积加 OpenAPI 地址 |
 | `GERPGO_APP_ID` | 空 | 积加应用 ID，不使用同步时可留空 |
 | `GERPGO_APP_KEY` | 空 | 积加应用密钥，不使用同步时可留空 |
 
