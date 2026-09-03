@@ -64,7 +64,7 @@ class FakeRunner:
             service = command[-1]
             return f"sha256:{service}-image\n"
         if "ps" in command and "--status" in command and "--services" in command:
-            return "db\napi\nworker\nweb\n"
+            return "db\napi\nworker\npurchase-sync-worker\ninbound-sync-worker\nweb\n"
         if "psql" in command:
             return "0\n"
         return ""
@@ -107,7 +107,9 @@ class BackupDeliveryNoteTests(unittest.TestCase):
         self.assertTrue((backup / "database.dump").is_file())
         self.assertTrue((backup / "delivery_data.tar.gz").is_file())
         self.assertTrue((backup / "SHA256SUMS").is_file())
-        metadata = json.loads((backup / "BACKUP-METADATA.json").read_text(encoding="utf-8"))
+        metadata = json.loads(
+            (backup / "BACKUP-METADATA.json").read_text(encoding="utf-8")
+        )
         self.assertEqual(metadata["status"], "complete")
         self.assertEqual(metadata["data_archive"]["files"], 1)
         self.assertEqual(metadata["active_jobs_before_maintenance"], 0)
@@ -121,10 +123,14 @@ class BackupDeliveryNoteTests(unittest.TestCase):
         stop_worker = next(
             index
             for index, command in enumerate(runner.commands)
-            if "stop" in command and command[-1] == "worker"
+            if "stop" in command
+            and command[-3:]
+            == ("worker", "purchase-sync-worker", "inbound-sync-worker")
         )
         database_dump = next(
-            index for index, command in enumerate(runner.commands) if "pg_dump" in command
+            index
+            for index, command in enumerate(runner.commands)
+            if "pg_dump" in command
         )
         resume = next(
             index for index, command in enumerate(runner.commands) if "up" in command

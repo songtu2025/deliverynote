@@ -141,7 +141,7 @@ export function UserManagementPanel({
         <div>
           <Typography.Text strong>账号与权限</Typography.Text>
           <Typography.Paragraph type="secondary">
-            管理员可维护基础资料和账号；操作员仅处理交货批次。停用账号会使其现有登录立即失效。
+            管理员维护资料和账号；操作员处理业务单据。停用账号会使现有登录失效。
           </Typography.Paragraph>
         </div>
         <div className="user-summary" role="status" aria-label="账号摘要">

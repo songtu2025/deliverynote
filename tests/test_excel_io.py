@@ -10,6 +10,7 @@ try:
     from delivery_note.excel_io import (
         read_delivery_workbook,
         read_supplier_workbook,
+        write_self_operated_inbound_workbook,
         write_delivery_workbook,
         write_exception_workbook,
         write_import_workbook,
@@ -26,6 +27,7 @@ except ImportError:
     write_delivery_workbook = None
     write_exception_workbook = None
     write_import_workbook = None
+    write_self_operated_inbound_workbook = None
     BatchResult = None
     EXCEPTION_COLUMNS = []
     IMPORT_COLUMNS = []
@@ -118,7 +120,49 @@ class ExcelInputTests(unittest.TestCase):
         self.assertEqual(zhangdun["供应商编号"], "GYS-027")
         self.assertEqual(zhangdun["状态"], "启用")
 
+
 class ExcelOutputTests(unittest.TestCase):
+    def test_write_self_operated_inbound_workbook_replaces_template_rows(self):
+        self.assertIsNotNone(write_self_operated_inbound_workbook)
+        if write_self_operated_inbound_workbook is None:
+            return
+
+        from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+
+        with TemporaryDirectory() as directory:
+            template_path = Path(directory) / "批量入库模板.xlsx"
+            output_path = Path(directory) / "批量入库结果.xlsx"
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.title = "批量入库"
+            sheet.append(INBOUND_TEMPLATE_COLUMNS)
+            sheet.append(["示例"] * len(INBOUND_TEMPLATE_COLUMNS))
+            sheet["A2"].font = Font(bold=True)
+            workbook.save(template_path)
+
+            values = {column: "" for column in INBOUND_TEMPLATE_COLUMNS}
+            values.update(
+                {
+                    "入库单号": "WV-1",
+                    "SKU": "SKU-A",
+                    "本次入库": 20,
+                    "入库库位": "未分配库位",
+                }
+            )
+            write_self_operated_inbound_workbook(
+                template_path,
+                output_path,
+                pd.DataFrame([values]),
+            )
+
+            result = load_workbook(output_path)
+            result_sheet = result.active
+            self.assertEqual(result_sheet.max_row, 2)
+            self.assertEqual(result_sheet["A2"].value, "WV-1")
+            self.assertEqual(result_sheet["Q2"].value, 20)
+            self.assertEqual(result_sheet["R2"].value, "未分配库位")
+            self.assertTrue(result_sheet["A2"].font.bold)
+
     def test_write_import_workbook_preserves_template_header_and_data_style(self):
         self.assertIsNotNone(write_import_workbook, "正式导入文件导出函数尚未实现")
         if write_import_workbook is None:
@@ -161,7 +205,9 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertEqual(output_sheet["A3"]._style, output_sheet["A4"]._style)
         self.assertNotEqual(output_sheet["A3"].value, "示例仓")
 
-    def test_write_delivery_workbook_contains_import_details_and_editable_pending_rows(self):
+    def test_write_delivery_workbook_contains_import_details_and_editable_pending_rows(
+        self,
+    ):
         self.assertIsNotNone(write_delivery_workbook, "交货处理文件导出函数尚未实现")
         if write_delivery_workbook is None:
             return
@@ -286,6 +332,7 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertTrue(workbook["待处理导入"]["H3"].alignment.wrap_text)
         self.assertEqual(workbook["待处理导入"].row_dimensions[3].height, 60)
         self.assertEqual(workbook["待处理导入"].column_dimensions["G"].width, 35)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,1 +1,1 @@
-"""FastAPI Web application for delivery-note processing."""
+"""交货单处理的网页应用。"""

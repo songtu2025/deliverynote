@@ -249,7 +249,6 @@ describe("PositionMaintenance", () => {
     renderMaintenance();
 
     expect(await screen.findByText("草稿已自动保存")).toBeInTheDocument();
-    expect(screen.getByText("已保存到服务器")).toBeInTheDocument();
     expect(screen.getByText("修订号 3")).toBeInTheDocument();
     expect(screen.getByText("新增 0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
@@ -298,9 +297,9 @@ describe("PositionMaintenance", () => {
     };
     renderMaintenance();
 
-    expect(await screen.findByText(/草稿基线：position-v1/)).toBeInTheDocument();
+    expect(await screen.findByText(/基于 position-v1/)).toBeInTheDocument();
     expect(screen.getByText("草稿基线已过期")).toBeInTheDocument();
-    expect(screen.getByText(/当前正式版本已变为 position-current/)).toBeInTheDocument();
+    expect(screen.getByText(/正式版本已变为 position-current/)).toBeInTheDocument();
     expect(screen.getByLabelText("新增记录")).toBeDisabled();
     expect(screen.getByLabelText("Excel 整表替换")).toBeDisabled();
     expect(screen.getByText("发布新版本").closest("button")).toBeDisabled();
@@ -317,7 +316,7 @@ describe("PositionMaintenance", () => {
     };
     renderMaintenance();
 
-    expect(await screen.findByText(/草稿基线：position-v2/)).toBeInTheDocument();
+    expect(await screen.findByText(/基于 position-v2/)).toBeInTheDocument();
     expect(screen.queryByText("草稿基线已过期")).not.toBeInTheDocument();
     expect(screen.getByLabelText("新增记录")).toBeEnabled();
     expect(screen.getByLabelText("Excel 整表替换")).toBeEnabled();
@@ -636,7 +635,7 @@ describe("PositionMaintenance", () => {
     renderMaintenance();
     fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
 
-    const dialog = await dialogByTitle("发布新的库位/排仓版本");
+    const dialog = await dialogByTitle("发布新的MSKU定位版本");
     const body = dialog.querySelector<HTMLElement>(".ant-modal-body");
     expect(body).toHaveStyle({
       maxHeight: "calc(100vh - 300px)",
@@ -652,7 +651,7 @@ describe("PositionMaintenance", () => {
     const onPublished = vi.fn();
     renderMaintenance({ onPublished });
     fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
-    expect(await screen.findByText("只影响之后批次，历史批次不变")).toBeInTheDocument();
+    expect(await screen.findByText("仅用于新批次；已有批次不变")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: "position-20260721" } });
     fireEvent.click(screen.getByRole("button", { name: "确认发布" }));
 
@@ -667,7 +666,7 @@ describe("PositionMaintenance", () => {
     const onPublished = vi.fn();
     renderMaintenance({ onPublished });
     fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
-    const dialog = await dialogByTitle("发布新的库位/排仓版本");
+    const dialog = await dialogByTitle("发布新的MSKU定位版本");
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "duplicate-name" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
 
@@ -776,7 +775,7 @@ describe("PositionMaintenance", () => {
     const onPublished = vi.fn();
     renderMaintenance({ onBack, onPublished });
     fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
-    const dialog = await dialogByTitle("发布新的库位/排仓版本");
+    const dialog = await dialogByTitle("发布新的MSKU定位版本");
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "position-busy" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
     await waitFor(() => expect(requests("POST", "/publish")).toHaveLength(1));
@@ -789,7 +788,7 @@ describe("PositionMaintenance", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "继续修改草稿" }));
       fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
       expect(onBack).not.toHaveBeenCalled();
-      expect(screen.getByText("发布新的库位/排仓版本")).toBeInTheDocument();
+      expect(screen.getByText("发布新的MSKU定位版本")).toBeInTheDocument();
     } finally {
       publishRequest.resolve(jsonResponse({
         ...version,

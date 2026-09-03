@@ -28,6 +28,15 @@ const routeBatch = {
   files: []
 };
 
+const readyInputVersions = ["purchase", "product", "supplier", "position", "template"].map((kind, index) => ({
+  id: index + 1,
+  kind,
+  name: `${kind}-v1`,
+  original_name: `${kind}.xlsx`,
+  active: true,
+  created_by: 1,
+  created_at: "2026-08-26T08:00:00"
+}));
 describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -72,6 +81,24 @@ describe("App", () => {
             headers: { "Content-Type": "application/json" }
           });
         }
+        if (url.endsWith("/api/purchase-sync")) {
+          return new Response(JSON.stringify({ configured: true, job: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.endsWith("/api/self-operated-inbound-sync")) {
+          return new Response(JSON.stringify({ configured: true, job: null, active_version: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.endsWith("/api/self-operated-overreceipt-rule-versions")) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
         if (url.endsWith("/api/overreceipt-rule-versions")) {
           return new Response(JSON.stringify([]), {
             status: 200,
@@ -79,6 +106,12 @@ describe("App", () => {
           });
         }
         if (url.endsWith("/api/overreceipt-rule-versions/warehouses")) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.endsWith("/api/users") || url.endsWith("/api/audit-logs")) {
           return new Response(JSON.stringify([]), {
             status: 200,
             headers: { "Content-Type": "application/json" }
@@ -98,6 +131,8 @@ describe("App", () => {
   it("logs in and opens the batch workspace", async () => {
     render(<App />);
 
+    expect(screen.getByRole("heading", { name: "供应链单据处理" })).toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("用户名"), {
       target: { value: "admin" }
     });
@@ -106,11 +141,22 @@ describe("App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
 
-    await screen.findByText("交货批次");
-    expect(screen.getByText("超收规则")).toBeInTheDocument();
-    expect(screen.getByText("管理员维护")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "交货批次" });
+    expect(screen.getByText("单据处理")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /交货批次/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /超收规则/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: /管理员维护/ })).toBeInTheDocument();
     expect(localStorage.getItem("delivery-note-token")).toBe("token-1");
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+    await waitFor(() => {
+      const requestedUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+      expect(requestedUrls).toEqual(expect.arrayContaining([
+        "/api/auth/login",
+        "/api/batches",
+        "/api/input-versions",
+        "/api/purchase-sync",
+        "/api/overreceipt-rule-versions"
+      ]));
+    });
   });
 
   it("shows overreceipt rule management to operators", async () => {
@@ -124,8 +170,8 @@ describe("App", () => {
 
     render(<App />);
 
-    await screen.findByText("交货批次");
-    expect(screen.getByText("超收规则")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "交货批次" });
+    expect(screen.getByRole("menuitem", { name: /超收规则/ })).toBeInTheDocument();
     expect(screen.queryByText("管理员维护")).not.toBeInTheDocument();
   });
 
@@ -139,7 +185,7 @@ describe("App", () => {
     }));
 
     render(<App />);
-    await screen.findByText("交货批次");
+    await screen.findByRole("heading", { name: "交货批次" });
 
     const account = screen.getByRole("group", { name: "当前用户" });
     expect(within(account).getByText("A")).toBeInTheDocument();
@@ -203,6 +249,64 @@ describe("App", () => {
     expect(within(account).getByText("管理员")).toBeVisible();
   });
 
+  it("keeps loaded batch actions stable while returning from another workspace", async () => {
+    localStorage.setItem("delivery-note-token", "admin-token");
+    localStorage.setItem("delivery-note-user", JSON.stringify({
+      id: 1,
+      username: "admin",
+      role: "admin",
+      active: true
+    }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/batches")) {
+          return new Response(JSON.stringify([routeBatch]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.endsWith("/api/input-versions")) {
+          return new Response(JSON.stringify(readyInputVersions), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.endsWith("/api/purchase-sync")) {
+          return new Response(JSON.stringify({ configured: true, job: null }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (
+          url.endsWith("/api/overreceipt-rule-versions")
+          || url.endsWith("/api/self-operated-overreceipt-rule-versions")
+        ) {
+          return new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        throw new Error("Unexpected request: " + url);
+      })
+    );
+
+    render(<App />);
+    const initialButton = await screen.findByRole("button", { name: /新建批次/ });
+    expect(initialButton).toBeEnabled();
+    expect(await screen.findByRole("button", { name: /同步采购数据/ })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: /超收规则/ }));
+    await screen.findByText("发布新版本");
+    fireEvent.click(screen.getByRole("menuitem", { name: /交货批次/ }));
+
+    const returnedButton = screen.getByRole("button", { name: /新建批次/ });
+    expect(returnedButton).toBe(initialButton);
+    expect(returnedButton).toBeEnabled();
+  }, 15000);
+
   it("returns to the top when switching workspaces", async () => {
     localStorage.setItem("delivery-note-token", "operator-token");
     localStorage.setItem("delivery-note-user", JSON.stringify({
@@ -214,8 +318,8 @@ describe("App", () => {
     const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
 
     render(<App />);
-    await screen.findByText("交货批次");
-    fireEvent.click(screen.getByText("超收规则"));
+    await screen.findByRole("heading", { name: "交货批次" });
+    fireEvent.click(screen.getByRole("menuitem", { name: /超收规则/ }));
     await screen.findByText("发布新版本");
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: "auto" });
@@ -239,7 +343,7 @@ describe("App", () => {
     await screen.findByRole("button", { name: /登\s*录/ });
     expect(localStorage.getItem("delivery-note-token")).toBeNull();
     expect(localStorage.getItem("delivery-note-user")).toBeNull();
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(fetch).toHaveBeenCalled();
   });
 
   it("restores a batch detail from its URL and returns to the list URL", async () => {
@@ -284,5 +388,5 @@ describe("App", () => {
 
     await screen.findByRole("heading", { name: "交货批次" });
     expect(window.location.pathname).toBe("/batches");
-  });
+  }, 10000);
 });

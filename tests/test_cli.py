@@ -153,14 +153,14 @@ class RunBatchOutputTests(unittest.TestCase):
             output_book = load_workbook(output_path, data_only=True)
             import_note = output_book["交货导入"]["F4"].value
             pending_sheet = output_book["待处理导入"]
-            pending_row = [pending_sheet.cell(3, column).value for column in range(1, 8)]
+            pending_row = [
+                pending_sheet.cell(3, column).value for column in range(1, 8)
+            ]
 
         self.assertEqual(result.manual_total, 40)
         self.assertTrue(output_path.name.endswith("_交货处理.xlsx"))
         self.assertEqual(len(output_files), 1)
-        self.assertEqual(
-            output_book.sheetnames, ["交货导入", "待处理导入"]
-        )
+        self.assertEqual(output_book.sheetnames, ["交货导入", "待处理导入"])
         self.assertEqual(import_note, "260717-狂飙-01-96箱")
         self.assertEqual(
             pending_row,
@@ -202,9 +202,7 @@ class RunBatchOutputTests(unittest.TestCase):
         self.assertTrue(output_path.name.endswith("_交货处理.xlsx"))
         self.assertEqual(result.manual_total, 0)
         self.assertEqual(len(output_files), 1)
-        self.assertEqual(
-            output_book.sheetnames, ["交货导入", "待处理导入"]
-        )
+        self.assertEqual(output_book.sheetnames, ["交货导入", "待处理导入"])
         self.assertIsNone(output_book["待处理导入"]["A3"].value)
 
     def test_default_output_directory_timestamp_uses_beijing_time(self):

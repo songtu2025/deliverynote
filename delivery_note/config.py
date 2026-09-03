@@ -11,6 +11,7 @@ class SupplierIdentity:
     name: str
     code: str
 
+
 PURCHASE_STATUSES = ("交货中", "待交货")
 
 WAREHOUSE_PRIORITY = {
@@ -33,9 +34,7 @@ def resolve_supplier(
         raise ValueError(f"供应商资料缺少必要字段：{', '.join(missing)}")
 
     filename_key = _supplier_key(delivery_path.stem)
-    enabled = supplier_rows[
-        supplier_rows["状态"].astype(str).str.strip().eq("启用")
-    ]
+    enabled = supplier_rows[supplier_rows["状态"].astype(str).str.strip().eq("启用")]
     matches = []
     for _, row in enabled.iterrows():
         name = str(row["供应商名称"]).strip()
@@ -57,9 +56,7 @@ def _delivery_date(delivery_path: Path) -> str:
     return match.group(1)
 
 
-def _supplier_display_name(
-    delivery_path: Path, supplier: SupplierIdentity
-) -> str:
+def _supplier_display_name(delivery_path: Path, supplier: SupplierIdentity) -> str:
     filename_body = re.sub(r"^\d{6}[\s_-]*", "", delivery_path.stem)
     supplier_key = _supplier_key(supplier.name)
     display_chars: list[str] = []
@@ -88,9 +85,7 @@ def build_ordered_document_note(
     if sequence <= 0:
         raise ValueError("交货单顺序必须大于 0")
     delivery_date = _delivery_date(delivery_path)
-    carton_match = re.search(
-        r"(?:发货|交货)\s*(\d+)\s*箱", delivery_path.stem
-    )
+    carton_match = re.search(r"(?:发货|交货)\s*(\d+)\s*箱", delivery_path.stem)
     if not carton_match:
         raise ValueError(f"交货单文件名缺少箱数：{delivery_path.name}")
 
@@ -99,9 +94,7 @@ def build_ordered_document_note(
     return f"{delivery_date}-{supplier_display}-{sequence:02d}-{cartons}箱"
 
 
-def build_document_note(
-    delivery_path: Path, supplier_rows: pd.DataFrame
-) -> str:
+def build_document_note(delivery_path: Path, supplier_rows: pd.DataFrame) -> str:
     """兼容 CLI：从同目录文件推导顺序，再调用统一备注生成函数。"""
     delivery_date = _delivery_date(delivery_path)
     supplier = resolve_supplier(delivery_path, supplier_rows)

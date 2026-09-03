@@ -1,15 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Tabs, Typography } from "antd";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Skeleton, Tabs, Typography } from "antd";
 
 import { api } from "../api";
 import type { AuditLog, InputVersion, User } from "../types";
-import { AuditLogPanel } from "./admin/AuditLogPanel";
 import { InputDataPanel } from "./admin/InputDataPanel";
-import { PositionMaintenance } from "./admin/PositionMaintenance";
-import { UserManagementPanel } from "./admin/UserManagementPanel";
 
-type AdminPageProps = { currentUser: User };
+const AuditLogPanel = lazy(() => import("./admin/AuditLogPanel").then((module) => ({
+  default: module.AuditLogPanel
+})));
+const IntegrationConfigPanel = lazy(() => import("./admin/IntegrationConfigPanel").then((module) => ({
+  default: module.IntegrationConfigPanel
+})));
+const PositionMaintenance = lazy(() => import("./admin/PositionMaintenance").then((module) => ({
+  default: module.PositionMaintenance
+})));
+const UserManagementPanel = lazy(() => import("./admin/UserManagementPanel").then((module) => ({
+  default: module.UserManagementPanel
+})));
+
+type AdminPageProps = { currentUser: User; active?: boolean };
 type InputView = "catalog" | "position";
+type AdminTab = "inputs" | "integrations" | "users" | "audit";
 
 interface LoadErrors {
   users: string | null;
@@ -30,73 +41,63 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-export default function AdminPage({ currentUser }: AdminPageProps) {
+function AdminPanelFallback() {
+  return (
+    <div aria-busy="true" aria-label="正在加载维护模块">
+      <Skeleton active title={false} paragraph={{ rows: 5 }} />
+    </div>
+  );
+}
+
+export default function AdminPage({ currentUser, active = true }: AdminPageProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [versions, setVersions] = useState<InputVersion[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState<LoadingState>(INITIAL_LOADING);
   const [errors, setErrors] = useState<LoadErrors>(EMPTY_ERRORS);
   const [inputView, setInputView] = useState<InputView>("catalog");
+  const [activeTab, setActiveTab] = useState<AdminTab>("inputs");
   const inputWorkspaceRef = useRef<HTMLDivElement>(null);
   const focusInputViewRef = useRef(false);
   const mountedRef = useRef(false);
   const usersRequestRef = useRef(0);
   const versionsRequestRef = useRef(0);
   const auditRequestRef = useRef(0);
+  const usersLoadedRef = useRef(false);
+  const versionsLoadedRef = useRef(false);
+  const auditLoadedRef = useRef(false);
 
-  const load = useCallback(async () => {
-    const usersRequestId = ++usersRequestRef.current;
-    const versionsRequestId = ++versionsRequestRef.current;
-    const auditRequestId = ++auditRequestRef.current;
+  const loadUsers = useCallback(async (background = false) => {
+    const requestId = ++usersRequestRef.current;
     if (!mountedRef.current) return;
 
-    setLoading(INITIAL_LOADING);
-    setErrors(EMPTY_ERRORS);
-    const [userResult, versionResult, auditResult] = await Promise.allSettled([
-      api<User[]>("/api/users"),
-      api<InputVersion[]>("/api/input-versions"),
-      api<AuditLog[]>("/api/audit-logs")
-    ]);
-
-    if (mountedRef.current && usersRequestRef.current === usersRequestId) {
-      if (userResult.status === "fulfilled") setUsers(userResult.value);
-      else {
+    if (!background) setLoading((current) => ({ ...current, users: true }));
+    setErrors((current) => ({ ...current, users: null }));
+    try {
+      const nextUsers = await api<User[]>("/api/users");
+      if (mountedRef.current && usersRequestRef.current === requestId) {
+        setUsers(nextUsers);
+      }
+    } catch (error) {
+      if (mountedRef.current && usersRequestRef.current === requestId) {
         setErrors((current) => ({
           ...current,
-          users: errorMessage(userResult.reason, "读取用户账号失败")
+          users: errorMessage(error, "读取用户账号失败")
         }));
       }
-      setLoading((current) => ({ ...current, users: false }));
-    }
-
-    if (mountedRef.current && versionsRequestRef.current === versionsRequestId) {
-      if (versionResult.status === "fulfilled") setVersions(versionResult.value);
-      else {
-        setErrors((current) => ({
-          ...current,
-          versions: errorMessage(versionResult.reason, "读取基础资料失败")
-        }));
+    } finally {
+      if (mountedRef.current && usersRequestRef.current === requestId) {
+        usersLoadedRef.current = true;
+        setLoading((current) => ({ ...current, users: false }));
       }
-      setLoading((current) => ({ ...current, versions: false }));
-    }
-
-    if (mountedRef.current && auditRequestRef.current === auditRequestId) {
-      if (auditResult.status === "fulfilled") setAuditLogs(auditResult.value);
-      else {
-        setErrors((current) => ({
-          ...current,
-          audit: errorMessage(auditResult.reason, "读取操作记录失败")
-        }));
-      }
-      setLoading((current) => ({ ...current, audit: false }));
     }
   }, []);
 
-  const refreshVersions = useCallback(async () => {
+  const loadVersions = useCallback(async (background = false) => {
     const requestId = ++versionsRequestRef.current;
     if (!mountedRef.current) return;
 
-    setLoading((current) => ({ ...current, versions: true }));
+    if (!background) setLoading((current) => ({ ...current, versions: true }));
     setErrors((current) => ({ ...current, versions: null }));
     try {
       const nextVersions = await api<InputVersion[]>("/api/input-versions");
@@ -112,30 +113,78 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
       }
     } finally {
       if (mountedRef.current && versionsRequestRef.current === requestId) {
+        versionsLoadedRef.current = true;
         setLoading((current) => ({ ...current, versions: false }));
       }
     }
   }, []);
 
+  const loadAudit = useCallback(async (background = false) => {
+    const requestId = ++auditRequestRef.current;
+    if (!mountedRef.current) return;
+
+    if (!background) setLoading((current) => ({ ...current, audit: true }));
+    setErrors((current) => ({ ...current, audit: null }));
+    try {
+      const nextAuditLogs = await api<AuditLog[]>("/api/audit-logs");
+      if (mountedRef.current && auditRequestRef.current === requestId) {
+        setAuditLogs(nextAuditLogs);
+      }
+    } catch (error) {
+      if (mountedRef.current && auditRequestRef.current === requestId) {
+        setErrors((current) => ({
+          ...current,
+          audit: errorMessage(error, "读取操作记录失败")
+        }));
+      }
+    } finally {
+      if (mountedRef.current && auditRequestRef.current === requestId) {
+        auditLoadedRef.current = true;
+        setLoading((current) => ({ ...current, audit: false }));
+      }
+    }
+  }, []);
+
+  const refreshVersions = useCallback(() => loadVersions(false), [loadVersions]);
+
+  const retryAudit = useCallback(async () => {
+    await Promise.all([loadUsers(true), loadAudit(false)]);
+  }, [loadAudit, loadUsers]);
+
   useEffect(() => {
     mountedRef.current = true;
-    void load();
     return () => {
       mountedRef.current = false;
       usersRequestRef.current += 1;
       versionsRequestRef.current += 1;
       auditRequestRef.current += 1;
     };
-  }, [load]);
+  }, []);
 
   useEffect(() => {
-    if (!focusInputViewRef.current) return undefined;
+    if (!versionsLoadedRef.current || active) {
+      void loadVersions(versionsLoadedRef.current);
+    }
+  }, [active, loadVersions]);
+
+  useEffect(() => {
+    if (!active) return;
+    if (activeTab === "users" && !usersLoadedRef.current) {
+      void loadUsers();
+    }
+    if (activeTab === "audit") {
+      if (!usersLoadedRef.current) void loadUsers();
+      if (!auditLoadedRef.current) void loadAudit();
+    }
+  }, [active, activeTab, loadAudit, loadUsers]);
+
+  useEffect(() => {
+    if (!focusInputViewRef.current || inputView !== "catalog") return undefined;
     focusInputViewRef.current = false;
     const timer = window.setTimeout(() => {
-      const selector = inputView === "position"
-        ? 'button[aria-label="返回基础资料"]'
-        : '[data-input-catalog-heading="true"]';
-      inputWorkspaceRef.current?.querySelector<HTMLElement>(selector)?.focus();
+      inputWorkspaceRef.current
+        ?.querySelector<HTMLElement>('[data-input-catalog-heading="true"]')
+        ?.focus();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [inputView]);
@@ -160,18 +209,30 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
     returnToCatalog();
   };
 
+  if (!versionsLoadedRef.current) {
+    return (
+      <div
+        className="page-shell admin-maintenance-pc"
+        aria-busy="true"
+        aria-label="正在加载管理员维护"
+      >
+        <Skeleton active title={{ width: 220 }} paragraph={{ rows: 8 }} />
+      </div>
+    );
+  }
   return (
     <div className="page-shell admin-maintenance-pc">
       <div className="page-heading admin-maintenance-heading">
         <div>
           <Typography.Title level={2}>管理员维护</Typography.Title>
-          <Typography.Text type="secondary">确保五类输入资料可用，并维护内部账号与操作记录。</Typography.Text>
         </div>
       </div>
 
       <Tabs
         className="admin-maintenance-tabs"
         animated={false}
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as AdminTab)}
         items={[
           {
             key: "inputs",
@@ -183,7 +244,6 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
                     <div className="admin-section-heading">
                       <div>
                         <Typography.Title data-input-catalog-heading="true" tabIndex={-1} level={4}>基础资料目录</Typography.Title>
-                        <Typography.Text type="secondary">选择资料类型，查看当前版本、内容预览和历史记录。</Typography.Text>
                       </div>
                     </div>
                     {errors.versions && (
@@ -207,40 +267,55 @@ export default function AdminPage({ currentUser }: AdminPageProps) {
                   </div>
                 ) : activePositionVersion ? (
                   <div className="position-workspace">
-                    <PositionMaintenance
-                      activeVersion={activePositionVersion}
-                      onPublished={() => void handlePublished()}
-                      onBack={returnToCatalog}
-                    />
+                    <Suspense fallback={<AdminPanelFallback />}>
+                      <PositionMaintenance
+                        activeVersion={activePositionVersion}
+                        onPublished={() => void handlePublished()}
+                        onBack={returnToCatalog}
+                      />
+                    </Suspense>
                   </div>
                 ) : null}
               </div>
             )
           },
           {
+            key: "integrations",
+            label: "接口配置",
+            children: (
+              <Suspense fallback={<AdminPanelFallback />}>
+                <IntegrationConfigPanel />
+              </Suspense>
+            )
+          },
+          {
             key: "users",
             label: "用户账号",
             children: (
-              <UserManagementPanel
-                currentUser={currentUser}
-                users={users}
-                loading={loading.users}
-                error={errors.users}
-                onDataChanged={load}
-              />
+              <Suspense fallback={<AdminPanelFallback />}>
+                <UserManagementPanel
+                  currentUser={currentUser}
+                  users={users}
+                  loading={loading.users}
+                  error={errors.users}
+                  onDataChanged={() => loadUsers(true)}
+                />
+              </Suspense>
             )
           },
           {
             key: "audit",
             label: "操作记录",
             children: (
-              <AuditLogPanel
-                auditLogs={auditLogs}
-                users={users}
-                loading={loading.audit}
-                error={errors.audit}
-                onRetry={load}
-              />
+              <Suspense fallback={<AdminPanelFallback />}>
+                <AuditLogPanel
+                  auditLogs={auditLogs}
+                  users={users}
+                  loading={loading.audit}
+                  error={errors.audit}
+                  onRetry={retryAudit}
+                />
+              </Suspense>
             )
           }
         ]}

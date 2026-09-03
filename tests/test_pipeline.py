@@ -13,7 +13,6 @@ try:
         process_data,
     )
 except ImportError:
-
     resolve_supplier = None
     SupplierIdentity = None
     BatchResult = None
@@ -151,9 +150,7 @@ class AllocationTests(unittest.TestCase):
 
     @staticmethod
     def delivery(quantity=100):
-        return pd.DataFrame(
-            [{"SKU": "SKU-A", "原始站点": "US", "交货量": quantity}]
-        )
+        return pd.DataFrame([{"SKU": "SKU-A", "原始站点": "US", "交货量": quantity}])
 
     @staticmethod
     def products(rows=None):
@@ -207,9 +204,7 @@ class AllocationTests(unittest.TestCase):
             short_tail_limit=50,
             medium_tail_limit=20,
             long_tail_limit=10,
-            allowed_warehouses=frozenset(
-                allowed_warehouses or {"水鞋-广州仓"}
-            ),
+            allowed_warehouses=frozenset(allowed_warehouses or {"水鞋-广州仓"}),
         )
 
     def overreceipt_allowances(
@@ -238,7 +233,6 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(result.import_rows.iloc[0]["*目的仓"], "水鞋-广州仓")
         self.assertEqual(result.import_rows.iloc[0]["交货备注"], "")
 
-
     def test_purchase_matches_supplier_name_but_import_uses_supplier_code(self):
         result = process_data(
             self.delivery(20),
@@ -249,6 +243,7 @@ class AllocationTests(unittest.TestCase):
         )
 
         self.assertEqual(result.import_rows.iloc[0]["*供应商编码"], "GYS-023")
+
     def test_excess_delivery_only_sends_excess_to_manual_processing(self):
         result = process_data(
             self.delivery(120),
@@ -270,9 +265,7 @@ class AllocationTests(unittest.TestCase):
 
         self.assertEqual(result.import_total, 80)
         self.assertEqual(result.manual_total, 40)
-        self.assertEqual(
-            result.import_rows.iloc[0]["交货备注"], "超出采购未交量：40"
-        )
+        self.assertEqual(result.import_rows.iloc[0]["交货备注"], "超出采购未交量：40")
         self.assertEqual(result.exception_rows.iloc[0]["异常原因"], "超出采购未交量")
 
     def test_short_tail_rule_imports_only_the_configured_overreceipt_quantity(self):
@@ -393,7 +386,9 @@ class AllocationTests(unittest.TestCase):
 
         self.assertEqual(result.import_total, 0)
         self.assertEqual(result.manual_total, 20)
-        self.assertEqual(result.exception_rows.iloc[0]["异常原因"], "产品信息站点不唯一")
+        self.assertEqual(
+            result.exception_rows.iloc[0]["异常原因"], "产品信息站点不唯一"
+        )
 
     def test_locked_product_site_resolves_ambiguity(self):
         products = self.products(
@@ -441,7 +436,9 @@ class AllocationTests(unittest.TestCase):
 
         self.assertEqual(result.import_total, 0)
         self.assertEqual(result.manual_total, 20)
-        self.assertEqual(result.exception_rows.iloc[0]["异常原因"], "未找到可交货采购需求")
+        self.assertEqual(
+            result.exception_rows.iloc[0]["异常原因"], "未找到可交货采购需求"
+        )
 
     def test_supplier_local_warehouse_is_allocated_first(self):
         purchases = self.purchases(
@@ -574,7 +571,9 @@ class ManualImportMappingTests(unittest.TestCase):
 
 class PendingPositionMappingTests(unittest.TestCase):
     def setUp(self):
-        self.assertIsNotNone(enrich_pending_import_rows, "待处理定位信息匹配函数尚未实现")
+        self.assertIsNotNone(
+            enrich_pending_import_rows, "待处理定位信息匹配函数尚未实现"
+        )
         if enrich_pending_import_rows is None:
             self.skipTest("待处理定位信息匹配函数尚未实现")
 

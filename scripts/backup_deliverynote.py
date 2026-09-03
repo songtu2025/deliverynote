@@ -22,7 +22,8 @@ from typing import BinaryIO, Callable, Iterator, Protocol, Sequence
 BACKUP_NAME_PATTERN = re.compile(r"^\d{8}-\d{6}$")
 PROJECT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DOCKER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
-REQUIRED_SERVICES = frozenset({"db", "api", "worker", "web"})
+WORKER_SERVICES = ("worker", "purchase-sync-worker", "inbound-sync-worker")
+REQUIRED_SERVICES = frozenset({"db", "api", "web", *WORKER_SERVICES})
 
 
 class BackupError(RuntimeError):
@@ -36,8 +37,7 @@ class Runner(Protocol):
         *,
         stdout: BinaryIO | None = None,
         timeout_seconds: int = 300,
-    ) -> str:
-        ...
+    ) -> str: ...
 
 
 class SubprocessRunner:
@@ -66,7 +66,9 @@ class SubprocessRunner:
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", errors="replace")
             detail = (stderr or "命令执行失败").strip()
-            raise BackupError(f"命令失败（{completed.returncode}）：{' '.join(arguments)}\n{detail}")
+            raise BackupError(
+                f"命令失败（{completed.returncode}）：{' '.join(arguments)}\n{detail}"
+            )
         return "" if stdout is not None else str(completed.stdout or "")
 
 
@@ -362,7 +364,8 @@ def _validate_data_archive(path: Path) -> tuple[int, int]:
                     link_path = PurePosixPath(member.linkname)
                     if link_path.is_absolute() or ".." in link_path.parts:
                         raise BackupError(
-                            f"文件卷归档包含不安全链接：{member.name} -> {member.linkname}"
+                            f"文件卷归档包含不安全链接：{member.name} -> "
+                            f"{member.linkname}"
                         )
                 entries += 1
                 files += int(member.isfile())
@@ -384,7 +387,7 @@ def _resume_services(config: BackupConfig, runner: Runner) -> None:
             "--wait-timeout",
             str(config.service_wait_timeout_seconds),
             "api",
-            "worker",
+            *WORKER_SERVICES,
             "web",
         ),
         timeout_seconds=config.service_wait_timeout_seconds + 60,
@@ -412,7 +415,10 @@ def _prune_completed_backups(destination: Path, retention_count: int) -> list[st
     pruned = []
     for item in completed[retention_count:]:
         resolved = item.resolve()
-        if resolved.parent != destination.resolve() or not BACKUP_NAME_PATTERN.fullmatch(item.name):
+        if (
+            resolved.parent != destination.resolve()
+            or not BACKUP_NAME_PATTERN.fullmatch(item.name)
+        ):
             raise BackupError(f"拒绝清理非标准备份目录：{item}")
         shutil.rmtree(resolved)
         pruned.append(item.name)
@@ -442,7 +448,9 @@ def create_backup(
         if final_directory.exists():
             raise BackupError(f"目标备份目录已存在：{final_directory}")
         temporary_directory = Path(
-            tempfile.mkdtemp(prefix=f".incomplete-{backup_name}-", dir=config.destination)
+            tempfile.mkdtemp(
+                prefix=f".incomplete-{backup_name}-", dir=config.destination
+            )
         )
         temporary_directory.chmod(0o700)
         maintenance_started = False
@@ -473,7 +481,7 @@ def create_backup(
                     "stop",
                     "--timeout",
                     str(config.stop_timeout_seconds),
-                    "worker",
+                    *WORKER_SERVICES,
                 ),
                 timeout_seconds=config.stop_timeout_seconds + 60,
             )
@@ -548,9 +556,12 @@ def create_backup(
         )
         _write_private_text(
             temporary_directory / "SHA256SUMS",
-            f"{database_sha256}  database.dump\n{archive_sha256}  delivery_data.tar.gz\n",
+            f"{database_sha256}  database.dump\n"
+            f"{archive_sha256}  delivery_data.tar.gz\n",
         )
-        _write_private_text(temporary_directory / "READY", f"{completed_at.isoformat()}\n")
+        _write_private_text(
+            temporary_directory / "READY", f"{completed_at.isoformat()}\n"
+        )
         database_bytes = database_path.stat().st_size
         data_archive_bytes = archive_path.stat().st_size
         temporary_directory.replace(final_directory)

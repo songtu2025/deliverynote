@@ -2,7 +2,7 @@
 
 ## 开始前
 
-1. 完整阅读 `README.md` 和 `HANDOFF_WEB_UPGRADE.md`。
+1. 完整阅读 `README.md`。
 2. 运行 `git status -sb`，确认当前分支和未提交改动。
 3. 先阅读相关测试和调用链，再修改业务代码。
 4. Linux/Docker 问题优先检查 `compose.yaml`、`.env.example` 和服务日志。

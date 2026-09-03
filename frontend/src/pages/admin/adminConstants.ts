@@ -1,4 +1,4 @@
-export type InputKind = "purchase" | "product" | "supplier" | "position" | "template";
+export type InputKind = "purchase" | "product" | "supplier" | "position" | "template" | "inbound_template";
 
 export interface InputKindDefinition {
   value: InputKind;
@@ -32,7 +32,7 @@ export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
   },
   {
     value: "position",
-    label: "库位/排仓数据",
+    label: "MSKU定位",
     purpose: "仅用于补充待处理导出的定位信息",
     impact: "不参与采购余额扣减或仓库分配；按店铺-站点与积加 SKU 补充定位字段。",
     requiredFields: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"]
@@ -43,6 +43,13 @@ export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
     purpose: "定义最终交货导入文件的 A:G 表头、样例行格式和样式。",
     impact: "生成单文件结果和批次 ZIP 时使用，必须保持既有七列导出格式兼容。",
     requiredFields: ["*目的仓", "*供应商编码", "*SKU", "*本次交货量", "*站点", "单据备注", "交货备注"]
+  },
+  {
+    value: "inbound_template",
+    label: "积加入库模板",
+    purpose: "定义自营仓批次最终生成的积加批量入库文件字段和样式。",
+    impact: "新建自营仓入库批次会锁定当前启用版本，不影响原交货处理的 A:G 导出模板。",
+    requiredFields: ["入库单号", "入库仓", "SKU", "平台站点", "关联采购单", "关联交货单/调拨单", "本次入库", "入库库位"]
   }
 ];
 

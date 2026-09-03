@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   App as AntApp,
   Button,
@@ -8,12 +8,14 @@ import {
   Input,
   Layout,
   Menu,
+  Skeleton,
   Typography,
   message,
   theme
 } from "antd";
 import {
   ApartmentOutlined,
+  InboxOutlined,
   LogoutOutlined,
   SafetyCertificateOutlined,
   SettingOutlined,
@@ -21,26 +23,58 @@ import {
 } from "@ant-design/icons";
 
 import { api, AUTH_EXPIRED_EVENT, getToken, setToken } from "./api";
-import AdminPage from "./pages/AdminPage";
-import BatchDetail from "./pages/BatchDetail";
-import BatchesPage from "./pages/BatchesPage";
-import OverreceiptRulesPage from "./pages/OverreceiptRulesPage";
 import type { User } from "./types";
 
 const USER_KEY = "delivery-note-user";
 
 type LoginResponse = { token: string; user: User };
-type WorkspacePage = "batches" | "overreceipt" | "admin";
+type WorkspacePage = "batches" | "self-operated" | "overreceipt" | "admin";
 type WorkspaceRoute = {
   page: WorkspacePage;
   batchId: number | null;
 };
+
+const loadAdminPage = () => import("./pages/AdminPage");
+const loadBatchDetail = () => import("./pages/BatchDetail");
+const loadBatchesPage = () => import("./pages/BatchesPage");
+const loadOverreceiptRulesPage = () => import("./pages/OverreceiptRulesPage");
+
+const AdminPage = lazy(loadAdminPage);
+const BatchDetail = lazy(loadBatchDetail);
+const BatchesPage = lazy(loadBatchesPage);
+const OverreceiptRulesPage = lazy(loadOverreceiptRulesPage);
+
+const WORKSPACE_LOADERS: Record<WorkspacePage, () => Promise<unknown>> = {
+  batches: loadBatchesPage,
+  "self-operated": loadBatchesPage,
+  overreceipt: loadOverreceiptRulesPage,
+  admin: loadAdminPage
+};
+
+function preloadWorkspaceRoute(route: WorkspaceRoute) {
+  void (route.batchId === null ? WORKSPACE_LOADERS[route.page]() : loadBatchDetail());
+}
+
+function WorkspacePageFallback() {
+  return (
+    <div className="page-shell" aria-busy="true" aria-label="正在加载页面">
+      <Skeleton active title={{ width: 220 }} paragraph={{ rows: 8 }} />
+    </div>
+  );
+}
 
 function readWorkspaceRoute(): WorkspaceRoute {
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
   const batchMatch = pathname.match(/^\/batches\/([1-9]\d*)$/);
   if (batchMatch) {
     return { page: "batches", batchId: Number(batchMatch[1]) };
+  }
+  const selfOperatedBatchMatch = pathname.match(/^\/self-operated\/([1-9]\d*)$/);
+  if (selfOperatedBatchMatch) {
+    return { page: "self-operated", batchId: Number(selfOperatedBatchMatch[1]) };
+  }
+  if (pathname === "/self-operated") {
+    return { page: "self-operated", batchId: null };
   }
   if (pathname === "/overreceipt") {
     return { page: "overreceipt", batchId: null };
@@ -52,7 +86,12 @@ function readWorkspaceRoute(): WorkspaceRoute {
 }
 
 function workspacePath(route: WorkspaceRoute): string {
-  if (route.batchId !== null) return `/batches/${route.batchId}`;
+  if (route.batchId !== null) {
+    return route.page === "self-operated"
+      ? `/self-operated/${route.batchId}`
+      : `/batches/${route.batchId}`;
+  }
+  if (route.page === "self-operated") return "/self-operated";
   if (route.page === "overreceipt") return "/overreceipt";
   if (route.page === "admin") return "/admin";
   return "/batches";
@@ -97,10 +136,7 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
     <div className="login-shell">
       <Card className="login-card" variant="borderless">
         <div className="login-mark">DN</div>
-        <Typography.Title level={2}>供应链交货处理</Typography.Title>
-        <Typography.Paragraph type="secondary">
-          上传、计算、审阅、拆分与导出
-        </Typography.Paragraph>
+        <Typography.Title level={2}>供应链单据处理</Typography.Title>
         <Form layout="vertical" onFinish={submit} requiredMark={false}>
           <Form.Item label="用户名" name="username" rules={[{ required: true }]}>
             <Input size="large" prefix={<UserOutlined />} autoComplete="username" />
@@ -120,20 +156,37 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
 function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => readWorkspaceRoute());
   const { page, batchId } = route;
+  const [visitedPages, setVisitedPages] = useState<Set<WorkspacePage>>(() => new Set([page]));
   const batchFocused = batchId !== null;
   const roleLabel = user.role === "admin" ? "管理员" : "操作员";
   const userInitial = user.username.trim().slice(0, 1).toUpperCase() || "U";
 
   const navigate = (nextRoute: WorkspaceRoute, replace = false) => {
+    preloadWorkspaceRoute(nextRoute);
     const path = workspacePath(nextRoute);
     if (window.location.pathname !== path) {
       window.history[replace ? "replaceState" : "pushState"]({}, "", path);
     }
+    setVisitedPages((current) => {
+      if (current.has(nextRoute.page)) return current;
+      const next = new Set(current);
+      next.add(nextRoute.page);
+      return next;
+    });
     setRoute(nextRoute);
   };
 
   useEffect(() => {
-    const handlePopState = () => setRoute(readWorkspaceRoute());
+    const handlePopState = () => {
+      const nextRoute = readWorkspaceRoute();
+      setVisitedPages((current) => {
+        if (current.has(nextRoute.page)) return current;
+        const next = new Set(current);
+        next.add(nextRoute.page);
+        return next;
+      });
+      setRoute(nextRoute);
+    };
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -153,11 +206,15 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [page, batchId]);
 
+  const menuLabel = (targetPage: WorkspacePage, label: string) => (
+    <span onMouseEnter={() => void WORKSPACE_LOADERS[targetPage]()}>{label}</span>
+  );
   const menuItems = [
-    { key: "batches", icon: <ApartmentOutlined />, label: "批次处理" },
-    { key: "overreceipt", icon: <SafetyCertificateOutlined />, label: "超收规则" },
+    { key: "batches", icon: <ApartmentOutlined />, label: menuLabel("batches", "交货批次") },
+    { key: "self-operated", icon: <InboxOutlined />, label: menuLabel("self-operated", "自营仓入库") },
+    { key: "overreceipt", icon: <SafetyCertificateOutlined />, label: menuLabel("overreceipt", "超收规则") },
     ...(user.role === "admin"
-      ? [{ key: "admin", icon: <SettingOutlined />, label: "管理员维护" }]
+      ? [{ key: "admin", icon: <SettingOutlined />, label: menuLabel("admin", "管理员维护") }]
       : [])
   ];
 
@@ -166,7 +223,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
       {!batchFocused && <Layout.Sider width={236} breakpoint="lg" collapsedWidth={72} theme="light">
         <div className="brand">
           <span className="brand-mark">DN</span>
-          <span className="brand-name">交货处理</span>
+          <span className="brand-name">单据处理</span>
         </div>
         <Menu
           mode="inline"
@@ -201,20 +258,44 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
           </div>
         </Layout.Header>
         <Layout.Content className="app-content">
-          {batchId !== null ? (
-            <BatchDetail
-              batchId={batchId}
-              onBack={() => navigate({ page: "batches", batchId: null })}
-            />
-          ) : page === "admin" && user.role === "admin" ? (
-            <AdminPage currentUser={user} />
-          ) : page === "overreceipt" ? (
-            <OverreceiptRulesPage />
-          ) : (
-            <BatchesPage
-              onOpen={(id) => navigate({ page: "batches", batchId: id })}
-            />
-          )}
+          <Suspense fallback={<WorkspacePageFallback />}>
+            {batchId !== null && (
+              <BatchDetail
+                batchId={batchId}
+                onBack={() => navigate({ page, batchId: null })}
+              />
+            )}
+            {visitedPages.has("batches") && (
+              <div hidden={batchId !== null || page !== "batches"}>
+                <BatchesPage
+                  active={batchId === null && page === "batches"}
+                  canActivatePurchaseSync={user.role === "admin"}
+                  canDeleteBatches={user.role === "admin"}
+                  onOpen={(id) => navigate({ page: "batches", batchId: id })}
+                />
+              </div>
+            )}
+            {visitedPages.has("self-operated") && (
+              <div hidden={batchId !== null || page !== "self-operated"}>
+                <BatchesPage
+                  active={batchId === null && page === "self-operated"}
+                  workflow="self_operated_inbound"
+                  canDeleteBatches={user.role === "admin"}
+                  onOpen={(id) => navigate({ page: "self-operated", batchId: id })}
+                />
+              </div>
+            )}
+            {visitedPages.has("overreceipt") && (
+              <div hidden={batchId !== null || page !== "overreceipt"}>
+                <OverreceiptRulesPage active={batchId === null && page === "overreceipt"} />
+              </div>
+            )}
+            {visitedPages.has("admin") && user.role === "admin" && (
+              <div hidden={batchId !== null || page !== "admin"}>
+                <AdminPage currentUser={user} active={batchId === null && page === "admin"} />
+              </div>
+            )}
+          </Suspense>
         </Layout.Content>
       </Layout>
     </Layout>
@@ -251,7 +332,12 @@ export default function App() {
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
-          colorPrimary: "#176b5b",
+          colorPrimary: "#055247",
+          colorInfo: "#055247",
+          colorText: "#141b18",
+          colorTextSecondary: "#63736e",
+          colorBgLayout: "#fbfcfb",
+          colorBorder: "#dfe6e3",
           borderRadius: 8,
           fontFamily: "Inter, Microsoft YaHei, sans-serif"
         }

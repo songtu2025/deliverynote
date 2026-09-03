@@ -7,7 +7,7 @@
 | 功能源码基线 | Git tree `729713a9499722c54047799834b1c7afed42604e` |
 | 生产前端资源 | `index-BchohicX.js` / `index-CrS6zE_W.css` |
 | 最后完整复核 | 2026-07-24（Asia/Shanghai） |
-| 需求基线 | [DeliveryNote PC 界面规范](UI_UX_OPTIMIZATION_PLAN.md) |
+| 需求基线 | 本报告记录的 PC 界面验收范围 |
 
 ## 1. 验收结论
 

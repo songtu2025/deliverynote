@@ -15,6 +15,12 @@ from .pipeline import (
     POSITION_VALUE_COLUMNS,
     normalize_delivery_sheet,
 )
+from .self_operated_inbound import (
+    INBOUND_COLUMNS as SELF_OPERATED_INBOUND_COLUMNS,
+    INBOUND_TEMPLATE_COLUMNS,
+    SelfOperatedDeliverySource,
+    normalize_self_operated_delivery_sheet,
+)
 
 
 PURCHASE_COLUMNS = ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"]
@@ -46,6 +52,21 @@ def read_delivery_workbook(path: Path) -> pd.DataFrame:
     raise ValueError("交货单汇总表第 2 行或第 4 行未找到有效表头")
 
 
+def read_self_operated_delivery_workbook(
+    path: Path,
+) -> SelfOperatedDeliverySource:
+    sheet = pd.read_excel(path, sheet_name="明细", header=3)
+    return normalize_self_operated_delivery_sheet(sheet)
+
+
+def read_self_operated_inbound_workbook(path: Path) -> pd.DataFrame:
+    rows = pd.read_excel(path)
+    missing = sorted(SELF_OPERATED_INBOUND_COLUMNS - set(rows.columns))
+    if missing:
+        raise ValueError(f"自营仓收货入库单缺少必要字段：{', '.join(missing)}")
+    return rows
+
+
 def read_product_workbook(path: Path) -> pd.DataFrame:
     return pd.read_excel(path, usecols=PRODUCT_COLUMNS)
 
@@ -56,6 +77,7 @@ def read_purchase_workbook(path: Path) -> pd.DataFrame:
 
 def read_supplier_workbook(path: Path) -> pd.DataFrame:
     return pd.read_excel(path, usecols=SUPPLIER_COLUMNS)
+
 
 def read_position_workbook(path: Path) -> pd.DataFrame:
     return pd.read_excel(path, sheet_name="MSKU_视图", usecols=POSITION_SOURCE_COLUMNS)
@@ -69,8 +91,26 @@ def validate_template_workbook(path: Path) -> None:
         headers = [sheet.cell(row=2, column=column).value for column in range(1, 8)]
         if headers != IMPORT_COLUMNS:
             raise ValueError("官方模板表头与预期字段不一致")
-        if sheet.max_row < 3:
+        example_cells = [sheet.cell(row=3, column=column) for column in range(1, 8)]
+        if not any(cell.value is not None or cell.has_style for cell in example_cells):
             raise ValueError("官方模板缺少第 3 行示例格式")
+    finally:
+        workbook.close()
+
+
+def validate_self_operated_template_workbook(path: Path) -> None:
+    """只读校验积加入库模板表头和样式示例行。"""
+    workbook = load_workbook(path, read_only=True, data_only=False)
+    try:
+        sheet = workbook.active
+        headers = [
+            sheet.cell(row=1, column=column).value
+            for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
+        ]
+        if headers != INBOUND_TEMPLATE_COLUMNS:
+            raise ValueError("积加入库模板表头与预期字段不一致")
+        if sheet.max_row < 2:
+            raise ValueError("积加入库模板缺少第 2 行示例格式")
     finally:
         workbook.close()
 
@@ -90,7 +130,9 @@ def _populate_import_sheet(
     if list(import_rows.columns) != IMPORT_COLUMNS:
         raise ValueError("正式导入数据字段与官方模板不一致")
 
-    template_headers = [sheet.cell(row=2, column=column).value for column in range(1, 8)]
+    template_headers = [
+        sheet.cell(row=2, column=column).value for column in range(1, 8)
+    ]
     if template_headers != IMPORT_COLUMNS:
         raise ValueError("官方模板表头与预期字段不一致")
     if sheet.max_row < 3:
@@ -125,6 +167,52 @@ def write_import_workbook(
     """复制官方模板，在第 3 行起写入可导入数据。"""
     workbook = load_workbook(template_path)
     _populate_import_sheet(workbook.active, import_rows)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    workbook.save(output_path)
+
+
+def write_self_operated_inbound_workbook(
+    template_path: Path,
+    output_path: Path,
+    allocation_rows: pd.DataFrame,
+) -> None:
+    """复制积加入库模板，从第 2 行写入本次可入库数据。"""
+    missing = [
+        column
+        for column in INBOUND_TEMPLATE_COLUMNS
+        if column not in allocation_rows.columns
+    ]
+    if missing:
+        raise ValueError(f"积加入库数据缺少字段：{', '.join(missing)}")
+
+    workbook = load_workbook(template_path)
+    sheet = workbook.active
+    headers = [
+        sheet.cell(row=1, column=column).value
+        for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
+    ]
+    if headers != INBOUND_TEMPLATE_COLUMNS:
+        raise ValueError("积加入库模板表头与预期字段不一致")
+    if sheet.max_row < 2:
+        raise ValueError("积加入库模板缺少第 2 行示例格式")
+
+    styles = [
+        copy(sheet.cell(row=2, column=column)._style)
+        for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
+    ]
+    row_height = sheet.row_dimensions[2].height
+    sheet.delete_rows(2, sheet.max_row - 1)
+    export_rows = allocation_rows[INBOUND_TEMPLATE_COLUMNS]
+    for row_offset, values in enumerate(
+        export_rows.itertuples(index=False, name=None),
+        start=2,
+    ):
+        sheet.row_dimensions[row_offset].height = row_height
+        for column, value in enumerate(values, start=1):
+            cell = sheet.cell(row=row_offset, column=column)
+            cell._style = copy(styles[column - 1])
+            cell.value = _excel_value(value)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
@@ -174,7 +262,9 @@ def write_exception_workbook(
     summary.column_dimensions["A"].width = 18
     summary.column_dimensions["B"].width = 48
     for row in range(1, summary.max_row + 1):
-        summary.cell(row=row, column=2).alignment = Alignment(vertical="top", wrap_text=True)
+        summary.cell(row=row, column=2).alignment = Alignment(
+            vertical="top", wrap_text=True
+        )
 
     details = workbook.create_sheet("异常明细", 1)
     details.append(EXCEPTION_COLUMNS)
@@ -194,7 +284,6 @@ def write_exception_workbook(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
-
 
 
 def _set_default_cells_unlocked(workbook) -> None:
@@ -225,7 +314,6 @@ def _protect_header_only(sheet) -> None:
             protection = copy(cell.protection)
             protection.locked = False
             cell.protection = protection
-
 
 
 def _populate_pending_position_columns(sheet, pending_rows: pd.DataFrame) -> None:
@@ -264,6 +352,7 @@ def _populate_pending_position_columns(sheet, pending_rows: pd.DataFrame) -> Non
             isinstance(value, str) and value.startswith("{") for value in helper_values
         ):
             sheet.row_dimensions[3 + row_offset].height = 60
+
 
 def write_delivery_workbook(
     template_path: Path,
