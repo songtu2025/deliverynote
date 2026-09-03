@@ -13,7 +13,6 @@ __pycache__/
 storage/
 outputs/
 acceptance_data/
-*.ipynb
 output.xlsx
 src_data/
 patch_probe.txt
