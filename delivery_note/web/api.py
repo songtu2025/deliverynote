@@ -1,10 +1,12 @@
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 import os
 from pathlib import Path
 import re
+import shutil
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Callable
 from uuid import uuid4
 
 import pandas as pd
@@ -15,12 +17,13 @@ from fastapi import (
     Form,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
@@ -35,7 +38,10 @@ from ..excel_io import (
     read_position_workbook,
     read_product_workbook,
     read_purchase_workbook,
+    read_self_operated_delivery_workbook,
+    read_self_operated_inbound_workbook,
     read_supplier_workbook,
+    validate_self_operated_template_workbook,
     validate_template_workbook,
 )
 from ..input_inspection import (
@@ -44,6 +50,16 @@ from ..input_inspection import (
     position_diff,
     validate_position_frame,
     write_position_workbook,
+)
+from ..migrations.purchase_sync_optional_versions import (
+    migrate as migrate_purchase_sync_optional_versions,
+)
+from ..gerpgo import (
+    GerpgoClient,
+    GerpgoError,
+    GerpgoSettings,
+    load_gerpgo_settings,
+    save_gerpgo_settings,
 )
 from ..pipeline import (
     IMPORT_COLUMNS,
@@ -65,13 +81,18 @@ from .models import (
     Job,
     OverreceiptRuleVersion,
     PositionDraftRow,
+    PurchaseSyncJob,
+    SelfOperatedBatch,
+    SelfOperatedInboundSyncJob,
+    SelfOperatedOverreceiptRuleVersion,
+    SelfOperatedSiteResolution,
     SplitRecord,
     User,
 )
 from .position_drafts import (
     FIELD_TO_COLUMN,
     ROW_FIELDS,
-    DraftConflict,
+    DraftConflictError,
     create_or_resume_draft,
     delete_draft_rows,
     discard_draft,
@@ -85,6 +106,18 @@ from .position_drafts import (
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
+SELF_OPERATED_INPUT_KINDS = ("product", "supplier", "inbound_template")
+UPLOAD_INPUT_KINDS = (*INPUT_KINDS, "inbound_template")
+BUILTIN_EXPORT_TEMPLATE_NAME = "系统内置交货导出模板"
+BUILTIN_EXPORT_TEMPLATE_ORIGINAL_NAME = "交货导入模板.xlsx"
+BUILTIN_EXPORT_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[1] / "assets" / "default_import_template.xlsx"
+)
+BUILTIN_INBOUND_TEMPLATE_NAME = "系统内置积加入库模板"
+BUILTIN_INBOUND_TEMPLATE_ORIGINAL_NAME = "积加批量入库模板.xlsx"
+BUILTIN_INBOUND_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[1] / "assets" / "default_inbound_template.xlsx"
+)
 VERSION_FIELDS = {
     "purchase": "purchase_version_id",
     "product": "product_version_id",
@@ -105,6 +138,36 @@ ROLES = {"admin", "operator"}
 POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
+INPUT_INSPECTION_CACHE_SIZE = 32
+
+
+class _InputInspectionCache:
+    """按最近使用顺序缓存不可变基础资料的检查结果。"""
+
+    def __init__(self, max_entries: int):
+        self._max_entries = max_entries
+        self._inspections: OrderedDict[tuple[int, int, int], dict] = OrderedDict()
+        self._lock = Lock()
+
+    def get(
+        self,
+        version_id: int,
+        offset: int,
+        limit: int,
+        loader: Callable[[], dict],
+    ) -> dict:
+        key = (version_id, offset, limit)
+        with self._lock:
+            inspection = self._inspections.get(key)
+            if inspection is not None:
+                self._inspections.move_to_end(key)
+                return inspection
+
+            inspection = loader()
+            self._inspections[key] = inspection
+            if len(self._inspections) > self._max_entries:
+                self._inspections.popitem(last=False)
+            return inspection
 
 
 class _PositionFrameCache:
@@ -160,6 +223,10 @@ class BatchPayload(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class BatchDeletePayload(BaseModel):
+    batch_ids: list[int] = Field(min_length=1)
+
+
 class FileOrderPayload(BaseModel):
     file_ids: list[int]
 
@@ -212,6 +279,42 @@ class OverreceiptRulePayload(BaseModel):
     allowed_warehouses: list[str]
 
 
+class SelfOperatedOverreceiptRulePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    allowance: int = Field(ge=0)
+
+
+class RuleVersionNamePayload(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class SelfOperatedSiteResolutionPayload(BaseModel):
+    full_site: str = Field(min_length=1, max_length=300)
+
+
+class GerpgoConfigPayload(BaseModel):
+    base_url: str = Field(min_length=1, max_length=500)
+    app_id: str = Field(default="", max_length=200)
+    app_key: str = Field(default="", max_length=500)
+
+
+def _masked_identifier(value: str) -> str:
+    if len(value) <= 4:
+        return "*" * len(value)
+    return f"{value[:2]}***{value[-2:]}"
+
+
+def _gerpgo_config_json(settings: GerpgoSettings) -> dict:
+    return {
+        "configured": True,
+        "base_url": settings.base_url,
+        "app_id_hint": _masked_identifier(settings.app_id),
+        "has_app_id": True,
+        "has_app_key": True,
+        "source": settings.source,
+    }
+
+
 def _user_json(user: User) -> dict:
     return {
         "id": user.id,
@@ -233,6 +336,133 @@ def _version_json(version: InputVersion) -> dict:
     }
 
 
+def _purchase_sync_job_json(job: PurchaseSyncJob) -> dict:
+    findings = job.issues or []
+    warning_count = sum(finding.get("severity") == "warning" for finding in findings)
+    return {
+        "id": job.id,
+        "status": job.status,
+        "base_version_id": job.base_version_id,
+        "product_version_id": job.product_version_id,
+        "supplier_version_id": job.supplier_version_id,
+        "candidate_version_id": job.candidate_version_id,
+        "total_orders": job.total_orders,
+        "processed_orders": job.processed_orders,
+        "raw_detail_count": job.raw_detail_count,
+        "eligible_detail_count": job.eligible_detail_count,
+        "filtered_detail_count": job.filtered_detail_count,
+        "current_order": job.current_order,
+        "issue_count": len(findings) - warning_count,
+        "warning_count": warning_count,
+        "diff": job.diff or {},
+        "error_message": job.error_message,
+        "created_at": _utc_isoformat(job.created_at),
+        "claimed_at": (_utc_isoformat(job.claimed_at) if job.claimed_at else None),
+        "heartbeat_at": (
+            _utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None
+        ),
+        "finished_at": (_utc_isoformat(job.finished_at) if job.finished_at else None),
+    }
+
+
+def _self_operated_inbound_sync_job_json(
+    job: SelfOperatedInboundSyncJob,
+) -> dict:
+    findings = job.issues or []
+    warning_count = sum(finding.get("severity") == "warning" for finding in findings)
+    return {
+        "id": job.id,
+        "status": job.status,
+        "base_version_id": job.base_version_id,
+        "candidate_version_id": job.candidate_version_id,
+        "total_orders": job.total_orders,
+        "raw_detail_count": job.raw_detail_count,
+        "eligible_detail_count": job.eligible_detail_count,
+        "filtered_detail_count": job.filtered_detail_count,
+        "issue_count": len(findings) - warning_count,
+        "warning_count": warning_count,
+        "diff": job.diff or {},
+        "error_message": job.error_message,
+        "created_at": _utc_isoformat(job.created_at),
+        "claimed_at": (_utc_isoformat(job.claimed_at) if job.claimed_at else None),
+        "heartbeat_at": (
+            _utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None
+        ),
+        "finished_at": (_utc_isoformat(job.finished_at) if job.finished_at else None),
+    }
+
+
+def _self_operated_inbound_sync_issues(
+    session: Session,
+    job: SelfOperatedInboundSyncJob,
+) -> list[dict]:
+    issues = [dict(issue) for issue in (job.issues or [])]
+    detail_fields = {
+        "warehouse",
+        "remaining_quantity",
+        "purchase_code",
+        "related_code",
+    }
+    if (
+        not issues
+        or all(detail_fields.issubset(issue) for issue in issues)
+        or job.candidate_version_id is None
+    ):
+        return issues
+
+    version = session.get(InputVersion, job.candidate_version_id)
+    if version is None:
+        return issues
+    try:
+        frame = read_self_operated_inbound_workbook(Path(version.storage_path))
+    except (OSError, ValueError):
+        return issues
+
+    def key_value(value) -> str:
+        return "" if pd.isna(value) else str(value).strip()
+
+    candidates: dict[tuple[str, str, str], list[dict]] = {}
+    for record in frame.to_dict("records"):
+        key = (
+            key_value(record.get("入库单号")),
+            key_value(record.get("SKU")),
+            key_value(record.get("接口站点", record.get("平台站点"))),
+        )
+        candidates.setdefault(key, []).append(record)
+
+    offsets: dict[tuple[str, str, str], int] = {}
+    for issue in issues:
+        if detail_fields.issubset(issue):
+            continue
+        key = (
+            key_value(issue.get("order_no")),
+            key_value(issue.get("sku")),
+            key_value(issue.get("source_site")),
+        )
+        matches = candidates.get(key, [])
+        offset = offsets.get(key, 0)
+        if offset >= len(matches):
+            continue
+        record = matches[offset]
+        offsets[key] = offset + 1
+        quantity = record.get("应收货")
+        issue.setdefault("warehouse", key_value(record.get("入库仓")))
+        issue.setdefault(
+            "remaining_quantity",
+            None
+            if pd.isna(quantity)
+            else quantity.item()
+            if hasattr(quantity, "item")
+            else quantity,
+        )
+        issue.setdefault("purchase_code", key_value(record.get("关联采购单")))
+        issue.setdefault(
+            "related_code",
+            key_value(record.get("关联交货单/调拨单")),
+        )
+    return issues
+
+
 def _overreceipt_rule_json(version: OverreceiptRuleVersion) -> dict:
     return {
         "id": version.id,
@@ -241,6 +471,19 @@ def _overreceipt_rule_json(version: OverreceiptRuleVersion) -> dict:
         "medium_tail_limit": version.medium_tail_limit,
         "long_tail_limit": version.long_tail_limit,
         "allowed_warehouses": version.allowed_warehouses,
+        "active": version.active,
+        "created_by": version.created_by,
+        "created_at": _utc_isoformat(version.created_at),
+    }
+
+
+def _self_operated_overreceipt_rule_json(
+    version: SelfOperatedOverreceiptRuleVersion,
+) -> dict:
+    return {
+        "id": version.id,
+        "name": version.name,
+        "allowance": version.allowance,
         "active": version.active,
         "created_by": version.created_by,
         "created_at": _utc_isoformat(version.created_at),
@@ -269,17 +512,16 @@ def _position_row_json(
 
 def _position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
     records = [
-        {
-            FIELD_TO_COLUMN[field]: getattr(row, field)
-            for field in ROW_FIELDS
-        }
+        {FIELD_TO_COLUMN[field]: getattr(row, field) for field in ROW_FIELDS}
         for row in rows
         if not row.deleted
     ]
     return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
 
 
-def _position_issue_map(rows: list[PositionDraftRow]) -> tuple[list[dict], dict[int, list[dict]]]:
+def _position_issue_map(
+    rows: list[PositionDraftRow],
+) -> tuple[list[dict], dict[int, list[dict]]]:
     active_rows = [row for row in rows if not row.deleted]
     issues = validate_position_frame(_position_frame(active_rows))
     by_row_id: dict[int, list[dict]] = {row.id: [] for row in active_rows}
@@ -345,7 +587,9 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
             else f"版本 #{draft.base_version_id}"
         ),
         "active_version_id": active_version.id if active_version is not None else None,
-        "active_version_name": active_version.name if active_version is not None else None,
+        "active_version_name": active_version.name
+        if active_version is not None
+        else None,
         "status": draft.status,
         "revision": draft.revision,
         "created_by": draft.created_by,
@@ -458,12 +702,8 @@ def _batch_summary(
             if not parts:
                 manual_total += exception.manual_quantity
                 continue
-            import_total += sum(
-                part.quantity for part in parts if part.resolved
-            )
-            manual_total += sum(
-                part.quantity for part in parts if not part.resolved
-            )
+            import_total += sum(part.quantity for part in parts if part.resolved)
+            manual_total += sum(part.quantity for part in parts if not part.resolved)
     return {
         "delivery_total": delivery_total,
         "import_total": import_total,
@@ -499,23 +739,51 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         if overreceipt_binding is not None
         else None
     )
+    self_operated = session.get(SelfOperatedBatch, batch.id)
+    self_operated_rule = (
+        session.get(
+            SelfOperatedOverreceiptRuleVersion,
+            self_operated.rule_version_id,
+        )
+        if self_operated is not None and self_operated.rule_version_id is not None
+        else None
+    )
     result = {
         "id": batch.id,
         "name": batch.name,
         "status": batch.status,
+        "workflow": (
+            "self_operated_inbound" if self_operated is not None else "delivery"
+        ),
         "created_by": batch.created_by,
         "version_ids": {
-            kind: getattr(batch, field)
-            for kind, field in VERSION_FIELDS.items()
+            kind: getattr(batch, field) for kind, field in VERSION_FIELDS.items()
         },
         "overreceipt_rule": (
             _overreceipt_rule_json(overreceipt_rule)
             if overreceipt_rule is not None
             else None
         ),
+        "self_operated_overreceipt_rule": (
+            _self_operated_overreceipt_rule_json(self_operated_rule)
+            if self_operated_rule is not None
+            else None
+        ),
+        "inbound_file": (
+            {
+                "original_name": self_operated.inbound_original_name,
+                "uploaded": bool(self_operated.inbound_storage_path),
+            }
+            if self_operated is not None
+            else None
+        ),
         "error_message": batch.error_message,
         "download_ready": bool(batch.zip_path),
-        "merged_download_ready": _merged_export_ready(batch, len(sources)),
+        "merged_download_ready": (
+            False
+            if self_operated is not None
+            else _merged_export_ready(batch, len(sources))
+        ),
         "created_at": _utc_isoformat(batch.created_at),
         "updated_at": _utc_isoformat(batch.updated_at),
         "file_count": len(sources),
@@ -525,6 +793,17 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
             splits_by_exception,
         ),
     }
+    inbound_source = None
+    if self_operated is not None and self_operated.inbound_storage_path:
+        inbound_source = session.scalar(
+            select(InputVersion).where(
+                InputVersion.kind == "self_operated_inbound",
+                InputVersion.storage_path == self_operated.inbound_storage_path,
+            )
+        )
+        result["version_ids"]["self_operated_inbound"] = (
+            inbound_source.id if inbound_source is not None else None
+        )
     if include_files:
         result["files"] = [
             _file_json(
@@ -537,14 +816,44 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         result["versions"] = {
             kind: _version_json(version)
             for kind, field in VERSION_FIELDS.items()
-            if (version := session.get(InputVersion, getattr(batch, field))) is not None
+            if (version_id := getattr(batch, field)) is not None
+            if (version := session.get(InputVersion, version_id)) is not None
         }
+        if self_operated is not None:
+            inbound_template = session.get(
+                InputVersion,
+                self_operated.template_version_id,
+            )
+            if inbound_template is not None:
+                result["versions"]["inbound_template"] = _version_json(inbound_template)
+            if inbound_source is not None:
+                result["versions"]["self_operated_inbound"] = _version_json(
+                    inbound_source
+                )
         result["jobs"] = {
             job.kind: _job_json(job)
             for job in session.scalars(
                 select(Job).where(Job.batch_id == batch.id).order_by(Job.id)
             ).all()
         }
+        result["site_resolutions"] = (
+            [
+                {
+                    "id": resolution.id,
+                    "sku": resolution.sku,
+                    "original_site": resolution.original_site,
+                    "full_site": resolution.full_site,
+                    "updated_at": _utc_isoformat(resolution.updated_at),
+                }
+                for resolution in session.scalars(
+                    select(SelfOperatedSiteResolution)
+                    .where(SelfOperatedSiteResolution.batch_id == batch.id)
+                    .order_by(SelfOperatedSiteResolution.id)
+                ).all()
+            ]
+            if self_operated is not None
+            else []
+        )
     return result
 
 
@@ -573,8 +882,12 @@ def _validate_input_version(kind: str, path: Path) -> None:
         read_supplier_workbook(path)
     elif kind == "position":
         read_position_workbook(path)
-    else:
+    elif kind == "template":
         validate_template_workbook(path)
+    elif kind == "inbound_template":
+        validate_self_operated_template_workbook(path)
+    else:
+        raise ValueError(f"不支持的输入资料类型：{kind}")
 
 
 def _exception_position_values(
@@ -729,6 +1042,64 @@ async def _save_upload(
         await upload.close()
 
 
+def _bootstrap_builtin_inbound_template(database: Database) -> None:
+    """首次启动时注册系统内置的积加入库模板。"""
+    with database.session() as session:
+        existing_id = session.scalar(
+            select(InputVersion.id).where(InputVersion.kind == "inbound_template")
+        )
+        if existing_id is not None:
+            return
+
+        creator_id = session.scalar(
+            select(User.id).where(User.role == "admin").order_by(User.id)
+        )
+        if creator_id is None:
+            return
+
+        validate_self_operated_template_workbook(BUILTIN_INBOUND_TEMPLATE_PATH)
+        session.add(
+            InputVersion(
+                kind="inbound_template",
+                name=BUILTIN_INBOUND_TEMPLATE_NAME,
+                original_name=BUILTIN_INBOUND_TEMPLATE_ORIGINAL_NAME,
+                storage_path=str(BUILTIN_INBOUND_TEMPLATE_PATH),
+                active=True,
+                created_by=creator_id,
+            )
+        )
+        session.commit()
+
+
+def _bootstrap_builtin_export_template(database: Database) -> None:
+    """首次启动时注册系统内置的交货导出模板。"""
+    with database.session() as session:
+        existing_id = session.scalar(
+            select(InputVersion.id).where(InputVersion.kind == "template")
+        )
+        if existing_id is not None:
+            return
+
+        creator_id = session.scalar(
+            select(User.id).where(User.role == "admin").order_by(User.id)
+        )
+        if creator_id is None:
+            return
+
+        validate_template_workbook(BUILTIN_EXPORT_TEMPLATE_PATH)
+        session.add(
+            InputVersion(
+                kind="template",
+                name=BUILTIN_EXPORT_TEMPLATE_NAME,
+                original_name=BUILTIN_EXPORT_TEMPLATE_ORIGINAL_NAME,
+                storage_path=str(BUILTIN_EXPORT_TEMPLATE_PATH),
+                active=True,
+                created_by=creator_id,
+            )
+        )
+        session.commit()
+
+
 def create_app(
     database_url: str | None = None,
     storage_root: Path | str | None = None,
@@ -737,11 +1108,12 @@ def create_app(
     import_candidate_ttl_seconds: int | None = None,
     position_frame_cache_size: int | None = None,
 ) -> FastAPI:
-    database = Database(
-        database_url
-        or os.getenv("DATABASE_URL", "sqlite+pysqlite:///delivery_note.db")
+    resolved_database_url = database_url or os.getenv(
+        "DATABASE_URL", "sqlite+pysqlite:///delivery_note.db"
     )
+    database = Database(resolved_database_url)
     database.create_schema()
+    migrate_purchase_sync_optional_versions(resolved_database_url)
     storage = Path(storage_root or os.getenv("STORAGE_ROOT", "storage")).resolve()
     storage.mkdir(parents=True, exist_ok=True)
     configured_max_upload_bytes = (
@@ -767,25 +1139,22 @@ def create_app(
         raise ValueError("POSITION_FRAME_CACHE_SIZE 必须大于 0")
     import_candidate_root = storage / "temporary" / "position-imports"
     import_candidate_root.mkdir(parents=True, exist_ok=True)
-    startup_expiry_cutoff = (
-        datetime.now().timestamp() - configured_import_candidate_ttl
-    )
+    startup_expiry_cutoff = datetime.now().timestamp() - configured_import_candidate_ttl
     for stale_candidate in import_candidate_root.iterdir():
         if (
             stale_candidate.is_file()
             and stale_candidate.stat().st_mtime <= startup_expiry_cutoff
         ):
             stale_candidate.unlink(missing_ok=True)
-    # Tokens are intentionally process-local while Compose runs one API process.
-    # A multi-process deployment must move this registry to shared database state.
+    # 当前编排只运行一个接口进程，因此令牌保存在进程内。
+    # 多进程部署时，必须将该注册表迁移到共享数据库。
     import_candidates: dict[str, dict] = {}
     import_candidates_lock = Lock()
     batch_file_upload_lock = Lock()
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
-    position_frame_cache = _PositionFrameCache(
-        configured_position_frame_cache_size
-    )
+    position_frame_cache = _PositionFrameCache(configured_position_frame_cache_size)
+    input_inspection_cache = _InputInspectionCache(INPUT_INSPECTION_CACHE_SIZE)
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -807,6 +1176,9 @@ def create_app(
                     )
                 )
                 session.commit()
+
+    _bootstrap_builtin_export_template(database)
+    _bootstrap_builtin_inbound_template(database)
 
     app = FastAPI(title="供应链交货处理系统", version="1.0.0")
     app.state.database = database
@@ -878,6 +1250,23 @@ def create_app(
         if draft is None or draft.kind != "position":
             raise HTTPException(status_code=404, detail="库位草稿不存在")
         return draft
+
+    def inspect_version(
+        version: InputVersion,
+        offset: int,
+        limit: int,
+    ) -> dict:
+        return input_inspection_cache.get(
+            version.id,
+            offset,
+            limit,
+            lambda: inspect_input_version_with_preview(
+                version.kind,
+                Path(version.storage_path),
+                offset,
+                limit,
+            ),
+        )
 
     def commit_once(session: Session) -> None:
         try:
@@ -962,8 +1351,10 @@ def create_app(
     @app.post("/api/auth/login")
     def login(payload: LoginPayload, session: Annotated[Session, Depends(get_session)]):
         user = session.scalar(select(User).where(User.username == payload.username))
-        if user is None or not user.active or not verify_password(
-            payload.password, user.password_hash
+        if (
+            user is None
+            or not user.active
+            or not verify_password(payload.password, user.password_hash)
         ):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
         token, token_hash, expires_at = new_session_token()
@@ -976,7 +1367,11 @@ def create_app(
         )
         _audit(session, user.id, "login", "user", user.id)
         session.commit()
-        return {"token": token, "expires_at": _utc_isoformat(expires_at), "user": _user_json(user)}
+        return {
+            "token": token,
+            "expires_at": _utc_isoformat(expires_at),
+            "user": _user_json(user),
+        }
 
     @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
     def logout(
@@ -1023,7 +1418,9 @@ def create_app(
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        return [_user_json(user) for user in session.scalars(select(User).order_by(User.id))]
+        return [
+            _user_json(user) for user in session.scalars(select(User).order_by(User.id))
+        ]
 
     @app.put("/api/users/{user_id}/status")
     def update_user_status(
@@ -1082,7 +1479,7 @@ def create_app(
         admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
     ):
-        if kind not in INPUT_KINDS:
+        if kind not in UPLOAD_INPUT_KINDS:
             raise HTTPException(status_code=404, detail="输入类型不存在")
         original_name = _safe_filename(file.filename or "")
         if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
@@ -1162,9 +1559,514 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         versions = session.scalars(
-            select(InputVersion).order_by(InputVersion.kind, InputVersion.created_at.desc())
+            select(InputVersion).order_by(
+                InputVersion.kind, InputVersion.created_at.desc()
+            )
         ).all()
         return [_version_json(version) for version in versions]
+
+    @app.get("/api/admin/integrations/gerpgo")
+    def get_gerpgo_config(
+        _admin: Annotated[User, Depends(admin_user)],
+    ):
+        try:
+            return _gerpgo_config_json(load_gerpgo_settings(storage))
+        except GerpgoError:
+            return {
+                "configured": False,
+                "base_url": os.getenv(
+                    "GERPGO_API_BASE_URL",
+                    "https://openapi.gerpgo.com",
+                ).strip(),
+                "app_id_hint": "",
+                "has_app_id": False,
+                "has_app_key": False,
+                "source": "environment",
+            }
+
+    @app.put("/api/admin/integrations/gerpgo")
+    def update_gerpgo_config(
+        payload: GerpgoConfigPayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        try:
+            current = load_gerpgo_settings(storage)
+        except GerpgoError:
+            current = None
+
+        base_url = payload.base_url.strip().rstrip("/")
+        app_id = payload.app_id.strip() or (current.app_id if current else "")
+        app_key = payload.app_key.strip() or (current.app_key if current else "")
+        if not base_url.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400, detail="API 地址必须使用 HTTP 或 HTTPS"
+            )
+        if not app_id or not app_key:
+            raise HTTPException(status_code=400, detail="请填写 App ID 和 App Key")
+
+        settings = GerpgoSettings(
+            base_url=base_url,
+            app_id=app_id,
+            app_key=app_key,
+            source="managed",
+        )
+        try:
+            GerpgoClient(base_url, app_id, app_key).authenticate()
+        except GerpgoError as error:
+            raise HTTPException(
+                status_code=400,
+                detail=f"积加连接验证失败：{error}",
+            ) from error
+        try:
+            save_gerpgo_settings(storage, settings)
+        except OSError as error:
+            raise HTTPException(status_code=500, detail="积加配置保存失败") from error
+
+        _audit(
+            session,
+            admin.id,
+            "update_gerpgo_config",
+            "integration_config",
+            "gerpgo",
+            details={
+                "base_url": base_url,
+                "app_id_changed": bool(payload.app_id.strip()),
+                "app_key_changed": bool(payload.app_key.strip()),
+            },
+        )
+        session.commit()
+        return _gerpgo_config_json(settings)
+
+    @app.get("/api/purchase-sync")
+    def purchase_sync_status(
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        configured = True
+        try:
+            GerpgoClient.from_config(storage)
+        except GerpgoError:
+            configured = False
+        job = session.scalar(
+            select(PurchaseSyncJob).order_by(PurchaseSyncJob.id.desc())
+        )
+        return {
+            "configured": configured,
+            "job": _purchase_sync_job_json(job) if job else None,
+        }
+
+    @app.post(
+        "/api/purchase-sync",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def start_purchase_sync(
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        try:
+            GerpgoClient.from_config(storage)
+        except GerpgoError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        running = session.scalar(
+            select(PurchaseSyncJob).where(PurchaseSyncJob.active_slot == 1)
+        )
+        if running is not None:
+            raise HTTPException(status_code=409, detail="已有采购同步正在运行")
+
+        active_versions = {
+            version.kind: version
+            for version in session.scalars(
+                select(InputVersion).where(
+                    InputVersion.active.is_(True),
+                    InputVersion.kind.in_(("purchase", "product", "supplier")),
+                )
+            )
+        }
+        product = active_versions.get("product")
+        supplier = active_versions.get("supplier")
+        job = PurchaseSyncJob(
+            status="queued",
+            active_slot=1,
+            created_by=user.id,
+            base_version_id=(
+                active_versions["purchase"].id
+                if "purchase" in active_versions
+                else None
+            ),
+            product_version_id=product.id if product else None,
+            supplier_version_id=supplier.id if supplier else None,
+        )
+        session.add(job)
+        try:
+            session.flush()
+            _audit(
+                session,
+                user.id,
+                "start_purchase_sync",
+                "purchase_sync_job",
+                job.id,
+            )
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="已有采购同步正在运行",
+            ) from error
+        return _purchase_sync_job_json(job)
+
+    @app.get("/api/purchase-sync/{job_id}/issues/download")
+    def download_purchase_sync_issues(
+        job_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        job = session.get(PurchaseSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="采购同步任务不存在")
+        if not job.issues:
+            raise HTTPException(status_code=404, detail="当前任务没有待处理问题")
+        columns = [
+            "severity",
+            "message",
+            "po_code",
+            "sku",
+            "warehouse",
+            "quantity",
+            "source_site",
+            "supplier_code",
+            "supplier_name",
+            "code",
+        ]
+        output = BytesIO()
+        pd.DataFrame(job.issues, columns=columns).rename(
+            columns={
+                "severity": "级别",
+                "message": "问题",
+                "po_code": "采购单号",
+                "sku": "SKU",
+                "warehouse": "目的仓",
+                "quantity": "未交量",
+                "source_site": "接口站点",
+                "supplier_code": "接口供应商编号",
+                "supplier_name": "接口供应商名称",
+                "code": "问题类型",
+            }
+        ).to_excel(output, index=False)
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="purchase_sync_issues_{job.id}.xlsx"'
+                )
+            },
+        )
+
+    @app.get("/api/purchase-sync/{job_id}/issues")
+    def list_purchase_sync_issues(
+        job_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        job = session.get(PurchaseSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="采购同步任务不存在")
+        return job.issues or []
+
+    @app.get("/api/purchase-sync/{job_id}/preview")
+    def preview_purchase_sync(
+        job_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        job = session.get(PurchaseSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="采购同步任务不存在")
+        version = (
+            session.get(InputVersion, job.candidate_version_id)
+            if job.candidate_version_id is not None
+            else None
+        )
+        if version is None:
+            raise HTTPException(status_code=409, detail="候选版本尚未生成")
+        try:
+            frame = read_purchase_workbook(Path(version.storage_path))
+        except (OSError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"候选版本无法读取：{error}",
+            ) from error
+        preview = frame.head(limit)
+        rows = [
+            {
+                "_row_number": row_number,
+                **{
+                    column: (
+                        None
+                        if pd.isna(value)
+                        else value.item()
+                        if hasattr(value, "item")
+                        else value
+                    )
+                    for column, value in record.items()
+                },
+            }
+            for row_number, record in enumerate(
+                preview.to_dict("records"),
+                start=1,
+            )
+        ]
+        return {
+            "columns": list(frame.columns),
+            "rows": rows,
+            "total": len(frame),
+        }
+
+    @app.get("/api/self-operated-inbound-sync")
+    def self_operated_inbound_sync_status(
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        configured = True
+        try:
+            GerpgoClient.from_config(storage)
+        except GerpgoError:
+            configured = False
+        job = session.scalar(
+            select(SelfOperatedInboundSyncJob).order_by(
+                SelfOperatedInboundSyncJob.id.desc()
+            )
+        )
+        active_version = session.scalar(
+            select(InputVersion).where(
+                InputVersion.kind == "self_operated_inbound",
+                InputVersion.active.is_(True),
+            )
+        )
+        return {
+            "configured": configured,
+            "active_version": (
+                _version_json(active_version) if active_version else None
+            ),
+            "job": (_self_operated_inbound_sync_job_json(job) if job else None),
+        }
+
+    @app.post(
+        "/api/self-operated-inbound-sync",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def start_self_operated_inbound_sync(
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        try:
+            GerpgoClient.from_config(storage)
+        except GerpgoError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        running = session.scalar(
+            select(SelfOperatedInboundSyncJob).where(
+                SelfOperatedInboundSyncJob.active_slot == 1
+            )
+        )
+        if running is not None:
+            raise HTTPException(status_code=409, detail="已有待入库同步正在运行")
+        active_version = session.scalar(
+            select(InputVersion).where(
+                InputVersion.kind == "self_operated_inbound",
+                InputVersion.active.is_(True),
+            )
+        )
+        job = SelfOperatedInboundSyncJob(
+            status="queued",
+            active_slot=1,
+            created_by=user.id,
+            base_version_id=active_version.id if active_version else None,
+        )
+        session.add(job)
+        try:
+            session.flush()
+            _audit(
+                session,
+                user.id,
+                "start_self_operated_inbound_sync",
+                "self_operated_inbound_sync_job",
+                job.id,
+            )
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="已有待入库同步正在运行",
+            ) from error
+        return _self_operated_inbound_sync_job_json(job)
+
+    @app.get("/api/self-operated-inbound-sync/{job_id}/issues/download")
+    def download_self_operated_inbound_sync_issues(
+        job_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        job = session.get(SelfOperatedInboundSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="待入库同步任务不存在")
+        issues = _self_operated_inbound_sync_issues(session, job)
+        if not issues:
+            raise HTTPException(status_code=404, detail="当前任务没有异常数据")
+        columns = [
+            "severity",
+            "message",
+            "order_no",
+            "sku",
+            "warehouse",
+            "remaining_quantity",
+            "purchase_code",
+            "related_code",
+            "source_site",
+            "supplier_code",
+            "supplier_name",
+            "code",
+        ]
+        output = BytesIO()
+        pd.DataFrame(issues, columns=columns).rename(
+            columns={
+                "severity": "级别",
+                "message": "问题",
+                "order_no": "入库单号",
+                "sku": "SKU",
+                "warehouse": "入库仓",
+                "remaining_quantity": "剩余应收货",
+                "purchase_code": "关联采购单",
+                "related_code": "关联交货单/调拨单",
+                "source_site": "接口站点",
+                "supplier_code": "接口供应商编号",
+                "supplier_name": "接口供应商名称",
+                "code": "问题类型",
+            }
+        ).to_excel(output, index=False)
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="self_operated_inbound_issues_{job.id}.xlsx"'
+                )
+            },
+        )
+
+    @app.get("/api/self-operated-inbound-sync/{job_id}/issues")
+    def list_self_operated_inbound_sync_issues(
+        job_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        job = session.get(SelfOperatedInboundSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="待入库同步任务不存在")
+        return _self_operated_inbound_sync_issues(session, job)
+
+    @app.get("/api/self-operated-inbound-sync/{job_id}/preview")
+    def preview_self_operated_inbound_sync(
+        job_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        job = session.get(SelfOperatedInboundSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="待入库同步任务不存在")
+        version = (
+            session.get(InputVersion, job.candidate_version_id)
+            if job.candidate_version_id is not None
+            else None
+        )
+        if version is None:
+            raise HTTPException(status_code=409, detail="候选版本尚未生成")
+        try:
+            frame = read_self_operated_inbound_workbook(Path(version.storage_path))
+        except (OSError, ValueError) as error:
+            raise HTTPException(
+                status_code=409,
+                detail=f"候选版本无法读取：{error}",
+            ) from error
+        preview = frame.head(limit)
+        rows = [
+            {
+                "_row_number": row_number,
+                **{
+                    column: (
+                        None
+                        if pd.isna(value)
+                        else value.item()
+                        if hasattr(value, "item")
+                        else value
+                    )
+                    for column, value in record.items()
+                },
+            }
+            for row_number, record in enumerate(
+                preview.to_dict("records"),
+                start=1,
+            )
+        ]
+        return {
+            "columns": list(frame.columns),
+            "rows": rows,
+            "total": len(frame),
+        }
+
+    @app.post("/api/self-operated-inbound-sync/{job_id}/activate")
+    def activate_self_operated_inbound_sync(
+        job_id: int,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        job = session.get(SelfOperatedInboundSyncJob, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="待入库同步任务不存在")
+        if job.status != "succeeded" or job.candidate_version_id is None:
+            raise HTTPException(status_code=409, detail="候选版本尚未生成")
+        version = session.get(InputVersion, job.candidate_version_id)
+        if version is None or version.kind != "self_operated_inbound":
+            raise HTTPException(status_code=409, detail="候选版本不存在")
+        try:
+            current_versions = list(
+                session.scalars(
+                    select(InputVersion)
+                    .where(InputVersion.kind == "self_operated_inbound")
+                    .order_by(InputVersion.id)
+                    .with_for_update()
+                )
+            )
+            for current in current_versions:
+                current.active = False
+            session.flush()
+            version.active = True
+            _audit(
+                session,
+                user.id,
+                "activate_self_operated_inbound_sync",
+                "input_version",
+                version.id,
+                {"job_id": job.id},
+            )
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="输入版本发生并发冲突，请刷新后重试",
+            ) from error
+        return _version_json(version)
 
     @app.get("/api/overreceipt-rule-versions/warehouses")
     def list_overreceipt_warehouses(
@@ -1211,6 +2113,59 @@ def create_app(
             )
         ).all()
         return [_overreceipt_rule_json(version) for version in versions]
+
+    @app.put("/api/overreceipt-rule-versions/{version_id}/name")
+    def rename_overreceipt_rule(
+        version_id: int,
+        payload: RuleVersionNamePayload,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
+
+        with overreceipt_rule_lock:
+            versions = list(
+                session.scalars(
+                    select(OverreceiptRuleVersion)
+                    .order_by(OverreceiptRuleVersion.id)
+                    .with_for_update()
+                )
+            )
+            target = next(
+                (version for version in versions if version.id == version_id),
+                None,
+            )
+            if target is None:
+                raise HTTPException(status_code=404, detail="超收规则版本不存在")
+            if target.name == name:
+                return _overreceipt_rule_json(target)
+            if any(
+                version.id != version_id and version.name == name
+                for version in versions
+            ):
+                raise HTTPException(status_code=409, detail="规则版本名称已存在")
+
+            before = target.name
+            target.name = name
+            _audit(
+                session,
+                user.id,
+                "rename_overreceipt_rule",
+                "overreceipt_rule",
+                target.id,
+                {"before": before, "after": name},
+            )
+            try:
+                session.commit()
+            except IntegrityError as error:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="规则版本名称已存在",
+                ) from error
+        return _overreceipt_rule_json(target)
 
     @app.post(
         "/api/overreceipt-rule-versions",
@@ -1321,6 +2276,172 @@ def create_app(
                 ) from error
         return _overreceipt_rule_json(target)
 
+    @app.get("/api/self-operated-overreceipt-rule-versions")
+    def list_self_operated_overreceipt_rule_versions(
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        versions = session.scalars(
+            select(SelfOperatedOverreceiptRuleVersion).order_by(
+                SelfOperatedOverreceiptRuleVersion.created_at.desc(),
+                SelfOperatedOverreceiptRuleVersion.id.desc(),
+            )
+        ).all()
+        return [_self_operated_overreceipt_rule_json(version) for version in versions]
+
+    @app.put("/api/self-operated-overreceipt-rule-versions/{version_id}/name")
+    def rename_self_operated_overreceipt_rule(
+        version_id: int,
+        payload: RuleVersionNamePayload,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
+
+        with overreceipt_rule_lock:
+            versions = list(
+                session.scalars(
+                    select(SelfOperatedOverreceiptRuleVersion)
+                    .order_by(SelfOperatedOverreceiptRuleVersion.id)
+                    .with_for_update()
+                )
+            )
+            target = next(
+                (version for version in versions if version.id == version_id),
+                None,
+            )
+            if target is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="自营仓超收规则版本不存在",
+                )
+            if target.name == name:
+                return _self_operated_overreceipt_rule_json(target)
+            if any(
+                version.id != version_id and version.name == name
+                for version in versions
+            ):
+                raise HTTPException(status_code=409, detail="规则版本名称已存在")
+
+            before = target.name
+            target.name = name
+            _audit(
+                session,
+                user.id,
+                "rename_self_operated_overreceipt_rule",
+                "self_operated_overreceipt_rule",
+                target.id,
+                {"before": before, "after": name},
+            )
+            try:
+                session.commit()
+            except IntegrityError as error:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="规则版本名称已存在",
+                ) from error
+        return _self_operated_overreceipt_rule_json(target)
+
+    @app.post(
+        "/api/self-operated-overreceipt-rule-versions",
+        status_code=status.HTTP_201_CREATED,
+    )
+    def publish_self_operated_overreceipt_rule(
+        payload: SelfOperatedOverreceiptRulePayload,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
+        with overreceipt_rule_lock:
+            versions = list(
+                session.scalars(
+                    select(SelfOperatedOverreceiptRuleVersion)
+                    .order_by(SelfOperatedOverreceiptRuleVersion.id)
+                    .with_for_update()
+                )
+            )
+            if any(version.name == name for version in versions):
+                raise HTTPException(status_code=409, detail="规则版本名称已存在")
+            for version in versions:
+                version.active = False
+            session.flush()
+            version = SelfOperatedOverreceiptRuleVersion(
+                name=name,
+                allowance=payload.allowance,
+                active=True,
+                created_by=user.id,
+            )
+            session.add(version)
+            try:
+                session.flush()
+                _audit(
+                    session,
+                    user.id,
+                    "publish_self_operated_overreceipt_rule",
+                    "self_operated_overreceipt_rule",
+                    version.id,
+                    {"allowance": version.allowance},
+                )
+                session.commit()
+            except IntegrityError as error:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="自营仓超收规则发布发生并发冲突，请重试",
+                ) from error
+        return _self_operated_overreceipt_rule_json(version)
+
+    @app.post("/api/self-operated-overreceipt-rule-versions/{version_id}/activate")
+    def activate_self_operated_overreceipt_rule(
+        version_id: int,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        with overreceipt_rule_lock:
+            versions = list(
+                session.scalars(
+                    select(SelfOperatedOverreceiptRuleVersion)
+                    .order_by(SelfOperatedOverreceiptRuleVersion.id)
+                    .with_for_update()
+                )
+            )
+            target = next(
+                (version for version in versions if version.id == version_id),
+                None,
+            )
+            if target is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="自营仓超收规则版本不存在",
+                )
+            if target.active:
+                return _self_operated_overreceipt_rule_json(target)
+            for version in versions:
+                version.active = False
+            session.flush()
+            target.active = True
+            _audit(
+                session,
+                user.id,
+                "activate_self_operated_overreceipt_rule",
+                "self_operated_overreceipt_rule",
+                target.id,
+            )
+            try:
+                session.commit()
+            except IntegrityError as error:
+                session.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="自营仓超收规则启用发生并发冲突，请重试",
+                ) from error
+        return _self_operated_overreceipt_rule_json(target)
+
     @app.get("/api/input-versions/{version_id}/summary")
     def input_version_summary(
         version_id: int,
@@ -1331,12 +2452,7 @@ def create_app(
         if version is None:
             raise HTTPException(status_code=404, detail="输入版本不存在")
         try:
-            return inspect_input_version_with_preview(
-                version.kind,
-                Path(version.storage_path),
-                0,
-                20,
-            )["summary"]
+            return inspect_version(version, 0, 20)["summary"]
         except Exception as error:
             raise HTTPException(
                 status_code=400,
@@ -1355,12 +2471,7 @@ def create_app(
         if version is None:
             raise HTTPException(status_code=404, detail="输入版本不存在")
         try:
-            return inspect_input_version_with_preview(
-                version.kind,
-                Path(version.storage_path),
-                offset,
-                limit,
-            )
+            return inspect_version(version, offset, limit)
         except Exception as error:
             raise HTTPException(
                 status_code=400,
@@ -1379,12 +2490,7 @@ def create_app(
         if version is None:
             raise HTTPException(status_code=404, detail="输入版本不存在")
         try:
-            return inspect_input_version_with_preview(
-                version.kind,
-                Path(version.storage_path),
-                offset,
-                limit,
-            )["preview"]
+            return inspect_version(version, offset, limit)["preview"]
         except Exception as error:
             raise HTTPException(
                 status_code=400,
@@ -1515,7 +2621,7 @@ def create_app(
                     {"base_version_id": draft.base_version_id},
                 )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1576,16 +2682,14 @@ def create_app(
             if only_modified and row.change_type == "unchanged":
                 continue
             if only_errors and not any(
-                issue["severity"] == "error"
-                for issue in issues_by_row.get(row.id, [])
+                issue["severity"] == "error" for issue in issues_by_row.get(row.id, [])
             ):
                 continue
             filtered.append(row)
         page = filtered[offset : offset + limit]
         return {
             "rows": [
-                _position_row_json(row, issues_by_row.get(row.id))
-                for row in page
+                _position_row_json(row, issues_by_row.get(row.id)) for row in page
             ],
             "total": len(filtered),
             "offset": offset,
@@ -1612,7 +2716,7 @@ def create_app(
                 payload.model_dump(exclude={"revision"}),
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1647,7 +2751,7 @@ def create_app(
                 row_id=row_id,
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1683,7 +2787,7 @@ def create_app(
                 delete=True,
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1722,7 +2826,7 @@ def create_app(
                 rows,
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1746,7 +2850,7 @@ def create_app(
         draft = get_draft_or_404(draft_id, session)
         try:
             require_revision(draft, revision)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             await file.close()
             rollback_draft_conflict(session, error)
         original_name = _safe_filename(file.filename or "")
@@ -1821,7 +2925,7 @@ def create_app(
             raise HTTPException(status_code=409, detail="导入预览已失效，请重新预览")
         try:
             require_revision(draft, payload.revision)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             remove_import_candidate(payload.token)
             rollback_draft_conflict(session, error)
         with import_candidates_lock:
@@ -1841,7 +2945,7 @@ def create_app(
                 candidate_frame,
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1924,7 +3028,7 @@ def create_app(
                 original_name=original_name,
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -1966,7 +3070,7 @@ def create_app(
                 admin.id,
             )
             commit_once(session)
-        except DraftConflict as error:
+        except DraftConflictError as error:
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
@@ -2000,10 +3104,7 @@ def create_app(
         batch = Batch(
             name=payload.name,
             created_by=user.id,
-            **{
-                VERSION_FIELDS[kind]: active_versions[kind].id
-                for kind in INPUT_KINDS
-            },
+            **{VERSION_FIELDS[kind]: active_versions[kind].id for kind in INPUT_KINDS},
         )
         session.add(batch)
         session.flush()
@@ -2031,6 +3132,349 @@ def create_app(
         session.commit()
         return _batch_json(batch, session)
 
+    @app.post(
+        "/api/batches/with-files",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_batch_with_files(
+        name: Annotated[str, Form()],
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+        files: list[UploadFile] = File(...),
+    ):
+        batch_name = name.strip()
+        if not batch_name:
+            raise HTTPException(status_code=400, detail="批次名称不能为空")
+        if len(batch_name) > 200:
+            raise HTTPException(status_code=400, detail="批次名称不能超过 200 个字符")
+        if not files:
+            raise HTTPException(status_code=400, detail="请至少上传一份交货文件")
+
+        active_versions = {
+            version.kind: version
+            for version in session.scalars(
+                select(InputVersion).where(InputVersion.active.is_(True))
+            )
+        }
+        missing = [kind for kind in INPUT_KINDS if kind not in active_versions]
+        if missing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"缺少启用的输入版本：{', '.join(missing)}",
+            )
+        original_names = [_safe_filename(file.filename or "") for file in files]
+        if any(
+            Path(original_name).suffix.lower() not in {".xls", ".xlsx"}
+            for original_name in original_names
+        ):
+            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+        if len(original_names) != len(set(original_names)):
+            raise HTTPException(status_code=400, detail="同一批次不可上传同名文件")
+
+        temporary_root = storage / "temporary" / "delivery-batches"
+        token = uuid4().hex
+        temporary_paths = [
+            temporary_root / f"{token}_{index}_{original_name}"
+            for index, original_name in enumerate(original_names, start=1)
+        ]
+        created_paths: list[Path] = []
+        active_overreceipt_rule = session.scalar(
+            select(OverreceiptRuleVersion).where(
+                OverreceiptRuleVersion.active.is_(True)
+            )
+        )
+        try:
+            for file, temporary_path in zip(files, temporary_paths):
+                await _save_upload(
+                    file,
+                    temporary_path,
+                    app.state.max_upload_bytes,
+                )
+                read_delivery_workbook(temporary_path)
+
+            batch = Batch(
+                name=batch_name,
+                created_by=user.id,
+                **{
+                    VERSION_FIELDS[kind]: active_versions[kind].id
+                    for kind in INPUT_KINDS
+                },
+            )
+            session.add(batch)
+            session.flush()
+            input_root = storage / "batches" / str(batch.id) / "inputs"
+            input_root.mkdir(parents=True, exist_ok=True)
+            for file_order, (original_name, temporary_path) in enumerate(
+                zip(original_names, temporary_paths),
+                start=1,
+            ):
+                destination = input_root / f"{uuid4().hex}_{original_name}"
+                os.replace(temporary_path, destination)
+                created_paths.append(destination)
+                session.add(
+                    BatchFile(
+                        batch_id=batch.id,
+                        original_name=original_name,
+                        storage_path=str(destination),
+                        file_order=file_order,
+                    )
+                )
+            if active_overreceipt_rule is not None:
+                session.add(
+                    BatchOverreceiptRule(
+                        batch_id=batch.id,
+                        rule_version_id=active_overreceipt_rule.id,
+                    )
+                )
+            _audit(
+                session,
+                user.id,
+                "create_batch_with_files",
+                "batch",
+                batch.id,
+                {
+                    "file_count": len(original_names),
+                    "overreceipt_rule_version_id": (
+                        active_overreceipt_rule.id
+                        if active_overreceipt_rule is not None
+                        else None
+                    ),
+                },
+            )
+            session.commit()
+        except HTTPException:
+            session.rollback()
+            for path in created_paths:
+                path.unlink(missing_ok=True)
+            raise
+        except Exception as error:
+            session.rollback()
+            for path in created_paths:
+                path.unlink(missing_ok=True)
+            if isinstance(error, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"交货文件校验失败：{error}",
+                ) from error
+            raise
+        finally:
+            for temporary_path in temporary_paths:
+                temporary_path.unlink(missing_ok=True)
+        return _batch_json(batch, session)
+
+    @app.post(
+        "/api/self-operated-batches",
+        status_code=status.HTTP_201_CREATED,
+    )
+    async def create_self_operated_batch(
+        request: Request,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+        name: Annotated[str | None, Form()] = None,
+        delivery_file: UploadFile | None = File(None),
+        inbound_file: UploadFile | None = File(None),
+    ):
+        if name is None:
+            try:
+                name = str((await request.json()).get("name") or "")
+            except ValueError:
+                name = ""
+        batch_name = name.strip()
+        if not batch_name:
+            raise HTTPException(status_code=400, detail="批次名称不能为空")
+        if len(batch_name) > 200:
+            raise HTTPException(status_code=400, detail="批次名称不能超过 200 个字符")
+
+        active_versions = {
+            version.kind: version
+            for version in session.scalars(
+                select(InputVersion).where(InputVersion.active.is_(True))
+            )
+        }
+        missing = [
+            kind for kind in SELF_OPERATED_INPUT_KINDS if kind not in active_versions
+        ]
+        if missing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"缺少启用的输入版本：{', '.join(missing)}",
+            )
+        if delivery_file is None and inbound_file is None:
+            active_rule = session.scalar(
+                select(SelfOperatedOverreceiptRuleVersion).where(
+                    SelfOperatedOverreceiptRuleVersion.active.is_(True)
+                )
+            )
+            batch = Batch(
+                name=batch_name,
+                created_by=user.id,
+                purchase_version_id=None,
+                product_version_id=active_versions["product"].id,
+                supplier_version_id=active_versions["supplier"].id,
+                position_version_id=None,
+                template_version_id=None,
+            )
+            session.add(batch)
+            session.flush()
+            session.add(
+                SelfOperatedBatch(
+                    batch_id=batch.id,
+                    template_version_id=active_versions["inbound_template"].id,
+                    rule_version_id=(
+                        active_rule.id if active_rule is not None else None
+                    ),
+                    inbound_original_name="",
+                    inbound_storage_path="",
+                )
+            )
+            _audit(
+                session,
+                user.id,
+                "create_empty_self_operated_batch",
+                "batch",
+                batch.id,
+            )
+            session.commit()
+            return _batch_json(batch, session)
+        if delivery_file is None:
+            raise HTTPException(status_code=400, detail="缺少质检交货单")
+        api_inbound_version = active_versions.get("self_operated_inbound")
+        if inbound_file is None and api_inbound_version is None:
+            raise HTTPException(
+                status_code=409,
+                detail="缺少启用的待入库 API 数据",
+            )
+        delivery_name = _safe_filename(delivery_file.filename or "")
+        inbound_name = (
+            _safe_filename(inbound_file.filename or "")
+            if inbound_file is not None
+            else api_inbound_version.original_name
+        )
+        if Path(delivery_name).suffix.lower() not in {".xls", ".xlsx"}:
+            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+        if inbound_file is not None and Path(inbound_name).suffix.lower() not in {
+            ".xls",
+            ".xlsx",
+        }:
+            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+
+        temporary_root = storage / "temporary" / "self-operated-batches"
+        token = uuid4().hex
+        temporary_delivery = temporary_root / f"{token}_delivery_{delivery_name}"
+        temporary_inbound = (
+            temporary_root / f"{token}_inbound_{inbound_name}"
+            if inbound_file is not None
+            else None
+        )
+        created_paths: list[Path] = []
+        active_rule = session.scalar(
+            select(SelfOperatedOverreceiptRuleVersion).where(
+                SelfOperatedOverreceiptRuleVersion.active.is_(True)
+            )
+        )
+        try:
+            await _save_upload(
+                delivery_file,
+                temporary_delivery,
+                app.state.max_upload_bytes,
+            )
+            read_self_operated_delivery_workbook(temporary_delivery)
+            if inbound_file is not None and temporary_inbound is not None:
+                await _save_upload(
+                    inbound_file,
+                    temporary_inbound,
+                    app.state.max_upload_bytes,
+                )
+                read_self_operated_inbound_workbook(temporary_inbound)
+                inbound_source_path = temporary_inbound
+            else:
+                inbound_source_path = Path(api_inbound_version.storage_path)
+                if not inbound_source_path.is_file():
+                    raise ValueError("启用的待入库 API 数据文件不存在")
+                read_self_operated_inbound_workbook(inbound_source_path)
+
+            batch = Batch(
+                name=batch_name,
+                created_by=user.id,
+                purchase_version_id=None,
+                product_version_id=active_versions["product"].id,
+                supplier_version_id=active_versions["supplier"].id,
+                position_version_id=None,
+                template_version_id=None,
+            )
+            session.add(batch)
+            session.flush()
+            input_root = storage / "batches" / str(batch.id) / "inputs"
+            input_root.mkdir(parents=True, exist_ok=True)
+            delivery_path = input_root / f"{uuid4().hex}_{delivery_name}"
+            os.replace(temporary_delivery, delivery_path)
+            created_paths.append(delivery_path)
+            if inbound_file is not None:
+                inbound_path = input_root / f"{uuid4().hex}_{inbound_name}"
+                os.replace(inbound_source_path, inbound_path)
+                created_paths.append(inbound_path)
+            else:
+                inbound_path = inbound_source_path
+
+            session.add(
+                BatchFile(
+                    batch_id=batch.id,
+                    original_name=delivery_name,
+                    storage_path=str(delivery_path),
+                    file_order=1,
+                )
+            )
+            session.add(
+                SelfOperatedBatch(
+                    batch_id=batch.id,
+                    template_version_id=active_versions["inbound_template"].id,
+                    rule_version_id=(
+                        active_rule.id if active_rule is not None else None
+                    ),
+                    inbound_original_name=inbound_name,
+                    inbound_storage_path=str(inbound_path),
+                )
+            )
+            _audit(
+                session,
+                user.id,
+                "create_self_operated_batch",
+                "batch",
+                batch.id,
+                {
+                    "rule_version_id": (
+                        active_rule.id if active_rule is not None else None
+                    ),
+                    "template_version_id": active_versions["inbound_template"].id,
+                    "delivery_file": delivery_name,
+                    "inbound_file": inbound_name,
+                    "inbound_version_id": (
+                        api_inbound_version.id if inbound_file is None else None
+                    ),
+                },
+            )
+            session.commit()
+        except HTTPException:
+            session.rollback()
+            for path in created_paths:
+                path.unlink(missing_ok=True)
+            raise
+        except Exception as error:
+            session.rollback()
+            for path in created_paths:
+                path.unlink(missing_ok=True)
+            if isinstance(error, ValueError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"自营仓文件校验失败：{error}",
+                ) from error
+            raise
+        finally:
+            temporary_delivery.unlink(missing_ok=True)
+            if temporary_inbound is not None:
+                temporary_inbound.unlink(missing_ok=True)
+        return _batch_json(batch, session)
+
     @app.get("/api/batches")
     def list_batches(
         _user: Annotated[User, Depends(current_user)],
@@ -2039,6 +3483,176 @@ def create_app(
         batches = session.scalars(select(Batch).order_by(Batch.id.desc())).all()
         return [_batch_json(batch, session, include_files=False) for batch in batches]
 
+    @app.delete("/api/batches")
+    def delete_batches(
+        payload: BatchDeletePayload,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        batch_ids = list(dict.fromkeys(payload.batch_ids))
+        batches = session.scalars(select(Batch).where(Batch.id.in_(batch_ids))).all()
+        found_ids = {batch.id for batch in batches}
+        missing_ids = [batch_id for batch_id in batch_ids if batch_id not in found_ids]
+        if missing_ids:
+            missing_text = "、".join(str(batch_id) for batch_id in missing_ids)
+            raise HTTPException(
+                status_code=404,
+                detail=f"批次不存在：{missing_text}",
+            )
+
+        active_batches = [
+            batch for batch in batches if batch.status in {"queued", "running"}
+        ]
+        if active_batches:
+            active_text = "、".join(
+                f"{batch.id}（{batch.name}）" for batch in active_batches
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=f"以下批次正在运行，不能删除：{active_text}",
+            )
+
+        sources = session.scalars(
+            select(BatchFile).where(BatchFile.batch_id.in_(batch_ids))
+        ).all()
+        source_ids = [source.id for source in sources]
+        exception_ids = (
+            session.scalars(
+                select(ExceptionRecord.id).where(
+                    ExceptionRecord.batch_file_id.in_(source_ids)
+                )
+            ).all()
+            if source_ids
+            else []
+        )
+        if exception_ids:
+            session.execute(
+                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
+            )
+            session.execute(
+                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
+            )
+        session.execute(
+            delete(SelfOperatedSiteResolution).where(
+                SelfOperatedSiteResolution.batch_id.in_(batch_ids)
+            )
+        )
+        session.execute(delete(BatchFile).where(BatchFile.batch_id.in_(batch_ids)))
+        session.execute(
+            delete(BatchOverreceiptRule).where(
+                BatchOverreceiptRule.batch_id.in_(batch_ids)
+            )
+        )
+        session.execute(delete(Job).where(Job.batch_id.in_(batch_ids)))
+        session.execute(
+            delete(SelfOperatedBatch).where(SelfOperatedBatch.batch_id.in_(batch_ids))
+        )
+        session.execute(delete(Batch).where(Batch.id.in_(batch_ids)))
+        _audit(
+            session,
+            admin.id,
+            "delete_batches",
+            "batch",
+            "bulk",
+            {
+                "batch_ids": batch_ids,
+                "batch_names": [batch.name for batch in batches],
+            },
+        )
+        session.commit()
+
+        file_cleanup_failed_ids = []
+        for batch_id in batch_ids:
+            batch_root = storage / "batches" / str(batch_id)
+            try:
+                if batch_root.exists():
+                    shutil.rmtree(batch_root)
+            except OSError:
+                file_cleanup_failed_ids.append(batch_id)
+        return {
+            "deleted_count": len(batch_ids),
+            "deleted_ids": batch_ids,
+            "file_cleanup_failed_ids": file_cleanup_failed_ids,
+        }
+
+    @app.delete("/api/batches/empty")
+    def delete_empty_delivery_batches(
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        empty_batches = session.scalars(
+            select(Batch)
+            .outerjoin(
+                SelfOperatedBatch,
+                SelfOperatedBatch.batch_id == Batch.id,
+            )
+            .where(
+                Batch.status == "draft",
+                SelfOperatedBatch.batch_id.is_(None),
+                ~select(BatchFile.id).where(BatchFile.batch_id == Batch.id).exists(),
+            )
+        ).all()
+        batch_ids = [batch.id for batch in empty_batches]
+        if not batch_ids:
+            return {"deleted_count": 0, "deleted_ids": []}
+
+        session.execute(
+            delete(BatchOverreceiptRule).where(
+                BatchOverreceiptRule.batch_id.in_(batch_ids)
+            )
+        )
+        session.execute(delete(Job).where(Job.batch_id.in_(batch_ids)))
+        session.execute(delete(Batch).where(Batch.id.in_(batch_ids)))
+        _audit(
+            session,
+            user.id,
+            "delete_empty_delivery_batches",
+            "batch",
+            "delivery_empty",
+            {"batch_ids": batch_ids},
+        )
+        session.commit()
+        return {"deleted_count": len(batch_ids), "deleted_ids": batch_ids}
+
+    @app.delete("/api/self-operated-batches/empty")
+    def delete_empty_self_operated_batches(
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        empty_batches = session.scalars(
+            select(Batch)
+            .join(SelfOperatedBatch, SelfOperatedBatch.batch_id == Batch.id)
+            .where(
+                Batch.status == "draft",
+                SelfOperatedBatch.inbound_storage_path == "",
+                ~select(BatchFile.id).where(BatchFile.batch_id == Batch.id).exists(),
+            )
+        ).all()
+        batch_ids = [batch.id for batch in empty_batches]
+        if not batch_ids:
+            return {"deleted_count": 0, "deleted_ids": []}
+
+        session.execute(
+            delete(SelfOperatedSiteResolution).where(
+                SelfOperatedSiteResolution.batch_id.in_(batch_ids)
+            )
+        )
+        session.execute(delete(Job).where(Job.batch_id.in_(batch_ids)))
+        session.execute(
+            delete(SelfOperatedBatch).where(SelfOperatedBatch.batch_id.in_(batch_ids))
+        )
+        session.execute(delete(Batch).where(Batch.id.in_(batch_ids)))
+        _audit(
+            session,
+            user.id,
+            "delete_empty_self_operated_batches",
+            "batch",
+            "self_operated_empty",
+            {"batch_ids": batch_ids},
+        )
+        session.commit()
+        return {"deleted_count": len(batch_ids), "deleted_ids": batch_ids}
+
     @app.get("/api/batches/{batch_id}")
     def get_batch(
         batch_id: int,
@@ -2046,6 +3660,60 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         return _batch_json(get_batch_or_404(batch_id, session), session)
+
+    @app.post("/api/self-operated-batches/{batch_id}/inbound-file")
+    async def upload_self_operated_inbound_file(
+        batch_id: int,
+        file: UploadFile = File(...),
+        user: User = Depends(current_user),
+        session: Session = Depends(get_session),
+    ):
+        batch = get_batch_or_404(batch_id, session)
+        profile = session.get(SelfOperatedBatch, batch.id)
+        if profile is None:
+            raise HTTPException(status_code=404, detail="自营仓入库批次不存在")
+        if batch.status not in {"draft", "preflight_ready", "failed"}:
+            raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
+        original_name = _safe_filename(file.filename or "")
+        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
+            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+        destination = (
+            storage
+            / "batches"
+            / str(batch.id)
+            / "inputs"
+            / f"{uuid4().hex}_{original_name}"
+        )
+        await _save_upload(file, destination, app.state.max_upload_bytes)
+        try:
+            read_self_operated_inbound_workbook(destination)
+        except Exception as error:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=400,
+                detail=f"自营仓收货入库单校验失败：{error}",
+            ) from error
+
+        old_path = (
+            Path(profile.inbound_storage_path) if profile.inbound_storage_path else None
+        )
+        profile.inbound_original_name = original_name
+        profile.inbound_storage_path = str(destination)
+        batch.status = "draft"
+        batch.error_message = None
+        batch.zip_path = None
+        _audit(
+            session,
+            user.id,
+            "upload_self_operated_inbound_file",
+            "batch",
+            batch.id,
+            {"original_name": original_name},
+        )
+        session.commit()
+        if old_path is not None and old_path != destination:
+            old_path.unlink(missing_ok=True)
+        return _batch_json(batch, session)
 
     @app.post(
         "/api/batches/{batch_id}/files",
@@ -2060,6 +3728,18 @@ def create_app(
         batch = get_batch_or_404(batch_id, session)
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
+        self_operated = session.get(SelfOperatedBatch, batch.id)
+        if self_operated is not None:
+            source_count = session.scalar(
+                select(func.count())
+                .select_from(BatchFile)
+                .where(BatchFile.batch_id == batch.id)
+            )
+            if source_count:
+                raise HTTPException(
+                    status_code=409,
+                    detail="自营仓入库批次只能上传一份质检交货单",
+                )
         original_name = _safe_filename(file.filename or "")
         if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
             raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
@@ -2071,7 +3751,13 @@ def create_app(
         )
         if duplicate is not None:
             raise HTTPException(status_code=409, detail="同一批次不可上传同名文件")
-        destination = storage / "batches" / str(batch.id) / "inputs" / f"{uuid4().hex}_{original_name}"
+        destination = (
+            storage
+            / "batches"
+            / str(batch.id)
+            / "inputs"
+            / f"{uuid4().hex}_{original_name}"
+        )
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
             with batch_file_upload_lock:
@@ -2088,6 +3774,17 @@ def create_app(
                         status_code=409,
                         detail="当前批次状态不可修改文件",
                     )
+                if session.get(SelfOperatedBatch, batch.id) is not None:
+                    source_count = session.scalar(
+                        select(func.count())
+                        .select_from(BatchFile)
+                        .where(BatchFile.batch_id == batch.id)
+                    )
+                    if source_count:
+                        raise HTTPException(
+                            status_code=409,
+                            detail="自营仓入库批次只能上传一份质检交货单",
+                        )
                 duplicate = session.scalar(
                     select(BatchFile).where(
                         BatchFile.batch_id == batch.id,
@@ -2099,11 +3796,14 @@ def create_app(
                         status_code=409,
                         detail="同一批次不可上传同名文件",
                     )
-                current_max = session.scalar(
-                    select(func.max(BatchFile.file_order)).where(
-                        BatchFile.batch_id == batch.id
+                current_max = (
+                    session.scalar(
+                        select(func.max(BatchFile.file_order)).where(
+                            BatchFile.batch_id == batch.id
+                        )
                     )
-                ) or 0
+                    or 0
+                )
                 source = BatchFile(
                     batch_id=batch.id,
                     original_name=original_name,
@@ -2156,15 +3856,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="交货文件不存在")
         storage_path = Path(source.storage_path)
         exception_ids = session.scalars(
-            select(ExceptionRecord.id).where(
-                ExceptionRecord.batch_file_id == source.id
-            )
+            select(ExceptionRecord.id).where(ExceptionRecord.batch_file_id == source.id)
         ).all()
         if exception_ids:
             session.execute(
-                delete(SplitRecord).where(
-                    SplitRecord.exception_id.in_(exception_ids)
-                )
+                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
             )
             session.execute(
                 delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
@@ -2210,7 +3906,9 @@ def create_app(
             select(BatchFile).where(BatchFile.batch_id == batch.id)
         ).all()
         by_id = {source.id: source for source in sources}
-        if len(payload.file_ids) != len(set(payload.file_ids)) or set(payload.file_ids) != set(by_id):
+        if len(payload.file_ids) != len(set(payload.file_ids)) or set(
+            payload.file_ids
+        ) != set(by_id):
             raise HTTPException(status_code=400, detail="文件顺序必须完整且不可重复")
         for source in sources:
             source.file_order = -source.id
@@ -2218,7 +3916,14 @@ def create_app(
         for file_order, source_id in enumerate(payload.file_ids, start=1):
             by_id[source_id].file_order = file_order
         batch.status = "draft"
-        _audit(session, user.id, "reorder_batch_files", "batch", batch.id, {"file_ids": payload.file_ids})
+        _audit(
+            session,
+            user.id,
+            "reorder_batch_files",
+            "batch",
+            batch.id,
+            {"file_ids": payload.file_ids},
+        )
         session.commit()
         return _batch_json(batch, session)
 
@@ -2238,9 +3943,24 @@ def create_app(
         ).all()
         if not sources:
             raise HTTPException(status_code=400, detail="批次至少需要一个交货文件")
+        self_operated = session.get(SelfOperatedBatch, batch.id)
+        if self_operated is not None and len(sources) != 1:
+            raise HTTPException(
+                status_code=400,
+                detail="自营仓入库批次必须且只能上传一份质检交货单",
+            )
         versions = {}
-        for kind, field in VERSION_FIELDS.items():
-            version = session.get(InputVersion, getattr(batch, field))
+        version_kinds = (
+            ("product", "supplier") if self_operated is not None else INPUT_KINDS
+        )
+        for kind in version_kinds:
+            version_id = getattr(batch, VERSION_FIELDS[kind])
+            if version_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="批次锁定的输入文件不完整",
+                )
+            version = session.get(InputVersion, version_id)
             if version is None or not Path(version.storage_path).is_file():
                 raise HTTPException(status_code=400, detail="批次锁定的输入文件不完整")
             versions[kind] = Path(version.storage_path)
@@ -2250,12 +3970,27 @@ def create_app(
         try:
             supplier_rows = read_supplier_workbook(versions["supplier"])
             read_product_workbook(versions["product"])
-            read_purchase_workbook(versions["purchase"])
-            read_position_workbook(versions["position"])
-            validate_template_workbook(versions["template"])
-            for source in sources:
-                read_delivery_workbook(Path(source.storage_path))
-                resolve_supplier(Path(source.original_name), supplier_rows)
+            if self_operated is not None:
+                inbound_path = Path(self_operated.inbound_storage_path)
+                if not self_operated.inbound_storage_path or not inbound_path.is_file():
+                    raise ValueError("尚未上传自营仓收货入库单")
+                template = session.get(
+                    InputVersion,
+                    self_operated.template_version_id,
+                )
+                if template is None or not Path(template.storage_path).is_file():
+                    raise ValueError("批次锁定的积加入库模板不存在")
+                read_self_operated_inbound_workbook(inbound_path)
+                validate_self_operated_template_workbook(Path(template.storage_path))
+                read_self_operated_delivery_workbook(Path(sources[0].storage_path))
+                resolve_supplier(Path(sources[0].original_name), supplier_rows)
+            else:
+                read_purchase_workbook(versions["purchase"])
+                read_position_workbook(versions["position"])
+                validate_template_workbook(versions["template"])
+                for source in sources:
+                    read_delivery_workbook(Path(source.storage_path))
+                    resolve_supplier(Path(source.original_name), supplier_rows)
         except Exception as error:
             raise HTTPException(
                 status_code=400,
@@ -2285,7 +4020,14 @@ def create_app(
             existing.heartbeat_at = None
             existing.finished_at = None
         session.flush()
-        _audit(session, user.id, f"queue_{kind}", "job", existing.id, {"batch_id": batch.id})
+        _audit(
+            session,
+            user.id,
+            f"queue_{kind}",
+            "job",
+            existing.id,
+            {"batch_id": batch.id},
+        )
         return existing
 
     @app.post("/api/batches/{batch_id}/compute", status_code=status.HTTP_202_ACCEPTED)
@@ -2340,11 +4082,15 @@ def create_app(
             .where(BatchFile.batch_id == batch_id)
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         ).all()
-        position_values = _exception_position_values(
-            exceptions,
-            batch,
-            session,
-            position_frame_cache,
+        position_values = (
+            {}
+            if session.get(SelfOperatedBatch, batch.id) is not None
+            else _exception_position_values(
+                exceptions,
+                batch,
+                session,
+                position_frame_cache,
+            )
         )
         splits_by_exception = _split_records_by_exception(
             session,
@@ -2358,6 +4104,110 @@ def create_app(
             )
             for exception in exceptions
         ]
+
+    @app.put(
+        "/api/exceptions/{exception_id}/self-operated-site",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def save_self_operated_site_resolution(
+        exception_id: int,
+        payload: SelfOperatedSiteResolutionPayload,
+        user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        exception = session.scalar(
+            select(ExceptionRecord)
+            .where(ExceptionRecord.id == exception_id)
+            .with_for_update()
+        )
+        if exception is None:
+            raise HTTPException(status_code=404, detail="待处理记录不存在")
+        source = session.get(BatchFile, exception.batch_file_id)
+        batch = session.get(Batch, source.batch_id) if source is not None else None
+        profile = (
+            session.get(SelfOperatedBatch, batch.id) if batch is not None else None
+        )
+        if batch is None or profile is None:
+            raise HTTPException(status_code=409, detail="不是自营仓入库待处理记录")
+        if batch.status != "succeeded":
+            raise HTTPException(status_code=409, detail="批次尚未计算成功")
+        if exception.reason != "产品信息站点不唯一":
+            raise HTTPException(status_code=409, detail="当前记录不需要选择站点")
+
+        candidates = [
+            site.strip() for site in exception.full_site.split("、") if site.strip()
+        ]
+        selected = next(
+            (
+                site
+                for site in candidates
+                if site.upper() == payload.full_site.strip().upper()
+            ),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(status_code=400, detail="所选站点不在候选范围")
+
+        export_job = session.scalar(
+            select(Job).where(Job.batch_id == batch.id, Job.kind == "export")
+        )
+        if export_job and export_job.status in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="导出任务运行期间不可修改站点")
+        resolution = session.scalar(
+            select(SelfOperatedSiteResolution).where(
+                SelfOperatedSiteResolution.batch_id == batch.id,
+                SelfOperatedSiteResolution.sku == exception.sku,
+                SelfOperatedSiteResolution.original_site == exception.original_site,
+            )
+        )
+        if resolution is None:
+            resolution = SelfOperatedSiteResolution(
+                batch_id=batch.id,
+                sku=exception.sku,
+                original_site=exception.original_site,
+                full_site=selected,
+                updated_by=user.id,
+            )
+            session.add(resolution)
+        else:
+            resolution.full_site = selected
+            resolution.updated_by = user.id
+
+        compute_job = session.scalar(
+            select(Job).where(Job.batch_id == batch.id, Job.kind == "compute")
+        )
+        if compute_job is not None:
+            compute_job.status = "stale"
+        if export_job is not None:
+            export_job.status = "stale"
+            export_job.output_path = None
+        batch.zip_path = None
+        if source is not None:
+            source.result_path = None
+        job = queue_job(batch, "compute", user, session)
+        batch.status = "queued"
+        batch.error_message = None
+        _audit(
+            session,
+            user.id,
+            "save_self_operated_site_resolution",
+            "batch",
+            batch.id,
+            {
+                "sku": exception.sku,
+                "original_site": exception.original_site,
+                "full_site": selected,
+            },
+        )
+        try:
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="站点选择发生并发冲突，请刷新后重试",
+            ) from error
+        return _job_json(job)
 
     @app.put("/api/exceptions/{exception_id}/split")
     def save_split(
@@ -2376,15 +4226,18 @@ def create_app(
         source = session.get(BatchFile, exception.batch_file_id)
         batch = (
             session.scalar(
-                select(Batch)
-                .where(Batch.id == source.batch_id)
-                .with_for_update()
+                select(Batch).where(Batch.id == source.batch_id).with_for_update()
             )
             if source
             else None
         )
         if batch is None or batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
+        if session.get(SelfOperatedBatch, batch.id) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="自营仓入库待处理记录必须通过站点选择重新计算",
+            )
         export_job = session.scalar(
             select(Job).where(Job.batch_id == batch.id, Job.kind == "export")
         )
@@ -2435,9 +4288,7 @@ def create_app(
         if not supplier_code:
             import_rows = source.import_rows or []
             supplier_code = (
-                str(import_rows[0].get("*供应商编码", ""))
-                if import_rows
-                else ""
+                str(import_rows[0].get("*供应商编码", "")) if import_rows else ""
             )
         try:
             project_split(
@@ -2561,11 +4412,7 @@ def create_app(
             .where(BatchFile.batch_id == batch.id)
         )
         merged_path = _merged_export_path(batch)
-        if (
-            source_count <= 1
-            or merged_path is None
-            or not merged_path.is_file()
-        ):
+        if source_count <= 1 or merged_path is None or not merged_path.is_file():
             raise HTTPException(status_code=404, detail="批次合并导出尚未生成")
         return FileResponse(merged_path, filename=merged_path.name)
 
@@ -2576,7 +4423,11 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         source = session.get(BatchFile, file_id)
-        if source is None or not source.result_path or not Path(source.result_path).is_file():
+        if (
+            source is None
+            or not source.result_path
+            or not Path(source.result_path).is_file()
+        ):
             raise HTTPException(status_code=404, detail="来源文件导出尚未生成")
         return FileResponse(source.result_path, filename=Path(source.result_path).name)
 
@@ -2585,7 +4436,9 @@ def create_app(
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        logs = session.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(200)).all()
+        logs = session.scalars(
+            select(AuditLog).order_by(AuditLog.id.desc()).limit(200)
+        ).all()
         return [
             {
                 "id": log.id,

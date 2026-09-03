@@ -73,7 +73,9 @@ class OverreceiptPolicy:
             self.medium_tail_limit,
             self.long_tail_limit,
         )
-        if any(isinstance(limit, bool) or not isinstance(limit, int) for limit in limits):
+        if any(
+            isinstance(limit, bool) or not isinstance(limit, int) for limit in limits
+        ):
             raise ValueError("超收数量必须是整数")
         if any(limit < 0 for limit in limits):
             raise ValueError("超收数量不能小于 0")
@@ -107,7 +109,8 @@ def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> No
 def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
     """把当前供应商汇总表转换为 SKU、原始站点、交货量明细。"""
     sku_columns = [
-        column for column in sheet.columns
+        column
+        for column in sheet.columns
         if str(column).strip().upper().endswith("SKU")
     ]
     if len(sku_columns) != 1:
@@ -152,6 +155,83 @@ def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def resolve_delivery_sites(
+    delivery_lines: pd.DataFrame,
+    product_info: pd.DataFrame,
+) -> pd.DataFrame:
+    """复用商品信息和锁仓标识，为交货数量解析唯一完整站点。"""
+    _require_columns(delivery_lines, {"SKU", "原始站点", "交货量"}, "交货明细")
+    _require_columns(
+        product_info, {"SKU", "店铺/站点", "品类A", "锁仓MKSU"}, "产品信息"
+    )
+
+    delivery = (
+        delivery_lines.groupby(["SKU", "原始站点"], as_index=False)["交货量"]
+        .sum()
+        .sort_values(["SKU", "原始站点"], kind="stable")
+        .reset_index(drop=True)
+    )
+    delivery["交货量"] = delivery["交货量"].astype(int)
+
+    relevant_skus = set(delivery["SKU"])
+    products = product_info[
+        product_info["SKU"].isin(relevant_skus)
+        & product_info["SKU"].notna()
+        & product_info["店铺/站点"].notna()
+        & product_info["品类A"].notna()
+    ].copy()
+    products["原始站点"] = (
+        products["店铺/站点"].astype(str).str.rsplit(":", n=1).str[-1]
+    )
+    products["完整站点"] = "AMAZON:" + products["店铺/站点"].astype(str)
+    products = products[["SKU", "原始站点", "完整站点", "锁仓MKSU"]].drop_duplicates()
+    product_groups = {
+        key: group for key, group in products.groupby(["SKU", "原始站点"], sort=False)
+    }
+
+    resolved_rows: list[dict] = []
+    for _, delivery_row in delivery.iterrows():
+        product_matches = product_groups.get(
+            (delivery_row["SKU"], delivery_row["原始站点"])
+        )
+        full_sites = (
+            product_matches["完整站点"].drop_duplicates().tolist()
+            if product_matches is not None
+            else []
+        )
+        if len(full_sites) > 1:
+            locked_sites = product_matches.loc[
+                product_matches["锁仓MKSU"].astype(str).str.strip().eq("锁"),
+                "完整站点",
+            ].drop_duplicates()
+            if not locked_sites.empty:
+                full_sites = locked_sites.tolist()
+
+        if not full_sites:
+            full_site = ""
+            reason = "产品信息未匹配"
+        elif len(full_sites) > 1:
+            full_site = "、".join(sorted(full_sites))
+            reason = "产品信息站点不唯一"
+        else:
+            full_site = full_sites[0]
+            reason = ""
+        resolved_rows.append(
+            {
+                "SKU": delivery_row["SKU"],
+                "原始站点": delivery_row["原始站点"],
+                "交货量": int(delivery_row["交货量"]),
+                "完整站点": full_site,
+                "异常原因": reason,
+            }
+        )
+
+    return pd.DataFrame(
+        resolved_rows,
+        columns=["SKU", "原始站点", "交货量", "完整站点", "异常原因"],
+    )
+
+
 def _append_exception(
     exceptions: list[dict],
     delivery_row: pd.Series,
@@ -181,6 +261,7 @@ def _append_exception(
         }
     )
 
+
 def build_manual_import_rows(
     exception_rows: pd.DataFrame,
     supplier_code: str,
@@ -191,9 +272,7 @@ def build_manual_import_rows(
 
     for _, exception in exception_rows.iterrows():
         reason = str(exception["异常原因"])
-        full_site = (
-            "" if pd.isna(exception["完整站点"]) else str(exception["完整站点"])
-        )
+        full_site = "" if pd.isna(exception["完整站点"]) else str(exception["完整站点"])
         original_site = (
             "" if pd.isna(exception["原始站点"]) else str(exception["原始站点"])
         )
@@ -238,7 +317,7 @@ def _normalize_pending_site(value) -> str:
     return site
 
 
-def _overreceipt_key(supplier, sku, site) -> OverreceiptKey:
+def make_overreceipt_key(supplier, sku, site) -> OverreceiptKey:
     return (
         _normalize_position_text(supplier),
         _normalize_position_text(sku),
@@ -251,7 +330,7 @@ def build_overreceipt_allowances(
     position_rows: pd.DataFrame,
     policy: OverreceiptPolicy,
 ) -> dict[OverreceiptKey, OverreceiptAllowance]:
-    """Build one absolute overreceipt allowance per supplier, SKU and site."""
+    """按供应商、商品编码和站点生成唯一的绝对超收额度。"""
 
     _require_columns(
         purchase_rows,
@@ -261,9 +340,7 @@ def build_overreceipt_allowances(
     _require_columns(position_rows, set(POSITION_SOURCE_COLUMNS), "排查表")
 
     purchases = purchase_rows[purchase_rows["单据状态"].isin(PURCHASE_STATUSES)].copy()
-    purchases["未交量"] = pd.to_numeric(
-        purchases["未交量"], errors="coerce"
-    ).fillna(0)
+    purchases["未交量"] = pd.to_numeric(purchases["未交量"], errors="coerce").fillna(0)
     purchases = purchases[purchases["未交量"] > 0]
     if purchases.empty or not policy.allowed_warehouses:
         return {}
@@ -385,9 +462,7 @@ def enrich_pending_import_rows(
         matches["_scale_order"] = matches["规模定位"].map(
             lambda value: scale_order.get(str(value).strip(), 3)
         )
-        matches = matches.sort_values(
-            ["_scale_order", "_msku"], kind="stable"
-        )
+        matches = matches.sort_values(["_scale_order", "_msku"], kind="stable")
         for column in POSITION_VALUE_COLUMNS:
             mapping = {
                 str(row["MSKU"]).strip(): _position_value(row[column])
@@ -399,15 +474,15 @@ def enrich_pending_import_rows(
 
     return result[PENDING_COLUMNS]
 
+
 def process_data(
     delivery_lines: pd.DataFrame,
     product_info: pd.DataFrame,
     purchase_rows: pd.DataFrame,
     supplier_name: str,
     supplier_code: str | None = None,
-    overreceipt_allowances: MutableMapping[
-        OverreceiptKey, OverreceiptAllowance
-    ] | None = None,
+    overreceipt_allowances: MutableMapping[OverreceiptKey, OverreceiptAllowance]
+    | None = None,
 ) -> BatchResult:
     """完成产品映射、采购需求汇总和交货数量分配。"""
     supplier_code = supplier_code or supplier_name
@@ -421,35 +496,7 @@ def process_data(
         "采购需求",
     )
 
-    delivery = (
-        delivery_lines.groupby(["SKU", "原始站点"], as_index=False)["交货量"]
-        .sum()
-        .sort_values(["SKU", "原始站点"], kind="stable")
-        .reset_index(drop=True)
-    )
-    delivery["交货量"] = delivery["交货量"].astype(int)
-
-    relevant_skus = set(delivery["SKU"])
-    products = product_info[
-        product_info["SKU"].isin(relevant_skus)
-        & product_info["SKU"].notna()
-        & product_info["店铺/站点"].notna()
-        & product_info["品类A"].notna()
-    ].copy()
-    products["原始站点"] = (
-        products["店铺/站点"].astype(str).str.rsplit(":", n=1).str[-1]
-    )
-    products["完整站点"] = "AMAZON:" + products["店铺/站点"].astype(str)
-    products = products[
-        ["SKU", "原始站点", "完整站点", "锁仓MKSU"]
-    ].drop_duplicates()
-    product_groups = {
-        key: group
-        for key, group in products.groupby(
-            ["SKU", "原始站点"],
-            sort=False,
-        )
-    }
+    delivery = resolve_delivery_sites(delivery_lines, product_info)
 
     purchases = purchase_rows[
         purchase_rows["单据状态"].isin(PURCHASE_STATUSES)
@@ -458,9 +505,9 @@ def process_data(
     purchases["未交量"] = pd.to_numeric(purchases["未交量"], errors="coerce").fillna(0)
     purchases = purchases[purchases["未交量"] > 0]
     needs = (
-        purchases.groupby(
-            ["SKU", "供应商", "平台站点", "目的仓"], as_index=False
-        )["未交量"]
+        purchases.groupby(["SKU", "供应商", "平台站点", "目的仓"], as_index=False)[
+            "未交量"
+        ]
         .sum()
         .reset_index(drop=True)
     )
@@ -468,9 +515,7 @@ def process_data(
     for key, group in needs.groupby(["SKU", "平台站点"], sort=False):
         indexes = group.index.tolist()
         indexes.sort(
-            key=lambda index: warehouse_sort_key(
-                str(needs.at[index, "目的仓"])
-            )
+            key=lambda index: warehouse_sort_key(str(needs.at[index, "目的仓"]))
         )
         need_indexes[key] = indexes
 
@@ -478,47 +523,20 @@ def process_data(
     exceptions: list[dict] = []
 
     for _, delivery_row in delivery.iterrows():
-        product_matches = product_groups.get(
-            (delivery_row["SKU"], delivery_row["原始站点"])
-        )
-        full_sites = (
-            product_matches["完整站点"].drop_duplicates().tolist()
-            if product_matches is not None
-            else []
-        )
-        if len(full_sites) > 1:
-            locked_sites = product_matches.loc[
-                product_matches["锁仓MKSU"].astype(str).str.strip().eq("锁"),
-                "完整站点",
-            ].drop_duplicates()
-            if not locked_sites.empty:
-                full_sites = locked_sites.tolist()
         delivery_quantity = int(delivery_row["交货量"])
-
-        if not full_sites:
+        if delivery_row["异常原因"]:
             _append_exception(
                 exceptions,
                 delivery_row,
-                None,
-                None,
-                0,
-                delivery_quantity,
-                "产品信息未匹配",
-            )
-            continue
-        if len(full_sites) > 1:
-            _append_exception(
-                exceptions,
-                delivery_row,
-                "、".join(sorted(full_sites)),
+                delivery_row["完整站点"],
                 None,
                 0,
                 delivery_quantity,
-                "产品信息站点不唯一",
+                delivery_row["异常原因"],
             )
             continue
 
-        full_site = full_sites[0]
+        full_site = delivery_row["完整站点"]
         candidate_indexes = need_indexes.get(
             (delivery_row["SKU"], full_site),
             [],
@@ -554,7 +572,7 @@ def process_data(
             if remaining == 0:
                 break
 
-        allowance_key = _overreceipt_key(
+        allowance_key = make_overreceipt_key(
             supplier_name,
             delivery_row["SKU"],
             full_site,
@@ -588,9 +606,7 @@ def process_data(
                 reason = "超出允许超收量"
             else:
                 reason = (
-                    "超出采购未交量"
-                    if candidate_indexes
-                    else "未找到可交货采购需求"
+                    "超出采购未交量" if candidate_indexes else "未找到可交货采购需求"
                 )
             if allocated > 0 and allowance is None:
                 import_rows[-1]["交货备注"] = f"{reason}：{remaining}"
@@ -612,8 +628,12 @@ def process_data(
     import_frame = pd.DataFrame(import_rows, columns=IMPORT_COLUMNS)
     exception_frame = pd.DataFrame(exceptions, columns=RESULT_EXCEPTION_COLUMNS)
     delivery_total = int(delivery["交货量"].sum())
-    import_total = int(import_frame["*本次交货量"].sum()) if not import_frame.empty else 0
-    manual_total = int(exception_frame["人工处理量"].sum()) if not exception_frame.empty else 0
+    import_total = (
+        int(import_frame["*本次交货量"].sum()) if not import_frame.empty else 0
+    )
+    manual_total = (
+        int(exception_frame["人工处理量"].sum()) if not exception_frame.empty else 0
+    )
     if delivery_total != import_total + manual_total:
         raise RuntimeError("数量守恒校验失败")
 

@@ -5,13 +5,13 @@ from httpx2 import ASGITransport, AsyncClient, Response
 
 
 async def _keep_event_loop_awake() -> None:
-    """Avoid lost cross-thread wakeups on affected Linux hosts."""
+    """避免受影响的主机在线程间唤醒时丢失信号。"""
     while True:
         await asyncio.sleep(0.01)
 
 
 class SyncASGIClient:
-    """Small synchronous facade over httpx2's in-process ASGI transport."""
+    """为进程内异步传输提供轻量同步封装。"""
 
     def __init__(self, app):
         self.app = app

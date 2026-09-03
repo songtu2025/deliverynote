@@ -144,7 +144,6 @@ class DeliveryBatchTests(unittest.TestCase):
         self.assertEqual(batch.items[0].result.import_total, 100)
         self.assertEqual(reversed_batch.items[0].result.import_total, 20)
 
-
     def test_batch_assigns_file_order_and_document_note(self):
         batch = process_delivery_batch(
             [
@@ -256,12 +255,8 @@ class SplitProjectionTests(unittest.TestCase):
 
         self.assertEqual(projection.import_total, 25)
         self.assertEqual(projection.pending_total, 15)
-        self.assertEqual(
-            projection.import_rows.iloc[0]["*本次交货量"], 25
-        )
-        self.assertEqual(
-            projection.pending_rows.iloc[0]["*本次交货量"], 15
-        )
+        self.assertEqual(projection.import_rows.iloc[0]["*本次交货量"], 25)
+        self.assertEqual(projection.pending_rows.iloc[0]["*本次交货量"], 15)
         self.assertEqual(
             projection.import_rows.iloc[0]["单据备注"],
             "260717-狂飙-01-96箱",

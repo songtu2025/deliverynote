@@ -7,7 +7,11 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill
 
-from delivery_note.excel_io import PRODUCT_COLUMNS, read_position_workbook
+from delivery_note.excel_io import (
+    PRODUCT_COLUMNS,
+    PURCHASE_COLUMNS,
+    read_position_workbook,
+)
 from delivery_note.input_inspection import (
     inspect_input_version,
     inspect_input_version_with_preview,
@@ -53,9 +57,7 @@ class InputInspectionTests(unittest.TestCase):
         write_position_workbook(self.path, frame)
         inspection = inspect_input_version("position", self.path)
         self.assertEqual(inspection["row_count"], 2)
-        self.assertEqual(
-            inspection["metrics"], {"sites": 1, "skus": 1, "mskus": 1}
-        )
+        self.assertEqual(inspection["metrics"], {"sites": 1, "skus": 1, "mskus": 1})
         self.assertEqual(
             {item["code"] for item in inspection["issues"]},
             {item["code"] for item in issues},
@@ -124,13 +126,47 @@ class InputInspectionTests(unittest.TestCase):
         self.assertEqual(result["preview"]["columns"], expected_columns)
         self.assertEqual(
             result["preview"]["rows"],
-            [{
-                "锁仓MKSU": None,
-                "SKU": "SKU-B",
-                "店铺/站点": "SEEKWAY:CA",
-                "品类A": "配件",
-            }],
+            [
+                {
+                    "锁仓MKSU": None,
+                    "SKU": "SKU-B",
+                    "店铺/站点": "SEEKWAY:CA",
+                    "品类A": "配件",
+                }
+            ],
         )
+
+    def test_purchase_inspection_marks_shared_site_as_warning(self):
+        path = self.root / "purchase.xlsx"
+        frame = pd.DataFrame(
+            [
+                ["待交货", "接口供应商", "SKU-A", "共享", "广州仓", 12],
+                [
+                    "交货中",
+                    "接口供应商",
+                    "SKU-B",
+                    "AMAZON:SEEKWAY:US",
+                    "广州仓",
+                    8,
+                ],
+            ],
+            columns=PURCHASE_COLUMNS,
+        )
+        frame.to_excel(path, index=False)
+
+        inspection = inspect_input_version("purchase", path)
+        combined = inspect_input_version_with_preview(
+            "purchase",
+            path,
+            offset=0,
+            limit=20,
+        )
+
+        issue = inspection["issues"][0]
+        self.assertEqual(issue["severity"], "warning")
+        self.assertEqual(issue["code"], "shared_site")
+        self.assertEqual(issue["row_numbers"], [2])
+        self.assertEqual(combined["summary"]["issues"], [issue])
 
     def test_written_position_workbook_round_trips(self):
         write_position_workbook(self.path, self.frame)
@@ -287,7 +323,9 @@ class InputInspectionTests(unittest.TestCase):
                 self.assertEqual(inspection["row_count"], 1)
                 self.assertEqual(inspection["columns"], list(frame.columns))
                 preview = preview_input_version(kind, path, offset=0, limit=10)
-                self.assertEqual(preview["rows"][0][frame.columns[-1]], frame.iloc[0, -1])
+                self.assertEqual(
+                    preview["rows"][0][frame.columns[-1]], frame.iloc[0, -1]
+                )
 
         template_path = self.root / "template.xlsx"
         workbook = Workbook()

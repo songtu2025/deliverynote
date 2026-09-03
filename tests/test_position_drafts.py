@@ -27,7 +27,7 @@ from delivery_note.web.models import (
     User,
 )
 from delivery_note.web.position_drafts import (
-    DraftConflict,
+    DraftConflictError,
     create_or_resume_draft,
     discard_draft,
     list_draft_rows,
@@ -198,9 +198,7 @@ class PositionDraftTests(unittest.TestCase):
             session.flush()
 
             self.assertTrue(stale_version.active)
-            created = create_or_resume_draft(
-                session, stale_version, self.admin_id
-            )
+            created = create_or_resume_draft(session, stale_version, self.admin_id)
 
             self.assertEqual(created.base_version_id, replacement.id)
 
@@ -294,7 +292,7 @@ class PositionDraftTests(unittest.TestCase):
         published_path = self.root / "position-v3.xlsx"
         with self.database.session() as session:
             draft = session.get(InputDraft, draft_id)
-            with self.assertRaisesRegex(DraftConflict, "当前启用的库位版本已变化"):
+            with self.assertRaisesRegex(DraftConflictError, "当前启用的库位版本已变化"):
                 publish_draft(
                     session,
                     draft,
@@ -365,7 +363,7 @@ class PositionDraftTests(unittest.TestCase):
                 self.valid_row,
             )
 
-            with self.assertRaises(DraftConflict):
+            with self.assertRaises(DraftConflictError):
                 mutate_draft_row(
                     session,
                     draft,
@@ -396,7 +394,7 @@ class PositionDraftTests(unittest.TestCase):
             )
             first_session.commit()
 
-            with self.assertRaises(DraftConflict):
+            with self.assertRaises(DraftConflictError):
                 mutate_draft_row(
                     stale_session,
                     stale_draft,
@@ -912,9 +910,7 @@ class PositionDraftTests(unittest.TestCase):
     def test_commit_hook_failure_then_close_removes_promoted_target(self):
         published_path = self.root / "commit-failure-close.xlsx"
         session = self.database.SessionLocal()
-        draft = create_or_resume_draft(
-            session, self._version(session), self.admin_id
-        )
+        draft = create_or_resume_draft(session, self._version(session), self.admin_id)
         publish_draft(
             session,
             draft,
@@ -944,7 +940,9 @@ class PositionDraftTests(unittest.TestCase):
                 verification_session.get(InputVersion, self.version_id).active
             )
 
-    def test_failed_root_commit_then_nested_commit_then_outer_rollback_cleans_files(self):
+    def test_failed_root_commit_then_nested_commit_then_outer_rollback_cleans_files(
+        self,
+    ):
         published_path = self.root / "failed-root-nested-commit-rollback.xlsx"
         with self.database.session() as session:
             draft = create_or_resume_draft(
@@ -1068,7 +1066,7 @@ class PositionDraftTests(unittest.TestCase):
             )
 
             self.assertEqual(discarded.status, "discarded")
-            with self.assertRaises(DraftConflict):
+            with self.assertRaises(DraftConflictError):
                 mutate_draft_row(
                     session,
                     draft,
@@ -1217,7 +1215,9 @@ class PositionDraftApiTests(unittest.TestCase):
                 )
                 self.assertEqual(invalid.status_code, 422, invalid.text)
 
-    def test_shared_upload_limit_accepts_boundary_and_rejects_overflow_without_files(self):
+    def test_shared_upload_limit_accepts_boundary_and_rejects_overflow_without_files(
+        self,
+    ):
         purchase_workbook = Workbook()
         purchase_sheet = purchase_workbook.active
         purchase_sheet.append(
@@ -1268,9 +1268,7 @@ class PositionDraftApiTests(unittest.TestCase):
             files={"file": ("exact.xlsx", BytesIO(payload))},
         )
         self.assertEqual(exact_import.status_code, 200, exact_import.text)
-        import_files = set(
-            (self.storage / "temporary" / "position-imports").iterdir()
-        )
+        import_files = set((self.storage / "temporary" / "position-imports").iterdir())
         oversized_import = self.client.post(
             f"/api/input-drafts/{draft['id']}/import-preview",
             headers=self.admin_headers,
@@ -1333,14 +1331,34 @@ class PositionDraftApiTests(unittest.TestCase):
 
         missing_requests = (
             ("GET", "/api/input-drafts/999/rows", {}),
-            ("POST", "/api/input-drafts/999/rows", {"json": {"revision": 1, **self.valid_row}}),
-            ("PUT", "/api/input-drafts/999/rows/999", {"json": {"revision": 1, **self.valid_row}}),
+            (
+                "POST",
+                "/api/input-drafts/999/rows",
+                {"json": {"revision": 1, **self.valid_row}},
+            ),
+            (
+                "PUT",
+                "/api/input-drafts/999/rows/999",
+                {"json": {"revision": 1, **self.valid_row}},
+            ),
             ("DELETE", "/api/input-drafts/999/rows/999", {"json": {"revision": 1}}),
-            ("POST", "/api/input-drafts/999/rows/bulk-delete", {"json": {"revision": 1, "row_ids": [999]}}),
-            ("POST", "/api/input-drafts/999/import-apply", {"json": {"revision": 1, "token": "missing"}}),
+            (
+                "POST",
+                "/api/input-drafts/999/rows/bulk-delete",
+                {"json": {"revision": 1, "row_ids": [999]}},
+            ),
+            (
+                "POST",
+                "/api/input-drafts/999/import-apply",
+                {"json": {"revision": 1, "token": "missing"}},
+            ),
             ("GET", "/api/input-drafts/999/download", {}),
             ("POST", "/api/input-drafts/999/validate", {}),
-            ("POST", "/api/input-drafts/999/publish", {"json": {"revision": 1, "name": "missing", "confirm_warnings": True}}),
+            (
+                "POST",
+                "/api/input-drafts/999/publish",
+                {"json": {"revision": 1, "name": "missing", "confirm_warnings": True}},
+            ),
             ("POST", "/api/input-drafts/999/discard", {"json": {"revision": 1}}),
         )
         for method, url, kwargs in missing_requests:
@@ -1375,15 +1393,49 @@ class PositionDraftApiTests(unittest.TestCase):
             ("POST", "/api/input-drafts/position", {}),
             ("GET", "/api/input-drafts/position", {}),
             ("GET", f"/api/input-drafts/{draft['id']}/rows", {}),
-            ("POST", f"/api/input-drafts/{draft['id']}/rows", {"json": {"revision": draft["revision"], **self.valid_row}}),
-            ("PUT", f"/api/input-drafts/{draft['id']}/rows/{row_id}", {"json": {"revision": draft["revision"], **self.valid_row}}),
-            ("DELETE", f"/api/input-drafts/{draft['id']}/rows/{row_id}", {"json": {"revision": draft["revision"]}}),
-            ("POST", f"/api/input-drafts/{draft['id']}/rows/bulk-delete", {"json": {"revision": draft["revision"], "row_ids": [row_id]}}),
-            ("POST", f"/api/input-drafts/{draft['id']}/import-apply", {"json": {"revision": draft["revision"], "token": "missing"}}),
+            (
+                "POST",
+                f"/api/input-drafts/{draft['id']}/rows",
+                {"json": {"revision": draft["revision"], **self.valid_row}},
+            ),
+            (
+                "PUT",
+                f"/api/input-drafts/{draft['id']}/rows/{row_id}",
+                {"json": {"revision": draft["revision"], **self.valid_row}},
+            ),
+            (
+                "DELETE",
+                f"/api/input-drafts/{draft['id']}/rows/{row_id}",
+                {"json": {"revision": draft["revision"]}},
+            ),
+            (
+                "POST",
+                f"/api/input-drafts/{draft['id']}/rows/bulk-delete",
+                {"json": {"revision": draft["revision"], "row_ids": [row_id]}},
+            ),
+            (
+                "POST",
+                f"/api/input-drafts/{draft['id']}/import-apply",
+                {"json": {"revision": draft["revision"], "token": "missing"}},
+            ),
             ("GET", f"/api/input-drafts/{draft['id']}/download", {}),
             ("POST", f"/api/input-drafts/{draft['id']}/validate", {}),
-            ("POST", f"/api/input-drafts/{draft['id']}/publish", {"json": {"revision": draft["revision"], "name": "forbidden", "confirm_warnings": True}}),
-            ("POST", f"/api/input-drafts/{draft['id']}/discard", {"json": {"revision": draft["revision"]}}),
+            (
+                "POST",
+                f"/api/input-drafts/{draft['id']}/publish",
+                {
+                    "json": {
+                        "revision": draft["revision"],
+                        "name": "forbidden",
+                        "confirm_warnings": True,
+                    }
+                },
+            ),
+            (
+                "POST",
+                f"/api/input-drafts/{draft['id']}/discard",
+                {"json": {"revision": draft["revision"]}},
+            ),
         )
         for method, url, kwargs in forbidden_requests:
             response = self.client.request(
@@ -1501,7 +1553,9 @@ class PositionDraftApiTests(unittest.TestCase):
         workbook = Workbook()
         sheet = workbook.active
         sheet.append(["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"])
-        sheet.append(["待交货", "KuangBiao", "SKU-A", "AMAZON:SEEKWAY:US", "水鞋-广州仓", 100])
+        sheet.append(
+            ["待交货", "KuangBiao", "SKU-A", "AMAZON:SEEKWAY:US", "水鞋-广州仓", 100]
+        )
         output = BytesIO()
         workbook.save(output)
         payload = output.getvalue()
@@ -1596,13 +1650,25 @@ class PositionDraftApiTests(unittest.TestCase):
         versions = self.client.get(
             "/api/input-versions", headers=self.admin_headers
         ).json()
-        self.assertTrue(next(item for item in versions if item["id"] == self.version["id"])["active"])
-        self.assertFalse(next(item for item in versions if item["id"] == historical_id)["active"])
+        self.assertTrue(
+            next(item for item in versions if item["id"] == self.version["id"])[
+                "active"
+            ]
+        )
+        self.assertFalse(
+            next(item for item in versions if item["id"] == historical_id)["active"]
+        )
         self.assertFalse(any(item["name"] == "position-v2-active" for item in versions))
-        self.assertFalse(any(item["name"] == "position-v2-inactive" for item in versions))
-        self.assertEqual(set(position_directory.iterdir()), files_before | {historical_path})
+        self.assertFalse(
+            any(item["name"] == "position-v2-inactive" for item in versions)
+        )
+        self.assertEqual(
+            set(position_directory.iterdir()), files_before | {historical_path}
+        )
 
-    def test_resumed_legacy_draft_reports_its_base_and_cannot_overwrite_new_active(self):
+    def test_resumed_legacy_draft_reports_its_base_and_cannot_overwrite_new_active(
+        self,
+    ):
         draft = self.create_draft()
         replacement_path = self.storage / "master" / "position" / "legacy-v2.xlsx"
         replacement_path.write_bytes(self.position_bytes())
@@ -1793,7 +1859,10 @@ class PositionDraftApiTests(unittest.TestCase):
         invalid = self.client.post(
             f"/api/input-drafts/{draft['id']}/rows",
             headers=self.admin_headers,
-            json={"revision": draft["revision"], **dict(self.valid_row, store_site=" ")},
+            json={
+                "revision": draft["revision"],
+                **dict(self.valid_row, store_site=" "),
+            },
         )
         self.assertEqual(invalid.status_code, 201, invalid.text)
         invalid_id = invalid.json()["row"]["id"]
@@ -1854,7 +1923,10 @@ class PositionDraftApiTests(unittest.TestCase):
         stale = self.client.post(
             f"/api/input-drafts/{draft['id']}/rows",
             headers=self.admin_headers,
-            json={"revision": draft["revision"], **dict(self.valid_row, jiaji_sku="SKU-C")},
+            json={
+                "revision": draft["revision"],
+                **dict(self.valid_row, jiaji_sku="SKU-C"),
+            },
         )
         self.assertEqual(stale.status_code, 409, stale.text)
         self.assertIn("刷新", stale.json()["detail"])
@@ -2093,11 +2165,18 @@ class PositionDraftApiTests(unittest.TestCase):
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             responses = list(executor.map(lambda _index: apply_once(), range(2)))
-        self.assertEqual(sorted(response.status_code for response in responses), [200, 409])
+        self.assertEqual(
+            sorted(response.status_code for response in responses), [200, 409]
+        )
         replay = self.client.post(
             f"/api/input-drafts/{draft['id']}/import-apply",
             headers=self.admin_headers,
-            json={"revision": max(response.json().get("revision", 1) for response in responses), "token": token},
+            json={
+                "revision": max(
+                    response.json().get("revision", 1) for response in responses
+                ),
+                "token": token,
+            },
         )
         self.assertEqual(replay.status_code, 409, replay.text)
 
@@ -2148,9 +2227,7 @@ class PositionDraftApiTests(unittest.TestCase):
 
     def test_download_validate_publish_and_duplicate_name_conflict(self):
         with self.app.state.database.session() as session:
-            base_path = Path(
-                session.get(InputVersion, self.version["id"]).storage_path
-            )
+            base_path = Path(session.get(InputVersion, self.version["id"]).storage_path)
         base_bytes = base_path.read_bytes()
         draft = self.create_draft()
 
@@ -2320,9 +2397,17 @@ class PositionDraftApiTests(unittest.TestCase):
             event.remove(Session, "before_commit", fail_publish_commit)
 
         with self.app.state.database.session() as session:
-            versions = session.query(InputVersion).order_by(InputVersion.id).all()
+            versions = (
+                session.query(InputVersion)
+                .filter_by(kind="position")
+                .order_by(InputVersion.id)
+                .all()
+            )
             persisted_draft = session.get(InputDraft, draft["id"])
-            self.assertEqual([(item.id, item.active) for item in versions], [(self.version["id"], True)])
+            self.assertEqual(
+                [(item.id, item.active) for item in versions],
+                [(self.version["id"], True)],
+            )
             self.assertEqual(persisted_draft.status, "editing")
             self.assertEqual(persisted_draft.revision, draft["revision"])
         self.assertEqual(

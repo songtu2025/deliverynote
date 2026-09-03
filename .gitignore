@@ -11,6 +11,8 @@ __pycache__/
 .env
 *.db
 storage/
+tmp/
+test_data/
 outputs/
 acceptance_data/
 output.xlsx
@@ -22,18 +24,33 @@ patch_probe.txt
 *.xlsx
 !tests/fixtures/
 !tests/fixtures/*.xls
+!delivery_note/assets/
+!delivery_note/assets/*.xlsx
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/.env*.local
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
 
-# Editors and OS
+# Local tools, editors and OS
+.agents/
+.codegraph/
+.codex/
 .worktrees/
 .superpowers/
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Internal requirement source files
+需求/
+
+# Non-production review and planning artifacts
+design-qa.md
+design/admin-maintenance-qa/
+docs/BULK_EXCEPTION_REVIEW_PROPOSAL.md
+docs/superpowers/

@@ -12,13 +12,16 @@ from .excel_io import (
     read_product_workbook,
     read_purchase_workbook,
     read_supplier_workbook,
+    validate_self_operated_template_workbook,
     validate_template_workbook,
 )
 from .pipeline import POSITION_SOURCE_COLUMNS
 
 
 POSITION_KEY = ["店铺-站点", "积加SKU", "MSKU"]
-_POSITION_VALUES = [column for column in POSITION_SOURCE_COLUMNS if column not in POSITION_KEY]
+_POSITION_VALUES = [
+    column for column in POSITION_SOURCE_COLUMNS if column not in POSITION_KEY
+]
 _KNOWN_SCALES = {"短尾", "中尾", "长尾"}
 _STREAMING_COLUMNS = {
     "product": PRODUCT_COLUMNS,
@@ -31,6 +34,11 @@ def _read_template_workbook(path: Path) -> pd.DataFrame:
     return pd.read_excel(path, header=1, usecols="A:G")
 
 
+def _read_self_operated_template_workbook(path: Path) -> pd.DataFrame:
+    validate_self_operated_template_workbook(path)
+    return pd.read_excel(path, header=0, usecols="A:T")
+
+
 def _read_frame(kind: str, path: Path) -> pd.DataFrame:
     readers: dict[str, Callable[[Path], pd.DataFrame]] = {
         "purchase": read_purchase_workbook,
@@ -38,6 +46,7 @@ def _read_frame(kind: str, path: Path) -> pd.DataFrame:
         "supplier": read_supplier_workbook,
         "position": read_position_workbook,
         "template": _read_template_workbook,
+        "inbound_template": _read_self_operated_template_workbook,
     }
     try:
         reader = readers[kind]
@@ -79,6 +88,8 @@ def _inspect_frame(kind: str, frame: pd.DataFrame) -> dict:
             "mskus": int(frame["MSKU"].dropna().astype(str).str.strip().nunique()),
         }
         result["issues"] = validate_position_frame(frame)
+    elif kind == "purchase":
+        result["issues"] = validate_purchase_frame(frame)
     return result
 
 
@@ -91,10 +102,7 @@ def _preview_frame(
     page = frame.iloc[offset : offset + limit]
     columns = [str(column) for column in frame.columns]
     rows = [
-        {
-            str(column): _json_safe(value)
-            for column, value in zip(frame.columns, values)
-        }
+        {str(column): _json_safe(value) for column, value in zip(frame.columns, values)}
         for values in page.itertuples(index=False, name=None)
     ]
     return {
@@ -121,10 +129,7 @@ def _stream_xlsx_inspection(
         sheet = workbook.worksheets[0]
         values = sheet.iter_rows(values_only=True)
         header = next(values, ())
-        header_names = [
-            "" if value is None else str(value)
-            for value in header
-        ]
+        header_names = ["" if value is None else str(value) for value in header]
         expected_set = set(expected_columns)
         selected_columns = [
             (index, name)
@@ -132,13 +137,16 @@ def _stream_xlsx_inspection(
             if name in expected_set
         ]
         found = {name for _index, name in selected_columns}
-        missing = [
-            column for column in expected_columns if column not in found
-        ]
+        missing = [column for column in expected_columns if column not in found]
         if missing:
             raise ValueError(f"缺少必要字段：{', '.join(missing)}")
 
         page_rows: list[tuple[int, dict[str, Any]]] = []
+        shared_site_rows: list[int] = []
+        site_column_index = next(
+            (index for index, name in selected_columns if name == "平台站点"),
+            None,
+        )
         last_data_offset = -1
         for row_offset, row in enumerate(values):
             selected_values = [
@@ -147,6 +155,13 @@ def _stream_xlsx_inspection(
             ]
             if any(value not in (None, "") for value in selected_values):
                 last_data_offset = row_offset
+            if (
+                kind == "purchase"
+                and site_column_index is not None
+                and site_column_index < len(row)
+                and str(row[site_column_index] or "").strip() == "共享"
+            ):
+                shared_site_rows.append(row_offset + 2)
             if offset <= row_offset < offset + limit:
                 page_rows.append(
                     (
@@ -166,11 +181,7 @@ def _stream_xlsx_inspection(
         preview = {
             "kind": kind,
             "columns": columns,
-            "rows": [
-                row
-                for row_offset, row in page_rows
-                if row_offset < total
-            ],
+            "rows": [row for row_offset, row in page_rows if row_offset < total],
             "total": total,
             "offset": offset,
             "limit": limit,
@@ -180,7 +191,18 @@ def _stream_xlsx_inspection(
             "row_count": total,
             "columns": columns,
             "metrics": {},
-            "issues": [],
+            "issues": (
+                [
+                    {
+                        "severity": "warning",
+                        "code": "shared_site",
+                        "message": "共享站点数据不能参与正常交货匹配",
+                        "row_numbers": shared_site_rows,
+                    }
+                ]
+                if shared_site_rows
+                else []
+            ),
         }
         return {"summary": summary, "preview": preview}
     finally:
@@ -200,10 +222,7 @@ def inspect_input_version_with_preview(
     """一次读取基础资料并生成摘要与分页预览。"""
 
     path = Path(path)
-    if (
-        kind in _STREAMING_COLUMNS
-        and path.suffix.lower() in {".xlsx", ".xlsm"}
-    ):
+    if kind in _STREAMING_COLUMNS and path.suffix.lower() in {".xlsx", ".xlsm"}:
         return _stream_xlsx_inspection(kind, path, offset, limit)
     frame = _read_frame(kind, path)
     return {
@@ -258,6 +277,18 @@ def _append_issue(
         )
 
 
+def validate_purchase_frame(frame: pd.DataFrame) -> list[dict]:
+    issues: list[dict] = []
+    _append_issue(
+        issues,
+        severity="warning",
+        code="shared_site",
+        message="共享站点数据不能参与正常交货匹配",
+        mask=_text_values(frame, "平台站点").eq("共享"),
+    )
+    return issues
+
+
 def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
     site = _identity_values(frame, "店铺-站点")
     sku = _identity_values(frame, "积加SKU")
@@ -269,9 +300,7 @@ def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
     valid_group = site.ne("") & sku.ne("")
     multiple_rows = valid_group & keys.duplicated(["site", "sku"], keep=False)
     duplicate_full_key = (
-        valid_group
-        & msku.ne("")
-        & keys.duplicated(["site", "sku", "msku"], keep=False)
+        valid_group & msku.ne("") & keys.duplicated(["site", "sku", "msku"], keep=False)
     )
     duplicate_msku = duplicate_full_key | (multiple_rows & msku.eq(""))
 

@@ -1,1 +1,1 @@
-"""Small, explicit migrations for existing deployments."""
+"""针对已有部署的小型显式迁移。"""

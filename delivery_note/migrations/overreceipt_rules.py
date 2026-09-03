@@ -1,4 +1,4 @@
-"""Create overreceipt rule tables and exception guidance fields."""
+"""创建超收规则表和异常指引字段。"""
 
 from __future__ import annotations
 
@@ -36,10 +36,12 @@ def migrate(database_url: str) -> None:
         with database.engine.begin() as connection:
             for column in EXCEPTION_GUIDANCE_COLUMNS:
                 if column not in existing_columns:
-                    connection.execute(text(
-                        f"ALTER TABLE {ExceptionRecord.__tablename__} "
-                        f"ADD COLUMN {column} INTEGER"
-                    ))
+                    connection.execute(
+                        text(
+                            f"ALTER TABLE {ExceptionRecord.__tablename__} "
+                            f"ADD COLUMN {column} INTEGER"
+                        )
+                    )
     finally:
         database.dispose()
 

@@ -118,6 +118,21 @@ describe("AdminPage", () => {
       if (url.endsWith("/api/audit-logs") && method === "GET") {
         return jsonResponse(auditLogs);
       }
+      if (
+        url.endsWith("/api/admin/integrations/gerpgo")
+        && method === "GET"
+      ) {
+        return jsonResponse({
+          configured: false,
+          base_url: "https://openapi.gerpgo.com",
+          app_id_hint: "",
+          has_app_id: false,
+          has_app_key: false,
+          source: "environment"
+        });
+      }
+
+
 
       if (positionFlow && url.endsWith("/api/input-drafts/position") && method === "POST") {
         if (positionEntryRequest) return positionEntryRequest.promise;
@@ -179,18 +194,56 @@ describe("AdminPage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("moves between the three administrator tabs with one shared initial load", async () => {
+  it("does not render administrator content before the initial data is ready", async () => {
+    const pendingVersions = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/input-versions") return pendingVersions.promise;
+      throw new Error(`Unexpected request: GET ${url.pathname}`);
+    }));
+
+    render(<AdminPage currentUser={admin} />);
+
+    expect(screen.getByLabelText("正在加载管理员维护")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "管理员维护" })).not.toBeInTheDocument();
+    expect(screen.queryByText("基础资料目录")).not.toBeInTheDocument();
+
+    await act(async () => {
+      pendingVersions.resolve(jsonResponse(versions));
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByRole("heading", { name: "管理员维护" })).toBeInTheDocument();
+    expect(screen.getByText("基础资料目录")).toBeInTheDocument();
+    expect(requestCount("GET", "/api/users")).toBe(0);
+    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
+  });
+  it("loads administrator resources only when their tab is opened", async () => {
     render(<AdminPage currentUser={admin} />);
 
     expect(await screen.findByText("基础资料目录")).toBeInTheDocument();
+    expect(requestCount("GET", "/api/input-versions")).toBe(1);
+    expect(requestCount("GET", "/api/users")).toBe(0);
+    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
+
+    fireEvent.click(screen.getByRole("tab", { name: "接口配置" }));
+    expect(await screen.findByText("积加开放平台")).toBeInTheDocument();
+    expect(requestCount("GET", "/api/users")).toBe(0);
+    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
+
     fireEvent.click(screen.getByRole("tab", { name: "用户账号" }));
     expect(await screen.findByText("内部账号")).toBeInTheDocument();
+    expect(requestCount("GET", "/api/users")).toBe(1);
+    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
+
     fireEvent.click(screen.getByRole("tab", { name: "操作记录" }));
-    expect(await screen.findByText("最近 200 条操作记录")).toBeInTheDocument();
+    expect(await screen.findByText("最多显示 200 条")).toBeInTheDocument();
 
     expect(requestCount("GET", "/api/users")).toBe(1);
     expect(requestCount("GET", "/api/input-versions")).toBe(1);
     expect(requestCount("GET", "/api/audit-logs")).toBe(1);
+    expect(requestCount("GET", "/api/admin/integrations/gerpgo")).toBe(1);
+    expect(requestCount("GET", "/api/purchase-sync")).toBe(0);
   });
 
   it("offers labelled audit filters and a clear result count", () => {
@@ -237,84 +290,83 @@ describe("AdminPage", () => {
     expect(screen.queryByText("创建用户")).not.toBeInTheDocument();
   });
 
-  it("keeps only the latest StrictMode load results when earlier requests settle last", async () => {
-    const staleUsers = deferred<Response>();
-    const freshUsers = deferred<Response>();
+  it("translates self-operated sync audit values", () => {
+    const records: AuditLog[] = [{
+      id: 4,
+      user_id: null,
+      action: "self_operated_inbound_sync_succeeded",
+      entity_type: "self_operated_inbound_sync_job",
+      entity_id: "12",
+      details: {},
+      created_at: "2026-07-21T09:30:00"
+    }];
+
+    render(
+      <AuditLogPanel
+        auditLogs={records}
+        users={[admin, operator]}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("待入库数据同步完成")).toBeInTheDocument();
+    expect(screen.getByText("待入库同步任务 #12")).toBeInTheDocument();
+
+  });
+  it("keeps only the latest StrictMode version results when earlier requests settle last", async () => {
     const staleVersions = deferred<Response>();
     const freshVersions = deferred<Response>();
-    const staleAudit = deferred<Response>();
-    const freshAudit = deferred<Response>();
     const freshPosition = { ...positionVersion, name: "position-fresh" };
-    const responses = {
-      "/api/users": [staleUsers, freshUsers],
-      "/api/input-versions": [staleVersions, freshVersions],
-      "/api/audit-logs": [staleAudit, freshAudit]
-    };
+    const responses = [staleVersions, freshVersions];
 
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
-      const queue = responses[url.pathname as keyof typeof responses];
-      const request = queue?.shift();
+      if (url.pathname !== "/api/input-versions") {
+        throw new Error(`Unexpected request: GET ${url.pathname}`);
+      }
+      const request = responses.shift();
       if (!request) throw new Error(`Unexpected request: GET ${url.pathname}`);
       return request.promise;
     }));
 
     render(<StrictMode><AdminPage currentUser={admin} /></StrictMode>);
     await waitFor(() => {
-      expect(requestCount("GET", "/api/users")).toBe(2);
       expect(requestCount("GET", "/api/input-versions")).toBe(2);
-      expect(requestCount("GET", "/api/audit-logs")).toBe(2);
     });
-    freshUsers.resolve(jsonResponse([admin, { ...operator, username: "fresh-user" }]));
     freshVersions.resolve(jsonResponse([freshPosition]));
-    freshAudit.resolve(jsonResponse([{
-      id: 9,
-      user_id: 1,
-      action: "create_user",
-      entity_type: "user",
-      entity_id: "2",
-      details: {},
-      created_at: "2026-07-21T10:00:00"
-    }]));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    staleUsers.resolve(jsonResponse([admin, { ...operator, username: "stale-user" }]));
     staleVersions.resolve(jsonResponse([{ ...positionVersion, name: "position-stale" }]));
-    staleAudit.resolve(jsonResponse({ detail: "stale audit failure" }, 503));
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    await waitFor(() => expect(document.body).toHaveTextContent("position-fresh"));
-    expect(document.body).not.toHaveTextContent("position-stale");
-    fireEvent.click(screen.getByText("用户账号"));
-    expect(await screen.findByText("fresh-user")).toBeInTheDocument();
-    expect(screen.queryByText("stale-user")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("操作记录"));
-    await waitFor(() => expect(screen.getAllByText("创建用户").some((element) => element.tagName === "TD")).toBe(true));
-    expect(screen.queryByText("无法读取操作记录")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", {
+      name: /MSKU定位，已就绪，当前版本 position-fresh/
+    })).toBeInTheDocument());
+    expect(screen.queryByRole("button", {
+      name: /MSKU定位，已就绪，当前版本 position-stale/
+    })).not.toBeInTheDocument();
+    expect(requestCount("GET", "/api/users")).toBe(0);
+    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
   });
 
   it("ignores deferred administrator responses after unmount", async () => {
-    const pendingUsers = deferred<Response>();
     const pendingVersions = deferred<Response>();
-    const pendingAudit = deferred<Response>();
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = new URL(String(input), "http://localhost");
-      if (url.pathname === "/api/users") return pendingUsers.promise;
       if (url.pathname === "/api/input-versions") return pendingVersions.promise;
-      if (url.pathname === "/api/audit-logs") return pendingAudit.promise;
       throw new Error(`Unexpected request: GET ${url.pathname}`);
     }));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const view = render(<AdminPage currentUser={admin} />);
-    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1));
     view.unmount();
     const errorsBeforeSettling = consoleError.mock.calls.length;
 
     await act(async () => {
-      pendingUsers.resolve(jsonResponse([admin]));
       pendingVersions.resolve(jsonResponse([positionVersion]));
-      pendingAudit.resolve(jsonResponse([]));
       await Promise.resolve();
     });
 
@@ -327,14 +379,14 @@ describe("AdminPage", () => {
     render(<AdminPage currentUser={admin} />);
 
     await screen.findByText("基础资料目录");
-    fireEvent.click(screen.getByRole("button", { name: /^库位\/排仓数据/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
     const maintenanceEntry = screen.getByRole("button", { name: "开始网页维护" });
     fireEvent.click(maintenanceEntry);
-    expect(await screen.findByText("库位/排仓网页维护")).toBeInTheDocument();
+    expect(await screen.findByText("MSKU 定位维护")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toHaveFocus());
 
     fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
-    await waitFor(() => expect(screen.queryByText("库位/排仓网页维护")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("MSKU 定位维护")).not.toBeInTheDocument());
     expect(screen.getByRole("heading", { name: "基础资料目录" })).toHaveFocus();
   }, 30_000);
 
@@ -346,7 +398,7 @@ describe("AdminPage", () => {
 
     try {
       await screen.findByText("基础资料目录");
-      fireEvent.click(screen.getByRole("button", { name: /^库位\/排仓数据/ }));
+      fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
       fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
       expect(await screen.findByText("正在创建或恢复服务器草稿")).toBeInTheDocument();
       await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toHaveFocus());
@@ -365,17 +417,17 @@ describe("AdminPage", () => {
     render(<AdminPage currentUser={admin} />);
 
     await screen.findByText("基础资料目录");
-    fireEvent.click(screen.getByRole("button", { name: /^库位\/排仓数据/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
     fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
     fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
     fireEvent.change(await screen.findByLabelText("新版本名称"), { target: { value: "position-published" } });
     fireEvent.click(screen.getByRole("button", { name: "确认发布" }));
 
     await waitFor(() => expect(requestCount("GET", "/api/input-versions")).toBe(2));
-    await waitFor(() => expect(screen.queryByText("库位/排仓网页维护")).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /库位\/排仓数据，已就绪，当前版本 position-published/ })).toBeInTheDocument();
-    expect(requestCount("GET", "/api/users")).toBe(1);
-    expect(requestCount("GET", "/api/audit-logs")).toBe(1);
+    await waitFor(() => expect(screen.queryByText("MSKU 定位维护")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /MSKU定位，已就绪，当前版本 position-published/ })).toBeInTheDocument();
+    expect(requestCount("GET", "/api/users")).toBe(0);
+    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
   }, 30_000);
 
   it("keeps the current administrator self-disable action blocked", async () => {

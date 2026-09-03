@@ -1,4 +1,4 @@
-"""Application services shared by the CLI, API and worker."""
+"""由命令行、接口和后台任务共用的应用服务。"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from .pipeline import (
 
 @dataclass(frozen=True)
 class DeliveryRequest:
-    """One delivery source in the explicit order chosen for a batch."""
+    """批次中按明确顺序排列的单个交货来源。"""
 
     source_id: str
     delivery_rows: pd.DataFrame
@@ -70,13 +70,18 @@ class SplitProjection:
     pending_total: int
 
 
-def validate_split(expected_quantity: int, parts: Iterable[SplitPart]) -> tuple[SplitPart, ...]:
-    """Validate a non-lossy split without mutating the original exception."""
+def validate_split(
+    expected_quantity: int, parts: Iterable[SplitPart]
+) -> tuple[SplitPart, ...]:
+    """校验无损拆分，不修改原始异常记录。"""
 
     validated = tuple(parts)
     if not validated:
         raise ValueError("拆分明细不能为空")
-    if any(isinstance(part.quantity, bool) or int(part.quantity) != part.quantity for part in validated):
+    if any(
+        isinstance(part.quantity, bool) or int(part.quantity) != part.quantity
+        for part in validated
+    ):
         raise ValueError("拆分数量必须是整数")
     if any(part.quantity <= 0 for part in validated):
         raise ValueError("拆分数量必须大于 0")
@@ -95,9 +100,11 @@ def project_split(
 
     expected_quantity = int(exception["人工处理量"])
     validated = validate_split(expected_quantity, parts)
-    base_row = build_manual_import_rows(
-        pd.DataFrame([exception]), supplier_code
-    ).iloc[0].to_dict()
+    base_row = (
+        build_manual_import_rows(pd.DataFrame([exception]), supplier_code)
+        .iloc[0]
+        .to_dict()
+    )
     base_row["单据备注"] = document_note
 
     import_rows: list[dict] = []
@@ -127,8 +134,12 @@ def project_split(
 
     import_frame = pd.DataFrame(import_rows, columns=IMPORT_COLUMNS)
     pending_frame = pd.DataFrame(pending_rows, columns=IMPORT_COLUMNS)
-    import_total = int(import_frame["*本次交货量"].sum()) if not import_frame.empty else 0
-    pending_total = int(pending_frame["*本次交货量"].sum()) if not pending_frame.empty else 0
+    import_total = (
+        int(import_frame["*本次交货量"].sum()) if not import_frame.empty else 0
+    )
+    pending_total = (
+        int(pending_frame["*本次交货量"].sum()) if not pending_frame.empty else 0
+    )
     if import_total + pending_total != expected_quantity:
         raise RuntimeError("拆分投影数量不守恒")
     return SplitProjection(

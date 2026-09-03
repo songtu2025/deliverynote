@@ -315,7 +315,7 @@ function PublishDialog({
 }) {
   return (
     <Modal
-      title="发布新的库位/排仓版本"
+      title="发布新的MSKU定位版本"
       open={validation !== null}
       styles={{ body: { maxHeight: "calc(100vh - 300px)", overflowY: "auto" } }}
       okText="确认发布"
@@ -336,8 +336,8 @@ function PublishDialog({
           <Alert
             type="info"
             showIcon
-            title="只影响之后批次，历史批次不变"
-            description="发布会创建并启用新的正式版本；已有批次继续使用创建时锁定的旧版本。"
+            title="仅用于新批次；已有批次不变"
+            description="发布后立即启用。"
           />
           <Form layout="vertical">
             <Form.Item label="新版本名称" required validateStatus={nameError ? "error" : undefined} help={nameError}>
@@ -653,7 +653,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         method: editingRow ? "PUT" : "POST",
         body: JSON.stringify({ revision: revisionRef.current, ...values })
       }),
-      "记录已保存到服务器草稿",
+      "记录已保存",
       () => {
         setDrawerDirty(false);
         setDrawerOpen(false);
@@ -940,7 +940,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   if (entryLoading && !draft) {
     return (
       <div>
-        <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
+        <Button autoFocus aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
           返回基础资料
         </Button>
         <div style={{ minHeight: 360, display: "grid", placeItems: "center" }}>
@@ -953,7 +953,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   if (entryError && !draft) {
     return (
       <div>
-        <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
+        <Button autoFocus aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
           返回基础资料
         </Button>
         <Card>
@@ -991,11 +991,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     <div className="position-maintenance">
       <div className="position-workspace-heading">
         <div className="position-workspace-title">
-          <Button aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} disabled={busyAction !== null} onClick={requestBack}>
+          <Button autoFocus aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} disabled={busyAction !== null} onClick={requestBack}>
             返回基础资料
           </Button>
-          <Typography.Title level={2} style={{ margin: 0 }}>库位/排仓网页维护</Typography.Title>
-          <Typography.Text type="secondary">草稿基线：{draft.base_version_name}。网页修改只保存在服务器草稿，发布前不影响正式数据。</Typography.Text>
+          <Typography.Title level={2} style={{ margin: 0 }}>MSKU 定位维护</Typography.Title>
+          <Typography.Text type="secondary">基于 {draft.base_version_name}；修改自动保存到草稿，发布后生效。</Typography.Text>
         </div>
         <Space wrap className="position-workspace-actions">
           <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void downloadDraft()}>下载草稿</Button>
@@ -1046,7 +1046,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         title="草稿已自动保存"
         description={(
           <Space wrap separator={<span aria-hidden="true">·</span>}>
-            <span>已保存到服务器</span>
             <span>修订号 {draft.revision}</span>
             <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>
             <span>最后编辑人：用户 #{draft.updated_by}</span>
@@ -1060,7 +1059,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
           type="error"
           showIcon
           title="草稿基线已过期"
-          description={`当前正式版本已变为 ${draft.active_version_name ?? "无启用版本"}。为避免覆盖新版本，请放弃当前草稿后重新开始维护。`}
+          description={`正式版本已变为 ${draft.active_version_name ?? "无启用版本"}。请放弃当前草稿后重新维护。`}
         />
       )}
 

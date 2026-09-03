@@ -42,13 +42,13 @@ _PENDING_PUBLISH_KEY = "position_draft_pending_publish"
 BASE_VERSION_CHANGED_DETAIL = "当前启用的库位版本已变化，请放弃当前草稿后重新开始"
 
 
-class DraftConflict(Exception):
+class DraftConflictError(Exception):
     pass
 
 
 def require_revision(draft: InputDraft, expected_revision: int) -> None:
     if draft.status != "editing" or draft.revision != expected_revision:
-        raise DraftConflict
+        raise DraftConflictError
 
 
 def touch_draft(draft: InputDraft, user_id: int) -> None:
@@ -61,7 +61,7 @@ def _flush_revision(session: Session) -> None:
     try:
         session.flush()
     except StaleDataError as error:
-        raise DraftConflict from error
+        raise DraftConflictError from error
 
 
 def _remove_pending_publish_files(state: dict, *, remove_target: bool) -> None:
@@ -165,10 +165,7 @@ def _base_frame(session: Session, draft: InputDraft) -> pd.DataFrame:
 
 def _frame_from_rows(rows: list[PositionDraftRow]) -> pd.DataFrame:
     records = [
-        {
-            FIELD_TO_COLUMN[field]: getattr(row, field)
-            for field in ROW_FIELDS
-        }
+        {FIELD_TO_COLUMN[field]: getattr(row, field) for field in ROW_FIELDS}
         for row in rows
         if not row.deleted
     ]
@@ -273,7 +270,7 @@ def create_or_resume_draft(
             )
         )
         if winner is None:
-            raise DraftConflict from error
+            raise DraftConflictError from error
         return winner
     return draft
 
@@ -497,16 +494,17 @@ def publish_draft(
     issues = validate_draft(session, draft)
     if any(issue["severity"] == "error" for issue in issues):
         raise ValueError("草稿仍有错误，不能发布")
-    if not confirm_warnings and any(
-        issue["severity"] == "warning" for issue in issues
-    ):
+    if not confirm_warnings and any(issue["severity"] == "warning" for issue in issues):
         raise ValueError("草稿仍有警告，请确认警告后发布")
-    if session.scalar(
-        select(InputVersion.id).where(
-            InputVersion.kind == "position",
-            InputVersion.name == name,
+    if (
+        session.scalar(
+            select(InputVersion.id).where(
+                InputVersion.kind == "position",
+                InputVersion.name == name,
+            )
         )
-    ) is not None:
+        is not None
+    ):
         raise ValueError("版本名称已存在")
 
     path = Path(storage_path)
@@ -522,9 +520,7 @@ def publish_draft(
     if session.info.get(_PENDING_PUBLISH_KEY) is not None:
         raise ValueError("当前事务已有待提交的发布文件")
 
-    temporary_path = path.with_name(
-        f".{path.name}.{uuid4().hex}.tmp.xlsx"
-    )
+    temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp.xlsx")
     try:
         write_position_workbook(
             temporary_path,
@@ -542,7 +538,7 @@ def publish_draft(
             current.id for current in position_versions if current.active
         ]
         if active_version_ids != [draft.base_version_id]:
-            raise DraftConflict(BASE_VERSION_CHANGED_DETAIL)
+            raise DraftConflictError(BASE_VERSION_CHANGED_DETAIL)
         for current in position_versions:
             current.active = False
         session.flush()

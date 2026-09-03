@@ -64,10 +64,8 @@ def generate_acceptance_data(output_dir: Path) -> dict[str, Path]:
         "supplier": output_dir / "supplier.xlsx",
         "position": output_dir / "position.xlsx",
         "template": output_dir / "template.xlsx",
-        "delivery_first": output_dir
-        / "260720-KuangBiao-A交货单-发货1箱.xlsx",
-        "delivery_second": output_dir
-        / "260720-KuangBiao-B交货单-发货1箱.xlsx",
+        "delivery_first": output_dir / "260720-KuangBiao-A交货单-发货1箱.xlsx",
+        "delivery_second": output_dir / "260720-KuangBiao-B交货单-发货1箱.xlsx",
     }
 
     _write_table(

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -24,7 +24,6 @@ import {
 } from "antd";
 import type { UploadProps } from "antd";
 import {
-  AimOutlined,
   ArrowDownOutlined,
   ArrowLeftOutlined,
   ArrowUpOutlined,
@@ -36,7 +35,6 @@ import {
   LockOutlined,
   PlayCircleOutlined,
   PlusOutlined,
-  RightOutlined,
   SafetyCertificateOutlined,
   SearchOutlined
 } from "@ant-design/icons";
@@ -56,8 +54,9 @@ const VERSION_LABELS: Record<string, string> = {
   purchase: "采购需求",
   product: "商品信息",
   supplier: "供应商资料",
-  position: "库位/排仓",
-  template: "导出模板"
+  position: "MSKU定位",
+  template: "导出模板",
+  inbound_template: "积加入库模板"
 };
 
 const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
@@ -241,10 +240,12 @@ function GuidanceMetric({ label, value }: { label: string; value: number | null 
 
 function ReasonGuidance({
   exception,
-  hasOverreceiptRule
+  hasOverreceiptRule,
+  selfOperated = false
 }: {
   exception: DeliveryException;
   hasOverreceiptRule: boolean;
+  selfOperated?: boolean;
 }) {
   if (exception.reason === "未找到可交货采购需求") {
     return (
@@ -286,7 +287,9 @@ function ReasonGuidance({
           showIcon
           type="warning"
           title="选择候选站点"
-          description="请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
+          description={selfOperated
+            ? "请在下方候选项中选择正确的完整站点。保存后系统会按所选站点重新计算整个批次。"
+            : "请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"}
         />
       </div>
     );
@@ -329,6 +332,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [siteFilter, setSiteFilter] = useState<string>();
   const [scaleFilter, setScaleFilter] = useState<string>();
   const [stockingFilter, setStockingFilter] = useState<string>();
@@ -473,7 +477,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     };
   }, [exceptions]);
   const filteredExceptions = useMemo(() => {
-    const keyword = query.trim().toLocaleLowerCase("zh-CN");
+    const keyword = deferredQuery.trim().toLocaleLowerCase("zh-CN");
     return exceptions.filter((item) => {
       const source = fileById[item.batch_file_id]?.original_name ?? "";
       const haystack = [
@@ -494,7 +498,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         && matchesScope
         && (!reasonFilter || item.reason === reasonFilter);
     });
-  }, [exceptions, fileById, query, reasonFilter, reviewScope, scaleFilter, siteFilter, stockingFilter]);
+  }, [deferredQuery, exceptions, fileById, reasonFilter, reviewScope, scaleFilter, siteFilter, stockingFilter]);
 
   const runAction = async (name: string, operation: () => Promise<void>) => {
     setAction(name);
@@ -518,6 +522,20 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       options.onSuccess?.({});
       await load(true);
       message.success("交货文件已上传，预检状态已更新");
+    });
+  };
+
+  const uploadInboundFile: NonNullable<UploadProps["customRequest"]> = async (options) => {
+    await runAction("upload-inbound", async () => {
+      const formData = new FormData();
+      formData.append("file", options.file as File);
+      await api<Batch>(`/api/self-operated-batches/${batchId}/inbound-file`, {
+        method: "POST",
+        body: formData
+      });
+      options.onSuccess?.({});
+      await load(true);
+      message.success("自营仓入库单已上传，预检状态已更新");
     });
   };
 
@@ -583,6 +601,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   const splitCandidateSites = splitTarget?.reason === "产品信息站点不唯一"
     ? candidateSites(splitTarget.full_site)
     : [];
+  const selfOperated = batch?.workflow === "self_operated_inbound";
+  const selfOperatedSiteSelection = Boolean(
+    selfOperated && splitTarget?.reason === "产品信息站点不唯一"
+  );
+  const selectedSelfOperatedSite = String(splitParts[0]?.site ?? "").trim();
+  const selfOperatedSiteValid = splitCandidateSites.includes(selectedSelfOperatedSite);
   const splitValid = Boolean(
     splitTarget
     && splitParts.length
@@ -613,6 +637,21 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     });
   };
 
+  const saveSelfOperatedSite = async () => {
+    if (!splitTarget || !selfOperatedSiteValid) return;
+    await splitForm.validateFields([["parts", 0, "site"]]);
+    await runAction("site-resolution", async () => {
+      await api<Job>(`/api/exceptions/${splitTarget.id}/self-operated-site`, {
+        method: "PUT",
+        body: JSON.stringify({ full_site: selectedSelfOperatedSite })
+      });
+      setSplitTarget(null);
+      splitForm.resetFields();
+      await load(true);
+      message.info("站点已保存，系统正在按新站点重新计算整个批次");
+    });
+  };
+
   if (!batch) {
     return <Card loading={loading} />;
   }
@@ -638,7 +677,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           : 0;
 
   const workflowItems = [
-    { title: "准备文件", content: files.length ? `${files.length} 个文件` : "等待上传" },
+    {
+      title: "准备文件",
+      content: selfOperated
+        ? `${files.length + (batch.inbound_file?.uploaded ? 1 : 0)}/2 个文件`
+        : files.length ? `${files.length} 个文件` : "等待上传"
+    },
     { title: "预检", content: currentStep > 1 || batch.status === "preflight_ready" ? "检查通过" : "检查格式与供应商" },
     { title: "计算结果", content: computed ? "计算完成" : activeJob?.kind === "compute" ? "后台处理中" : "等待计算" },
     { title: "异常审校", content: computed ? `${totals.manual_total} 待处理` : "计算后开始" },
@@ -665,14 +709,23 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         </div>
         <Space wrap className="batch-primary-actions">
           {canEditFiles && (
-            <Upload accept=".xls,.xlsx" multiple showUploadList={false} customRequest={uploadFile}>
-              <Button icon={<CloudUploadOutlined />} loading={action === "upload"}>上传交货文件</Button>
+            <Upload accept=".xls,.xlsx" multiple={!selfOperated} showUploadList={false} customRequest={uploadFile}>
+              <Button icon={<CloudUploadOutlined />} loading={action === "upload"}>
+                {selfOperated ? "上传质检交货单" : "上传交货文件"}
+              </Button>
+            </Upload>
+          )}
+          {canEditFiles && selfOperated && (
+            <Upload accept=".xls,.xlsx" showUploadList={false} customRequest={uploadInboundFile}>
+              <Button icon={<CloudUploadOutlined />} loading={action === "upload-inbound"}>
+                上传自营仓入库单
+              </Button>
             </Upload>
           )}
           {(batch.status === "draft" || batch.status === "failed") && (
             <Button
               icon={<SafetyCertificateOutlined />}
-              disabled={!files.length}
+              disabled={!files.length || (selfOperated && !batch.inbound_file?.uploaded)}
               loading={action === "preflight"}
               onClick={() => void preflight()}
             >
@@ -699,30 +752,19 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
 
       {computed && (
         <section
-          className={`stage-guidance ${needsReview ? "" : "stage-guidance-results"}`}
+          className="stage-actions"
           aria-labelledby="current-stage-title"
         >
-          <AimOutlined className="stage-guidance-icon" />
-          <div className="stage-guidance-copy">
-            <strong id="current-stage-title">
-              当前阶段：{needsReview ? "异常审校" : "导出下载"}
-            </strong>
-            <span>
-              {needsReview
-                ? `发现 ${totals.manual_total} 件超出规则或需要判断的记录，请先查看原因指导并完成处理。`
-                : "计算结果已确认，可直接生成或下载处理结果。"}
-            </span>
+          <div className="stage-actions-copy">
+            <strong id="current-stage-title">{needsReview ? `待处理 ${totals.manual_total} 件` : "结果可下载"}</strong>
+            <span>{needsReview ? "处理完成后生成最终结果。" : "可生成或下载结果文件。"}</span>
           </div>
           {needsReview && (
-            <div className="stage-guidance-primary">
-              <span>下一步（唯一主操作）</span>
-              <Button aria-label={`查看并处理（${totals.manual_total}）`} type="primary" size="large" onClick={focusReview}>
-                查看并处理（{totals.manual_total}）<RightOutlined />
-              </Button>
-            </div>
+            <Button aria-label="处理异常" type="primary" size="large" onClick={focusReview}>
+              处理异常
+            </Button>
           )}
-          <div className="stage-guidance-secondary">
-            <span>{batch.download_ready && !needsMergedGeneration ? "下载处理结果" : "生成处理结果"}</span>
+          <div className="stage-actions-export">
             <div className="export-action-buttons">
               {batch.download_ready && !needsMergedGeneration ? (
                 hasMultipleFiles ? (
@@ -754,7 +796,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                       icon={<DownloadOutlined />}
                       onClick={() => void download(
                         `/api/batch-files/${files[0].id}/download`,
-                        `${files[0].original_name.replace(/\.(xls|xlsx)$/i, "")}_交货处理.xlsx`
+                        `${files[0].original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
                       )}
                     >
                       下载处理结果
@@ -776,13 +818,6 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                 </Button>
               )}
             </div>
-            <small>
-              {hasMultipleFiles
-                ? batch.download_ready && !needsMergedGeneration
-                  ? "合并 Excel 按来源顺序汇总；ZIP 保留每张交货单的独立文件。"
-                  : "将同时生成合并 Excel 和分文件 ZIP；待处理记录仍保留在待处理工作表。"
-                : "单个来源直接下载对应处理结果；待处理记录仍保留在待处理工作表。"}
-            </small>
           </div>
         </section>
       )}
@@ -812,10 +847,21 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       </div>
 
       <Card
-        title="来源文件与处理顺序"
+        title={selfOperated ? "本批次业务文件" : "来源文件与处理顺序"}
         className="section-card file-order-card"
-        extra={<span className="order-hint">序号越小，越先扣减采购余额</span>}
+        extra={!selfOperated && <span className="order-hint">序号越小，越先扣减采购余额</span>}
       >
+        {selfOperated && (
+          <Alert
+            className="inline-alert"
+            type={batch.inbound_file?.uploaded ? "success" : "warning"}
+            showIcon
+            title={batch.inbound_file?.uploaded
+              ? `自营仓入库单：${batch.inbound_file.original_name}`
+              : "尚未上传自营仓入库单"}
+            description="提供交货单、PO、SKU、站点和应收货数据；每个批次一份。"
+          />
+        )}
         {canEditFiles && files.length > 1 && (
           <Alert
             className="inline-alert"
@@ -830,7 +876,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           dataSource={files}
           pagination={false}
           scroll={{ x: 900 }}
-          locale={{ emptyText: <Empty description="请先上传一个或多个交货 Excel" /> }}
+          locale={{ emptyText: <Empty description={selfOperated ? "请先上传一份质检交货单" : "请先上传一个或多个交货 Excel"} /> }}
           columns={[
             {
               title: "顺序",
@@ -871,12 +917,16 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                 <Space>
                   {canEditFiles && (
                     <>
-                      <Tooltip title="上移，提前扣减采购余额">
-                        <Button aria-label={`上移 ${file.original_name}`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
-                      </Tooltip>
-                      <Tooltip title="下移，延后扣减采购余额">
-                        <Button aria-label={`下移 ${file.original_name}`} size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
-                      </Tooltip>
+                      {!selfOperated && (
+                        <>
+                          <Tooltip title="上移，提前扣减采购余额">
+                            <Button aria-label={`上移 ${file.original_name}`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
+                          </Tooltip>
+                          <Tooltip title="下移，延后扣减采购余额">
+                            <Button aria-label={`下移 ${file.original_name}`} size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
+                          </Tooltip>
+                        </>
+                      )}
                       <Popconfirm title="删除此交货文件？" description="其余文件会自动重新编号。" onConfirm={() => void removeFile(file)}>
                         <Tooltip title="删除错传文件">
                           <Button aria-label={`删除 ${file.original_name}`} danger size="small" icon={<DeleteOutlined />} />
@@ -889,7 +939,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                       aria-label="下载单文件结果"
                       size="small"
                       icon={<DownloadOutlined />}
-                      onClick={() => void download(`/api/batch-files/${file.id}/download`, `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_交货处理.xlsx`)}
+                      onClick={() => void download(`/api/batch-files/${file.id}/download`, `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`)}
                     >
                       下载单文件结果
                     </Button>
@@ -902,7 +952,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       </Card>
 
       <Card
-        title={<span className="locked-data-title"><LockOutlined /> 本批次锁定的基础资料与规则（不可修改）</span>}
+        title={<span className="locked-data-title"><LockOutlined /> 批次锁定版本</span>}
         className={`section-card compact-card locked-data-card ${lockedDataOpen ? "" : "is-collapsed"}`}
         extra={(
           <Button
@@ -923,7 +973,14 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               </Descriptions.Item>
             ))}
             <Descriptions.Item label="超收规则">
-              {batch.overreceipt_rule ? (
+              {selfOperated ? (
+                batch.self_operated_overreceipt_rule ? (
+                  <span className="locked-overreceipt-rule">
+                    <strong>{batch.self_operated_overreceipt_rule.name}</strong>
+                    <small>每个供应商 + SKU + 站点共享 +{batch.self_operated_overreceipt_rule.allowance}</small>
+                  </span>
+                ) : "未启用（不自动超收）"
+              ) : batch.overreceipt_rule ? (
                 <span className="locked-overreceipt-rule">
                   <strong>{batch.overreceipt_rule.name}</strong>
                   <small>
@@ -1057,6 +1114,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
             rowKey="id"
             dataSource={filteredExceptions}
             pagination={filteredExceptions.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+            scroll={{ x: 1260 }}
             locale={{ emptyText: <Empty description={
               exceptions.length
                 ? reviewScope === "unfinished"
@@ -1118,7 +1176,11 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                 render: (_, record) => (
                   <ExceptionEvidence
                     exception={record}
-                    hasOverreceiptRule={Boolean(batch?.overreceipt_rule)}
+                    hasOverreceiptRule={Boolean(
+                      selfOperated
+                        ? batch.self_operated_overreceipt_rule
+                        : batch.overreceipt_rule
+                    )}
                   />
                 )
               },
@@ -1131,7 +1193,9 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               {
                 title: "操作",
                 width: 100,
-                render: (_, record) => <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
+                render: (_, record) => selfOperated && record.reason !== "产品信息站点不唯一"
+                  ? <Typography.Text type="secondary">待处理</Typography.Text>
+                  : <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
               }
             ]}
           />
@@ -1154,7 +1218,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
         footer={(
           <div className="drawer-footer">
-            {filteredExceptions.length > 1 && (
+            {!selfOperatedSiteSelection && filteredExceptions.length > 1 && (
               <div className="drawer-review-navigation">
                 <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
                   <span>
@@ -1179,29 +1243,45 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               </div>
             )}
             <div className="drawer-review-actions">
-              <Button onClick={() => setSplitTarget(null)}>返回列表</Button>
-              {nextReviewTarget && (
-                <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+              <Button aria-label="取消" onClick={() => setSplitTarget(null)}>取消</Button>
+              {selfOperatedSiteSelection ? (
+                <Tooltip title={selfOperatedSiteValid ? "" : "请选择一个候选站点"}>
                   <Button
-                    aria-label="保存"
-                    disabled={!splitValid}
-                    loading={action === "split"}
-                    onClick={() => void saveSplit(false)}
+                    type="primary"
+                    disabled={!selfOperatedSiteValid}
+                    loading={action === "site-resolution"}
+                    onClick={() => void saveSelfOperatedSite()}
                   >
-                    保存
+                    保存并重新计算
                   </Button>
                 </Tooltip>
+              ) : (
+                <>
+                  {nextReviewTarget && (
+                    <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+                      <Button
+                        aria-label="保存"
+                        disabled={!splitValid}
+                        loading={action === "split"}
+                        onClick={() => void saveSplit(false)}
+                      >
+                        保存
+                      </Button>
+                    </Tooltip>
+                  )}
+                  <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
+                    <Button
+                      aria-label={nextReviewTarget ? "保存并下一条" : "保存"}
+                      type="primary"
+                      disabled={!splitValid}
+                      loading={action === "split"}
+                      onClick={() => void saveSplit(Boolean(nextReviewTarget))}
+                    >
+                      {nextReviewTarget ? "保存并下一条" : "保存"}
+                    </Button>
+                  </Tooltip>
+                </>
               )}
-              <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
-                <Button
-                  type="primary"
-                  disabled={!splitValid}
-                  loading={action === "split"}
-                  onClick={() => void saveSplit(Boolean(nextReviewTarget))}
-                >
-                  {nextReviewTarget ? "保存并处理下一条" : "保存并返回列表"}
-                </Button>
-              </Tooltip>
             </div>
           </div>
         )}
@@ -1220,10 +1300,31 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
 
             <ReasonGuidance
               exception={splitTarget}
-              hasOverreceiptRule={Boolean(batch.overreceipt_rule)}
+              hasOverreceiptRule={Boolean(
+                selfOperated
+                  ? batch.self_operated_overreceipt_rule
+                  : batch.overreceipt_rule
+              )}
+              selfOperated={selfOperated}
             />
 
-            <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
+            {selfOperatedSiteSelection ? (
+              <Form form={splitForm} layout="vertical">
+                <Form.Item
+                  name={["parts", 0, "site"]}
+                  label="选择正确的完整站点"
+                  rules={[{ required: true, message: "请选择一个候选站点" }]}
+                >
+                  <Radio.Group className="candidate-site-options">
+                    {splitCandidateSites.map((site) => (
+                      <Radio key={site} value={site}>{site}</Radio>
+                    ))}
+                  </Radio.Group>
+                </Form.Item>
+              </Form>
+            ) : (
+              <>
+              <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
               <div>
                 <span>原待处理</span>
                 <strong>{splitTarget.manual_quantity}</strong>
@@ -1239,7 +1340,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
               {splitValid && <CheckCircleFilled aria-label="数量守恒通过" />}
             </div>
 
-            <Form form={splitForm} layout="vertical">
+              <Form form={splitForm} layout="vertical">
               <Form.List name="parts">
                 {(fields, { add, remove }) => (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>
@@ -1323,12 +1424,14 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                         resolved: false
                       })}
                     >
-                      需要拆成多份？增加一份{splitRemaining > 0 ? `并填入剩余 ${splitRemaining}` : ""}
+                      添加拆分{splitRemaining > 0 ? `（剩余 ${splitRemaining}）` : ""}
                     </Button>
                   </Space>
                 )}
               </Form.List>
-            </Form>
+              </Form>
+              </>
+            )}
           </>
         )}
       </Drawer>

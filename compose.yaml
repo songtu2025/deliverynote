@@ -28,6 +28,9 @@ services:
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
       IMPORT_CANDIDATE_TTL_SECONDS: ${IMPORT_CANDIDATE_TTL_SECONDS:-900}
       POSITION_FRAME_CACHE_SIZE: ${POSITION_FRAME_CACHE_SIZE:-8}
+      GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://openapi.gerpgo.com}
+      GERPGO_APP_ID: ${GERPGO_APP_ID:-}
+      GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}
     volumes:
       - delivery_data:/data
     depends_on:
@@ -44,10 +47,50 @@ services:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
-    command: ["python", "-m", "delivery_note.worker"]
+    command: ["python", "-m", "delivery_note.worker", "--queue", "batch"]
     environment:
       DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
       STORAGE_ROOT: /data/storage
+      GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://openapi.gerpgo.com}
+      GERPGO_APP_ID: ${GERPGO_APP_ID:-}
+      GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}
+    volumes:
+      - delivery_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+
+  purchase-sync-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "delivery_note.worker", "--queue", "purchase-sync"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
+      STORAGE_ROOT: /data/storage
+      PURCHASE_SYNC_MODE: ${PURCHASE_SYNC_MODE:-incremental}
+      GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://openapi.gerpgo.com}
+      GERPGO_APP_ID: ${GERPGO_APP_ID:-}
+      GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}
+    volumes:
+      - delivery_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+
+  inbound-sync-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "delivery_note.worker", "--queue", "inbound-sync"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
+      STORAGE_ROOT: /data/storage
+      GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://openapi.gerpgo.com}
+      GERPGO_APP_ID: ${GERPGO_APP_ID:-}
+      GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}
     volumes:
       - delivery_data:/data
     depends_on:

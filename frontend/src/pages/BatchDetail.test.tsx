@@ -186,6 +186,12 @@ describe("BatchDetail", () => {
         exceptionPayload = exceptionPayload.map((item) => item.id === exceptionId ? updated : item);
         return jsonResponse(updated);
       }
+      const selfOperatedSiteMatch = url.match(
+        /\/api\/exceptions\/(\d+)\/self-operated-site$/
+      );
+      if (selfOperatedSiteMatch && init?.method === "PUT") {
+        return jsonResponse({ id: 99, kind: "compute", status: "queued" });
+      }
       if (url.endsWith("/api/batches/7/download-merged")) {
         return new Response("merged", { status: 200 });
       }
@@ -207,12 +213,15 @@ describe("BatchDetail", () => {
     await screen.findByText("160 = 100 + 60");
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
     expect(screen.getByText("异常审校").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
-    expect(screen.getByText("当前阶段：异常审校")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "查看并处理（60）" })).toBeInTheDocument();
+    expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
+    expect(screen.getByText("待处理 60 件")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "处理异常" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
+    expect(container.querySelector(".exception-review-card .ant-table-content"))
+      .toHaveStyle({ overflowX: "auto" });
     fireEvent.click(screen.getByRole("button", { name: "收起锁定版本" }));
     expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
@@ -373,7 +382,7 @@ describe("BatchDetail", () => {
     expect(within(drawer).getByText("第 1 / 4 条")).toBeInTheDocument();
     expect(within(drawer).getByRole("radio", { name: "继续保留待处理" })).toBeChecked();
     fireEvent.click(within(drawer).getByRole("radio", { name: "可正式导入" }));
-    const saveAndNext = within(drawer).getByRole("button", { name: "保存并处理下一条" });
+    const saveAndNext = within(drawer).getByRole("button", { name: "保存并下一条" });
     await waitFor(() => expect(saveAndNext).toBeEnabled());
     fireEvent.click(saveAndNext);
 
@@ -446,8 +455,7 @@ describe("BatchDetail", () => {
     const drawer = await screen.findByRole("dialog");
     expect(within(drawer).queryByRole("button", { name: "上一条" })).not.toBeInTheDocument();
     expect(within(drawer).queryByRole("button", { name: "下一条" })).not.toBeInTheDocument();
-    expect(within(drawer).queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "保存并返回列表" })).toBeInTheDocument();
+    expect(within(drawer).getByRole("button", { name: "保存" })).toBeInTheDocument();
   }, 30_000);
 
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
@@ -508,5 +516,64 @@ describe("BatchDetail", () => {
     expect(within(guidance).getByText("20")).toBeInTheDocument();
     expect(within(guidance).getByText("50")).toBeInTheDocument();
     expect(within(guidance).getByText("0")).toBeInTheDocument();
+  }, 30_000);
+
+  it("recomputes a self-operated batch after selecting an ambiguous site", async () => {
+    batchPayload = {
+      ...batchPayload,
+      workflow: "self_operated_inbound",
+      name: "2026-08-21 自营仓入库批次",
+      self_operated_overreceipt_rule: {
+        id: 10,
+        name: "自营仓超收 5 件",
+        allowance: 5,
+        active: false,
+        created_by: 1,
+        created_at: "2026-08-21T08:00:00"
+      },
+      inbound_file: {
+        original_name: "自营仓收货入库单.xlsx",
+        uploaded: true
+      },
+      file_count: 1,
+      files: [batchPayload.files[0]],
+      summary: {
+        delivery_total: 27,
+        import_total: 0,
+        manual_total: 27,
+        conserved: true
+      }
+    };
+    exceptionPayload = [exceptionPayload[2], exceptionPayload[3]];
+
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    expect(await screen.findByText("自营仓入库单：自营仓收货入库单.xlsx")).toBeInTheDocument();
+    expect(screen.getByText("每个供应商 + SKU + 站点共享 +5")).toBeInTheDocument();
+    const ambiguousRow = screen.getByText("SKU-C").closest("tr");
+    const overreceiptRow = screen.getByText("SKU-D").closest("tr");
+    expect(ambiguousRow).not.toBeNull();
+    expect(overreceiptRow).not.toBeNull();
+    expect(within(overreceiptRow!).getByText("待处理")).toBeInTheDocument();
+    expect(within(overreceiptRow!).queryByText("保留待处理")).not.toBeInTheDocument();
+    fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "查看并处理" }));
+
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).queryByRole("spinbutton", { name: "数量" })).not.toBeInTheDocument();
+    const save = within(drawer).getByRole("button", { name: "保存并重新计算" });
+    expect(save).toBeDisabled();
+    fireEvent.click(within(drawer).getByRole("radio", { name: "AMAZON:SEEKWAY:US" }));
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/exceptions/32/self-operated-site",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ full_site: "AMAZON:SEEKWAY:US" })
+        })
+      );
+    });
   }, 30_000);
 });

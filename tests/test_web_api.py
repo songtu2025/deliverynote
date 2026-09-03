@@ -6,11 +6,12 @@ from threading import Barrier, BrokenBarrierError
 import unittest
 from unittest.mock import patch
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 import pandas as pd
-from sqlalchemy import event
+from sqlalchemy import event, select
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from tests.asgi_client import SyncASGIClient
 
 try:
@@ -20,6 +21,11 @@ try:
         Batch,
         BatchFile,
         ExceptionRecord,
+        InputVersion,
+        Job,
+        PurchaseSyncJob,
+        SelfOperatedBatch,
+        SelfOperatedInboundSyncJob,
         SplitRecord,
     )
 except ImportError:
@@ -28,6 +34,10 @@ except ImportError:
     Batch = None
     BatchFile = None
     ExceptionRecord = None
+    InputVersion = None
+    PurchaseSyncJob = None
+    SelfOperatedBatch = None
+    SelfOperatedInboundSyncJob = None
     SplitRecord = None
 
 
@@ -41,6 +51,7 @@ class WebApiTests(unittest.TestCase):
             self.skipTest("FastAPI 应用尚未实现")
         self.directory = TemporaryDirectory()
         root = Path(self.directory.name)
+        self.root = root
         self.app = create_app(
             database_url=f"sqlite+pysqlite:///{root / 'test.db'}",
             storage_root=root / "storage",
@@ -83,7 +94,16 @@ class WebApiTests(unittest.TestCase):
         sheet = workbook.active
         if kind == "purchase":
             sheet.append(["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"])
-            sheet.append(["待交货", "KuangBiao", "SKU-A", "AMAZON:SEEKWAY:US", "水鞋-广州仓", 100])
+            sheet.append(
+                [
+                    "待交货",
+                    "KuangBiao",
+                    "SKU-A",
+                    "AMAZON:SEEKWAY:US",
+                    "水鞋-广州仓",
+                    100,
+                ]
+            )
         elif kind == "product":
             sheet.append(["SKU", "店铺/站点", "品类A", "锁仓MKSU"])
             sheet.append(["SKU-A", "SEEKWAY:US", "水鞋", "锁"])
@@ -92,13 +112,26 @@ class WebApiTests(unittest.TestCase):
             sheet.append(["GYS-023", "KuangBiao", "启用"])
         elif kind == "position":
             sheet.title = "MSKU_视图"
-            sheet.append(["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"])
+            sheet.append(
+                [
+                    "店铺-站点",
+                    "积加SKU",
+                    "MSKU",
+                    "规模定位",
+                    "备货定位",
+                    "已下单可售天数",
+                ]
+            )
             sheet.append(["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90])
         elif kind == "template":
             sheet["A1"] = "模板提示"
             sheet.merge_cells("A1:G1")
             sheet.append(IMPORT_COLUMNS)
             sheet.append(["示例仓", "示例供应商", "示例SKU", 1, "示例站点", "", ""])
+        elif kind == "inbound_template":
+            sheet.title = "批量入库"
+            sheet.append(INBOUND_TEMPLATE_COLUMNS)
+            sheet.append(["示例"] + [""] * (len(INBOUND_TEMPLATE_COLUMNS) - 1))
         buffer = BytesIO()
         workbook.save(buffer)
         return buffer.getvalue()
@@ -113,6 +146,44 @@ class WebApiTests(unittest.TestCase):
         sheet.append([])
         sheet.append(["SKU", "US站", "总计"])
         sheet.append(["SKU-A", quantity, quantity])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    def self_operated_delivery_bytes(quantity: int = 15) -> bytes:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "明细"
+        sheet.append([])
+        sheet.append([])
+        sheet.append([])
+        sheet.append(["积加SKU", "实收数量", "站点", "交货单号"])
+        sheet.append(["SKU-A", quantity, "US站", "LN2608179025"])
+        buffer = BytesIO()
+        workbook.save(buffer)
+        return buffer.getvalue()
+
+    @staticmethod
+    def self_operated_inbound_bytes() -> bytes:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(INBOUND_TEMPLATE_COLUMNS + ["供应商"])
+        values = {column: "" for column in INBOUND_TEMPLATE_COLUMNS}
+        values.update(
+            {
+                "入库单号": "IN-1",
+                "入库仓": "自营仓",
+                "SKU": "SKU-A",
+                "平台站点": "AMAZON:SEEKWAY:US",
+                "关联采购单": "PO-20260801",
+                "关联交货单/调拨单": "LN2608179025",
+                "应收货": 10,
+            }
+        )
+        sheet.append(
+            [values[column] for column in INBOUND_TEMPLATE_COLUMNS] + ["KuangBiao"]
+        )
         buffer = BytesIO()
         workbook.save(buffer)
         return buffer.getvalue()
@@ -204,15 +275,622 @@ class WebApiTests(unittest.TestCase):
             headers=admin_headers,
         )
         self.assertEqual(activated.status_code, 200, activated.text)
-        versions = self.client.get(
-            "/api/input-versions", headers=admin_headers
-        ).json()
+        versions = self.client.get("/api/input-versions", headers=admin_headers).json()
         active_ids = [
             version["id"]
             for version in versions
             if version["kind"] == "purchase" and version["active"]
         ]
         self.assertEqual(active_ids, [created_ids[1]])
+
+    def test_input_version_inspection_is_cached_by_version_and_page(self):
+        admin_headers = self.login("admin", "admin-pass")
+        uploaded = self.client.post(
+            "/api/input-versions/product",
+            headers=admin_headers,
+            data={"name": "product-cache", "activate": "true"},
+            files={
+                "file": (
+                    "product-cache.xlsx",
+                    BytesIO(self.workbook_bytes("product")),
+                )
+            },
+        )
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+        version_id = uploaded.json()["id"]
+
+        def inspection_result(kind, _path, offset, limit):
+            return {
+                "summary": {
+                    "kind": kind,
+                    "row_count": 1,
+                    "columns": ["SKU"],
+                    "metrics": {},
+                    "issues": [],
+                },
+                "preview": {
+                    "kind": kind,
+                    "columns": ["SKU"],
+                    "rows": [{"SKU": "SKU-A"}],
+                    "total": 1,
+                    "offset": offset,
+                    "limit": limit,
+                },
+            }
+
+        with patch.object(
+            web_api_module,
+            "inspect_input_version_with_preview",
+            side_effect=inspection_result,
+        ) as inspect:
+            summary = self.client.get(
+                f"/api/input-versions/{version_id}/summary",
+                headers=admin_headers,
+            )
+            inspection = self.client.get(
+                f"/api/input-versions/{version_id}/inspection",
+                headers=admin_headers,
+            )
+            preview = self.client.get(
+                f"/api/input-versions/{version_id}/preview",
+                headers=admin_headers,
+            )
+            next_page = self.client.get(
+                (f"/api/input-versions/{version_id}/inspection?offset=20&limit=10"),
+                headers=admin_headers,
+            )
+
+        for response in (summary, inspection, preview, next_page):
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(inspect.call_count, 2)
+        self.assertEqual(next_page.json()["preview"]["offset"], 20)
+        self.assertEqual(next_page.json()["preview"]["limit"], 10)
+
+    @patch.dict(
+        "os.environ",
+        {
+            "GERPGO_API_BASE_URL": "https://example.test",
+            "GERPGO_APP_ID": "app",
+            "GERPGO_APP_KEY": "key",
+        },
+    )
+    def test_purchase_sync_does_not_require_product_or_supplier_information(self):
+        admin_headers = self.login("admin", "admin-pass")
+        started = self.client.post(
+            "/api/purchase-sync",
+            headers=admin_headers,
+        )
+
+        self.assertEqual(started.status_code, 201, started.text)
+        self.assertIsNone(started.json()["product_version_id"])
+        self.assertIsNone(started.json()["supplier_version_id"])
+
+    @patch.dict(
+        "os.environ",
+        {
+            "GERPGO_API_BASE_URL": "https://example.test",
+            "GERPGO_APP_ID": "app",
+            "GERPGO_APP_KEY": "key",
+        },
+    )
+    def test_operator_can_start_purchase_sync(self):
+        admin_headers = self.login("admin", "admin-pass")
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+
+        started = self.client.post(
+            "/api/purchase-sync",
+            headers=operator_headers,
+        )
+
+        self.assertEqual(started.status_code, 201, started.text)
+        self.assertEqual(started.json()["status"], "queued")
+        status_response = self.client.get(
+            "/api/purchase-sync",
+            headers=operator_headers,
+        )
+        self.assertEqual(status_response.status_code, 200, status_response.text)
+        self.assertEqual(status_response.json()["job"]["id"], started.json()["id"])
+
+    @patch.dict(
+        "os.environ",
+        {
+            "GERPGO_API_BASE_URL": "https://example.test",
+            "GERPGO_APP_ID": "app",
+            "GERPGO_APP_KEY": "key",
+        },
+    )
+    def test_operator_can_start_self_operated_inbound_sync(self):
+        admin_headers = self.login("admin", "admin-pass")
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+
+        started = self.client.post(
+            "/api/self-operated-inbound-sync",
+            headers=operator_headers,
+        )
+
+        self.assertEqual(started.status_code, 201, started.text)
+        self.assertEqual(started.json()["status"], "queued")
+        self.assertIsNone(started.json()["base_version_id"])
+
+    def test_admin_can_test_and_save_gerpgo_config(self):
+        admin_headers = self.login("admin", "admin-pass")
+        payload = {
+            "base_url": "https://openapi.example.test/",
+            "app_id": "app-001",
+            "app_key": "secret-key",
+        }
+
+        with patch.object(
+            web_api_module.GerpgoClient,
+            "authenticate",
+        ) as authenticate:
+            updated = self.client.put(
+                "/api/admin/integrations/gerpgo",
+                headers=admin_headers,
+                json=payload,
+            )
+
+        self.assertEqual(updated.status_code, 200, updated.text)
+        self.assertEqual(authenticate.call_count, 1)
+        self.assertTrue(updated.json()["configured"])
+        self.assertEqual(updated.json()["source"], "managed")
+        self.assertEqual(updated.json()["base_url"], "https://openapi.example.test")
+        self.assertEqual(updated.json()["app_id_hint"], "ap***01")
+        self.assertNotIn("secret-key", updated.text)
+        self.assertNotIn("app_key", updated.json())
+
+        status_response = self.client.get(
+            "/api/admin/integrations/gerpgo",
+            headers=admin_headers,
+        )
+        self.assertEqual(status_response.status_code, 200, status_response.text)
+        self.assertEqual(status_response.json(), updated.json())
+
+        purchase_status = self.client.get(
+            "/api/purchase-sync",
+            headers=admin_headers,
+        )
+        self.assertTrue(purchase_status.json()["configured"])
+
+        settings = web_api_module.load_gerpgo_settings(
+            self.app.state.storage_root,
+        )
+        self.assertEqual(settings.app_id, "app-001")
+        self.assertEqual(settings.app_key, "secret-key")
+
+        audit_logs = self.client.get(
+            "/api/audit-logs",
+            headers=admin_headers,
+        ).json()
+        audit = next(
+            item for item in audit_logs if item["action"] == "update_gerpgo_config"
+        )
+        self.assertNotIn("app_key", audit["details"])
+        self.assertNotIn("secret-key", str(audit))
+
+    def test_operator_cannot_update_gerpgo_config(self):
+        admin_headers = self.login("admin", "admin-pass")
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+
+        response = self.client.put(
+            "/api/admin/integrations/gerpgo",
+            headers=operator_headers,
+            json={
+                "base_url": "https://openapi.example.test",
+                "app_id": "app",
+                "app_key": "key",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertFalse(
+            (self.app.state.storage_root / "config" / "gerpgo.json").exists()
+        )
+
+    def test_failed_gerpgo_connection_does_not_save_config(self):
+        admin_headers = self.login("admin", "admin-pass")
+        with patch.object(
+            web_api_module.GerpgoClient,
+            "authenticate",
+            side_effect=web_api_module.GerpgoError("凭证无效"),
+        ):
+            response = self.client.put(
+                "/api/admin/integrations/gerpgo",
+                headers=admin_headers,
+                json={
+                    "base_url": "https://openapi.example.test",
+                    "app_id": "wrong-app",
+                    "app_key": "wrong-key",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("积加连接验证失败", response.json()["detail"])
+        self.assertFalse(
+            (self.app.state.storage_root / "config" / "gerpgo.json").exists()
+        )
+
+    def test_self_operated_batch_uses_active_api_inbound_version(self):
+        headers = self.login("admin", "admin-pass")
+        for kind in ("product", "supplier"):
+            response = self.client.post(
+                f"/api/input-versions/{kind}",
+                headers=headers,
+                data={"name": f"{kind}-api-batch", "activate": "true"},
+                files={
+                    "file": (
+                        f"{kind}.xlsx",
+                        BytesIO(self.workbook_bytes(kind)),
+                    )
+                },
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+
+        inbound_path = self.root / "api-inbound.xlsx"
+        inbound_path.write_bytes(self.self_operated_inbound_bytes())
+        with self.app.state.database.session() as session:
+            version = InputVersion(
+                kind="self_operated_inbound",
+                name="积加待入库-测试版",
+                original_name="积加待入库.xlsx",
+                storage_path=str(inbound_path),
+                active=True,
+                created_by=1,
+            )
+            session.add(version)
+            session.commit()
+            inbound_version_id = version.id
+
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "使用 API 待入库数据的批次"},
+            files={
+                "delivery_file": (
+                    "质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                )
+            },
+        )
+
+        self.assertEqual(created.status_code, 201, created.text)
+        batch = created.json()
+        self.assertEqual(
+            batch["version_ids"]["self_operated_inbound"],
+            inbound_version_id,
+        )
+        self.assertEqual(
+            batch["versions"]["self_operated_inbound"]["name"],
+            "积加待入库-测试版",
+        )
+        self.assertEqual(
+            batch["inbound_file"]["original_name"],
+            "积加待入库.xlsx",
+        )
+
+    def test_purchase_sync_issues_can_be_previewed_by_an_operator(self):
+        admin_headers = self.login("admin", "admin-pass")
+        with self.app.state.database.session() as session:
+            job = PurchaseSyncJob(
+                status="succeeded",
+                created_by=1,
+                issues=[
+                    {
+                        "severity": "warning",
+                        "message": "共享站点数据不能参与正常交货匹配",
+                        "po_code": "PO-1001",
+                        "sku": "SKU-A",
+                        "source_site": "共享",
+                        "supplier_code": "SUP-1",
+                        "supplier_name": "供应商 A",
+                        "warehouse": "水鞋-广州仓",
+                        "quantity": 12,
+                        "code": "shared_site",
+                    }
+                ],
+            )
+            session.add(job)
+            session.commit()
+            job_id = job.id
+
+        preview = self.client.get(
+            f"/api/purchase-sync/{job_id}/issues",
+            headers=admin_headers,
+        )
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertEqual(preview.json()[0]["po_code"], "PO-1001")
+        self.assertEqual(preview.json()[0]["warehouse"], "水鞋-广州仓")
+        self.assertEqual(preview.json()[0]["quantity"], 12)
+        download = self.client.get(
+            f"/api/purchase-sync/{job_id}/issues/download",
+            headers=admin_headers,
+        )
+        self.assertEqual(download.status_code, 200, download.text)
+        issue_frame = pd.read_excel(BytesIO(download.content))
+        self.assertEqual(issue_frame.loc[0, "目的仓"], "水鞋-广州仓")
+        self.assertEqual(issue_frame.loc[0, "未交量"], 12)
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+        operator_preview = self.client.get(
+            f"/api/purchase-sync/{job_id}/issues",
+            headers=operator_headers,
+        )
+        self.assertEqual(operator_preview.status_code, 200, operator_preview.text)
+        self.assertEqual(operator_preview.json()[0]["po_code"], "PO-1001")
+
+    def test_purchase_sync_candidate_can_be_previewed_by_an_operator(self):
+        admin_headers = self.login("admin", "admin-pass")
+        candidate_path = self.root / "purchase-candidate.xlsx"
+        candidate_path.write_bytes(self.workbook_bytes("purchase"))
+        with self.app.state.database.session() as session:
+            version = InputVersion(
+                kind="purchase",
+                name="采购候选版本",
+                original_name="purchase-candidate.xlsx",
+                storage_path=str(candidate_path),
+                active=False,
+                created_by=1,
+            )
+            session.add(version)
+            session.flush()
+            job = PurchaseSyncJob(
+                status="succeeded",
+                created_by=1,
+                candidate_version_id=version.id,
+            )
+            session.add(job)
+            session.commit()
+            job_id = job.id
+
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+        preview = self.client.get(
+            f"/api/purchase-sync/{job_id}/preview?limit=100",
+            headers=operator_headers,
+        )
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        payload = preview.json()
+        self.assertEqual(
+            payload["columns"],
+            ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"],
+        )
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["rows"][0]["_row_number"], 1)
+        self.assertEqual(payload["rows"][0]["SKU"], "SKU-A")
+        self.assertEqual(payload["rows"][0]["目的仓"], "水鞋-广州仓")
+        self.assertEqual(payload["rows"][0]["未交量"], 100)
+
+    def test_self_operated_candidate_preview_has_stable_row_numbers(self):
+        admin_headers = self.login("admin", "admin-pass")
+        candidate_path = self.root / "self-operated-candidate.xlsx"
+        candidate_path.write_bytes(self.self_operated_inbound_bytes())
+        with self.app.state.database.session() as session:
+            version = InputVersion(
+                kind="self_operated_inbound",
+                name="待入库候选版本",
+                original_name="self-operated-candidate.xlsx",
+                storage_path=str(candidate_path),
+                active=False,
+                created_by=1,
+            )
+            session.add(version)
+            session.flush()
+            job = SelfOperatedInboundSyncJob(
+                status="succeeded",
+                created_by=1,
+                candidate_version_id=version.id,
+                issues=[
+                    {
+                        "severity": "warning",
+                        "message": "共享站点数据不能参与正常入库匹配",
+                        "order_no": "IN-1",
+                        "sku": "SKU-A",
+                        "source_site": "AMAZON:SEEKWAY:US",
+                        "supplier_code": "GYS-023",
+                        "supplier_name": "KuangBiao",
+                        "code": "shared_site",
+                    }
+                ],
+            )
+            session.add(job)
+            session.commit()
+            job_id = job.id
+
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+        preview = self.client.get(
+            f"/api/self-operated-inbound-sync/{job_id}/preview?limit=100",
+            headers=operator_headers,
+        )
+
+        self.assertEqual(preview.status_code, 200, preview.text)
+        payload = preview.json()
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(payload["rows"][0]["_row_number"], 1)
+        self.assertEqual(payload["rows"][0]["入库单号"], "IN-1")
+        self.assertEqual(payload["rows"][0]["SKU"], "SKU-A")
+        self.assertEqual(payload["rows"][0]["应收货"], 10)
+
+        issues = self.client.get(
+            f"/api/self-operated-inbound-sync/{job_id}/issues",
+            headers=operator_headers,
+        )
+        self.assertEqual(issues.status_code, 200, issues.text)
+        issue = issues.json()[0]
+        self.assertEqual(issue["warehouse"], "自营仓")
+        self.assertEqual(issue["remaining_quantity"], 10)
+        self.assertEqual(issue["purchase_code"], "PO-20260801")
+        self.assertEqual(issue["related_code"], "LN2608179025")
+
+        download = self.client.get(
+            f"/api/self-operated-inbound-sync/{job_id}/issues/download",
+            headers=operator_headers,
+        )
+        self.assertEqual(download.status_code, 200, download.text)
+        issue_frame = pd.read_excel(BytesIO(download.content))
+        self.assertEqual(issue_frame.loc[0, "入库仓"], "自营仓")
+        self.assertEqual(issue_frame.loc[0, "剩余应收货"], 10)
+
+    def test_initial_state_includes_builtin_templates(self):
+        admin_headers = self.login("admin", "admin-pass")
+        versions = self.client.get(
+            "/api/input-versions",
+            headers=admin_headers,
+        ).json()
+        export_versions = [
+            version for version in versions if version["kind"] == "template"
+        ]
+        inbound_versions = [
+            version for version in versions if version["kind"] == "inbound_template"
+        ]
+
+        self.assertEqual(len(export_versions), 1)
+        export_version = export_versions[0]
+        self.assertEqual(
+            export_version["name"],
+            "系统内置交货导出模板",
+        )
+        self.assertEqual(
+            export_version["original_name"],
+            "交货导入模板.xlsx",
+        )
+        self.assertTrue(export_version["active"])
+
+        export_download = self.client.get(
+            f"/api/input-versions/{export_version['id']}/download",
+            headers=admin_headers,
+        )
+        self.assertEqual(export_download.status_code, 200, export_download.text)
+        export_workbook = load_workbook(
+            BytesIO(export_download.content),
+            read_only=True,
+        )
+        try:
+            self.assertEqual(
+                [
+                    export_workbook.active.cell(row=2, column=column).value
+                    for column in range(1, len(IMPORT_COLUMNS) + 1)
+                ],
+                IMPORT_COLUMNS,
+            )
+            self.assertEqual(export_workbook.active["A3"].value, "示例仓库")
+        finally:
+            export_workbook.close()
+
+        self.assertEqual(len(inbound_versions), 1)
+        version = inbound_versions[0]
+        self.assertEqual(version["name"], "系统内置积加入库模板")
+        self.assertEqual(version["original_name"], "积加批量入库模板.xlsx")
+        self.assertTrue(version["active"])
+
+        downloaded = self.client.get(
+            f"/api/input-versions/{version['id']}/download",
+            headers=admin_headers,
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        workbook = load_workbook(BytesIO(downloaded.content), read_only=True)
+        try:
+            headers = [
+                workbook.active.cell(row=1, column=column).value
+                for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
+            ]
+            self.assertEqual(headers, INBOUND_TEMPLATE_COLUMNS)
+            self.assertEqual(
+                sum(
+                    1 for sheet in workbook.worksheets if sheet.sheet_state == "hidden"
+                ),
+                70,
+            )
+        finally:
+            workbook.close()
+
+    def test_delivery_batch_uses_builtin_template_without_upload(self):
+        admin_headers = self.login("admin", "admin-pass")
+        for kind in ("purchase", "product", "supplier", "position"):
+            response = self.client.post(
+                f"/api/input-versions/{kind}",
+                headers=admin_headers,
+                data={"name": f"{kind}-v1", "activate": "true"},
+                files={
+                    "file": (
+                        f"{kind}.xlsx",
+                        BytesIO(self.workbook_bytes(kind)),
+                    )
+                },
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+
+        created = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "使用系统内置导出模板"},
+        )
+
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(
+            created.json()["versions"]["template"]["name"],
+            "系统内置交货导出模板",
+        )
+
+    def test_self_operated_batch_only_requires_its_own_input_versions(self):
+        headers = self.login("admin", "admin-pass")
+        version_ids = {}
+        for kind in ("product", "supplier"):
+            response = self.client.post(
+                f"/api/input-versions/{kind}",
+                headers=headers,
+                data={"name": f"{kind}-self-operated", "activate": "true"},
+                files={
+                    "file": (
+                        f"{kind}.xlsx",
+                        BytesIO(self.workbook_bytes(kind)),
+                    )
+                },
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            version_ids[kind] = response.json()["id"]
+
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "不依赖原流程资料的自营仓批次"},
+            files={
+                "delivery_file": (
+                    "质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                ),
+                "inbound_file": (
+                    "自营仓收货入库单.xlsx",
+                    BytesIO(self.self_operated_inbound_bytes()),
+                ),
+            },
+        )
+
+        self.assertEqual(created.status_code, 201, created.text)
+        batch = created.json()
+        self.assertEqual(batch["version_ids"]["product"], version_ids["product"])
+        self.assertEqual(batch["version_ids"]["supplier"], version_ids["supplier"])
+        self.assertIsNone(batch["version_ids"]["purchase"])
+        self.assertIsNone(batch["version_ids"]["position"])
+        self.assertIsNone(batch["version_ids"]["template"])
+        self.assertIn("inbound_template", batch["versions"])
+        self.assertEqual(batch["file_count"], 1)
+        self.assertTrue(batch["inbound_file"]["uploaded"])
+
+        delivery_batch = self.client.post(
+            "/api/batches",
+            headers=headers,
+            json={"name": "原流程仍要求完整资料"},
+        )
+        self.assertEqual(delivery_batch.status_code, 409, delivery_batch.text)
+        self.assertIn("purchase", delivery_batch.json()["detail"])
+        self.assertIn("position", delivery_batch.json()["detail"])
+        self.assertNotIn("template", delivery_batch.json()["detail"])
 
     def test_position_bootstrap_upload_is_allowed(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -243,10 +921,11 @@ class WebApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("输入版本校验失败", response.json()["detail"])
-        versions = self.client.get(
-            "/api/input-versions", headers=admin_headers
-        ).json()
-        self.assertEqual(versions, [])
+        versions = self.client.get("/api/input-versions", headers=admin_headers).json()
+        self.assertEqual(
+            [version["kind"] for version in versions],
+            ["inbound_template", "template"],
+        )
 
     def test_initial_state_creates_batches_without_overreceipt_rule(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -418,6 +1097,434 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(actions[0]["user_id"], operator["id"])
 
+    def test_rule_version_names_can_change_without_changing_locked_rules(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+
+        first = self.client.post(
+            "/api/overreceipt-rule-versions",
+            headers=headers,
+            json={
+                "name": "交货超收旧名称",
+                "short_tail_limit": 50,
+                "medium_tail_limit": 20,
+                "long_tail_limit": 10,
+                "allowed_warehouses": ["水鞋-广州仓"],
+            },
+        )
+        self.assertEqual(first.status_code, 201, first.text)
+        locked_batch = self.client.post(
+            "/api/batches",
+            headers=headers,
+            json={"name": "规则名称修改验收"},
+        )
+        self.assertEqual(locked_batch.status_code, 201, locked_batch.text)
+        second = self.client.post(
+            "/api/overreceipt-rule-versions",
+            headers=headers,
+            json={
+                "name": "交货超收当前名称",
+                "short_tail_limit": 30,
+                "medium_tail_limit": 10,
+                "long_tail_limit": 0,
+                "allowed_warehouses": [],
+            },
+        )
+        self.assertEqual(second.status_code, 201, second.text)
+
+        renamed = self.client.put(
+            f"/api/overreceipt-rule-versions/{first.json()['id']}/name",
+            headers=headers,
+            json={"name": " 交货超收新名称 "},
+        )
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["id"], first.json()["id"])
+        self.assertEqual(renamed.json()["name"], "交货超收新名称")
+        self.assertEqual(renamed.json()["short_tail_limit"], 50)
+        self.assertEqual(renamed.json()["medium_tail_limit"], 20)
+        self.assertEqual(renamed.json()["long_tail_limit"], 10)
+        self.assertEqual(
+            renamed.json()["allowed_warehouses"],
+            ["水鞋-广州仓"],
+        )
+        self.assertFalse(renamed.json()["active"])
+
+        locked = self.client.get(
+            f"/api/batches/{locked_batch.json()['id']}",
+            headers=headers,
+        )
+        self.assertEqual(locked.status_code, 200, locked.text)
+        self.assertEqual(
+            locked.json()["overreceipt_rule"]["id"],
+            first.json()["id"],
+        )
+        self.assertEqual(
+            locked.json()["overreceipt_rule"]["name"],
+            "交货超收新名称",
+        )
+        self.assertEqual(
+            locked.json()["overreceipt_rule"]["short_tail_limit"],
+            50,
+        )
+
+        duplicate = self.client.put(
+            f"/api/overreceipt-rule-versions/{first.json()['id']}/name",
+            headers=headers,
+            json={"name": second.json()["name"]},
+        )
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+        blank = self.client.put(
+            f"/api/overreceipt-rule-versions/{first.json()['id']}/name",
+            headers=headers,
+            json={"name": "   "},
+        )
+        self.assertEqual(blank.status_code, 400, blank.text)
+
+        self_operated = self.client.post(
+            "/api/self-operated-overreceipt-rule-versions",
+            headers=headers,
+            json={"name": "自营仓旧名称", "allowance": 5},
+        )
+        self.assertEqual(self_operated.status_code, 201, self_operated.text)
+        renamed_self_operated = self.client.put(
+            "/api/self-operated-overreceipt-rule-versions/"
+            f"{self_operated.json()['id']}/name",
+            headers=headers,
+            json={"name": "自营仓新名称"},
+        )
+        self.assertEqual(
+            renamed_self_operated.status_code,
+            200,
+            renamed_self_operated.text,
+        )
+        self.assertEqual(
+            renamed_self_operated.json()["id"],
+            self_operated.json()["id"],
+        )
+        self.assertEqual(
+            renamed_self_operated.json()["name"],
+            "自营仓新名称",
+        )
+        self.assertEqual(renamed_self_operated.json()["allowance"], 5)
+
+        logs = self.client.get("/api/audit-logs", headers=headers).json()
+        rename_actions = {
+            log["action"]: log for log in logs if log["action"].startswith("rename_")
+        }
+        self.assertEqual(
+            set(rename_actions),
+            {
+                "rename_overreceipt_rule",
+                "rename_self_operated_overreceipt_rule",
+            },
+        )
+        self.assertEqual(
+            rename_actions["rename_overreceipt_rule"]["details"],
+            {"before": "交货超收旧名称", "after": "交货超收新名称"},
+        )
+
+    def test_self_operated_batch_locks_rule_and_creates_with_two_business_files(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        template = self.client.post(
+            "/api/input-versions/inbound_template",
+            headers=headers,
+            data={"name": "inbound-template-v1", "activate": "true"},
+            files={
+                "file": (
+                    "inbound-template.xlsx",
+                    BytesIO(self.workbook_bytes("inbound_template")),
+                )
+            },
+        )
+        self.assertEqual(template.status_code, 201, template.text)
+        rule = self.client.post(
+            "/api/self-operated-overreceipt-rule-versions",
+            headers=headers,
+            json={"name": "自营仓超收 5 件", "allowance": 5},
+        )
+        self.assertEqual(rule.status_code, 201, rule.text)
+
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "自营仓入库接口测试"},
+            files={
+                "delivery_file": (
+                    "260817-狂飙-质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                ),
+                "inbound_file": (
+                    "自营仓收货入库单.xlsx",
+                    BytesIO(self.self_operated_inbound_bytes()),
+                ),
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch = created.json()
+        batch_id = batch["id"]
+        self.assertEqual(batch["workflow"], "self_operated_inbound")
+        self.assertEqual(batch["self_operated_overreceipt_rule"]["allowance"], 5)
+        self.assertEqual(
+            batch["versions"]["inbound_template"]["id"],
+            template.json()["id"],
+        )
+        self.assertEqual(batch["file_count"], 1)
+        self.assertTrue(batch["inbound_file"]["uploaded"])
+        preflight = self.client.post(
+            f"/api/batches/{batch_id}/preflight",
+            headers=headers,
+        )
+        self.assertEqual(preflight.status_code, 200, preflight.text)
+        self.assertEqual(preflight.json()["status"], "preflight_ready")
+
+    def test_self_operated_creation_is_atomic_when_file_validation_fails(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+
+        invalid = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "校验失败的自营仓批次"},
+            files={
+                "delivery_file": (
+                    "质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                ),
+                "inbound_file": ("异常入库单.xlsx", BytesIO(b"not-an-excel-file")),
+            },
+        )
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+
+        batches = self.client.get("/api/batches", headers=headers)
+        self.assertEqual(batches.status_code, 200, batches.text)
+        self.assertEqual(batches.json(), [])
+
+    def test_delivery_creation_with_files_is_atomic(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+
+        invalid = self.client.post(
+            "/api/batches/with-files",
+            headers=headers,
+            data={"name": "校验失败的交货批次"},
+            files={"files": ("异常交货单.xlsx", BytesIO(b"not-an-excel-file"))},
+        )
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+        self.assertEqual(
+            self.client.get("/api/batches", headers=headers).json(),
+            [],
+        )
+
+        created = self.client.post(
+            "/api/batches/with-files",
+            headers=headers,
+            data={"name": "带文件创建的交货批次"},
+            files={"files": ("交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["file_count"], 1)
+
+    def test_empty_delivery_drafts_are_removed_without_touching_uploaded_batches(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        empty = self.client.post(
+            "/api/batches",
+            headers=headers,
+            json={"name": "应被清理的空交货批次"},
+        )
+        self.assertEqual(empty.status_code, 201, empty.text)
+        created = self.client.post(
+            "/api/batches/with-files",
+            headers=headers,
+            data={"name": "保留的交货批次"},
+            files={"files": ("交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+
+        cleaned = self.client.delete("/api/batches/empty", headers=headers)
+        self.assertEqual(cleaned.status_code, 200, cleaned.text)
+        self.assertEqual(cleaned.json()["deleted_ids"], [empty.json()["id"]])
+        batches = self.client.get("/api/batches", headers=headers)
+        self.assertEqual(
+            [batch["name"] for batch in batches.json()],
+            ["保留的交货批次"],
+        )
+
+    def test_empty_self_operated_drafts_are_removed_without_touching_ready_batches(
+        self,
+    ):
+        headers = self.login("admin", "admin-pass")
+        version_ids = self.upload_active_versions(headers)
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "保留的自营仓批次"},
+            files={
+                "delivery_file": (
+                    "质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                ),
+                "inbound_file": (
+                    "自营仓收货入库单.xlsx",
+                    BytesIO(self.self_operated_inbound_bytes()),
+                ),
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+
+        with self.app.state.database.session() as session:
+            empty = Batch(
+                name="应被清理的空批次",
+                created_by=1,
+                purchase_version_id=None,
+                product_version_id=version_ids["product"],
+                supplier_version_id=version_ids["supplier"],
+                position_version_id=None,
+                template_version_id=None,
+            )
+            session.add(empty)
+            session.flush()
+            session.add(
+                SelfOperatedBatch(
+                    batch_id=empty.id,
+                    template_version_id=created.json()["versions"]["inbound_template"][
+                        "id"
+                    ],
+                )
+            )
+            session.commit()
+            empty_id = empty.id
+
+        cleaned = self.client.delete(
+            "/api/self-operated-batches/empty",
+            headers=headers,
+        )
+        self.assertEqual(cleaned.status_code, 200, cleaned.text)
+        self.assertEqual(cleaned.json()["deleted_ids"], [empty_id])
+
+        batches = self.client.get("/api/batches", headers=headers)
+        self.assertEqual(batches.status_code, 200, batches.text)
+        self.assertEqual(
+            [batch["name"] for batch in batches.json()], ["保留的自营仓批次"]
+        )
+
+    def test_admin_can_delete_multiple_batches_and_owned_files(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        delivery = self.client.post(
+            "/api/batches/with-files",
+            headers=headers,
+            data={"name": "delete-delivery-batch"},
+            files={"files": ("delivery.xlsx", BytesIO(self.delivery_bytes()))},
+        )
+        self.assertEqual(delivery.status_code, 201, delivery.text)
+        self_operated = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "delete-self-operated-batch"},
+            files={
+                "delivery_file": (
+                    "quality-delivery.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                ),
+                "inbound_file": (
+                    "self-operated-inbound.xlsx",
+                    BytesIO(self.self_operated_inbound_bytes()),
+                ),
+            },
+        )
+        self.assertEqual(self_operated.status_code, 201, self_operated.text)
+        batch_ids = [delivery.json()["id"], self_operated.json()["id"]]
+        batch_directories = [
+            self.root / "storage" / "batches" / str(batch_id) for batch_id in batch_ids
+        ]
+        self.assertTrue(all(path.is_dir() for path in batch_directories))
+
+        with self.app.state.database.session() as session:
+            source = session.scalar(
+                select(BatchFile).where(BatchFile.batch_id == batch_ids[0])
+            )
+            exception = ExceptionRecord(
+                batch_file_id=source.id,
+                sku="SKU-A",
+                delivery_quantity=1,
+                allocated_quantity=0,
+                manual_quantity=1,
+                reason="delete-test",
+            )
+            session.add(exception)
+            session.flush()
+            session.add(SplitRecord(exception_id=exception.id, quantity=1))
+            session.add(
+                Job(
+                    batch_id=batch_ids[0],
+                    kind="compute",
+                    status="succeeded",
+                )
+            )
+            session.commit()
+
+        deleted = self.client.request(
+            "DELETE",
+            "/api/batches",
+            headers=headers,
+            json={"batch_ids": batch_ids},
+        )
+
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["deleted_ids"], batch_ids)
+        self.assertEqual(deleted.json()["file_cleanup_failed_ids"], [])
+        self.assertTrue(all(not path.exists() for path in batch_directories))
+        self.assertEqual(
+            self.client.get("/api/batches", headers=headers).json(),
+            [],
+        )
+
+    def test_batch_delete_is_admin_only_and_rejects_active_batch_atomically(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        first = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "keep-batch"},
+        ).json()
+        active = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "running-batch"},
+        ).json()
+        with self.app.state.database.session() as session:
+            session.get(Batch, active["id"]).status = "running"
+            session.commit()
+
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+        forbidden = self.client.request(
+            "DELETE",
+            "/api/batches",
+            headers=operator_headers,
+            json={"batch_ids": [first["id"]]},
+        )
+        self.assertEqual(forbidden.status_code, 403, forbidden.text)
+
+        blocked = self.client.request(
+            "DELETE",
+            "/api/batches",
+            headers=admin_headers,
+            json={"batch_ids": [first["id"], active["id"]]},
+        )
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertIn("running-batch", blocked.json()["detail"])
+        remaining_ids = [
+            batch["id"]
+            for batch in self.client.get(
+                "/api/batches",
+                headers=admin_headers,
+            ).json()
+        ]
+        self.assertEqual(set(remaining_ids), {first["id"], active["id"]})
+
     def test_admin_can_disable_and_reset_operator_password(self):
         admin_headers = self.login("admin", "admin-pass")
         operator = self.create_operator(admin_headers)
@@ -479,7 +1586,9 @@ class WebApiTests(unittest.TestCase):
             "/api/input-versions",
             headers=headers,
         ).json()
-        self.assertTrue(all(version["created_at"].endswith("Z") for version in versions))
+        self.assertTrue(
+            all(version["created_at"].endswith("Z") for version in versions)
+        )
 
         created = self.client.post(
             "/api/batches",
@@ -517,17 +1626,32 @@ class WebApiTests(unittest.TestCase):
         first = self.client.post(
             f"/api/batches/{batch_id}/files",
             headers=operator_headers,
-            files={"file": ("260717-狂飙-A交货单-发货10箱.xlsx", BytesIO(self.delivery_bytes()))},
+            files={
+                "file": (
+                    "260717-狂飙-A交货单-发货10箱.xlsx",
+                    BytesIO(self.delivery_bytes()),
+                )
+            },
         )
         duplicate = self.client.post(
             f"/api/batches/{batch_id}/files",
             headers=operator_headers,
-            files={"file": ("260717-狂飙-A交货单-发货10箱.xlsx", BytesIO(self.delivery_bytes()))},
+            files={
+                "file": (
+                    "260717-狂飙-A交货单-发货10箱.xlsx",
+                    BytesIO(self.delivery_bytes()),
+                )
+            },
         )
         second = self.client.post(
             f"/api/batches/{batch_id}/files",
             headers=operator_headers,
-            files={"file": ("260717-狂飙-B交货单-发货20箱.xlsx", BytesIO(self.delivery_bytes()))},
+            files={
+                "file": (
+                    "260717-狂飙-B交货单-发货20箱.xlsx",
+                    BytesIO(self.delivery_bytes()),
+                )
+            },
         )
         self.assertEqual(first.status_code, 201, first.text)
         self.assertEqual(duplicate.status_code, 409, duplicate.text)
@@ -708,8 +1832,7 @@ class WebApiTests(unittest.TestCase):
         ) as reader:
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = [
-                    executor.submit(cache.get, 1, Path("1.xlsx"))
-                    for _ in range(2)
+                    executor.submit(cache.get, 1, Path("1.xlsx")) for _ in range(2)
                 ]
                 frames = [future.result(timeout=5) for future in futures]
 
@@ -777,12 +1900,16 @@ class WebApiTests(unittest.TestCase):
         first = self.client.post(
             f"/api/batches/{batch_id}/files",
             headers=admin_headers,
-            files={"file": ("260717-狂飙-A交货单.xlsx", BytesIO(self.delivery_bytes()))},
+            files={
+                "file": ("260717-狂飙-A交货单.xlsx", BytesIO(self.delivery_bytes()))
+            },
         ).json()
         second = self.client.post(
             f"/api/batches/{batch_id}/files",
             headers=admin_headers,
-            files={"file": ("260717-狂飙-B交货单.xlsx", BytesIO(self.delivery_bytes()))},
+            files={
+                "file": ("260717-狂飙-B交货单.xlsx", BytesIO(self.delivery_bytes()))
+            },
         ).json()
         with self.app.state.database.session() as session:
             removed_path = Path(session.get(BatchFile, second["id"]).storage_path)
@@ -801,12 +1928,8 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertFalse(removed_path.exists())
 
-        self.client.post(
-            f"/api/batches/{batch_id}/preflight", headers=admin_headers
-        )
-        self.client.post(
-            f"/api/batches/{batch_id}/compute", headers=admin_headers
-        )
+        self.client.post(f"/api/batches/{batch_id}/preflight", headers=admin_headers)
+        self.client.post(f"/api/batches/{batch_id}/compute", headers=admin_headers)
         blocked = self.client.request(
             "DELETE",
             f"/api/batches/{batch_id}/files/{first['id']}",
@@ -913,7 +2036,11 @@ class WebApiTests(unittest.TestCase):
         ).json()
         summary = batch_after_split["summary"]
         self.assertEqual(
-            (summary["delivery_total"], summary["import_total"], summary["manual_total"]),
+            (
+                summary["delivery_total"],
+                summary["import_total"],
+                summary["manual_total"],
+            ),
             (40, 25, 15),
         )
         self.assertEqual(
