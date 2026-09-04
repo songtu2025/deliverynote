@@ -26,32 +26,323 @@ button, input { font: inherit; }
 
 .login-shell {
   min-height: 100vh;
+  min-height: 100svh;
   display: grid;
-  place-items: center;
-  padding: 24px;
-  background: #eef4f2;
+  grid-template-columns: minmax(0, 3fr) minmax(480px, 2fr);
+  background: #fff;
 }
 
-.login-card {
-  width: min(420px, 100%);
-  box-shadow: 0 24px 70px rgba(28, 54, 49, 0.12);
+.login-story {
+  position: relative;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow: hidden;
+  color: #f8fdfb;
+  background: linear-gradient(180deg, #123f36 0%, #142b23 100%);
 }
 
-.login-mark,
-.brand-mark {
-  display: inline-grid;
-  place-items: center;
-  background: #176b5b;
+.login-brand-lockup {
+  position: absolute;
+  top: 54px;
+  left: 72px;
+  display: flex;
+  height: 36px;
+  align-items: center;
+  gap: 18px;
+  white-space: nowrap;
+}
+
+.login-company-mark {
   color: #fff;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  font-family: Inter, Arial, sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  line-height: normal;
 }
 
-.login-mark {
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  margin-bottom: 20px;
+.login-brand-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(134, 214, 189, 0.68);
+}
+
+.login-product-name {
+  color: #f2fbf8;
+  font-family: Inter, Arial, sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  line-height: normal;
+}
+
+.login-story-copy {
+  position: absolute;
+  top: 210px;
+  left: 72px;
+}
+
+.login-story-copy h1 {
+  width: 650px;
+  margin: 0;
+  color: #f8fdfb;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -1.2px;
+  line-height: 66px;
+}
+
+.login-story-copy p {
+  width: 570px;
+  margin: 24px 0 0;
+  color: #a6d9c8;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.2px;
+  line-height: 32px;
+}
+
+.login-story-illustration {
+  position: absolute;
+  bottom: 40px;
+  left: 72px;
+  width: min(700px, calc(100% - 144px));
+  height: auto;
+  aspect-ratio: 700 / 340;
+}
+
+.login-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100svh;
+  overflow: hidden;
+  background: #fff;
+}
+
+.login-form-wrap {
+  position: absolute;
+  top: calc(50% - 228px);
+  left: 50%;
+  width: 380px;
+  transform: translateX(-50%);
+}
+
+.login-form-header {
+  margin-bottom: 36px;
+}
+
+.login-form-header h2 {
+  margin: 0;
+  color: #141b18;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  line-height: 48px;
+}
+
+.login-form-header p {
+  margin: 10px 0 0;
+  color: #63736e;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.login-form .ant-form-item {
+  margin-bottom: 22px;
+}
+
+.login-form .ant-form-item-label {
+  height: 28px !important;
+  padding: 0 0 8px;
+}
+
+.login-form .ant-form-item-label > label {
+  height: 20px !important;
+  color: #141b18;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px !important;
+}
+
+.login-form .ant-input-affix-wrapper {
+  height: 56px;
+  padding: 0 16px;
+  border-color: #cbd6d2 !important;
+  border-radius: 12px;
+}
+
+.login-form .ant-input-affix-wrapper:hover {
+  border-color: #9ebbb2 !important;
+}
+
+.login-form .ant-input-affix-wrapper-focused {
+  border-color: #055247 !important;
+}
+
+.login-form .ant-input-prefix {
+  margin-inline-end: 12px;
+}
+
+.login-form .ant-input-prefix .anticon,
+.login-form .ant-input-password-icon {
+  color: #6f817b;
+  font-size: 20px;
+}
+
+.login-form .ant-input {
+  color: #141b18;
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.login-form .ant-input::placeholder {
+  color: #919d99;
+}
+
+.login-form .ant-btn {
+  height: 56px;
+  border-radius: 12px;
+  box-shadow: 0 8px 20px -6px rgba(5, 82, 71, 0.18);
+  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.login-footer {
+  position: absolute;
+  right: 0;
+  bottom: 45px;
+  left: 0;
+  color: #74807c;
+  font-family: Inter, "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.1px;
+  line-height: normal;
+  text-align: center;
+}
+
+@media (min-width: 901px) and (max-width: 1180px) {
+  .login-brand-lockup,
+  .login-story-copy,
+  .login-story-illustration {
+    left: 40px;
+  }
+
+  .login-story-copy h1 {
+    width: calc(100vw - 600px);
+    font-size: 38px;
+    letter-spacing: -0.8px;
+    line-height: 54px;
+  }
+
+  .login-story-copy p {
+    width: calc(100vw - 600px);
+    font-size: 16px;
+    line-height: 28px;
+  }
+
+  .login-story-illustration {
+    width: calc(100% - 80px);
+  }
+}
+
+@media (max-width: 900px) {
+  .login-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 196px minmax(648px, calc(100svh - 196px));
+  }
+
+  .login-story {
+    min-height: 196px;
+  }
+
+  .login-brand-lockup {
+    top: 26px;
+    left: 24px;
+    height: 30px;
+    gap: 12px;
+  }
+
+  .login-company-mark {
+    font-size: 18px;
+    letter-spacing: 3px;
+  }
+
+  .login-brand-divider {
+    height: 22px;
+  }
+
+  .login-product-name {
+    font-size: 15px;
+    letter-spacing: 0;
+  }
+
+  .login-story-copy {
+    top: 94px;
+    right: 24px;
+    left: 24px;
+  }
+
+  .login-story-copy h1 {
+    width: auto;
+    font-size: 25px;
+    letter-spacing: -0.5px;
+    line-height: 36px;
+  }
+
+  .login-story-copy p,
+  .login-story-illustration {
+    display: none;
+  }
+
+  .login-panel {
+    min-height: 648px;
+  }
+
+  .login-form-wrap {
+    top: 46px;
+    right: 24px;
+    left: 24px;
+    width: auto;
+    transform: none;
+  }
+
+  .login-form-header {
+    margin-bottom: 28px;
+  }
+
+  .login-form-header h2 {
+    font-size: 32px;
+    letter-spacing: -0.5px;
+    line-height: 44px;
+  }
+
+  .login-form-header p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .login-form .ant-form-item {
+    margin-bottom: 20px;
+  }
+
+  .login-form .ant-form-item-label {
+    padding-bottom: 6px;
+  }
+
+  .login-footer {
+    bottom: 27px;
+  }
 }
 
 .app-layout { min-height: 100vh; }
@@ -2163,7 +2454,6 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert { border-radius: 8px; }
 .brand { border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
 .brand-name { color: #f7fbfa; font-weight: 650; }
 .brand-mark,
-.login-mark,
 .account-avatar {
   background: var(--dn-primary);
   border-radius: 9px;
@@ -2353,9 +2643,6 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert { border-radius: 8px; }
   border-color: #cfe3d8 !important;
 }
 .ant-tag-blue { color: var(--dn-primary); background: var(--dn-primary-soft); border-color: var(--dn-primary-border); }
-
-.login-shell { background: var(--dn-canvas); }
-.login-card { border: 1px solid var(--dn-border); box-shadow: 0 24px 70px rgba(20, 64, 54, 0.12); }
 
 /* 采购同步以“结果确认”为主线，避免警告信息挤压为窄栏。 */
 .purchase-sync-card {

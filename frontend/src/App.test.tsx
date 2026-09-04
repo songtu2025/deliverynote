@@ -148,12 +148,16 @@ describe("App", () => {
     localStorage.setItem("delivery-note-token", "legacy-token");
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "供应链单据处理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "欢迎回来" })).toBeInTheDocument();
+    expect(screen.getByText("SEEKWAY")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /让每一份交货数据，\s*清晰抵达下一站/ })).toBeInTheDocument();
+    expect(screen.getByText("请使用系统账号登录")).toBeInTheDocument();
+    expect(screen.getByText("DeliveryNote · 内部供应链单据处理系统")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("用户名"), {
+    fireEvent.change(screen.getByPlaceholderText("请输入用户名"), {
       target: { value: "admin" }
     });
-    fireEvent.change(screen.getByLabelText("密码"), {
+    fireEvent.change(screen.getByPlaceholderText("请输入密码"), {
       target: { value: "admin-pass" }
     });
     fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
@@ -179,6 +183,32 @@ describe("App", () => {
         expect(new Headers(init?.headers).has("Authorization")).toBe(false);
       }
     });
+  });
+
+  it("shows only the credential error when login is rejected", async () => {
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      return new Response(
+        JSON.stringify({
+          detail: url.endsWith("/api/auth/login") ? "用户名或密码错误" : "未登录"
+        }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    });
+
+    render(<App />);
+    await screen.findByRole("heading", { name: "欢迎回来" });
+
+    fireEvent.change(screen.getByPlaceholderText("请输入用户名"), {
+      target: { value: "admin" }
+    });
+    fireEvent.change(screen.getByPlaceholderText("请输入密码"), {
+      target: { value: "wrong-password" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
+
+    expect(await screen.findByText("用户名或密码错误")).toBeInTheDocument();
+    expect(screen.queryByText("登录已过期，请重新登录")).not.toBeInTheDocument();
   });
 
   it("shows overreceipt rule management to operators", async () => {
