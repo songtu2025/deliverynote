@@ -1567,7 +1567,7 @@ class WebApiTests(unittest.TestCase):
             {"before": "交货超收旧名称", "after": "交货超收新名称"},
         )
 
-    def test_self_operated_batch_locks_rule_and_creates_with_two_business_files(self):
+    def test_self_operated_batch_locks_rule_and_accepts_an_appended_delivery(self):
         headers = self.login("admin", "admin-pass")
         self.upload_active_versions(headers)
         template = self.client.post(
@@ -1624,20 +1624,200 @@ class WebApiTests(unittest.TestCase):
             listed_batch,
             {key: batch[key] for key in listed_batch},
         )
-        self.app.state.max_batch_upload_files = 1
+        self.app.state.max_batch_upload_files = 2
         extra_file = self.client.post(
             f"/api/batches/{batch_id}/files",
             headers=headers,
-            files={"file": ("额外质检交货单.xlsx", BytesIO(self.delivery_bytes()))},
+            files={
+                "file": (
+                    "260817-狂飙-额外质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                )
+            },
         )
-        self.assertEqual(extra_file.status_code, 409, extra_file.text)
-        self.assertIn("只能上传一份质检交货单", extra_file.json()["detail"])
+        self.assertEqual(extra_file.status_code, 201, extra_file.text)
+        self.assertEqual(extra_file.json()["file_order"], 2)
         preflight = self.client.post(
             f"/api/batches/{batch_id}/preflight",
             headers=headers,
         )
         self.assertEqual(preflight.status_code, 200, preflight.text)
         self.assertEqual(preflight.json()["status"], "preflight_ready")
+        self.assertEqual(preflight.json()["file_count"], 2)
+
+    def test_self_operated_creation_accepts_repeated_delivery_file_fields(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "多质检单批次"},
+            files=[
+                (
+                    "delivery_file",
+                    (
+                        "260817-狂飙-A质检交货单.xlsx",
+                        BytesIO(self.self_operated_delivery_bytes(8)),
+                    ),
+                ),
+                (
+                    "delivery_file",
+                    (
+                        "260817-狂飙-B质检交货单.xlsx",
+                        BytesIO(self.self_operated_delivery_bytes(7)),
+                    ),
+                ),
+                (
+                    "inbound_file",
+                    (
+                        "自营仓收货入库单.xlsx",
+                        BytesIO(self.self_operated_inbound_bytes()),
+                    ),
+                ),
+            ],
+        )
+
+        self.assertEqual(created.status_code, 201, created.text)
+        batch = created.json()
+        self.assertEqual(batch["file_count"], 2)
+        self.assertEqual(
+            [
+                (source["original_name"], source["file_order"])
+                for source in batch["files"]
+            ],
+            [
+                ("260817-狂飙-A质检交货单.xlsx", 1),
+                ("260817-狂飙-B质检交货单.xlsx", 2),
+            ],
+        )
+
+    def test_self_operated_multi_file_creation_is_atomic_on_validation_failure(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+
+        invalid = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "多质检单原子失败"},
+            files=[
+                (
+                    "delivery_file",
+                    (
+                        "260817-狂飙-A质检交货单.xlsx",
+                        BytesIO(self.self_operated_delivery_bytes()),
+                    ),
+                ),
+                (
+                    "delivery_file",
+                    ("260817-狂飙-B质检交货单.xlsx", BytesIO(b"invalid")),
+                ),
+                (
+                    "inbound_file",
+                    (
+                        "自营仓收货入库单.xlsx",
+                        BytesIO(self.self_operated_inbound_bytes()),
+                    ),
+                ),
+            ],
+        )
+
+        self.assertEqual(invalid.status_code, 400, invalid.text)
+        self.assertEqual(self.client.get("/api/batches", headers=headers).json(), [])
+        temporary_root = (
+            self.app.state.storage_root / "temporary" / "self-operated-batches"
+        )
+        self.assertEqual(list(temporary_root.glob("*")), [])
+
+    def test_self_operated_creation_rejects_duplicate_names_and_file_limit(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        duplicate_files = [
+            (
+                "delivery_file",
+                ("同名质检单.xlsx", BytesIO(self.self_operated_delivery_bytes())),
+            ),
+            (
+                "delivery_file",
+                ("同名质检单.xlsx", BytesIO(self.self_operated_delivery_bytes())),
+            ),
+            (
+                "inbound_file",
+                (
+                    "自营仓收货入库单.xlsx",
+                    BytesIO(self.self_operated_inbound_bytes()),
+                ),
+            ),
+        ]
+
+        duplicate = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "同名失败"},
+            files=duplicate_files,
+        )
+        self.assertEqual(duplicate.status_code, 409, duplicate.text)
+        self.assertIn("同名", duplicate.json()["detail"])
+
+        self.app.state.max_batch_upload_files = 1
+        limited = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "数量超限"},
+            files=[
+                (
+                    "delivery_file",
+                    ("A.xlsx", BytesIO(self.self_operated_delivery_bytes())),
+                ),
+                (
+                    "delivery_file",
+                    ("B.xlsx", BytesIO(self.self_operated_delivery_bytes())),
+                ),
+                (
+                    "inbound_file",
+                    (
+                        "自营仓收货入库单.xlsx",
+                        BytesIO(self.self_operated_inbound_bytes()),
+                    ),
+                ),
+            ],
+        )
+        self.assertEqual(limited.status_code, 413, limited.text)
+        self.assertEqual(self.client.get("/api/batches", headers=headers).json(), [])
+
+    def test_self_operated_preflight_validates_every_delivery_file(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=headers,
+            data={"name": "逐份预检"},
+            files={
+                "delivery_file": (
+                    "260817-狂飙-A质检交货单.xlsx",
+                    BytesIO(self.self_operated_delivery_bytes()),
+                ),
+                "inbound_file": (
+                    "自营仓收货入库单.xlsx",
+                    BytesIO(self.self_operated_inbound_bytes()),
+                ),
+            },
+        )
+        batch_id = created.json()["id"]
+        appended = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=headers,
+            files={"file": ("第二份损坏.xlsx", BytesIO(b"invalid"))},
+        )
+        self.assertEqual(appended.status_code, 201, appended.text)
+
+        preflight = self.client.post(
+            f"/api/batches/{batch_id}/preflight",
+            headers=headers,
+        )
+
+        self.assertEqual(preflight.status_code, 400, preflight.text)
+        self.assertIn("第二份", preflight.json()["detail"])
 
     def test_self_operated_creation_is_atomic_when_file_validation_fails(self):
         headers = self.login("admin", "admin-pass")

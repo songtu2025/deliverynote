@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import re
-from typing import Mapping, MutableMapping, Sequence
+from typing import Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
 
@@ -79,6 +79,33 @@ class SelfOperatedDeliverySource:
 class SelfOperatedInboundResult:
     allocation_rows: pd.DataFrame
     pending_rows: pd.DataFrame
+    qualified_total: int
+    import_total: int
+    pending_total: int
+
+
+@dataclass(frozen=True)
+class SelfOperatedInboundRequest:
+    """批次中按用户顺序排列的一份质检交货单。"""
+
+    source_id: str | int
+    delivery_lines: pd.DataFrame
+    delivery_numbers: Sequence[str]
+    supplier_name: str
+
+
+@dataclass(frozen=True)
+class SelfOperatedInboundItemResult:
+    source_id: str | int
+    file_order: int
+    delivery_numbers: tuple[str, ...]
+    supplier_name: str
+    result: SelfOperatedInboundResult
+
+
+@dataclass(frozen=True)
+class SelfOperatedInboundBatchResult:
+    items: tuple[SelfOperatedInboundItemResult, ...]
     qualified_total: int
     import_total: int
     pending_total: int
@@ -285,12 +312,11 @@ def process_self_operated_inbound(
     | None = None,
     site_overrides: Mapping[tuple[str, str], str] | None = None,
     overreceipt_limit: int | None = None,
+    receivable_balances: MutableMapping[int, int] | None = None,
 ) -> SelfOperatedInboundResult:
     """按 PO 单号升序分配自营仓实收数量。"""
     if overreceipt_limit is not None and overreceipt_limit < 0:
         raise ValueError("允许超收数量必须为非负整数")
-    if overreceipt_limit is not None and overreceipt_allowances is not None:
-        raise ValueError("不能同时传入超收额度和统一允许超收数量")
     _require_columns(inbound_rows, INBOUND_COLUMNS, "自营仓收货入库单")
     normalized_numbers = tuple(
         sorted({_normalized_text(value) for value in delivery_numbers if _text(value)})
@@ -436,7 +462,10 @@ def process_self_operated_inbound(
         remaining = quantity
         normal_total = 0
         for index, candidate in candidates.iterrows():
-            normal = min(remaining, int(candidate["_receivable"]))
+            available = int(candidate["_receivable"])
+            if receivable_balances is not None:
+                available = receivable_balances.setdefault(int(index), available)
+            normal = min(remaining, available)
             if normal <= 0:
                 continue
             record = allocation_records.setdefault(
@@ -447,6 +476,8 @@ def process_self_operated_inbound(
             record["本次入库"] += normal
             normal_total += normal
             remaining -= normal
+            if receivable_balances is not None:
+                receivable_balances[int(index)] = available - normal
             if remaining == 0:
                 break
 
@@ -454,6 +485,14 @@ def process_self_operated_inbound(
         allowance_key = make_overreceipt_key(supplier_name, sku, full_site)
         if overreceipt_allowances is not None:
             allowance = overreceipt_allowances.get(allowance_key)
+            if allowance is None and overreceipt_limit is not None:
+                allowance = overreceipt_allowances.setdefault(
+                    allowance_key,
+                    OverreceiptAllowance(
+                        remaining=overreceipt_limit,
+                        destination_warehouse="",
+                    ),
+                )
         elif overreceipt_limit is not None:
             allowance = generated_allowances.setdefault(
                 allowance_key,
@@ -524,6 +563,56 @@ def process_self_operated_inbound(
     return SelfOperatedInboundResult(
         allocation_rows=allocation_frame,
         pending_rows=pending_frame,
+        qualified_total=qualified_total,
+        import_total=import_total,
+        pending_total=pending_total,
+    )
+
+
+def process_self_operated_inbound_batch(
+    deliveries: Iterable[SelfOperatedInboundRequest],
+    product_info: pd.DataFrame,
+    inbound_rows: pd.DataFrame,
+    *,
+    overreceipt_limit: int = 0,
+    site_overrides: Mapping[tuple[str, str], str] | None = None,
+) -> SelfOperatedInboundBatchResult:
+    """按用户顺序处理质检单，并共享待入库余额与超收额度。"""
+
+    if overreceipt_limit < 0:
+        raise ValueError("允许超收数量必须为非负整数")
+    receivable_balances: dict[int, int] = {}
+    overreceipt_allowances: dict[OverreceiptKey, OverreceiptAllowance] = {}
+    items: list[SelfOperatedInboundItemResult] = []
+    for file_order, delivery in enumerate(deliveries, start=1):
+        result = process_self_operated_inbound(
+            delivery.delivery_lines,
+            delivery.delivery_numbers,
+            product_info,
+            inbound_rows,
+            delivery.supplier_name,
+            overreceipt_allowances=overreceipt_allowances,
+            site_overrides=site_overrides,
+            overreceipt_limit=overreceipt_limit,
+            receivable_balances=receivable_balances,
+        )
+        items.append(
+            SelfOperatedInboundItemResult(
+                source_id=delivery.source_id,
+                file_order=file_order,
+                delivery_numbers=tuple(delivery.delivery_numbers),
+                supplier_name=delivery.supplier_name,
+                result=result,
+            )
+        )
+
+    qualified_total = sum(item.result.qualified_total for item in items)
+    import_total = sum(item.result.import_total for item in items)
+    pending_total = sum(item.result.pending_total for item in items)
+    if qualified_total != import_total + pending_total:
+        raise RuntimeError("自营仓入库批次数量守恒校验失败")
+    return SelfOperatedInboundBatchResult(
+        items=tuple(items),
         qualified_total=qualified_total,
         import_total=import_total,
         pending_total=pending_total,

@@ -389,8 +389,23 @@ describe("BatchesPage", () => {
     expect(requests).toHaveLength(4);
   });
 
-  it("only requires the quality delivery file before creating a self-operated batch", async () => {
-    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
+  it("creates a self-operated batch with multiple quality delivery files", async () => {
+    const onOpen = vi.fn();
+    let submittedFiles: FormDataEntryValue[] = [];
+    const loadFetch = vi.mocked(fetch);
+    vi.stubGlobal("fetch", vi.fn(async (
+      input: RequestInfo | URL,
+      init: RequestInit = {}
+    ) => {
+      if (String(input).endsWith("/api/self-operated-batches") && init.method === "POST") {
+        const body = init.body as FormData;
+        submittedFiles = body.getAll("delivery_file");
+        return jsonResponse({ id: 88 });
+      }
+      return loadFetch(input, init);
+    }));
+
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />);
 
     await screen.findByRole("heading", { name: "自营仓入库" });
     await screen.findByText("4 / 4 已就绪");
@@ -402,6 +417,29 @@ describe("BatchesPage", () => {
     expect(within(dialog).getByText("锁定待入库数据版本")).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "创建批次" })).toBeDisabled();
     expect(within(dialog).getByText(/本批次将使用：self_operated_inbound-v1/)).toBeInTheDocument();
+
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    expect(input).toHaveAttribute("multiple");
+    fireEvent.change(input!, {
+      target: {
+        files: [
+          new File(["first"], "A质检交货单.xlsx"),
+          new File(["second"], "B质检交货单.xlsx")
+        ]
+      }
+    });
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "创建批次" })).toBeEnabled();
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建批次" }));
+
+    await waitFor(() => expect(submittedFiles).toHaveLength(2));
+    expect(submittedFiles.map((file) => (file as File).name)).toEqual([
+      "A质检交货单.xlsx",
+      "B质检交货单.xlsx"
+    ]);
+    expect(onOpen).toHaveBeenCalledWith(88);
   });
 
   it("requires a delivery file before creating a delivery batch", async () => {

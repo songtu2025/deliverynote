@@ -818,9 +818,7 @@ def _batch_base_json(
         "error_message": batch.error_message,
         "download_ready": bool(batch.zip_path),
         "merged_download_ready": (
-            False
-            if self_operated is not None
-            else _merged_export_ready(batch, len(sources))
+            _merged_export_ready(batch, len(sources))
         ),
         "created_at": _utc_isoformat(batch.created_at),
         "updated_at": _utc_isoformat(batch.updated_at),
@@ -3576,7 +3574,7 @@ def create_app(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
         name: Annotated[str | None, Form()] = None,
-        delivery_file: UploadFile | None = File(None),
+        delivery_file: list[UploadFile] | None = File(None),
         inbound_file: UploadFile | None = File(None),
     ):
         if name is None:
@@ -3604,7 +3602,8 @@ def create_app(
                 status_code=409,
                 detail=f"缺少启用的输入版本：{', '.join(missing)}",
             )
-        if delivery_file is None and inbound_file is None:
+        delivery_files = delivery_file or []
+        if not delivery_files and inbound_file is None:
             active_rule = session.scalar(
                 select(SelfOperatedOverreceiptRuleVersion).where(
                     SelfOperatedOverreceiptRuleVersion.active.is_(True)
@@ -3641,21 +3640,44 @@ def create_app(
             )
             session.commit()
             return _batch_json(batch, session)
-        if delivery_file is None:
+        if not delivery_files:
             raise HTTPException(status_code=400, detail="缺少质检交货单")
+        if len(delivery_files) > app.state.max_batch_upload_files:
+            for upload in delivery_files:
+                await upload.close()
+            if inbound_file is not None:
+                await inbound_file.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    "单批次最多上传 "
+                    f"{app.state.max_batch_upload_files} 份质检交货单"
+                ),
+            )
         api_inbound_version = active_versions.get("self_operated_inbound")
         if inbound_file is None and api_inbound_version is None:
             raise HTTPException(
                 status_code=409,
                 detail="缺少启用的待入库 API 数据",
             )
-        delivery_name = _safe_filename(delivery_file.filename or "")
+        delivery_names = [
+            _safe_filename(upload.filename or "") for upload in delivery_files
+        ]
+        if len(delivery_names) != len(set(delivery_names)):
+            for upload in delivery_files:
+                await upload.close()
+            if inbound_file is not None:
+                await inbound_file.close()
+            raise HTTPException(status_code=409, detail="同一批次不可上传同名文件")
         inbound_name = (
             _safe_filename(inbound_file.filename or "")
             if inbound_file is not None
             else api_inbound_version.original_name
         )
-        if Path(delivery_name).suffix.lower() not in {".xls", ".xlsx"}:
+        if any(
+            Path(delivery_name).suffix.lower() not in {".xls", ".xlsx"}
+            for delivery_name in delivery_names
+        ):
             raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
         if inbound_file is not None and Path(inbound_name).suffix.lower() not in {
             ".xls",
@@ -3665,7 +3687,10 @@ def create_app(
 
         temporary_root = storage / "temporary" / "self-operated-batches"
         token = uuid4().hex
-        temporary_delivery = temporary_root / f"{token}_delivery_{delivery_name}"
+        temporary_deliveries = [
+            temporary_root / f"{token}_delivery_{index}_{delivery_name}"
+            for index, delivery_name in enumerate(delivery_names, start=1)
+        ]
         temporary_inbound = (
             temporary_root / f"{token}_inbound_{inbound_name}"
             if inbound_file is not None
@@ -3678,15 +3703,20 @@ def create_app(
             )
         )
         try:
-            await _save_upload(
-                delivery_file,
-                temporary_delivery,
-                app.state.max_upload_bytes,
-            )
-            await parse_uploaded_workbook(
-                read_self_operated_delivery_workbook,
-                temporary_delivery,
-            )
+            for upload, temporary_delivery in zip(
+                delivery_files,
+                temporary_deliveries,
+                strict=True,
+            ):
+                await _save_upload(
+                    upload,
+                    temporary_delivery,
+                    app.state.max_upload_bytes,
+                )
+                await parse_uploaded_workbook(
+                    read_self_operated_delivery_workbook,
+                    temporary_delivery,
+                )
             if inbound_file is not None and temporary_inbound is not None:
                 await _save_upload(
                     inbound_file,
@@ -3720,9 +3750,20 @@ def create_app(
             session.flush()
             input_root = storage / "batches" / str(batch.id) / "inputs"
             await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
-            delivery_path = input_root / f"{uuid4().hex}_{delivery_name}"
-            await run_in_threadpool(os.replace, temporary_delivery, delivery_path)
-            created_paths.append(delivery_path)
+            delivery_paths = []
+            for temporary_delivery, delivery_name in zip(
+                temporary_deliveries,
+                delivery_names,
+                strict=True,
+            ):
+                delivery_path = input_root / f"{uuid4().hex}_{delivery_name}"
+                await run_in_threadpool(
+                    os.replace,
+                    temporary_delivery,
+                    delivery_path,
+                )
+                created_paths.append(delivery_path)
+                delivery_paths.append(delivery_path)
             if inbound_file is not None:
                 inbound_path = input_root / f"{uuid4().hex}_{inbound_name}"
                 await run_in_threadpool(os.replace, inbound_source_path, inbound_path)
@@ -3730,13 +3771,19 @@ def create_app(
             else:
                 inbound_path = inbound_source_path
 
-            session.add(
-                BatchFile(
-                    batch_id=batch.id,
-                    original_name=delivery_name,
-                    storage_path=str(delivery_path),
-                    file_order=1,
-                )
+            session.add_all(
+                [
+                    BatchFile(
+                        batch_id=batch.id,
+                        original_name=delivery_name,
+                        storage_path=str(delivery_path),
+                        file_order=file_order,
+                    )
+                    for file_order, (delivery_name, delivery_path) in enumerate(
+                        zip(delivery_names, delivery_paths, strict=True),
+                        start=1,
+                    )
+                ]
             )
             session.add(
                 SelfOperatedBatch(
@@ -3760,7 +3807,8 @@ def create_app(
                         active_rule.id if active_rule is not None else None
                     ),
                     "template_version_id": active_versions["inbound_template"].id,
-                    "delivery_file": delivery_name,
+                    "delivery_file": delivery_names[0],
+                    "delivery_files": delivery_names,
                     "inbound_file": inbound_name,
                     "inbound_version_id": (
                         api_inbound_version.id if inbound_file is None else None
@@ -3784,7 +3832,8 @@ def create_app(
                 ) from error
             raise
         finally:
-            await run_in_threadpool(temporary_delivery.unlink, missing_ok=True)
+            for temporary_delivery in temporary_deliveries:
+                await run_in_threadpool(temporary_delivery.unlink, missing_ok=True)
             if temporary_inbound is not None:
                 await run_in_threadpool(temporary_inbound.unlink, missing_ok=True)
         return _batch_json(batch, session)
@@ -4045,17 +4094,11 @@ def create_app(
         batch = get_batch_or_404(batch_id, session)
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
-        self_operated = session.get(SelfOperatedBatch, batch.id)
         source_count = session.scalar(
             select(func.count())
             .select_from(BatchFile)
             .where(BatchFile.batch_id == batch.id)
         )
-        if self_operated is not None and source_count:
-            raise HTTPException(
-                status_code=409,
-                detail="自营仓入库批次只能上传一份质检交货单",
-            )
         if source_count >= app.state.max_batch_upload_files:
             await file.close()
             raise HTTPException(
@@ -4096,17 +4139,11 @@ def create_app(
                         status_code=409,
                         detail="当前批次状态不可修改文件",
                     )
-                self_operated = session.get(SelfOperatedBatch, batch.id)
                 source_count = session.scalar(
                     select(func.count())
                     .select_from(BatchFile)
                     .where(BatchFile.batch_id == batch.id)
                 )
-                if self_operated is not None and source_count:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="自营仓入库批次只能上传一份质检交货单",
-                    )
                 if source_count >= app.state.max_batch_upload_files:
                     raise HTTPException(
                         status_code=status.HTTP_413_CONTENT_TOO_LARGE,
@@ -4274,11 +4311,6 @@ def create_app(
         if not sources:
             raise HTTPException(status_code=400, detail="批次至少需要一个交货文件")
         self_operated = session.get(SelfOperatedBatch, batch.id)
-        if self_operated is not None and len(sources) != 1:
-            raise HTTPException(
-                status_code=400,
-                detail="自营仓入库批次必须且只能上传一份质检交货单",
-            )
         versions = {}
         version_kinds = (
             ("product", "supplier") if self_operated is not None else INPUT_KINDS
@@ -4312,8 +4344,16 @@ def create_app(
                     raise ValueError("批次锁定的积加入库模板不存在")
                 read_self_operated_inbound_workbook(inbound_path)
                 validate_self_operated_template_workbook(Path(template.storage_path))
-                read_self_operated_delivery_workbook(Path(sources[0].storage_path))
-                resolve_supplier(Path(sources[0].original_name), supplier_rows)
+                for source in sources:
+                    try:
+                        read_self_operated_delivery_workbook(
+                            Path(source.storage_path)
+                        )
+                        resolve_supplier(Path(source.original_name), supplier_rows)
+                    except Exception as error:
+                        raise ValueError(
+                            f"{source.original_name}：{error}"
+                        ) from error
             else:
                 read_purchase_workbook(versions["purchase"])
                 read_position_workbook(versions["position"])

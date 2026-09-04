@@ -345,14 +345,16 @@ export default function BatchesPage({
       const values = await form.validateFields();
       let batch: Batch;
       if (workflow === "self_operated_inbound") {
-        const sourceFile = sourceFiles[0]?.originFileObj;
-        if (!sourceFile) {
-          message.warning("请先选择质检交货单");
+        const files = sourceFiles.flatMap((file) => (
+          file.originFileObj ? [file.originFileObj] : []
+        ));
+        if (!files.length) {
+          message.warning("请至少选择一份质检交货单");
           return;
         }
         const formData = new FormData();
         formData.append("name", values.name);
-        formData.append("delivery_file", sourceFile);
+        files.forEach((file) => formData.append("delivery_file", file));
         batch = await api<Batch>("/api/self-operated-batches", {
           method: "POST",
           body: formData
@@ -398,8 +400,8 @@ export default function BatchesPage({
     setSourceFiles([]);
   };
 
-  const selectSourceFile: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
-    setSourceFiles(fileList.slice(-1));
+  const selectSourceFiles: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
+    setSourceFiles(fileList);
   };
 
   const selectDeliveryFiles: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
@@ -900,7 +902,9 @@ export default function BatchesPage({
               <div className="batch-table-value">
                 <span className="batch-cell-label">文件 / 数量</span>
                 <span className="batch-volume">
-                  {batch.file_count} 个文件
+                  {batch.workflow === "self_operated_inbound"
+                    ? `${batch.file_count} 份质检单 + ${batch.inbound_file?.uploaded ? 1 : 0} 份待入库数据`
+                    : `${batch.file_count} 个文件`}
                   {batch.summary && batch.summary.delivery_total > 0
                     ? " · 交货 " + batch.summary.delivery_total
                     : ""}
@@ -1014,15 +1018,17 @@ export default function BatchesPage({
               <Form.Item label="质检交货单" required>
                 <Upload
                   accept=".xls,.xlsx"
-                  maxCount={1}
-                  multiple={false}
+                  multiple
                   beforeUpload={() => false}
                   fileList={sourceFiles}
-                  onChange={selectSourceFile}
+                  onChange={selectSourceFiles}
                 >
                   <Button icon={<UploadOutlined />}>选择质检交货单</Button>
                 </Upload>
               </Form.Item>
+              <Typography.Text type="secondary">
+                可同时选择多份；系统将按列表顺序共享扣减待入库余额和超收额度。
+              </Typography.Text>
               <Alert
                 type="info"
                 showIcon
