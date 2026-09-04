@@ -360,10 +360,15 @@ button, input { font: inherit; }
 }
 
 .brand-mark {
+  display: inline-grid;
   width: 36px;
   height: 36px;
+  place-items: center;
   border-radius: 10px;
   flex: 0 0 auto;
+  color: #fff;
+  font-weight: 800;
+  letter-spacing: -0.04em;
 }
 
 .brand-name {
