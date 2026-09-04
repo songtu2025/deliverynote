@@ -198,6 +198,9 @@ describe("BatchDetail", () => {
       if (url.endsWith("/api/batches/7/download")) {
         return new Response("zip", { status: 200 });
       }
+      if (url.endsWith("/api/batches/7/files/order") && init?.method === "PUT") {
+        return jsonResponse(batchPayload);
+      }
       throw new Error(`Unexpected request: ${url}`);
     }));
   });
@@ -576,4 +579,45 @@ describe("BatchDetail", () => {
       );
     });
   }, 30_000);
+
+  it("allows multiple self-operated delivery files to be reordered", async () => {
+    batchPayload = {
+      ...batchPayload,
+      workflow: "self_operated_inbound",
+      name: "2026-08-21 自营仓入库批次",
+      status: "draft",
+      inbound_file: {
+        original_name: "自营仓收货入库单.xlsx",
+        uploaded: true
+      },
+      summary: {
+        delivery_total: 0,
+        import_total: 0,
+        manual_total: 0,
+        conserved: true
+      }
+    };
+    exceptionPayload = [];
+
+    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    expect(await screen.findByText("2 份质检单 + 1 份待入库数据")).toBeInTheDocument();
+    expect(screen.getByText("序号越小，越先扣减待入库余额和超收额度")).toBeInTheDocument();
+    const uploadInput = container.querySelector<HTMLInputElement>(
+      '.batch-primary-actions input[type="file"]'
+    );
+    expect(uploadInput).toHaveAttribute("multiple");
+    fireEvent.click(screen.getByRole("button", { name: "下移 KuangBiao-A交货单.xlsx" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/batches/7/files/order",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ file_ids: [11, 10] })
+        })
+      );
+    });
+    expect(await screen.findByText("处理顺序已更新，需要重新预检")).toBeInTheDocument();
+  });
 });

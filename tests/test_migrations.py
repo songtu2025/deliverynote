@@ -8,19 +8,151 @@ from delivery_note.migrations.overreceipt_rules import migrate
 from delivery_note.migrations.purchase_sync_optional_versions import (
     migrate as migrate_purchase_sync_optional_versions,
 )
+from delivery_note.migrations.runner import migrate_schema
 from delivery_note.migrations.self_operated_optional_versions import (
     migrate as migrate_self_operated_optional_versions,
 )
 from delivery_note.web.database import Database
 from delivery_note.web.models import (
     Base,
+    Batch,
     BatchOverreceiptRule,
     ExceptionRecord,
     InputVersion,
     OverreceiptRuleVersion,
+    PositionDraftRow,
     PurchaseSyncJob,
     User,
 )
+
+
+POSITION_DRAFT_PAGE_INDEX = "ix_position_draft_rows_draft_id_deleted_row_order"
+
+
+class SchemaMigrationRunnerTests(unittest.TestCase):
+    def test_fresh_schema_is_complete_and_runner_is_idempotent(self):
+        with TemporaryDirectory() as directory:
+            database_url = f"sqlite+pysqlite:///{Path(directory) / 'migration.db'}"
+
+            migrate_schema(database_url)
+            migrate_schema(database_url)
+
+            database = Database(database_url)
+            try:
+                inspector = inspect(database.engine)
+                tables = set(inspector.get_table_names())
+                batch_columns = {
+                    column["name"]: column
+                    for column in inspector.get_columns(Batch.__tablename__)
+                }
+                purchase_sync_columns = {
+                    column["name"]: column
+                    for column in inspector.get_columns(PurchaseSyncJob.__tablename__)
+                }
+                exception_columns = {
+                    column["name"]
+                    for column in inspector.get_columns(ExceptionRecord.__tablename__)
+                }
+            finally:
+                database.dispose()
+
+        self.assertIn(OverreceiptRuleVersion.__tablename__, tables)
+        self.assertIn(BatchOverreceiptRule.__tablename__, tables)
+        for column in (
+            "purchase_version_id",
+            "position_version_id",
+            "template_version_id",
+        ):
+            self.assertTrue(batch_columns[column]["nullable"])
+        for column in ("product_version_id", "supplier_version_id"):
+            self.assertTrue(purchase_sync_columns[column]["nullable"])
+        self.assertTrue(
+            {
+                "purchase_allocated_quantity",
+                "overreceipt_allocated_quantity",
+                "overreceipt_remaining_quantity",
+            }.issubset(exception_columns)
+        )
+
+
+class PositionDraftRowIndexMigrationTests(unittest.TestCase):
+    @staticmethod
+    def indexes(database: Database) -> dict[str, dict]:
+        return {
+            index["name"]: index
+            for index in inspect(database.engine).get_indexes(
+                PositionDraftRow.__tablename__
+            )
+        }
+
+    def test_fresh_metadata_schema_has_composite_page_index(self):
+        with TemporaryDirectory() as directory:
+            database_url = f"sqlite+pysqlite:///{Path(directory) / 'fresh.db'}"
+            database = Database(database_url)
+            try:
+                database.create_schema()
+                indexes = self.indexes(database)
+            finally:
+                database.dispose()
+
+        self.assertIn(POSITION_DRAFT_PAGE_INDEX, indexes)
+        self.assertEqual(
+            indexes[POSITION_DRAFT_PAGE_INDEX]["column_names"],
+            ["draft_id", "deleted", "row_order"],
+        )
+
+    def test_runner_adds_missing_index_to_existing_table_idempotently(self):
+        with TemporaryDirectory() as directory:
+            database_url = f"sqlite+pysqlite:///{Path(directory) / 'existing.db'}"
+            database = Database(database_url)
+            try:
+                database.create_schema()
+                if POSITION_DRAFT_PAGE_INDEX in self.indexes(database):
+                    with database.engine.begin() as connection:
+                        connection.execute(
+                            text(f"DROP INDEX {POSITION_DRAFT_PAGE_INDEX}")
+                        )
+                self.assertNotIn(
+                    POSITION_DRAFT_PAGE_INDEX,
+                    self.indexes(database),
+                )
+            finally:
+                database.dispose()
+
+            migrate_schema(database_url)
+            migrate_schema(database_url)
+
+            database = Database(database_url)
+            try:
+                indexes = self.indexes(database)
+            finally:
+                database.dispose()
+
+        self.assertIn(POSITION_DRAFT_PAGE_INDEX, indexes)
+
+    def test_sqlite_page_plan_uses_composite_index_without_temp_sort(self):
+        with TemporaryDirectory() as directory:
+            database_url = f"sqlite+pysqlite:///{Path(directory) / 'plan.db'}"
+            migrate_schema(database_url)
+            database = Database(database_url)
+            try:
+                with database.engine.connect() as connection:
+                    plan = connection.execute(
+                        text(
+                            "EXPLAIN QUERY PLAN "
+                            "SELECT * FROM position_draft_rows "
+                            "WHERE draft_id = 1 AND deleted = 0 "
+                            "ORDER BY row_order LIMIT 50"
+                        )
+                    ).all()
+            finally:
+                database.dispose()
+
+        details = [str(row[-1]).upper() for row in plan]
+        self.assertTrue(
+            any(POSITION_DRAFT_PAGE_INDEX.upper() in detail for detail in details)
+        )
+        self.assertFalse(any("TEMP B-TREE" in detail for detail in details))
 
 
 class OverreceiptMigrationTests(unittest.TestCase):

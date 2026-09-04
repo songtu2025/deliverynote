@@ -4,6 +4,7 @@ from io import BytesIO
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier, BrokenBarrierError
 import unittest
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import delivery_note.web.api as web_api_module
 import delivery_note.web.position_drafts as position_drafts_module
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
@@ -24,6 +26,7 @@ from delivery_note.web.models import (
     Batch,
     InputDraft,
     InputVersion,
+    PositionDraftRow,
     User,
 )
 from delivery_note.web.position_drafts import (
@@ -174,6 +177,81 @@ class PositionDraftTests(unittest.TestCase):
             self.assertEqual(
                 session.query(AuditLog).filter_by(action="resume_input_draft").count(),
                 0,
+            )
+
+    def test_draft_analysis_cache_is_bounded_and_serializes_same_revision(self):
+        cache = web_api_module._DraftAnalysisCache(max_entries=2)
+        loaded_keys: list[tuple[int, int]] = []
+
+        def load(key):
+            loaded_keys.append(key)
+            return {"key": key}
+
+        first = cache.get(1, 1, lambda: load((1, 1)))
+        cache.get(2, 1, lambda: load((2, 1)))
+        self.assertIs(cache.get(1, 1, lambda: load((1, 1))), first)
+        cache.get(3, 1, lambda: load((3, 1)))
+        cache.get(2, 1, lambda: load((2, 1)))
+        self.assertEqual(loaded_keys, [(1, 1), (2, 1), (3, 1), (2, 1)])
+
+        concurrent_cache = web_api_module._DraftAnalysisCache(max_entries=2)
+        concurrent_loads = 0
+        concurrent_misses = Barrier(2)
+
+        def load_once():
+            nonlocal concurrent_loads
+            concurrent_loads += 1
+            try:
+                concurrent_misses.wait(timeout=0.2)
+            except BrokenBarrierError:
+                pass
+            return {"revision": 1}
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(concurrent_cache.get, 1, 1, load_once)
+                for _ in range(2)
+            ]
+            analyses = [future.result(timeout=5) for future in futures]
+
+        self.assertEqual(concurrent_loads, 1)
+        self.assertIs(analyses[0], analyses[1])
+
+    def test_create_bulk_inserts_initial_rows_without_adding_orm_rows(self):
+        self.base_frame = pd.DataFrame(
+            [
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90],
+                ["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货", 60],
+                ["SEEKWAY:UK", "SKU-C", "MSKU-C", "长尾", "不备货", 30],
+            ],
+            columns=POSITION_SOURCE_COLUMNS,
+        )
+        write_position_workbook(self.base_path, self.base_frame)
+
+        with self.database.session() as session:
+            original_add = session.add
+
+            def add_non_row(instance, *args, **kwargs):
+                self.assertNotIsInstance(instance, PositionDraftRow)
+                return original_add(instance, *args, **kwargs)
+
+            with patch.object(session, "add", side_effect=add_non_row):
+                draft = create_or_resume_draft(
+                    session,
+                    self._version(session),
+                    self.admin_id,
+                )
+
+            rows = list_draft_rows(session, draft.id)
+            self.assertEqual([row.row_order for row in rows], [1, 2, 3])
+            self.assertEqual([row.base_row_number for row in rows], [2, 3, 4])
+            self.assertEqual(
+                [row.change_type for row in rows],
+                ["unchanged", "unchanged", "unchanged"],
+            )
+            self.assertEqual(
+                [row.jiaji_sku for row in rows],
+                ["SKU-A", "SKU-B", "SKU-C"],
             )
 
     def test_create_uses_fresh_active_version_instead_of_cached_prelock_state(self):
@@ -1479,19 +1557,126 @@ class PositionDraftApiTests(unittest.TestCase):
         )
 
     def test_draft_summary_reads_the_base_workbook_once(self):
-        self.create_draft()
-        with patch.object(
-            position_drafts_module,
-            "read_position_workbook",
-            wraps=position_drafts_module.read_position_workbook,
-        ) as read_workbook:
-            response = self.client.get(
+        with (
+            patch.object(
+                position_drafts_module,
+                "read_position_workbook",
+                wraps=position_drafts_module.read_position_workbook,
+            ) as read_workbook,
+            patch.object(
+                web_api_module,
+                "validate_position_frame",
+                wraps=web_api_module.validate_position_frame,
+            ) as validate_frame,
+        ):
+            draft = self.create_draft()
+            first = self.client.get(
+                "/api/input-drafts/position",
+                headers=self.admin_headers,
+            )
+            second = self.client.get(
                 "/api/input-drafts/position",
                 headers=self.admin_headers,
             )
 
-        self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(first.status_code, 200, first.text)
+            self.assertEqual(second.status_code, 200, second.text)
+            self.assertEqual(read_workbook.call_count, 1)
+            self.assertEqual(validate_frame.call_count, 1)
+
+            mutation = self.client.post(
+                f"/api/input-drafts/{draft['id']}/rows",
+                headers=self.admin_headers,
+                json={"revision": draft["revision"], **self.valid_row},
+            )
+            self.assertEqual(mutation.status_code, 201, mutation.text)
+            changed = self.client.get(
+                "/api/input-drafts/position",
+                headers=self.admin_headers,
+            )
+            repeated = self.client.get(
+                "/api/input-drafts/position",
+                headers=self.admin_headers,
+            )
+
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(repeated.status_code, 200, repeated.text)
+        self.assertEqual(changed.json()["revision"], mutation.json()["revision"])
+        self.assertEqual(repeated.json()["revision"], mutation.json()["revision"])
         self.assertEqual(read_workbook.call_count, 1)
+        self.assertEqual(validate_frame.call_count, 2)
+
+    def test_draft_caches_do_not_cross_application_databases(self):
+        first = self.create_draft()
+        self.assertEqual(first["row_count"], 1)
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = create_app(
+                database_url=sqlite_url(root / "isolated.db"),
+                storage_root=root / "storage",
+                bootstrap_admin=("admin", "admin-pass"),
+            )
+            client = SyncASGIClient(app)
+            try:
+                login = client.post(
+                    "/api/auth/login",
+                    json={"username": "admin", "password": "admin-pass"},
+                )
+                headers = {
+                    "Authorization": f"Bearer {login.json()['token']}"
+                }
+                upload = client.post(
+                    "/api/input-versions/position",
+                    headers=headers,
+                    data={"name": "isolated-position", "activate": "true"},
+                    files={
+                        "file": (
+                            "isolated-position.xlsx",
+                            BytesIO(
+                                self.position_bytes(
+                                    [
+                                        [
+                                            "OTHER:US",
+                                            "OTHER-A",
+                                            "OTHER-MSKU-A",
+                                            "短尾",
+                                            "备货",
+                                            30,
+                                        ],
+                                        [
+                                            "OTHER:CA",
+                                            "OTHER-B",
+                                            "OTHER-MSKU-B",
+                                            "中尾",
+                                            "备货",
+                                            60,
+                                        ],
+                                    ]
+                                )
+                            ),
+                        )
+                    },
+                )
+                self.assertEqual(upload.status_code, 201, upload.text)
+                isolated = client.post(
+                    "/api/input-drafts/position",
+                    headers=headers,
+                )
+                self.assertEqual(isolated.status_code, 201, isolated.text)
+                self.assertEqual(isolated.json()["row_count"], 2)
+                rows = client.get(
+                    f"/api/input-drafts/{isolated.json()['id']}/rows",
+                    headers=headers,
+                )
+                self.assertEqual(rows.status_code, 200, rows.text)
+                self.assertEqual(
+                    [row["jiaji_sku"] for row in rows.json()["rows"]],
+                    ["OTHER-A", "OTHER-B"],
+                )
+            finally:
+                client.close()
+                app.state.database.dispose()
 
     def test_resuming_existing_draft_records_the_admin_action(self):
         created = self.create_draft()
@@ -1853,6 +2038,63 @@ class PositionDraftApiTests(unittest.TestCase):
             json={"revision": deleted.json()["revision"], **self.valid_row},
         )
         self.assertEqual(missing_update.status_code, 404, missing_update.text)
+
+    def test_row_page_loads_only_requested_orm_rows(self):
+        source_rows = [
+            [
+                "SEEKWAY:US" if index % 2 else "SEEKWAY:CA",
+                f"SKU-{index:03d}",
+                f"MSKU-{index:03d}",
+                "短尾" if index % 3 else "中尾",
+                "备货",
+                index,
+            ]
+            for index in range(1, 121)
+        ]
+        with self.app.state.database.session() as session:
+            source_path = Path(
+                session.get(InputVersion, self.version["id"]).storage_path
+            )
+        write_position_workbook(
+            source_path,
+            pd.DataFrame(source_rows, columns=POSITION_SOURCE_COLUMNS),
+        )
+        draft = self.create_draft()
+        loaded_row_ids: list[int] = []
+
+        def record_loaded(_session, instance):
+            if isinstance(instance, PositionDraftRow):
+                loaded_row_ids.append(instance.id)
+
+        event.listen(Session, "loaded_as_persistent", record_loaded)
+        try:
+            with patch.object(
+                web_api_module,
+                "list_draft_rows",
+                side_effect=AssertionError("普通分页不应加载全部草稿 ORM 行"),
+            ):
+                page = self.list_rows(draft["id"], offset=10, limit=50)
+                self.assertEqual(len(loaded_row_ids), 50)
+                filtered = self.list_rows(
+                    draft["id"],
+                    search="sku-01",
+                    site="seekway:ca",
+                )
+        finally:
+            event.remove(Session, "loaded_as_persistent", record_loaded)
+
+        self.assertEqual(page["total"], 120)
+        self.assertEqual(len(page["rows"]), 50)
+        self.assertEqual(
+            [row["row_order"] for row in page["rows"]],
+            list(range(11, 61)),
+        )
+        self.assertEqual(len(loaded_row_ids), 55)
+        self.assertEqual(filtered["total"], 5)
+        self.assertEqual(
+            [row["jiaji_sku"] for row in filtered["rows"]],
+            ["SKU-010", "SKU-012", "SKU-014", "SKU-016", "SKU-018"],
+        )
 
     def test_only_errors_filter_and_bulk_delete_are_atomic(self):
         draft = self.create_draft()

@@ -521,7 +521,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       });
       options.onSuccess?.({});
       await load(true);
-      message.success("交货文件已上传，预检状态已更新");
+      message.success(`${selfOperated ? "质检交货单" : "交货文件"}已上传，预检状态已更新`);
     });
   };
 
@@ -680,7 +680,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     {
       title: "准备文件",
       content: selfOperated
-        ? `${files.length + (batch.inbound_file?.uploaded ? 1 : 0)}/2 个文件`
+        ? `${files.length} 份质检单 + ${batch.inbound_file?.uploaded ? 1 : 0} 份待入库数据`
         : files.length ? `${files.length} 个文件` : "等待上传"
     },
     { title: "预检", content: currentStep > 1 || batch.status === "preflight_ready" ? "检查通过" : "检查格式与供应商" },
@@ -709,7 +709,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         </div>
         <Space wrap className="batch-primary-actions">
           {canEditFiles && (
-            <Upload accept=".xls,.xlsx" multiple={!selfOperated} showUploadList={false} customRequest={uploadFile}>
+            <Upload accept=".xls,.xlsx" multiple showUploadList={false} customRequest={uploadFile}>
               <Button icon={<CloudUploadOutlined />} loading={action === "upload"}>
                 {selfOperated ? "上传质检交货单" : "上传交货文件"}
               </Button>
@@ -774,7 +774,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                       icon={<DownloadOutlined />}
                       onClick={() => void download(
                         `/api/batches/${batch.id}/download-merged`,
-                        `${batch.name}_合并处理.xlsx`
+                        `${batch.name}_${selfOperated ? "合并积加入库" : "合并处理"}.xlsx`
                       )}
                     >
                       下载合并结果
@@ -833,8 +833,8 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       )}
 
       <div className={`summary-strip ${computed ? "" : "summary-pending"}`}>
-        <div className="summary-metric"><span>交货总量</span><strong>{computed ? totals.delivery_total : "—"}</strong></div>
-        <div className="summary-metric import"><span>可导入</span><strong>{computed ? totals.import_total : "—"}</strong></div>
+        <div className="summary-metric"><span>{selfOperated ? "质检合格总量" : "交货总量"}</span><strong>{computed ? totals.delivery_total : "—"}</strong></div>
+        <div className="summary-metric import"><span>{selfOperated ? "可入库" : "可导入"}</span><strong>{computed ? totals.import_total : "—"}</strong></div>
         <div className="summary-metric pending"><span>待处理</span><strong>{computed ? totals.manual_total : "—"}</strong></div>
         <div className="summary-equation">
           <span>数量守恒</span>
@@ -849,7 +849,9 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       <Card
         title={selfOperated ? "本批次业务文件" : "来源文件与处理顺序"}
         className="section-card file-order-card"
-        extra={!selfOperated && <span className="order-hint">序号越小，越先扣减采购余额</span>}
+        extra={<span className="order-hint">{selfOperated
+          ? "序号越小，越先扣减待入库余额和超收额度"
+          : "序号越小，越先扣减采购余额"}</span>}
       >
         {selfOperated && (
           <Alert
@@ -867,7 +869,9 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
             className="inline-alert"
             type="info"
             showIcon
-            title="调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
+            title={selfOperated
+              ? "调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
+              : "调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"}
           />
         )}
         <Table<BatchFile>
@@ -876,7 +880,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
           dataSource={files}
           pagination={false}
           scroll={{ x: 900 }}
-          locale={{ emptyText: <Empty description={selfOperated ? "请先上传一份质检交货单" : "请先上传一个或多个交货 Excel"} /> }}
+          locale={{ emptyText: <Empty description={selfOperated ? "请先上传一份或多份质检交货单" : "请先上传一个或多个交货 Excel"} /> }}
           columns={[
             {
               title: "顺序",
@@ -917,16 +921,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
                 <Space>
                   {canEditFiles && (
                     <>
-                      {!selfOperated && (
-                        <>
-                          <Tooltip title="上移，提前扣减采购余额">
-                            <Button aria-label={`上移 ${file.original_name}`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
-                          </Tooltip>
-                          <Tooltip title="下移，延后扣减采购余额">
-                            <Button aria-label={`下移 ${file.original_name}`} size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
-                          </Tooltip>
-                        </>
-                      )}
+                      <Tooltip title={selfOperated ? "上移，提前扣减待入库余额" : "上移，提前扣减采购余额"}>
+                        <Button aria-label={`上移 ${file.original_name}`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
+                      </Tooltip>
+                      <Tooltip title={selfOperated ? "下移，延后扣减待入库余额" : "下移，延后扣减采购余额"}>
+                        <Button aria-label={`下移 ${file.original_name}`} size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
+                      </Tooltip>
                       <Popconfirm title="删除此交货文件？" description="其余文件会自动重新编号。" onConfirm={() => void removeFile(file)}>
                         <Tooltip title="删除错传文件">
                           <Button aria-label={`删除 ${file.original_name}`} danger size="small" icon={<DeleteOutlined />} />

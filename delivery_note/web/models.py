@@ -98,8 +98,19 @@ class InputDraft(Base):
     )
 
 
+POSITION_DRAFT_PAGE_INDEX_NAME = "ix_position_draft_rows_draft_id_deleted_row_order"
+
+
 class PositionDraftRow(Base):
     __tablename__ = "position_draft_rows"
+    __table_args__ = (
+        Index(
+            POSITION_DRAFT_PAGE_INDEX_NAME,
+            "draft_id",
+            "deleted",
+            "row_order",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     draft_id: Mapped[int] = mapped_column(ForeignKey("input_drafts.id"), index=True)

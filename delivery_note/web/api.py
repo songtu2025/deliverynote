@@ -1,6 +1,9 @@
+import asyncio
 from collections import OrderedDict
+from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import logging
 import os
 from pathlib import Path
 import re
@@ -26,10 +29,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from ..application import SplitPart, project_split
 from ..config import PURCHASE_STATUSES, resolve_supplier, warehouse_sort_key
@@ -48,12 +52,11 @@ from ..input_inspection import (
     inspect_input_version_with_preview,
     position_change_warnings,
     position_diff,
+    preview_input_version_page,
     validate_position_frame,
     write_position_workbook,
 )
-from ..migrations.purchase_sync_optional_versions import (
-    migrate as migrate_purchase_sync_optional_versions,
-)
+from ..migrations.runner import migrate_schema as run_schema_migrations
 from ..gerpgo import (
     GerpgoClient,
     GerpgoError,
@@ -91,18 +94,22 @@ from .models import (
 )
 from .position_drafts import (
     FIELD_TO_COLUMN,
+    POSITION_FRAME_CACHE_SESSION_KEY,
     ROW_FIELDS,
     DraftConflictError,
     create_or_resume_draft,
     delete_draft_rows,
     discard_draft,
     list_draft_rows,
-    load_draft_frames,
+    load_base_frame,
     mutate_draft_row,
     publish_draft,
     replace_draft_from_frame,
     require_revision,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
@@ -139,15 +146,94 @@ POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
 INPUT_INSPECTION_CACHE_SIZE = 32
+INPUT_INSPECTION_PAGES_PER_VERSION = 4
+DRAFT_ANALYSIS_CACHE_SIZE = 32
+SESSION_COOKIE_NAME = "delivery_note_session"
+_TRUE_BOOLEAN_VALUES = {"1", "true", "yes", "on"}
+_FALSE_BOOLEAN_VALUES = {"0", "false", "no", "off"}
+
+
+def _boolean_environment(name: str, default: bool) -> bool:
+    """读取布尔环境变量，并拒绝无法识别的配置。"""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    value = raw_value.strip().lower()
+    if value in _TRUE_BOOLEAN_VALUES:
+        return True
+    if value in _FALSE_BOOLEAN_VALUES:
+        return False
+    raise ValueError(f"{name} 必须是 true 或 false")
+
+
+def _set_session_cookie(
+    response: Response,
+    token: str,
+    expires_at: datetime,
+    *,
+    secure: bool,
+) -> None:
+    """写入与数据库会话同期限的浏览器会话 Cookie。"""
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        expires=expires_at.replace(tzinfo=timezone.utc),
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _delete_session_cookie(response: Response, *, secure: bool) -> None:
+    """按登录时的属性清除浏览器会话 Cookie。"""
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _deleted_session_cookie_header(*, secure: bool) -> str:
+    """生成可附加到鉴权错误响应的 Cookie 清理头。"""
+    response = Response()
+    _delete_session_cookie(response, secure=secure)
+    return response.headers["set-cookie"]
 
 
 class _InputInspectionCache:
-    """按最近使用顺序缓存不可变基础资料的检查结果。"""
+    """按版本缓存摘要和少量页面，并协调并发加载。"""
 
-    def __init__(self, max_entries: int):
+    def __init__(self, max_entries: int, max_pages_per_version: int = 4):
+        if max_entries <= 0 or max_pages_per_version <= 0:
+            raise ValueError("输入检查缓存容量必须大于 0")
         self._max_entries = max_entries
-        self._inspections: OrderedDict[tuple[int, int, int], dict] = OrderedDict()
+        self._max_pages_per_version = max_pages_per_version
+        self._inspections: OrderedDict[int, dict] = OrderedDict()
+        self._version_loads: dict[int, Future[None]] = {}
+        self._page_loads: dict[tuple[int, int, int], Future[dict]] = {}
         self._lock = Lock()
+
+    @staticmethod
+    def _result(entry: dict, page_key: tuple[int, int]) -> dict:
+        return {
+            "summary": entry["summary"],
+            "preview": entry["pages"][page_key],
+        }
+
+    def _store_page(
+        self,
+        entry: dict,
+        page_key: tuple[int, int],
+        preview: dict,
+    ) -> None:
+        pages = entry["pages"]
+        pages[page_key] = preview
+        pages.move_to_end(page_key)
+        if len(pages) > self._max_pages_per_version:
+            pages.popitem(last=False)
 
     def get(
         self,
@@ -155,19 +241,84 @@ class _InputInspectionCache:
         offset: int,
         limit: int,
         loader: Callable[[], dict],
+        page_loader: Callable[[dict], dict],
     ) -> dict:
-        key = (version_id, offset, limit)
+        page_key = (offset, limit)
         with self._lock:
-            inspection = self._inspections.get(key)
-            if inspection is not None:
-                self._inspections.move_to_end(key)
-                return inspection
+            entry = self._inspections.get(version_id)
+            if entry is not None:
+                self._inspections.move_to_end(version_id)
+                if page_key in entry["pages"]:
+                    entry["pages"].move_to_end(page_key)
+                    return self._result(entry, page_key)
+                load_key = (version_id, offset, limit)
+                page_future = self._page_loads.get(load_key)
+                load_page = page_future is None
+                if load_page:
+                    page_future = Future()
+                    self._page_loads[load_key] = page_future
+            else:
+                version_future = self._version_loads.get(version_id)
+                load_version = version_future is None
+                if load_version:
+                    version_future = Future()
+                    self._version_loads[version_id] = version_future
 
-            inspection = loader()
-            self._inspections[key] = inspection
-            if len(self._inspections) > self._max_entries:
-                self._inspections.popitem(last=False)
-            return inspection
+        if entry is None:
+            if not load_version:
+                version_future.result()
+                return self.get(
+                    version_id,
+                    offset,
+                    limit,
+                    loader,
+                    page_loader,
+                )
+            try:
+                inspection = loader()
+                loaded_entry = {
+                    "summary": inspection["summary"],
+                    "pages": OrderedDict(),
+                }
+                self._store_page(
+                    loaded_entry,
+                    page_key,
+                    inspection["preview"],
+                )
+            except BaseException as error:
+                with self._lock:
+                    self._version_loads.pop(version_id, None)
+                version_future.set_exception(error)
+                raise
+
+            with self._lock:
+                self._inspections[version_id] = loaded_entry
+                self._inspections.move_to_end(version_id)
+                if len(self._inspections) > self._max_entries:
+                    self._inspections.popitem(last=False)
+                self._version_loads.pop(version_id, None)
+            version_future.set_result(None)
+            return self._result(loaded_entry, page_key)
+
+        if not load_page:
+            preview = page_future.result()
+            return {"summary": entry["summary"], "preview": preview}
+
+        try:
+            preview = page_loader(entry["summary"])
+        except BaseException as error:
+            with self._lock:
+                self._page_loads.pop(load_key, None)
+            page_future.set_exception(error)
+            raise
+
+        with self._lock:
+            current_entry = self._inspections.get(version_id)
+            if current_entry is entry:
+                self._store_page(entry, page_key, preview)
+            self._page_loads.pop(load_key, None)
+        page_future.set_result(preview)
+        return {"summary": entry["summary"], "preview": preview}
 
 
 class _PositionFrameCache:
@@ -180,18 +331,54 @@ class _PositionFrameCache:
         self._frames: OrderedDict[int, pd.DataFrame] = OrderedDict()
         self._lock = Lock()
 
-    def get(self, version_id: int, path: Path) -> pd.DataFrame:
+    def get(
+        self,
+        version_id: int,
+        path: Path,
+        loader: Callable[[Path], pd.DataFrame] | None = None,
+    ) -> pd.DataFrame:
+        frame_loader = loader or read_position_workbook
         with self._lock:
             frame = self._frames.get(version_id)
             if frame is not None:
                 self._frames.move_to_end(version_id)
                 return frame
 
-            frame = read_position_workbook(path)
+            frame = frame_loader(path)
             self._frames[version_id] = frame
             if len(self._frames) > self._max_entries:
                 self._frames.popitem(last=False)
             return frame
+
+
+class _DraftAnalysisCache:
+    """按草稿修订缓存纯数据分析结果，不保留跨会话 ORM 实体。"""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("草稿分析缓存容量必须大于 0")
+        self._max_entries = max_entries
+        self._analyses: OrderedDict[tuple[int, int], dict] = OrderedDict()
+        self._lock = Lock()
+
+    def get(
+        self,
+        draft_id: int,
+        revision: int,
+        loader: Callable[[], dict],
+    ) -> dict:
+        key = (draft_id, revision)
+        with self._lock:
+            analysis = self._analyses.get(key)
+            if analysis is not None:
+                self._analyses.move_to_end(key)
+                return analysis
+
+            analysis = loader()
+            self._analyses[key] = analysis
+            if len(self._analyses) > self._max_entries:
+                self._analyses.popitem(last=False)
+            return analysis
 
 
 def _utc_isoformat(value: datetime) -> str:
@@ -519,18 +706,47 @@ def _position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
     return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
 
 
+def _draft_row_snapshots(session: Session, draft_id: int) -> list[dict]:
+    """按稳定顺序加载分析所需标量，避免把整表 ORM 实体放入缓存。"""
+
+    columns = [
+        PositionDraftRow.id,
+        PositionDraftRow.row_order,
+        PositionDraftRow.change_type,
+        PositionDraftRow.deleted,
+        *(getattr(PositionDraftRow, field) for field in ROW_FIELDS),
+    ]
+    return [
+        dict(row)
+        for row in session.execute(
+            select(*columns)
+            .where(PositionDraftRow.draft_id == draft_id)
+            .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
+        ).mappings()
+    ]
+
+
+def _snapshot_position_frame(rows: list[dict]) -> pd.DataFrame:
+    records = [
+        {FIELD_TO_COLUMN[field]: row[field] for field in ROW_FIELDS}
+        for row in rows
+        if not row["deleted"]
+    ]
+    return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
+
+
 def _position_issue_map(
-    rows: list[PositionDraftRow],
-) -> tuple[list[dict], dict[int, list[dict]]]:
-    active_rows = [row for row in rows if not row.deleted]
-    issues = validate_position_frame(_position_frame(active_rows))
-    by_row_id: dict[int, list[dict]] = {row.id: [] for row in active_rows}
+    rows: list[dict],
+    issues: list[dict],
+) -> dict[int, list[dict]]:
+    active_rows = [row for row in rows if not row["deleted"]]
+    by_row_id: dict[int, list[dict]] = {}
     for issue in issues:
         for row_number in issue["row_numbers"]:
             offset = row_number - 2
             if 0 <= offset < len(active_rows):
-                by_row_id[active_rows[offset].id].append(issue)
-    return issues, by_row_id
+                by_row_id.setdefault(active_rows[offset]["id"], []).append(issue)
+    return by_row_id
 
 
 def _issue_summary(issues: list[dict]) -> dict:
@@ -555,20 +771,44 @@ def _issue_summary(issues: list[dict]) -> dict:
 def _draft_analysis(
     session: Session,
     draft: InputDraft,
-) -> tuple[list[PositionDraftRow], dict[str, int], list[dict]]:
-    """一次生成草稿摘要所需的行、差异和校验结果。"""
+    cache: _DraftAnalysisCache,
+) -> dict:
+    """按草稿修订复用摘要、差异和逐行问题分析。"""
 
-    rows, base_frame, current_frame = load_draft_frames(session, draft)
-    issues = [
-        *validate_position_frame(current_frame),
-        *position_change_warnings(base_frame, current_frame),
-    ]
-    return rows, position_diff(base_frame, current_frame), issues
+    def load() -> dict:
+        rows = _draft_row_snapshots(session, draft.id)
+        base_frame = load_base_frame(session, draft)
+        current_frame = _snapshot_position_frame(rows)
+        validation_issues = validate_position_frame(current_frame)
+        issues = [
+            *validation_issues,
+            *position_change_warnings(base_frame, current_frame),
+        ]
+        issues_by_row = _position_issue_map(rows, validation_issues)
+        return {
+            "row_count": sum(not row["deleted"] for row in rows),
+            "modified_count": sum(
+                row["change_type"] != "unchanged" for row in rows
+            ),
+            "diff": position_diff(base_frame, current_frame),
+            "issues": issues,
+            "issues_by_row": issues_by_row,
+            "error_row_ids": tuple(
+                row_id
+                for row_id, row_issues in issues_by_row.items()
+                if any(issue["severity"] == "error" for issue in row_issues)
+            ),
+        }
+
+    return cache.get(draft.id, draft.revision, load)
 
 
-def _draft_json(session: Session, draft: InputDraft) -> dict:
-    rows, diff, issues = _draft_analysis(session, draft)
-    active_rows = [row for row in rows if not row.deleted]
+def _draft_json(
+    session: Session,
+    draft: InputDraft,
+    analysis_cache: _DraftAnalysisCache,
+) -> dict:
+    analysis = _draft_analysis(session, draft, analysis_cache)
     base_version = session.get(InputVersion, draft.base_version_id)
     active_version = session.scalar(
         select(InputVersion).where(
@@ -576,7 +816,7 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
             InputVersion.active.is_(True),
         )
     )
-    issue_summary = _issue_summary(issues)
+    issue_summary = _issue_summary(analysis["issues"])
     return {
         "id": draft.id,
         "kind": draft.kind,
@@ -596,9 +836,9 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
         "updated_by": draft.updated_by,
         "created_at": _utc_isoformat(draft.created_at),
         "updated_at": _utc_isoformat(draft.updated_at),
-        "row_count": len(active_rows),
-        "modified_count": sum(row.change_type != "unchanged" for row in rows),
-        "diff": diff,
+        "row_count": analysis["row_count"],
+        "modified_count": analysis["modified_count"],
+        "diff": analysis["diff"],
         **issue_summary,
     }
 
@@ -723,31 +963,16 @@ def _merged_export_ready(batch: Batch, source_count: int) -> bool:
     return source_count > 1 and path is not None and path.is_file()
 
 
-def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
-    sources = session.scalars(
-        select(BatchFile)
-        .where(BatchFile.batch_id == batch.id)
-        .order_by(BatchFile.file_order)
-    ).all()
-    exceptions_by_source, splits_by_exception = _batch_exception_data(
-        session,
-        sources,
-    )
-    overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
-    overreceipt_rule = (
-        session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
-        if overreceipt_binding is not None
-        else None
-    )
-    self_operated = session.get(SelfOperatedBatch, batch.id)
-    self_operated_rule = (
-        session.get(
-            SelfOperatedOverreceiptRuleVersion,
-            self_operated.rule_version_id,
-        )
-        if self_operated is not None and self_operated.rule_version_id is not None
-        else None
-    )
+def _batch_base_json(
+    batch: Batch,
+    sources: list[BatchFile],
+    exceptions_by_source: dict[int, list[ExceptionRecord]],
+    splits_by_exception: dict[int, list[SplitRecord]],
+    overreceipt_rule: OverreceiptRuleVersion | None,
+    self_operated: SelfOperatedBatch | None,
+    self_operated_rule: SelfOperatedOverreceiptRuleVersion | None,
+    inbound_source: InputVersion | None,
+) -> dict:
     result = {
         "id": batch.id,
         "name": batch.name,
@@ -780,9 +1005,7 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         "error_message": batch.error_message,
         "download_ready": bool(batch.zip_path),
         "merged_download_ready": (
-            False
-            if self_operated is not None
-            else _merged_export_ready(batch, len(sources))
+            _merged_export_ready(batch, len(sources))
         ),
         "created_at": _utc_isoformat(batch.created_at),
         "updated_at": _utc_isoformat(batch.updated_at),
@@ -793,6 +1016,38 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
             splits_by_exception,
         ),
     }
+    if self_operated is not None and self_operated.inbound_storage_path:
+        result["version_ids"]["self_operated_inbound"] = (
+            inbound_source.id if inbound_source is not None else None
+        )
+    return result
+
+
+def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
+    sources = session.scalars(
+        select(BatchFile)
+        .where(BatchFile.batch_id == batch.id)
+        .order_by(BatchFile.file_order)
+    ).all()
+    exceptions_by_source, splits_by_exception = _batch_exception_data(
+        session,
+        sources,
+    )
+    overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
+    overreceipt_rule = (
+        session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
+        if overreceipt_binding is not None
+        else None
+    )
+    self_operated = session.get(SelfOperatedBatch, batch.id)
+    self_operated_rule = (
+        session.get(
+            SelfOperatedOverreceiptRuleVersion,
+            self_operated.rule_version_id,
+        )
+        if self_operated is not None and self_operated.rule_version_id is not None
+        else None
+    )
     inbound_source = None
     if self_operated is not None and self_operated.inbound_storage_path:
         inbound_source = session.scalar(
@@ -801,9 +1056,16 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
                 InputVersion.storage_path == self_operated.inbound_storage_path,
             )
         )
-        result["version_ids"]["self_operated_inbound"] = (
-            inbound_source.id if inbound_source is not None else None
-        )
+    result = _batch_base_json(
+        batch,
+        sources,
+        exceptions_by_source,
+        splits_by_exception,
+        overreceipt_rule,
+        self_operated,
+        self_operated_rule,
+        inbound_source,
+    )
     if include_files:
         result["files"] = [
             _file_json(
@@ -857,6 +1119,84 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
     return result
 
 
+def _batch_list_json(batches: list[Batch], session: Session) -> list[dict]:
+    if not batches:
+        return []
+    batch_ids = [batch.id for batch in batches]
+    sources = session.scalars(
+        select(BatchFile)
+        .where(BatchFile.batch_id.in_(batch_ids))
+        .order_by(BatchFile.batch_id, BatchFile.file_order)
+    ).all()
+    sources_by_batch: dict[int, list[BatchFile]] = {}
+    for source in sources:
+        sources_by_batch.setdefault(source.batch_id, []).append(source)
+    exceptions_by_source, splits_by_exception = _batch_exception_data(
+        session,
+        sources,
+    )
+
+    overreceipt_rules = {
+        binding.batch_id: rule
+        for binding, rule in session.execute(
+            select(BatchOverreceiptRule, OverreceiptRuleVersion)
+            .join(
+                OverreceiptRuleVersion,
+                OverreceiptRuleVersion.id == BatchOverreceiptRule.rule_version_id,
+            )
+            .where(BatchOverreceiptRule.batch_id.in_(batch_ids))
+        ).all()
+    }
+    self_operated_by_batch: dict[int, SelfOperatedBatch] = {}
+    self_operated_rules: dict[int, SelfOperatedOverreceiptRuleVersion] = {}
+    inbound_sources: dict[int, InputVersion] = {}
+    self_operated_rows = session.execute(
+        select(
+            SelfOperatedBatch,
+            SelfOperatedOverreceiptRuleVersion,
+            InputVersion,
+        )
+        .select_from(SelfOperatedBatch)
+        .outerjoin(
+            SelfOperatedOverreceiptRuleVersion,
+            SelfOperatedOverreceiptRuleVersion.id
+            == SelfOperatedBatch.rule_version_id,
+        )
+        .outerjoin(
+            InputVersion,
+            and_(
+                SelfOperatedBatch.inbound_storage_path != "",
+                InputVersion.kind == "self_operated_inbound",
+                InputVersion.storage_path == SelfOperatedBatch.inbound_storage_path,
+            ),
+        )
+        .where(SelfOperatedBatch.batch_id.in_(batch_ids))
+        .order_by(SelfOperatedBatch.batch_id, InputVersion.id)
+    ).all()
+    for self_operated, rule, inbound_source in self_operated_rows:
+        if self_operated.batch_id in self_operated_by_batch:
+            continue
+        self_operated_by_batch[self_operated.batch_id] = self_operated
+        if rule is not None:
+            self_operated_rules[self_operated.batch_id] = rule
+        if inbound_source is not None:
+            inbound_sources[self_operated.batch_id] = inbound_source
+
+    return [
+        _batch_base_json(
+            batch,
+            sources_by_batch.get(batch.id, []),
+            exceptions_by_source,
+            splits_by_exception,
+            overreceipt_rules.get(batch.id),
+            self_operated_by_batch.get(batch.id),
+            self_operated_rules.get(batch.id),
+            inbound_sources.get(batch.id),
+        )
+        for batch in batches
+    ]
+
+
 def _job_json(job: Job) -> dict:
     return {
         "id": job.id,
@@ -888,6 +1228,19 @@ def _validate_input_version(kind: str, path: Path) -> None:
         validate_self_operated_template_workbook(path)
     else:
         raise ValueError(f"不支持的输入资料类型：{kind}")
+
+
+def _inspect_position_import(
+    path: Path,
+    current_frame: pd.DataFrame,
+) -> tuple[pd.DataFrame, list, dict]:
+    """在线程池中读取并检查库位导入文件。"""
+    candidate_frame = read_position_workbook(path)
+    issues = [
+        *validate_position_frame(candidate_frame),
+        *position_change_warnings(current_frame, candidate_frame),
+    ]
+    return candidate_frame, issues, position_diff(current_frame, candidate_frame)
 
 
 def _exception_position_values(
@@ -1017,16 +1370,26 @@ def _safe_filename(filename: str) -> str:
     return safe
 
 
+def _unlink_after_commit(path: Path) -> None:
+    """数据库提交后尽力删除旧文件，不让清理故障改变请求结果。"""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        LOGGER.warning("数据库已提交，但旧文件清理失败：%s", path, exc_info=True)
+
+
 async def _save_upload(
     upload: UploadFile,
     destination: Path,
     max_bytes: int,
 ) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
     bytes_written = 0
+    output = None
     try:
-        with temporary.open("wb") as output:
+        output = await run_in_threadpool(temporary.open, "wb")
+        try:
             while chunk := await upload.read(1024 * 1024):
                 bytes_written += len(chunk)
                 if bytes_written > max_bytes:
@@ -1034,11 +1397,15 @@ async def _save_upload(
                         status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         detail=f"上传文件不能超过 {max_bytes} 字节",
                     )
-                output.write(chunk)
-        os.replace(temporary, destination)
+                await run_in_threadpool(output.write, chunk)
+        finally:
+            await run_in_threadpool(output.close)
+            output = None
+        await run_in_threadpool(os.replace, temporary, destination)
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        if output is not None:
+            await run_in_threadpool(output.close)
+        await run_in_threadpool(temporary.unlink, missing_ok=True)
         await upload.close()
 
 
@@ -1107,13 +1474,23 @@ def create_app(
     max_upload_bytes: int | None = None,
     import_candidate_ttl_seconds: int | None = None,
     position_frame_cache_size: int | None = None,
+    auto_migrate_schema: bool | None = None,
+    max_concurrent_upload_parses: int | None = None,
+    max_batch_upload_files: int | None = None,
+    session_cookie_secure: bool | None = None,
 ) -> FastAPI:
     resolved_database_url = database_url or os.getenv(
         "DATABASE_URL", "sqlite+pysqlite:///delivery_note.db"
     )
+    if auto_migrate_schema is None:
+        auto_migrate_schema = os.getenv("AUTO_MIGRATE_SCHEMA", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+    if auto_migrate_schema:
+        run_schema_migrations(resolved_database_url)
     database = Database(resolved_database_url)
-    database.create_schema()
-    migrate_purchase_sync_optional_versions(resolved_database_url)
     storage = Path(storage_root or os.getenv("STORAGE_ROOT", "storage")).resolve()
     storage.mkdir(parents=True, exist_ok=True)
     configured_max_upload_bytes = (
@@ -1123,6 +1500,20 @@ def create_app(
     )
     if configured_max_upload_bytes <= 0:
         raise ValueError("MAX_UPLOAD_BYTES 必须大于 0")
+    configured_max_concurrent_upload_parses = (
+        max_concurrent_upload_parses
+        if max_concurrent_upload_parses is not None
+        else int(os.getenv("MAX_CONCURRENT_UPLOAD_PARSES", "2"))
+    )
+    if configured_max_concurrent_upload_parses <= 0:
+        raise ValueError("MAX_CONCURRENT_UPLOAD_PARSES 必须大于 0")
+    configured_max_batch_upload_files = (
+        max_batch_upload_files
+        if max_batch_upload_files is not None
+        else int(os.getenv("MAX_BATCH_UPLOAD_FILES", "50"))
+    )
+    if configured_max_batch_upload_files <= 0:
+        raise ValueError("MAX_BATCH_UPLOAD_FILES 必须大于 0")
     configured_import_candidate_ttl = (
         import_candidate_ttl_seconds
         if import_candidate_ttl_seconds is not None
@@ -1137,6 +1528,11 @@ def create_app(
     )
     if configured_position_frame_cache_size <= 0:
         raise ValueError("POSITION_FRAME_CACHE_SIZE 必须大于 0")
+    configured_session_cookie_secure = (
+        session_cookie_secure
+        if session_cookie_secure is not None
+        else _boolean_environment("SESSION_COOKIE_SECURE", False)
+    )
     import_candidate_root = storage / "temporary" / "position-imports"
     import_candidate_root.mkdir(parents=True, exist_ok=True)
     startup_expiry_cutoff = datetime.now().timestamp() - configured_import_candidate_ttl
@@ -1150,11 +1546,18 @@ def create_app(
     # 多进程部署时，必须将该注册表迁移到共享数据库。
     import_candidates: dict[str, dict] = {}
     import_candidates_lock = Lock()
-    batch_file_upload_lock = Lock()
+    batch_file_upload_lock = asyncio.Lock()
+    upload_parse_semaphore = asyncio.Semaphore(
+        configured_max_concurrent_upload_parses
+    )
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
     position_frame_cache = _PositionFrameCache(configured_position_frame_cache_size)
-    input_inspection_cache = _InputInspectionCache(INPUT_INSPECTION_CACHE_SIZE)
+    draft_analysis_cache = _DraftAnalysisCache(DRAFT_ANALYSIS_CACHE_SIZE)
+    input_inspection_cache = _InputInspectionCache(
+        INPUT_INSPECTION_CACHE_SIZE,
+        INPUT_INSPECTION_PAGES_PER_VERSION,
+    )
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -1184,8 +1587,13 @@ def create_app(
     app.state.database = database
     app.state.storage_root = storage
     app.state.max_upload_bytes = configured_max_upload_bytes
+    app.state.max_concurrent_upload_parses = configured_max_concurrent_upload_parses
+    app.state.max_batch_upload_files = configured_max_batch_upload_files
     app.state.import_candidate_ttl_seconds = configured_import_candidate_ttl
     app.state.position_frame_cache_size = configured_position_frame_cache_size
+    app.state.position_frame_cache = position_frame_cache
+    app.state.draft_analysis_cache = draft_analysis_cache
+    app.state.session_cookie_secure = configured_session_cookie_secure
     app.state.position_import_candidates = import_candidates
     app.add_middleware(
         CORSMiddleware,
@@ -1205,6 +1613,7 @@ def create_app(
 
     def get_session():
         session = database.SessionLocal()
+        session.info[POSITION_FRAME_CACHE_SESSION_KEY] = position_frame_cache
         try:
             yield session
         except Exception:
@@ -1213,25 +1622,58 @@ def create_app(
         finally:
             session.close()
 
+    async def parse_uploaded_workbook(function: Callable, *args):
+        """限制进程内并发，并在线程池执行工作簿解析。"""
+        async with upload_parse_semaphore:
+            return await run_in_threadpool(function, *args)
+
     def current_user(
+        request: Request,
         credentials: Annotated[
             HTTPAuthorizationCredentials | None,
             Depends(bearer),
         ],
         session: Annotated[Session, Depends(get_session)],
     ) -> User:
-        if credentials is None:
+        cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
+        token = credentials.credentials if credentials is not None else cookie_token
+        using_cookie = credentials is None and cookie_token is not None
+        if token is None:
             raise HTTPException(status_code=401, detail="未登录")
         auth_session = session.scalar(
             select(AuthSession).where(
-                AuthSession.token_hash == hash_token(credentials.credentials)
+                AuthSession.token_hash == hash_token(token)
             )
         )
         if auth_session is None or auth_session.expires_at <= datetime.utcnow():
-            raise HTTPException(status_code=401, detail="登录已失效")
+            raise HTTPException(
+                status_code=401,
+                detail="登录已失效",
+                headers=(
+                    {
+                        "Set-Cookie": _deleted_session_cookie_header(
+                            secure=configured_session_cookie_secure
+                        )
+                    }
+                    if using_cookie
+                    else None
+                ),
+            )
         user = session.get(User, auth_session.user_id)
         if user is None or not user.active:
-            raise HTTPException(status_code=401, detail="用户不可用")
+            raise HTTPException(
+                status_code=401,
+                detail="用户不可用",
+                headers=(
+                    {
+                        "Set-Cookie": _deleted_session_cookie_header(
+                            secure=configured_session_cookie_secure
+                        )
+                    }
+                    if using_cookie
+                    else None
+                ),
+            )
         return user
 
     def admin_user(user: Annotated[User, Depends(current_user)]) -> User:
@@ -1265,6 +1707,13 @@ def create_app(
                 Path(version.storage_path),
                 offset,
                 limit,
+            ),
+            lambda summary: preview_input_version_page(
+                version.kind,
+                Path(version.storage_path),
+                offset,
+                limit,
+                summary,
             ),
         )
 
@@ -1308,6 +1757,10 @@ def create_app(
             Path(candidate["path"]).unlink(missing_ok=True)
         return candidate
 
+    def register_import_candidate(token: str, candidate: dict) -> None:
+        with import_candidates_lock:
+            import_candidates[token] = candidate
+
     def remove_draft_import_candidates(draft_id: int) -> None:
         with import_candidates_lock:
             tokens = [
@@ -1344,12 +1797,35 @@ def create_app(
             ):
                 candidate_path.unlink(missing_ok=True)
 
-    @app.get("/health")
-    def health() -> dict:
+    def readiness() -> dict:
+        try:
+            with database.session() as session:
+                session.execute(text("SELECT 1"))
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="服务尚未就绪",
+            ) from None
         return {"status": "ok"}
 
+    @app.get("/health/live")
+    def health_live() -> dict:
+        return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def health_ready() -> dict:
+        return readiness()
+
+    @app.get("/health")
+    def health() -> dict:
+        return readiness()
+
     @app.post("/api/auth/login")
-    def login(payload: LoginPayload, session: Annotated[Session, Depends(get_session)]):
+    def login(
+        payload: LoginPayload,
+        response: Response,
+        session: Annotated[Session, Depends(get_session)],
+    ):
         user = session.scalar(select(User).where(User.username == payload.username))
         if (
             user is None
@@ -1367,6 +1843,12 @@ def create_app(
         )
         _audit(session, user.id, "login", "user", user.id)
         session.commit()
+        _set_session_cookie(
+            response,
+            token,
+            expires_at,
+            secure=configured_session_cookie_secure,
+        )
         return {
             "token": token,
             "expires_at": _utc_isoformat(expires_at),
@@ -1375,18 +1857,36 @@ def create_app(
 
     @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
     def logout(
-        credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
+        request: Request,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Depends(bearer),
+        ],
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
+        selected_token = (
+            credentials.credentials
+            if credentials is not None
+            else request.cookies.get(SESSION_COOKIE_NAME)
+        )
+        presented_tokens = {
+            token
+            for token in (selected_token, request.cookies.get(SESSION_COOKIE_NAME))
+            if token
+        }
         session.execute(
             delete(AuthSession).where(
-                AuthSession.token_hash == hash_token(credentials.credentials)
+                AuthSession.token_hash.in_(
+                    hash_token(token) for token in presented_tokens
+                )
             )
         )
         _audit(session, user.id, "logout", "user", user.id)
         session.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        _delete_session_cookie(response, secure=configured_session_cookie_secure)
+        return response
 
     @app.get("/api/auth/me")
     def me(user: Annotated[User, Depends(current_user)]):
@@ -1496,9 +1996,9 @@ def create_app(
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            _validate_input_version(kind, destination)
+            await parse_uploaded_workbook(_validate_input_version, kind, destination)
         except Exception as error:
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise HTTPException(
                 status_code=400,
                 detail=f"输入版本校验失败：{error}",
@@ -2632,7 +3132,7 @@ def create_app(
         session.refresh(draft)
         if existing is not None:
             response.status_code = status.HTTP_200_OK
-        return _draft_json(session, draft)
+        return _draft_json(session, draft, draft_analysis_cache)
 
     @app.get("/api/input-drafts/position")
     def get_position_draft(
@@ -2647,7 +3147,7 @@ def create_app(
         )
         if draft is None:
             raise HTTPException(status_code=404, detail="当前没有进行中的库位草稿")
-        return _draft_json(session, draft)
+        return _draft_json(session, draft, draft_analysis_cache)
 
     @app.get("/api/input-drafts/{draft_id}/rows")
     def get_position_draft_rows(
@@ -2662,36 +3162,61 @@ def create_app(
         only_errors: bool = False,
         only_modified: bool = False,
     ):
-        get_draft_or_404(draft_id, session)
-        rows = [row for row in list_draft_rows(session, draft_id) if not row.deleted]
-        _issues, issues_by_row = _position_issue_map(rows)
+        draft = get_draft_or_404(draft_id, session)
+        analysis = _draft_analysis(session, draft, draft_analysis_cache)
+        issues_by_row = analysis["issues_by_row"]
         search_value = search.strip().casefold()
         site_value = site.strip().casefold()
         scale_value = scale_position.strip().casefold()
-        filtered = []
-        for row in rows:
-            values = [str(getattr(row, field) or "") for field in ROW_FIELDS]
-            if search_value and not any(
-                search_value in value.casefold() for value in values
-            ):
-                continue
-            if site_value and row.store_site.strip().casefold() != site_value:
-                continue
-            if scale_value and row.scale_position.strip().casefold() != scale_value:
-                continue
-            if only_modified and row.change_type == "unchanged":
-                continue
-            if only_errors and not any(
-                issue["severity"] == "error" for issue in issues_by_row.get(row.id, [])
-            ):
-                continue
-            filtered.append(row)
-        page = filtered[offset : offset + limit]
+        conditions = [
+            PositionDraftRow.draft_id == draft_id,
+            PositionDraftRow.deleted.is_(False),
+        ]
+        if search_value:
+            conditions.append(
+                or_(
+                    *(
+                        func.lower(
+                            func.coalesce(getattr(PositionDraftRow, field), "")
+                        ).contains(search_value, autoescape=True)
+                        for field in ROW_FIELDS
+                    )
+                )
+            )
+        if site_value:
+            conditions.append(
+                func.lower(func.trim(PositionDraftRow.store_site)) == site_value
+            )
+        if scale_value:
+            conditions.append(
+                func.lower(func.trim(PositionDraftRow.scale_position)) == scale_value
+            )
+        if only_modified:
+            conditions.append(PositionDraftRow.change_type != "unchanged")
+        if only_errors:
+            conditions.append(
+                PositionDraftRow.id.in_(analysis["error_row_ids"])
+            )
+
+        total = session.scalar(
+            select(func.count())
+            .select_from(PositionDraftRow)
+            .where(*conditions)
+        )
+        page = list(
+            session.scalars(
+                select(PositionDraftRow)
+                .where(*conditions)
+                .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        )
         return {
             "rows": [
                 _position_row_json(row, issues_by_row.get(row.id)) for row in page
             ],
-            "total": len(filtered),
+            "total": total or 0,
             "offset": offset,
             "limit": limit,
         }
@@ -2846,7 +3371,7 @@ def create_app(
         _admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
     ):
-        remove_expired_import_candidates()
+        await run_in_threadpool(remove_expired_import_candidates)
         draft = get_draft_or_404(draft_id, session)
         try:
             require_revision(draft, revision)
@@ -2862,31 +3387,33 @@ def create_app(
         destination = import_candidate_root / f"{draft.id}_{revision}_{token}{suffix}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            candidate_frame = read_position_workbook(destination)
             current_frame = _position_frame(list_draft_rows(session, draft.id))
-            issues = [
-                *validate_position_frame(candidate_frame),
-                *position_change_warnings(current_frame, candidate_frame),
-            ]
-            diff = position_diff(current_frame, candidate_frame)
+            candidate_frame, issues, diff = await parse_uploaded_workbook(
+                _inspect_position_import,
+                destination,
+                current_frame,
+            )
         except Exception as error:
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             if session.in_transaction():
                 session.rollback()
             raise HTTPException(
                 status_code=400,
                 detail=f"导入文件校验失败：{error}",
             ) from error
-        remove_draft_import_candidates(draft.id)
-        with import_candidates_lock:
-            import_candidates[token] = {
+        await run_in_threadpool(remove_draft_import_candidates, draft.id)
+        await run_in_threadpool(
+            register_import_candidate,
+            token,
+            {
                 "draft_id": draft.id,
                 "revision": revision,
                 "path": str(destination),
                 "created_by": _admin.id,
                 "expires_at": datetime.utcnow()
                 + timedelta(seconds=app.state.import_candidate_ttl_seconds),
-            }
+            },
+        )
         return {
             "token": token,
             "draft_id": draft.id,
@@ -2995,12 +3522,12 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         draft = get_draft_or_404(draft_id, session)
-        _rows, diff, issues = _draft_analysis(session, draft)
+        analysis = _draft_analysis(session, draft, draft_analysis_cache)
         return {
             "draft_id": draft.id,
             "revision": draft.revision,
-            "diff": diff,
-            **_issue_summary(issues),
+            "diff": analysis["diff"],
+            **_issue_summary(analysis["issues"]),
         }
 
     @app.post(
@@ -3076,7 +3603,7 @@ def create_app(
             rollback_integrity_conflict(session, error)
         session.refresh(draft)
         remove_draft_import_candidates(draft.id)
-        return _draft_json(session, draft)
+        return _draft_json(session, draft, draft_analysis_cache)
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
     def create_batch(
@@ -3149,6 +3676,13 @@ def create_app(
             raise HTTPException(status_code=400, detail="批次名称不能超过 200 个字符")
         if not files:
             raise HTTPException(status_code=400, detail="请至少上传一份交货文件")
+        if len(files) > app.state.max_batch_upload_files:
+            for upload in files:
+                await upload.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"单批次最多上传 {app.state.max_batch_upload_files} 份交货文件",
+            )
 
         active_versions = {
             version.kind: version
@@ -3190,7 +3724,10 @@ def create_app(
                     temporary_path,
                     app.state.max_upload_bytes,
                 )
-                read_delivery_workbook(temporary_path)
+                await parse_uploaded_workbook(
+                    read_delivery_workbook,
+                    temporary_path,
+                )
 
             batch = Batch(
                 name=batch_name,
@@ -3203,13 +3740,13 @@ def create_app(
             session.add(batch)
             session.flush()
             input_root = storage / "batches" / str(batch.id) / "inputs"
-            input_root.mkdir(parents=True, exist_ok=True)
+            await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
             for file_order, (original_name, temporary_path) in enumerate(
                 zip(original_names, temporary_paths),
                 start=1,
             ):
                 destination = input_root / f"{uuid4().hex}_{original_name}"
-                os.replace(temporary_path, destination)
+                await run_in_threadpool(os.replace, temporary_path, destination)
                 created_paths.append(destination)
                 session.add(
                     BatchFile(
@@ -3245,12 +3782,12 @@ def create_app(
         except HTTPException:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             raise
         except Exception as error:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             if isinstance(error, ValueError):
                 raise HTTPException(
                     status_code=400,
@@ -3259,7 +3796,7 @@ def create_app(
             raise
         finally:
             for temporary_path in temporary_paths:
-                temporary_path.unlink(missing_ok=True)
+                await run_in_threadpool(temporary_path.unlink, missing_ok=True)
         return _batch_json(batch, session)
 
     @app.post(
@@ -3271,7 +3808,7 @@ def create_app(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
         name: Annotated[str | None, Form()] = None,
-        delivery_file: UploadFile | None = File(None),
+        delivery_file: list[UploadFile] | None = File(None),
         inbound_file: UploadFile | None = File(None),
     ):
         if name is None:
@@ -3299,7 +3836,8 @@ def create_app(
                 status_code=409,
                 detail=f"缺少启用的输入版本：{', '.join(missing)}",
             )
-        if delivery_file is None and inbound_file is None:
+        delivery_files = delivery_file or []
+        if not delivery_files and inbound_file is None:
             active_rule = session.scalar(
                 select(SelfOperatedOverreceiptRuleVersion).where(
                     SelfOperatedOverreceiptRuleVersion.active.is_(True)
@@ -3336,21 +3874,44 @@ def create_app(
             )
             session.commit()
             return _batch_json(batch, session)
-        if delivery_file is None:
+        if not delivery_files:
             raise HTTPException(status_code=400, detail="缺少质检交货单")
+        if len(delivery_files) > app.state.max_batch_upload_files:
+            for upload in delivery_files:
+                await upload.close()
+            if inbound_file is not None:
+                await inbound_file.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=(
+                    "单批次最多上传 "
+                    f"{app.state.max_batch_upload_files} 份质检交货单"
+                ),
+            )
         api_inbound_version = active_versions.get("self_operated_inbound")
         if inbound_file is None and api_inbound_version is None:
             raise HTTPException(
                 status_code=409,
                 detail="缺少启用的待入库 API 数据",
             )
-        delivery_name = _safe_filename(delivery_file.filename or "")
+        delivery_names = [
+            _safe_filename(upload.filename or "") for upload in delivery_files
+        ]
+        if len(delivery_names) != len(set(delivery_names)):
+            for upload in delivery_files:
+                await upload.close()
+            if inbound_file is not None:
+                await inbound_file.close()
+            raise HTTPException(status_code=409, detail="同一批次不可上传同名文件")
         inbound_name = (
             _safe_filename(inbound_file.filename or "")
             if inbound_file is not None
             else api_inbound_version.original_name
         )
-        if Path(delivery_name).suffix.lower() not in {".xls", ".xlsx"}:
+        if any(
+            Path(delivery_name).suffix.lower() not in {".xls", ".xlsx"}
+            for delivery_name in delivery_names
+        ):
             raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
         if inbound_file is not None and Path(inbound_name).suffix.lower() not in {
             ".xls",
@@ -3360,7 +3921,10 @@ def create_app(
 
         temporary_root = storage / "temporary" / "self-operated-batches"
         token = uuid4().hex
-        temporary_delivery = temporary_root / f"{token}_delivery_{delivery_name}"
+        temporary_deliveries = [
+            temporary_root / f"{token}_delivery_{index}_{delivery_name}"
+            for index, delivery_name in enumerate(delivery_names, start=1)
+        ]
         temporary_inbound = (
             temporary_root / f"{token}_inbound_{inbound_name}"
             if inbound_file is not None
@@ -3373,25 +3937,39 @@ def create_app(
             )
         )
         try:
-            await _save_upload(
-                delivery_file,
-                temporary_delivery,
-                app.state.max_upload_bytes,
-            )
-            read_self_operated_delivery_workbook(temporary_delivery)
+            for upload, temporary_delivery in zip(
+                delivery_files,
+                temporary_deliveries,
+                strict=True,
+            ):
+                await _save_upload(
+                    upload,
+                    temporary_delivery,
+                    app.state.max_upload_bytes,
+                )
+                await parse_uploaded_workbook(
+                    read_self_operated_delivery_workbook,
+                    temporary_delivery,
+                )
             if inbound_file is not None and temporary_inbound is not None:
                 await _save_upload(
                     inbound_file,
                     temporary_inbound,
                     app.state.max_upload_bytes,
                 )
-                read_self_operated_inbound_workbook(temporary_inbound)
+                await parse_uploaded_workbook(
+                    read_self_operated_inbound_workbook,
+                    temporary_inbound,
+                )
                 inbound_source_path = temporary_inbound
             else:
                 inbound_source_path = Path(api_inbound_version.storage_path)
-                if not inbound_source_path.is_file():
+                if not await run_in_threadpool(inbound_source_path.is_file):
                     raise ValueError("启用的待入库 API 数据文件不存在")
-                read_self_operated_inbound_workbook(inbound_source_path)
+                await parse_uploaded_workbook(
+                    read_self_operated_inbound_workbook,
+                    inbound_source_path,
+                )
 
             batch = Batch(
                 name=batch_name,
@@ -3405,24 +3983,41 @@ def create_app(
             session.add(batch)
             session.flush()
             input_root = storage / "batches" / str(batch.id) / "inputs"
-            input_root.mkdir(parents=True, exist_ok=True)
-            delivery_path = input_root / f"{uuid4().hex}_{delivery_name}"
-            os.replace(temporary_delivery, delivery_path)
-            created_paths.append(delivery_path)
+            await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
+            delivery_paths = []
+            for temporary_delivery, delivery_name in zip(
+                temporary_deliveries,
+                delivery_names,
+                strict=True,
+            ):
+                delivery_path = input_root / f"{uuid4().hex}_{delivery_name}"
+                await run_in_threadpool(
+                    os.replace,
+                    temporary_delivery,
+                    delivery_path,
+                )
+                created_paths.append(delivery_path)
+                delivery_paths.append(delivery_path)
             if inbound_file is not None:
                 inbound_path = input_root / f"{uuid4().hex}_{inbound_name}"
-                os.replace(inbound_source_path, inbound_path)
+                await run_in_threadpool(os.replace, inbound_source_path, inbound_path)
                 created_paths.append(inbound_path)
             else:
                 inbound_path = inbound_source_path
 
-            session.add(
-                BatchFile(
-                    batch_id=batch.id,
-                    original_name=delivery_name,
-                    storage_path=str(delivery_path),
-                    file_order=1,
-                )
+            session.add_all(
+                [
+                    BatchFile(
+                        batch_id=batch.id,
+                        original_name=delivery_name,
+                        storage_path=str(delivery_path),
+                        file_order=file_order,
+                    )
+                    for file_order, (delivery_name, delivery_path) in enumerate(
+                        zip(delivery_names, delivery_paths, strict=True),
+                        start=1,
+                    )
+                ]
             )
             session.add(
                 SelfOperatedBatch(
@@ -3446,7 +4041,8 @@ def create_app(
                         active_rule.id if active_rule is not None else None
                     ),
                     "template_version_id": active_versions["inbound_template"].id,
-                    "delivery_file": delivery_name,
+                    "delivery_file": delivery_names[0],
+                    "delivery_files": delivery_names,
                     "inbound_file": inbound_name,
                     "inbound_version_id": (
                         api_inbound_version.id if inbound_file is None else None
@@ -3457,12 +4053,12 @@ def create_app(
         except HTTPException:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             raise
         except Exception as error:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             if isinstance(error, ValueError):
                 raise HTTPException(
                     status_code=400,
@@ -3470,9 +4066,10 @@ def create_app(
                 ) from error
             raise
         finally:
-            temporary_delivery.unlink(missing_ok=True)
+            for temporary_delivery in temporary_deliveries:
+                await run_in_threadpool(temporary_delivery.unlink, missing_ok=True)
             if temporary_inbound is not None:
-                temporary_inbound.unlink(missing_ok=True)
+                await run_in_threadpool(temporary_inbound.unlink, missing_ok=True)
         return _batch_json(batch, session)
 
     @app.get("/api/batches")
@@ -3481,7 +4078,7 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         batches = session.scalars(select(Batch).order_by(Batch.id.desc())).all()
-        return [_batch_json(batch, session, include_files=False) for batch in batches]
+        return _batch_list_json(batches, session)
 
     @app.delete("/api/batches")
     def delete_batches(
@@ -3686,9 +4283,12 @@ def create_app(
         )
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            read_self_operated_inbound_workbook(destination)
+            await parse_uploaded_workbook(
+                read_self_operated_inbound_workbook,
+                destination,
+            )
         except Exception as error:
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise HTTPException(
                 status_code=400,
                 detail=f"自营仓收货入库单校验失败：{error}",
@@ -3712,7 +4312,7 @@ def create_app(
         )
         session.commit()
         if old_path is not None and old_path != destination:
-            old_path.unlink(missing_ok=True)
+            await run_in_threadpool(_unlink_after_commit, old_path)
         return _batch_json(batch, session)
 
     @app.post(
@@ -3728,18 +4328,17 @@ def create_app(
         batch = get_batch_or_404(batch_id, session)
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
-        self_operated = session.get(SelfOperatedBatch, batch.id)
-        if self_operated is not None:
-            source_count = session.scalar(
-                select(func.count())
-                .select_from(BatchFile)
-                .where(BatchFile.batch_id == batch.id)
+        source_count = session.scalar(
+            select(func.count())
+            .select_from(BatchFile)
+            .where(BatchFile.batch_id == batch.id)
+        )
+        if source_count >= app.state.max_batch_upload_files:
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"单批次最多上传 {app.state.max_batch_upload_files} 份交货文件",
             )
-            if source_count:
-                raise HTTPException(
-                    status_code=409,
-                    detail="自营仓入库批次只能上传一份质检交货单",
-                )
         original_name = _safe_filename(file.filename or "")
         if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
             raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
@@ -3760,7 +4359,7 @@ def create_app(
         )
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            with batch_file_upload_lock:
+            async with batch_file_upload_lock:
                 batch = session.scalar(
                     select(Batch)
                     .where(Batch.id == batch_id)
@@ -3774,17 +4373,19 @@ def create_app(
                         status_code=409,
                         detail="当前批次状态不可修改文件",
                     )
-                if session.get(SelfOperatedBatch, batch.id) is not None:
-                    source_count = session.scalar(
-                        select(func.count())
-                        .select_from(BatchFile)
-                        .where(BatchFile.batch_id == batch.id)
+                source_count = session.scalar(
+                    select(func.count())
+                    .select_from(BatchFile)
+                    .where(BatchFile.batch_id == batch.id)
+                )
+                if source_count >= app.state.max_batch_upload_files:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail=(
+                            "单批次最多上传 "
+                            f"{app.state.max_batch_upload_files} 份交货文件"
+                        ),
                     )
-                    if source_count:
-                        raise HTTPException(
-                            status_code=409,
-                            detail="自营仓入库批次只能上传一份质检交货单",
-                        )
                 duplicate = session.scalar(
                     select(BatchFile).where(
                         BatchFile.batch_id == batch.id,
@@ -3825,11 +4426,11 @@ def create_app(
                 session.commit()
         except HTTPException:
             session.rollback()
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise
         except IntegrityError as error:
             session.rollback()
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise HTTPException(
                 status_code=409,
                 detail="文件上传发生并发冲突，请刷新后重试",
@@ -3889,7 +4490,7 @@ def create_app(
             {"batch_id": batch.id, "original_name": source.original_name},
         )
         session.commit()
-        storage_path.unlink(missing_ok=True)
+        _unlink_after_commit(storage_path)
         return _batch_json(batch, session)
 
     @app.put("/api/batches/{batch_id}/files/order")
@@ -3944,11 +4545,6 @@ def create_app(
         if not sources:
             raise HTTPException(status_code=400, detail="批次至少需要一个交货文件")
         self_operated = session.get(SelfOperatedBatch, batch.id)
-        if self_operated is not None and len(sources) != 1:
-            raise HTTPException(
-                status_code=400,
-                detail="自营仓入库批次必须且只能上传一份质检交货单",
-            )
         versions = {}
         version_kinds = (
             ("product", "supplier") if self_operated is not None else INPUT_KINDS
@@ -3982,8 +4578,16 @@ def create_app(
                     raise ValueError("批次锁定的积加入库模板不存在")
                 read_self_operated_inbound_workbook(inbound_path)
                 validate_self_operated_template_workbook(Path(template.storage_path))
-                read_self_operated_delivery_workbook(Path(sources[0].storage_path))
-                resolve_supplier(Path(sources[0].original_name), supplier_rows)
+                for source in sources:
+                    try:
+                        read_self_operated_delivery_workbook(
+                            Path(source.storage_path)
+                        )
+                        resolve_supplier(Path(source.original_name), supplier_rows)
+                    except Exception as error:
+                        raise ValueError(
+                            f"{source.original_name}：{error}"
+                        ) from error
             else:
                 read_purchase_workbook(versions["purchase"])
                 read_position_workbook(versions["position"])

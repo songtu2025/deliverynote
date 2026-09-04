@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
@@ -150,6 +150,7 @@ describe("BatchesPage", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -316,8 +317,95 @@ describe("BatchesPage", () => {
     expect(progress).not.toHaveAttribute("aria-valuenow");
   });
 
-  it("only requires the quality delivery file before creating a self-operated batch", async () => {
+  it("polls only inbound sync status without overlap and fully refreshes once on completion", async () => {
+    vi.useFakeTimers();
+    const initialFetch = vi.mocked(fetch);
+    const requests: string[] = [];
+    let statusRequestCount = 0;
+    let releaseRunningPoll!: () => void;
+    const runningJob = {
+      ...(inboundSyncStatus.job as Record<string, unknown>),
+      status: "running",
+      candidate_version_id: null,
+      finished_at: null
+    };
+    const completedStatus = {
+      ...inboundSyncStatus,
+      job: {
+        ...(inboundSyncStatus.job as Record<string, unknown>),
+        status: "succeeded"
+      }
+    };
+    vi.stubGlobal("fetch", vi.fn(async (
+      input: RequestInfo | URL,
+      init: RequestInit = {}
+    ) => {
+      const url = String(input);
+      requests.push(url.replace(/^.*(?=\/api\/)/, ""));
+      if (url.endsWith("/api/self-operated-inbound-sync") && !init.method) {
+        statusRequestCount += 1;
+        if (statusRequestCount === 1) {
+          return jsonResponse({ ...inboundSyncStatus, job: runningJob });
+        }
+        if (statusRequestCount === 2) {
+          return new Promise<Response>((resolve) => {
+            releaseRunningPoll = () => resolve(jsonResponse({
+              ...inboundSyncStatus,
+              job: runningJob
+            }));
+          });
+        }
+        return jsonResponse(completedStatus);
+      }
+      return initialFetch(input, init);
+    }));
+
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    requests.length = 0;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(requests).toEqual(["/api/self-operated-inbound-sync"]);
+
+    await act(async () => {
+      releaseRunningPoll();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    requests.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(requests).toEqual(expect.arrayContaining([
+      "/api/self-operated-inbound-sync",
+      "/api/batches",
+      "/api/input-versions",
+      "/api/self-operated-overreceipt-rule-versions"
+    ]));
+    expect(requests).toHaveLength(4);
+  });
+
+  it("creates a self-operated batch with multiple quality delivery files", async () => {
+    const onOpen = vi.fn();
+    let submittedFiles: FormDataEntryValue[] = [];
+    const loadFetch = vi.mocked(fetch);
+    vi.stubGlobal("fetch", vi.fn(async (
+      input: RequestInfo | URL,
+      init: RequestInit = {}
+    ) => {
+      if (String(input).endsWith("/api/self-operated-batches") && init.method === "POST") {
+        const body = init.body as FormData;
+        submittedFiles = body.getAll("delivery_file");
+        return jsonResponse({ id: 88 });
+      }
+      return loadFetch(input, init);
+    }));
+
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />);
 
     await screen.findByRole("heading", { name: "自营仓入库" });
     await screen.findByText("4 / 4 已就绪");
@@ -327,8 +415,33 @@ describe("BatchesPage", () => {
     expect(within(dialog).getByText("质检交货单")).toBeInTheDocument();
     expect(within(dialog).queryByText("自营仓收货入库单")).not.toBeInTheDocument();
     expect(within(dialog).getByText("锁定待入库数据版本")).toBeInTheDocument();
+    expect(within(dialog).getByText("锁定待入库数据版本").closest(".ant-alert"))
+      .toHaveClass("self-operated-version-lock", "ant-alert-info");
     expect(within(dialog).getByRole("button", { name: "创建批次" })).toBeDisabled();
     expect(within(dialog).getByText(/本批次将使用：self_operated_inbound-v1/)).toBeInTheDocument();
+
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    expect(input).toHaveAttribute("multiple");
+    fireEvent.change(input!, {
+      target: {
+        files: [
+          new File(["first"], "A质检交货单.xlsx"),
+          new File(["second"], "B质检交货单.xlsx")
+        ]
+      }
+    });
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "创建批次" })).toBeEnabled();
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建批次" }));
+
+    await waitFor(() => expect(submittedFiles).toHaveLength(2));
+    expect(submittedFiles.map((file) => (file as File).name)).toEqual([
+      "A质检交货单.xlsx",
+      "B质检交货单.xlsx"
+    ]);
+    expect(onOpen).toHaveBeenCalledWith(88);
   });
 
   it("requires a delivery file before creating a delivery batch", async () => {

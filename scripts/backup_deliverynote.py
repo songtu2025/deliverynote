@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -22,8 +23,33 @@ from typing import BinaryIO, Callable, Iterator, Protocol, Sequence
 BACKUP_NAME_PATTERN = re.compile(r"^\d{8}-\d{6}$")
 PROJECT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DOCKER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+RESTORE_DATABASE_PATTERN = re.compile(
+    r"^delivery_note_restore_[0-9a-f]{16}$"
+)
+CRITICAL_TABLES = ("users", "input_versions", "batches", "batch_files", "jobs")
+CRITICAL_TABLE_COUNTS_SQL = "\nUNION ALL\n".join(
+    f"SELECT '{table}', count(*) FROM public.{table}" for table in CRITICAL_TABLES
+)
 WORKER_SERVICES = ("worker", "purchase-sync-worker", "inbound-sync-worker")
+RESUMED_SERVICES = ("api", *WORKER_SERVICES, "web")
 REQUIRED_SERVICES = frozenset({"db", "api", "web", *WORKER_SERVICES})
+API_READINESS_PROBE = """\
+import time
+import urllib.request
+
+deadline = time.monotonic() + {timeout}
+while True:
+    try:
+        with urllib.request.urlopen(
+            "http://127.0.0.1:8000/health", timeout=5
+        ) as response:
+            if response.status == 200:
+                break
+    except Exception:
+        if time.monotonic() >= deadline:
+            raise
+        time.sleep(1)
+"""
 
 
 class BackupError(RuntimeError):
@@ -35,6 +61,7 @@ class Runner(Protocol):
         self,
         arguments: Sequence[str],
         *,
+        stdin: BinaryIO | None = None,
         stdout: BinaryIO | None = None,
         timeout_seconds: int = 300,
     ) -> str: ...
@@ -45,6 +72,7 @@ class SubprocessRunner:
         self,
         arguments: Sequence[str],
         *,
+        stdin: BinaryIO | None = None,
         stdout: BinaryIO | None = None,
         timeout_seconds: int = 300,
     ) -> str:
@@ -52,6 +80,7 @@ class SubprocessRunner:
             completed = subprocess.run(
                 list(arguments),
                 check=False,
+                stdin=stdin,
                 stdout=stdout if stdout is not None else subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=stdout is None,
@@ -184,6 +213,53 @@ def _active_job_count(config: BackupConfig, runner: Runner) -> int:
         raise BackupError(f"无法解析活动任务数量：{output!r}") from error
 
 
+def _critical_table_counts(
+    config: BackupConfig,
+    runner: Runner,
+    database_name: str,
+) -> dict[str, int]:
+    if database_name != "delivery_note" and not RESTORE_DATABASE_PATTERN.fullmatch(
+        database_name
+    ):
+        raise BackupError("临时恢复数据库名称不安全")
+    output = runner.run(
+        _compose(
+            config,
+            "exec",
+            "-T",
+            "db",
+            "psql",
+            "-U",
+            "delivery_note",
+            "-d",
+            database_name,
+            "-Atq",
+            "-F",
+            "=",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            CRITICAL_TABLE_COUNTS_SQL,
+        )
+    )
+    counts: dict[str, int] = {}
+    try:
+        for line in output.splitlines():
+            table, value = line.strip().split("=", 1)
+            if table not in CRITICAL_TABLES or table in counts:
+                raise ValueError
+            count = int(value)
+            if count < 0:
+                raise ValueError
+            counts[table] = count
+    except ValueError as error:
+        raise BackupError("无法解析关键表行数") from error
+    if set(counts) != set(CRITICAL_TABLES):
+        missing = ", ".join(sorted(set(CRITICAL_TABLES) - set(counts)))
+        raise BackupError(f"关键表计数输出不完整：{missing}")
+    return counts
+
+
 def _single_output_line(output: str, label: str) -> str:
     values = [line.strip() for line in output.splitlines() if line.strip()]
     if len(values) != 1 or not DOCKER_NAME_PATTERN.fullmatch(values[0]):
@@ -212,6 +288,17 @@ def _resolve_image(config: BackupConfig, runner: Runner, service: str) -> str:
     return _single_output_line(output, f"{service} 镜像")
 
 
+def _resolve_service_containers(
+    config: BackupConfig,
+    runner: Runner,
+) -> dict[str, str]:
+    containers = {}
+    for service in RESUMED_SERVICES:
+        output = runner.run(_compose(config, "ps", "--quiet", service))
+        containers[service] = _single_output_line(output, f"{service} 容器")
+    return containers
+
+
 def inspect_environment(config: BackupConfig, runner: Runner) -> dict:
     config.validate()
     runner.run(_compose(config, "config", "--quiet"))
@@ -237,7 +324,7 @@ def inspect_environment(config: BackupConfig, runner: Runner) -> dict:
         "active_jobs": _active_job_count(config, runner),
         "data_volume": _resolve_volume(config, runner),
         "api_image": _resolve_image(config, runner, "api"),
-        "db_image": _resolve_image(config, runner, "db"),
+        "service_containers": _resolve_service_containers(config, runner),
     }
 
 
@@ -324,31 +411,97 @@ def _create_data_archive(
     return target
 
 
-def _validate_database_dump(
+def _temporary_restore_database_name() -> str:
+    database_name = f"delivery_note_restore_{secrets.token_hex(8)}"
+    if not RESTORE_DATABASE_PATTERN.fullmatch(database_name):
+        raise BackupError("生成的临时恢复数据库名称不安全")
+    return database_name
+
+
+def _validate_database_restore(
+    config: BackupConfig,
     runner: Runner,
     *,
-    db_image: str,
-    backup_directory: Path,
-    timeout_seconds: int,
-) -> None:
-    output = runner.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--volume",
-            f"{backup_directory.resolve()}:/backup:ro",
-            db_image,
-            "pg_restore",
-            "--list",
-            "/backup/database.dump",
-        ],
-        timeout_seconds=timeout_seconds,
-    )
-    if not output.strip():
-        raise BackupError("pg_restore 未能列出数据库备份内容")
+    database_path: Path,
+    source_counts: dict[str, int],
+) -> dict[str, int]:
+    database_name = _temporary_restore_database_name()
+    primary_error: Exception | None = None
+    restored_counts: dict[str, int] = {}
+    try:
+        runner.run(
+            _compose(
+                config,
+                "exec",
+                "-T",
+                "db",
+                "createdb",
+                "-U",
+                "delivery_note",
+                "--maintenance-db=postgres",
+                "--owner=delivery_note",
+                database_name,
+            )
+        )
+        with database_path.open("rb") as source:
+            runner.run(
+                _compose(
+                    config,
+                    "exec",
+                    "-T",
+                    "db",
+                    "pg_restore",
+                    "-U",
+                    "delivery_note",
+                    "-d",
+                    database_name,
+                    "--exit-on-error",
+                    "--no-owner",
+                    "--no-privileges",
+                ),
+                stdin=source,
+                timeout_seconds=config.snapshot_timeout_seconds,
+            )
+        restored_counts = _critical_table_counts(config, runner, database_name)
+        if restored_counts != source_counts:
+            differences = ", ".join(
+                f"{table}: 源库={source_counts[table]}, 恢复库={restored_counts[table]}"
+                for table in CRITICAL_TABLES
+                if source_counts[table] != restored_counts[table]
+            )
+            raise BackupError(f"恢复库关键表行数与快照不一致：{differences}")
+    except Exception as error:
+        primary_error = error
+    finally:
+        try:
+            runner.run(
+                _compose(
+                    config,
+                    "exec",
+                    "-T",
+                    "db",
+                    "dropdb",
+                    "-U",
+                    "delivery_note",
+                    "--maintenance-db=postgres",
+                    "--if-exists",
+                    "--force",
+                    database_name,
+                )
+            )
+        except Exception as cleanup_error:
+            if primary_error is None:
+                primary_error = BackupError(
+                    f"临时恢复数据库清理失败：{cleanup_error}"
+                )
+            else:
+                primary_error = BackupError(
+                    "数据库恢复验证失败且临时恢复数据库清理失败："
+                    f"{primary_error}; {cleanup_error}"
+                )
+    if primary_error is not None:
+        raise primary_error
+    return restored_counts
 
 
 def _validate_data_archive(path: Path) -> tuple[int, int]:
@@ -376,21 +529,39 @@ def _validate_data_archive(path: Path) -> tuple[int, int]:
     return entries, files
 
 
-def _resume_services(config: BackupConfig, runner: Runner) -> None:
+def _resume_services(
+    config: BackupConfig,
+    runner: Runner,
+    service_containers: dict[str, str],
+) -> None:
+    missing_containers = [
+        service for service in RESUMED_SERVICES if service not in service_containers
+    ]
+    if missing_containers:
+        raise BackupError(
+            "缺少维护前容器标识：" + ", ".join(missing_containers)
+        )
+    container_ids = [
+        service_containers[service] for service in RESUMED_SERVICES
+    ]
+    # 直接启动维护前解析出的容器，避免新版 Compose 的依赖图或尚未构建镜像
+    # 阻断旧生产版本在备份窗口后的恢复。
     runner.run(
-        _compose(
-            config,
-            "up",
-            "-d",
-            "--no-build",
-            "--wait",
-            "--wait-timeout",
-            str(config.service_wait_timeout_seconds),
-            "api",
-            *WORKER_SERVICES,
-            "web",
-        ),
+        ["docker", "start", *container_ids],
         timeout_seconds=config.service_wait_timeout_seconds + 60,
+    )
+    runner.run(
+        [
+            "docker",
+            "exec",
+            service_containers["api"],
+            "python",
+            "-c",
+            API_READINESS_PROBE.format(
+                timeout=config.service_wait_timeout_seconds
+            ),
+        ],
+        timeout_seconds=config.service_wait_timeout_seconds + 10,
     )
     missing = sorted(REQUIRED_SERVICES - _running_services(config, runner))
     if missing:
@@ -455,6 +626,12 @@ def create_backup(
         temporary_directory.chmod(0o700)
         maintenance_started = False
         primary_error: Exception | None = None
+        database_path = temporary_directory / "database.dump"
+        archive_path = temporary_directory / "delivery_data.tar.gz"
+        source_counts: dict[str, int] = {}
+        restored_counts: dict[str, int] = {}
+        archive_entries = 0
+        archive_files = 0
 
         try:
             maintenance_started = True
@@ -488,28 +665,29 @@ def create_backup(
             if _active_job_count(config, runner) != 0:
                 raise BackupError("Worker 停止后仍存在活动任务")
 
-            database_path = temporary_directory / "database.dump"
+            source_counts = _critical_table_counts(
+                config,
+                runner,
+                "delivery_note",
+            )
             _create_database_dump(config, runner, database_path)
-            archive_path = _create_data_archive(
+            _create_data_archive(
                 runner,
                 api_image=environment["api_image"],
                 data_volume=environment["data_volume"],
                 backup_directory=temporary_directory,
                 timeout_seconds=config.snapshot_timeout_seconds,
             )
-            _validate_database_dump(
-                runner,
-                db_image=environment["db_image"],
-                backup_directory=temporary_directory,
-                timeout_seconds=config.snapshot_timeout_seconds,
-            )
-            archive_entries, archive_files = _validate_data_archive(archive_path)
         except Exception as error:
             primary_error = error
         finally:
             if maintenance_started:
                 try:
-                    _resume_services(config, runner)
+                    _resume_services(
+                        config,
+                        runner,
+                        environment["service_containers"],
+                    )
                 except Exception as resume_error:
                     if primary_error is None:
                         primary_error = resume_error
@@ -517,6 +695,18 @@ def create_backup(
                         primary_error = BackupError(
                             f"备份失败且服务恢复失败：{primary_error}; {resume_error}"
                         )
+
+        if primary_error is None:
+            try:
+                restored_counts = _validate_database_restore(
+                    config,
+                    runner,
+                    database_path=database_path,
+                    source_counts=source_counts,
+                )
+                archive_entries, archive_files = _validate_data_archive(archive_path)
+            except Exception as error:
+                primary_error = error
 
         if primary_error is not None:
             _write_private_text(
@@ -529,7 +719,7 @@ def create_backup(
         database_sha256 = _sha256(database_path)
         archive_sha256 = _sha256(archive_path)
         metadata = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "complete",
             "created_at": started_at.isoformat(),
             "completed_at": completed_at.isoformat(),
@@ -541,6 +731,11 @@ def create_backup(
                 "format": "postgresql_custom",
                 "bytes": database_path.stat().st_size,
                 "sha256": database_sha256,
+                "source_row_counts": source_counts,
+                "restore_verification": {
+                    "status": "passed",
+                    "restored_row_counts": restored_counts,
+                },
             },
             "data_archive": {
                 "filename": archive_path.name,
@@ -570,6 +765,7 @@ def create_backup(
             "status": "complete",
             "backup_directory": str(final_directory),
             "database_bytes": database_bytes,
+            "database_restore_verified": True,
             "data_archive_bytes": data_archive_bytes,
             "data_archive_files": archive_files,
             "pruned_backups": pruned,

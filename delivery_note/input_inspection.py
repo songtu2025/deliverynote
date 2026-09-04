@@ -128,18 +128,10 @@ def _stream_xlsx_inspection(
     try:
         sheet = workbook.worksheets[0]
         values = sheet.iter_rows(values_only=True)
-        header = next(values, ())
-        header_names = ["" if value is None else str(value) for value in header]
-        expected_set = set(expected_columns)
-        selected_columns = [
-            (index, name)
-            for index, name in enumerate(header_names)
-            if name in expected_set
-        ]
-        found = {name for _index, name in selected_columns}
-        missing = [column for column in expected_columns if column not in found]
-        if missing:
-            raise ValueError(f"缺少必要字段：{', '.join(missing)}")
+        selected_columns = _stream_selected_columns(
+            expected_columns,
+            next(values, ()),
+        )
 
         page_rows: list[tuple[int, dict[str, Any]]] = []
         shared_site_rows: list[int] = []
@@ -209,6 +201,78 @@ def _stream_xlsx_inspection(
         workbook.close()
 
 
+def _stream_selected_columns(
+    expected_columns: list[str],
+    header: tuple,
+) -> list[tuple[int, str]]:
+    header_names = ["" if value is None else str(value) for value in header]
+    expected_set = set(expected_columns)
+    selected_columns = [
+        (index, name)
+        for index, name in enumerate(header_names)
+        if name in expected_set
+    ]
+    found = {name for _index, name in selected_columns}
+    missing = [column for column in expected_columns if column not in found]
+    if missing:
+        raise ValueError(f"缺少必要字段：{', '.join(missing)}")
+    return selected_columns
+
+
+def _stream_xlsx_preview(
+    kind: str,
+    path: Path,
+    offset: int,
+    limit: int,
+    summary: dict,
+) -> dict:
+    """使用已知总行数读取一页，并在页末停止流式扫描。"""
+
+    total = int(summary["row_count"])
+    columns = list(summary["columns"])
+    preview = {
+        "kind": kind,
+        "columns": columns,
+        "rows": [],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+    page_end = min(offset + limit, total)
+    if offset >= page_end:
+        return preview
+
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook.worksheets[0]
+        values = sheet.iter_rows(values_only=True)
+        selected_columns = _stream_selected_columns(
+            _STREAMING_COLUMNS[kind],
+            next(values, ()),
+        )
+        for row_offset, row in enumerate(values):
+            if row_offset < offset:
+                continue
+            selected_values = [
+                row[index] if index < len(row) else None
+                for index, _name in selected_columns
+            ]
+            preview["rows"].append(
+                {
+                    name: _stream_json_safe(value)
+                    for (_index, name), value in zip(
+                        selected_columns,
+                        selected_values,
+                    )
+                }
+            )
+            if row_offset + 1 >= page_end:
+                break
+        return preview
+    finally:
+        workbook.close()
+
+
 def inspect_input_version(kind: str, path: Path) -> dict:
     return _inspect_frame(kind, _read_frame(kind, path))
 
@@ -229,6 +293,21 @@ def inspect_input_version_with_preview(
         "summary": _inspect_frame(kind, frame),
         "preview": _preview_frame(kind, frame, offset, limit),
     }
+
+
+def preview_input_version_page(
+    kind: str,
+    path: Path,
+    offset: int,
+    limit: int,
+    summary: dict,
+) -> dict:
+    """基于已缓存摘要加载新页面，避免再次完整扫描流式工作簿。"""
+
+    path = Path(path)
+    if kind in _STREAMING_COLUMNS and path.suffix.lower() in {".xlsx", ".xlsm"}:
+        return _stream_xlsx_preview(kind, path, offset, limit, summary)
+    return _preview_frame(kind, _read_frame(kind, path), offset, limit)
 
 
 def preview_input_version(

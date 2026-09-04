@@ -7,7 +7,7 @@ DeliveryNote 是一个面向内部供应链团队的单据处理系统，用于�
 | 流程 | 输入 | 输出 |
 | --- | --- | --- |
 | 交货批次 | 一份或多份供应商交货单，以及采购、商品、供应商、库位资料 | 标准 A:G 交货导入表、待处理明细、合并 Excel 或分文件 ZIP |
-| 自营仓入库 | 一份质检交货单，以及积加待入库数据 | 积加批量入库表和待处理明细 |
+| 自营仓入库 | 一份或多份质检交货单，以及积加待入库数据 | 单文件积加入库表、合并表、分文件 ZIP 和待处理明细 |
 
 Web 端适合日常批次操作，CLI 保留单文件交货处理能力。当前系统面向少量 PC 用户，不做 ERP 回写，也不跨批次延续采购余额。
 
@@ -41,10 +41,12 @@ Web 端适合日常批次操作，CLI 保留单文件交货处理能力。当前
 
 ### 自营仓入库
 
-1. 每个批次使用一份质检交货单和一个已启用的待入库数据版本。
-2. 可收数量按关联采购单顺序分配，规则内超收和规则外数量分别记录。
-3. 站点不唯一时必须由用户选择后重新计算。
-4. 始终满足：
+1. 每个批次使用一份或多份质检交货单和一个已启用的待入库数据版本。
+2. 质检交货单按用户指定顺序连续扣减同一份待入库余额，前序文件优先。
+3. 超收额度按供应商、SKU、站点在整个批次共享，不能按文件重复使用。
+4. 可收数量按关联采购单顺序分配，规则内超收和规则外数量分别记录。
+5. 站点不唯一时必须由用户选择后重新计算整个批次。
+6. 每份质检单和批次汇总始终满足：
 
    ```text
    质检合格总量 = 可入库总量 + 待处理总量
@@ -90,9 +92,13 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 | `ADMIN_PASSWORD` | 无 | 首次建库时创建的管理员密码，必填 |
 | `WEB_PORT` | `8080` | Web 在宿主机回环地址上的端口 |
 | `CORS_ORIGINS` | `http://localhost:8080` | 允许访问 API 的 Web 来源 |
+| `SESSION_COOKIE_SECURE` | `false` | 会话 Cookie 是否仅通过 HTTPS 发送；正式 HTTPS 环境应设为 `true` |
 | `MAX_UPLOAD_BYTES` | `20971520` | 单次上传大小上限，单位为字节 |
+| `MAX_CONCURRENT_UPLOAD_PARSES` | `2` | 单个 API 进程并发解析 Excel 的数量，必须大于 0 |
+| `MAX_BATCH_UPLOAD_FILES` | `50` | 单个交货或自营仓批次最多上传的来源文件数，必须大于 0 |
 | `IMPORT_CANDIDATE_TTL_SECONDS` | `900` | 库位导入预览有效时间 |
 | `POSITION_FRAME_CACHE_SIZE` | `8` | API 进程缓存的库位版本数量 |
+| `WORKER_MAX_ATTEMPTS` | `3` | Worker 超时任务的最大自动尝试次数，必须大于 0 |
 | `GERPGO_API_BASE_URL` | `https://open.gerpgo.com` | 积加 OpenAPI 地址 |
 | `GERPGO_APP_ID` | 空 | 积加应用 ID，不使用同步时可留空 |
 | `GERPGO_APP_KEY` | 空 | 积加应用密钥，不使用同步时可留空 |
@@ -101,13 +107,17 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 
 > 修改 `.env` 中的初始管理员密码不会重置数据库里已经存在的账号，请在系统内执行密码重置。
 
+浏览器登录使用 `HttpOnly`、`SameSite=Strict`、`Path=/` 的会话 Cookie，前端不会把会话令牌保存到 Web Storage。登录接口仍在响应体返回 token，供 CLI 或受控脚本通过 `Authorization: Bearer <token>` 调用；同时出现 Bearer 和 Cookie 时，服务端优先验证 Bearer。正式环境通过 HTTPS 反向代理访问时必须设置 `SESSION_COOKIE_SECURE=true`；本地 HTTP 开发保持默认 `false`。
+
+默认的 `SameSite=Strict` 与精确配置的 `CORS_ORIGINS` 面向同站点部署。若未来需要跨站点托管前端，应先设计独立的 CSRF 防护并评审 Cookie 策略，不能直接降低为 `SameSite=None` 或放宽 CORS。
+
 ### 2. 启动服务
 
 ```bash
 docker compose config
 docker compose up -d --build
 docker compose ps
-curl http://127.0.0.1:8080/health
+curl http://127.0.0.1:8080/health/ready
 ```
 
 健康检查成功时返回：
@@ -116,9 +126,19 @@ curl http://127.0.0.1:8080/health
 {"status":"ok"}
 ```
 
+`/health/live` 只检查 API 进程是否存活，`/health/ready` 会实际检查数据库连接；原有 `/health` 保留兼容，并与 readiness 语义一致。数据库不可用时 readiness 返回 `503`，且不会返回底层异常信息。
+
 如修改了 `WEB_PORT`，请同步替换健康检查端口。
 
-Compose 会启动六个服务：PostgreSQL、API、Web、批次 Worker、采购同步 Worker 和待入库同步 Worker。上传文件、同步结果和导出文件保存在 `delivery_data` 数据卷，数据库保存在 `postgres_data` 数据卷。
+Compose 会先运行一次性的 `migrate` 服务，成功创建或升级数据库结构后，再启动六个常驻服务：PostgreSQL、API、Web、批次 Worker、采购同步 Worker 和待入库同步 Worker。上传文件、同步结果和导出文件保存在 `delivery_data` 数据卷，数据库保存在 `postgres_data` 数据卷。迁移失败时 API 和 Worker 不会启动，应先查看 `docker compose logs migrate`，修复问题后重新执行启动命令。
+
+需要在维护窗口显式检查并执行迁移时，可运行：
+
+```bash
+docker compose run --rm migrate
+```
+
+直接以 Python 启动 API（包括默认的 SQLite 开发模式）时，应用仍会自动执行同一个幂等迁移入口。Compose 通过 `AUTO_MIGRATE_SCHEMA=false` 关闭这一兼容行为，避免 API 与 Worker 并发修改数据库结构。
 
 停止服务但保留数据：
 
@@ -127,6 +147,26 @@ docker compose down
 ```
 
 不要执行 `docker compose down -v`，该命令会删除数据库和业务文件数据卷。
+
+## 备份与恢复演练
+
+先执行只读环境检查，再在维护窗口创建数据库与文件卷的成对备份：
+
+```bash
+python scripts/backup_deliverynote.py \
+  --destination /srv/deliverynote-backups \
+  --check-only
+
+python scripts/backup_deliverynote.py \
+  --destination /srv/deliverynote-backups \
+  --retention-count 14
+```
+
+脚本会先停止 Web 和 API、等待任务排空，再停止三个 Worker。在所有业务写入停止后，脚本记录 `users`、`input_versions`、`batches`、`batch_files` 和 `jobs` 的源库行数，并生成 PostgreSQL custom dump 与 `delivery_data` 归档。两个快照生成后会先恢复常驻服务，再进行耗时的隔离恢复验证，以缩短业务停机时间。
+
+数据库验证不是只检查 dump 目录。脚本会在现有 PostgreSQL 容器内创建名称严格匹配 `delivery_note_restore_<16位十六进制随机值>` 的临时数据库，将 dump 完整恢复到该库，确认关键表可查询，并将恢复库行数与停机快照时记录的源库行数逐表比较。验证结束后，无论创建、恢复或查询是否成功，都会尝试强制删除临时库；脚本不会对正式 `delivery_note` 数据库执行 restore、clean 或覆盖操作。
+
+只有数据库恢复验证、文件归档校验、服务恢复和临时库清理全部成功时，备份目录才会写入 `READY`。`BACKUP-METADATA.json` 会记录源库计数、恢复计数和验证结果，`SHA256SUMS` 保存数据库与文件归档校验和。任一步失败时，目录保留为 `.incomplete-*` 并写入 `FAILED.txt`，不会参与自动保留清理；确认原因和所需证据后再由管理员手工删除。临时库删除失败会明确导致整次备份失败，必须根据错误信息人工清理，不能将该目录用于正式恢复。
 
 ## Web 使用流程
 
@@ -173,11 +213,12 @@ docker compose down
 
 ```text
 同步并启用积加待入库数据
-  → 创建自营仓批次并上传质检交货单
+  → 创建自营仓批次并上传一份或多份质检交货单
+  → 调整质检单处理顺序
   → 预检
   → 后台计算
   → 处理站点歧义或超量
-  → 导出积加批量入库表
+  → 导出单文件积加入库表、合并表或分文件 ZIP
 ```
 
 质检交货单必须包含 `明细` 工作表，并提供 `积加SKU`、`实收数量`、`站点` 和 `交货单号`。系统只读取积加数据，不会自动提交入库结果。
@@ -283,7 +324,15 @@ docker compose config
 git diff --check
 ```
 
-CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、后端测试、前端测试与构建、依赖检查和 Compose 配置校验。
+CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、后端测试、前端测试与构建、依赖检查和 Compose 配置校验。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
+
+也可以显式运行统一迁移命令：
+
+```bash
+python -m delivery_note.migrations --database-url postgresql+psycopg://user:password@host/database
+```
+
+当前迁移数量较少，因此没有引入 Alembic；统一入口先创建缺失的新表，再按固定顺序执行 `overreceipt_rules`、`self_operated_optional_versions` 和 `purchase_sync_optional_versions` 三个幂等升级。新增结构变更必须加入该有序入口，不能只挂在 API 启动代码中。
 
 ## 数据与安全
 

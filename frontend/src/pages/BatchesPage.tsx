@@ -205,6 +205,7 @@ export default function BatchesPage({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>();
   const loadedRef = useRef(false);
+  const inboundSyncPollInFlightRef = useRef(false);
   const [form] = Form.useForm<{ name: string }>();
 
   const refreshVersions = useCallback(async () => {
@@ -213,7 +214,10 @@ export default function BatchesPage({
     return nextVersions;
   }, []);
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (
+    background = false,
+    knownInboundSyncStatus?: SelfOperatedInboundSyncStatus
+  ) => {
     if (!background) setLoading(true);
     try {
       const [batchRows, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
@@ -223,7 +227,9 @@ export default function BatchesPage({
           ? api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
           : api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions"),
         workflow === "self_operated_inbound"
-          ? api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
+          ? knownInboundSyncStatus
+            ? Promise.resolve(knownInboundSyncStatus)
+            : api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
           : Promise.resolve(null)
       ]);
       setBatches(batchRows);
@@ -255,8 +261,47 @@ export default function BatchesPage({
     if (!active || workflow !== "self_operated_inbound" || (status !== "queued" && status !== "running")) {
       return undefined;
     }
-    const timer = window.setInterval(() => void load(true), 2000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const pollSyncStatus = async () => {
+      if (inboundSyncPollInFlightRef.current) {
+        if (!cancelled) {
+          timer = window.setTimeout(() => void pollSyncStatus(), 2000);
+        }
+        return;
+      }
+      inboundSyncPollInFlightRef.current = true;
+      let shouldContinue = false;
+      try {
+        const next = await api<SelfOperatedInboundSyncStatus>(
+          "/api/self-operated-inbound-sync"
+        );
+        if (cancelled) return;
+        setSyncStatus(next);
+        setSyncError("");
+        shouldContinue = next.job?.status === "queued" || next.job?.status === "running";
+        if (!shouldContinue) {
+          await load(true, next);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSyncError(error instanceof Error ? error.message : "读取同步状态失败");
+          shouldContinue = true;
+        }
+      } finally {
+        inboundSyncPollInFlightRef.current = false;
+        if (!cancelled && shouldContinue) {
+          timer = window.setTimeout(() => void pollSyncStatus(), 2000);
+        }
+      }
+    };
+
+    timer = window.setTimeout(() => void pollSyncStatus(), 2000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [active, load, syncStatus?.job?.status, workflow]);
 
   const activeVersions = useMemo(
@@ -300,14 +345,16 @@ export default function BatchesPage({
       const values = await form.validateFields();
       let batch: Batch;
       if (workflow === "self_operated_inbound") {
-        const sourceFile = sourceFiles[0]?.originFileObj;
-        if (!sourceFile) {
-          message.warning("请先选择质检交货单");
+        const files = sourceFiles.flatMap((file) => (
+          file.originFileObj ? [file.originFileObj] : []
+        ));
+        if (!files.length) {
+          message.warning("请至少选择一份质检交货单");
           return;
         }
         const formData = new FormData();
         formData.append("name", values.name);
-        formData.append("delivery_file", sourceFile);
+        files.forEach((file) => formData.append("delivery_file", file));
         batch = await api<Batch>("/api/self-operated-batches", {
           method: "POST",
           body: formData
@@ -353,8 +400,8 @@ export default function BatchesPage({
     setSourceFiles([]);
   };
 
-  const selectSourceFile: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
-    setSourceFiles(fileList.slice(-1));
+  const selectSourceFiles: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
+    setSourceFiles(fileList);
   };
 
   const selectDeliveryFiles: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
@@ -855,7 +902,9 @@ export default function BatchesPage({
               <div className="batch-table-value">
                 <span className="batch-cell-label">文件 / 数量</span>
                 <span className="batch-volume">
-                  {batch.file_count} 个文件
+                  {batch.workflow === "self_operated_inbound"
+                    ? `${batch.file_count} 份质检单 + ${batch.inbound_file?.uploaded ? 1 : 0} 份待入库数据`
+                    : `${batch.file_count} 个文件`}
                   {batch.summary && batch.summary.delivery_total > 0
                     ? " · 交货 " + batch.summary.delivery_total
                     : ""}
@@ -969,16 +1018,19 @@ export default function BatchesPage({
               <Form.Item label="质检交货单" required>
                 <Upload
                   accept=".xls,.xlsx"
-                  maxCount={1}
-                  multiple={false}
+                  multiple
                   beforeUpload={() => false}
                   fileList={sourceFiles}
-                  onChange={selectSourceFile}
+                  onChange={selectSourceFiles}
                 >
                   <Button icon={<UploadOutlined />}>选择质检交货单</Button>
                 </Upload>
               </Form.Item>
+              <Typography.Text type="secondary">
+                可同时选择多份；系统将按列表顺序共享扣减待入库余额和超收额度。
+              </Typography.Text>
               <Alert
+                className="self-operated-version-lock"
                 type="info"
                 showIcon
                 title="锁定待入库数据版本"

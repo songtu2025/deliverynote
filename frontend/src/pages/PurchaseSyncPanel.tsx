@@ -72,6 +72,8 @@ export default function PurchaseSyncPanel({
   const [issueFilter, setIssueFilter] = useState<SyncIssueFilter>("warning");
   const [detailsOpen, setDetailsOpen] = useState(!compact);
   const refreshedCandidateRef = useRef<number | null>(null);
+  const versionsRef = useRef(versions);
+  versionsRef.current = versions;
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +89,7 @@ export default function PurchaseSyncPanel({
         if (
           next.job?.status === "succeeded"
           && candidateId
-          && !versions.some((version) => version.id === candidateId)
+          && !versionsRef.current.some((version) => version.id === candidateId)
           && refreshedCandidateRef.current !== candidateId
         ) {
           refreshedCandidateRef.current = candidateId;
@@ -108,7 +110,7 @@ export default function PurchaseSyncPanel({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [refreshVersions, syncAttempt, versions]);
+  }, [refreshVersions, syncAttempt]);
 
   const syncJob = syncStatus?.job ?? null;
   const syncCandidate = syncJob?.candidate_version_id

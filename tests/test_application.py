@@ -1,6 +1,10 @@
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
+
+import delivery_note.application as application_module
+import delivery_note.pipeline as pipeline_module
 
 try:
     from delivery_note.pipeline import OverreceiptPolicy
@@ -188,6 +192,46 @@ class DeliveryBatchTests(unittest.TestCase):
             process_delivery_batch(deliveries, self.products(), purchases)
 
         self.assertEqual(purchases.iloc[0]["未交量"], 100)
+
+    def test_same_purchase_frame_starts_each_batch_with_fresh_balance(self):
+        purchases = self.purchases()
+        original = purchases.copy(deep=True)
+        deliveries = [self.request("first", 60), self.request("second", 60)]
+
+        first = process_delivery_batch(deliveries, self.products(), purchases)
+        second = process_delivery_batch(deliveries, self.products(), purchases)
+
+        self.assertEqual(
+            (first.delivery_total, first.import_total, first.manual_total),
+            (120, 100, 20),
+        )
+        self.assertEqual(
+            (second.delivery_total, second.import_total, second.manual_total),
+            (120, 100, 20),
+        )
+        pd.testing.assert_frame_equal(purchases, original)
+
+    def test_twenty_files_build_one_shared_purchase_ledger(self):
+        purchases = self.purchases()
+        purchases.loc[:, "未交量"] = 20
+        deliveries = [self.request(str(index), 1) for index in range(20)]
+
+        with patch.object(
+            application_module,
+            "build_purchase_balance_ledger",
+            wraps=pipeline_module.build_purchase_balance_ledger,
+        ) as build_ledger:
+            result = process_delivery_batch(
+                deliveries,
+                self.products(),
+                purchases,
+            )
+
+        self.assertEqual(build_ledger.call_count, 1)
+        self.assertEqual(
+            (result.delivery_total, result.import_total, result.manual_total),
+            (20, 20, 0),
+        )
 
 
 class SplitValidationTests(unittest.TestCase):

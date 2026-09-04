@@ -13,6 +13,8 @@ from typing import BinaryIO, Sequence
 from scripts.backup_deliverynote import (
     BackupConfig,
     BackupError,
+    CRITICAL_TABLES,
+    RESTORE_DATABASE_PATTERN,
     SubprocessRunner,
     _validate_data_archive,
     create_backup,
@@ -21,30 +23,75 @@ from scripts.backup_deliverynote import (
 
 
 class FakeRunner:
-    def __init__(self, *, fail_archive: bool = False):
+    def __init__(
+        self,
+        *,
+        fail_archive: bool = False,
+        fail_create_database: bool = False,
+        fail_restore: bool = False,
+        fail_validation: bool = False,
+        fail_drop_database: bool = False,
+        fail_compose_reconcile: bool = False,
+        restored_counts: dict[str, int] | None = None,
+    ):
         self.fail_archive = fail_archive
+        self.fail_create_database = fail_create_database
+        self.fail_restore = fail_restore
+        self.fail_validation = fail_validation
+        self.fail_drop_database = fail_drop_database
+        self.fail_compose_reconcile = fail_compose_reconcile
+        self.source_counts = {
+            "users": 3,
+            "input_versions": 7,
+            "batches": 5,
+            "batch_files": 8,
+            "jobs": 2,
+        }
+        self.restored_counts = restored_counts or dict(self.source_counts)
+        self.restored_payload: bytes | None = None
         self.commands: list[tuple[str, ...]] = []
 
     def run(
         self,
         arguments: Sequence[str],
         *,
+        stdin: BinaryIO | None = None,
         stdout: BinaryIO | None = None,
         timeout_seconds: int = 300,
     ) -> str:
         command = tuple(arguments)
         self.commands.append(command)
 
+        if (
+            command[:2] == ("docker", "compose")
+            and self.fail_compose_reconcile
+            and ("up" in command or "start" in command)
+        ):
+            raise BackupError("模拟新 Compose 镜像尚不存在")
+
         if "pg_dump" in command:
             if stdout is None:
                 raise AssertionError("pg_dump 必须直接写入文件")
             stdout.write(b"PGDMP\x01\x0funit-test")
             return ""
+        if "createdb" in command:
+            if self.fail_create_database:
+                raise BackupError("模拟临时数据库创建失败")
+            return ""
+        if "pg_restore" in command:
+            if stdin is None:
+                raise AssertionError("pg_restore 必须从数据库备份读取标准输入")
+            if self.fail_restore:
+                raise BackupError("模拟 pg_restore 失败")
+            self.restored_payload = stdin.read()
+            return ""
+        if "dropdb" in command:
+            if self.fail_drop_database:
+                raise BackupError("模拟临时数据库清理失败")
+            return ""
         if command[:3] == ("docker", "volume", "ls"):
             return "deliverynote_delivery_data\n"
         if command[:2] == ("docker", "run"):
-            if "pg_restore" in command:
-                return "; Archive created for unit test\nTABLE public batches\n"
             if "tar" in command:
                 if self.fail_archive:
                     raise BackupError("模拟文件卷归档失败")
@@ -63,9 +110,25 @@ class FakeRunner:
         if "images" in command and "--quiet" in command:
             service = command[-1]
             return f"sha256:{service}-image\n"
+        if "ps" in command and "--quiet" in command:
+            service = command[-1]
+            return f"deliverynote-{service}-1\n"
         if "ps" in command and "--status" in command and "--services" in command:
             return "db\napi\nworker\npurchase-sync-worker\ninbound-sync-worker\nweb\n"
         if "psql" in command:
+            query = command[command.index("-c") + 1]
+            if "UNION ALL" in query and "public.users" in query:
+                database = command[command.index("-d") + 1]
+                if database != "delivery_note" and self.fail_validation:
+                    raise BackupError("模拟恢复库验证失败")
+                counts = (
+                    self.source_counts
+                    if database == "delivery_note"
+                    else self.restored_counts
+                )
+                return "".join(
+                    f"{table}={counts[table]}\n" for table in CRITICAL_TABLES
+                )
             return "0\n"
         return ""
 
@@ -91,6 +154,22 @@ class BackupDeliveryNoteTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
+    def assert_failed_backup(self, runner: FakeRunner, message: str) -> Path:
+        with self.assertRaisesRegex(BackupError, message):
+            create_backup(
+                self.config,
+                runner=runner,
+                now=lambda: self.fixed_time,
+            )
+        failed = list(self.destination.glob(".incomplete-20260722-183000-*"))
+        self.assertEqual(len(failed), 1)
+        self.assertTrue((failed[0] / "FAILED.txt").is_file())
+        self.assertFalse((failed[0] / "READY").exists())
+        for command in (item for item in runner.commands if "dropdb" in item):
+            self.assertRegex(command[-1], RESTORE_DATABASE_PATTERN)
+            self.assertNotEqual(command[-1], "delivery_note")
+        return failed[0]
+
     def test_successful_backup_is_completed_only_after_resume_and_validation(self):
         runner = FakeRunner()
 
@@ -111,8 +190,21 @@ class BackupDeliveryNoteTests(unittest.TestCase):
             (backup / "BACKUP-METADATA.json").read_text(encoding="utf-8")
         )
         self.assertEqual(metadata["status"], "complete")
+        self.assertEqual(metadata["schema_version"], 2)
         self.assertEqual(metadata["data_archive"]["files"], 1)
         self.assertEqual(metadata["active_jobs_before_maintenance"], 0)
+        self.assertEqual(
+            metadata["database"]["source_row_counts"],
+            runner.source_counts,
+        )
+        self.assertEqual(
+            metadata["database"]["restore_verification"],
+            {
+                "status": "passed",
+                "restored_row_counts": runner.source_counts,
+            },
+        )
+        self.assertTrue(result["database_restore_verified"])
         self.assertEqual((backup / "database.dump").stat().st_mode & 0o777, 0o600)
 
         stop_ingress = next(
@@ -133,11 +225,126 @@ class BackupDeliveryNoteTests(unittest.TestCase):
             if "pg_dump" in command
         )
         resume = next(
-            index for index, command in enumerate(runner.commands) if "up" in command
+            index
+            for index, command in enumerate(runner.commands)
+            if command[:2] == ("docker", "start")
         )
+        source_counts = next(
+            index
+            for index, command in enumerate(runner.commands)
+            if "psql" in command
+            and "UNION ALL" in command[command.index("-c") + 1]
+            and command[command.index("-d") + 1] == "delivery_note"
+        )
+        create_database = next(
+            index
+            for index, command in enumerate(runner.commands)
+            if "createdb" in command
+        )
+        restore_database = next(
+            index
+            for index, command in enumerate(runner.commands)
+            if "pg_restore" in command
+        )
+        verify_database = next(
+            index
+            for index, command in enumerate(runner.commands)
+            if "psql" in command
+            and "UNION ALL" in command[command.index("-c") + 1]
+            and command[command.index("-d") + 1] != "delivery_note"
+        )
+        drop_database = next(
+            index
+            for index, command in enumerate(runner.commands)
+            if "dropdb" in command
+        )
+        temporary_database = runner.commands[create_database][-1]
         self.assertLess(stop_ingress, stop_worker)
-        self.assertLess(stop_worker, database_dump)
+        self.assertLess(stop_worker, source_counts)
+        self.assertLess(source_counts, database_dump)
         self.assertLess(database_dump, resume)
+        self.assertLess(resume, create_database)
+        self.assertLess(create_database, restore_database)
+        self.assertLess(restore_database, verify_database)
+        self.assertLess(verify_database, drop_database)
+        self.assertRegex(temporary_database, RESTORE_DATABASE_PATTERN)
+        self.assertNotEqual(temporary_database, "delivery_note")
+        self.assertEqual(
+            runner.commands[restore_database][
+                runner.commands[restore_database].index("-d") + 1
+            ],
+            temporary_database,
+        )
+        self.assertEqual(runner.commands[drop_database][-1], temporary_database)
+        self.assertEqual(runner.restored_payload, b"PGDMP\x01\x0funit-test")
+
+    def test_resume_uses_existing_containers_when_new_compose_image_is_missing(self):
+        runner = FakeRunner(fail_compose_reconcile=True)
+
+        result = create_backup(
+            self.config,
+            runner=runner,
+            now=lambda: self.fixed_time,
+        )
+
+        self.assertEqual(result["status"], "complete")
+        resume = next(
+            command
+            for command in runner.commands
+            if command[:2] == ("docker", "start")
+            and command[-5:]
+            == (
+                "deliverynote-api-1",
+                "deliverynote-worker-1",
+                "deliverynote-purchase-sync-worker-1",
+                "deliverynote-inbound-sync-worker-1",
+                "deliverynote-web-1",
+            )
+        )
+        self.assertNotIn("compose", resume)
+
+    def test_restore_count_mismatch_fails_and_drops_temporary_database(self):
+        restored_counts = {
+            "users": 3,
+            "input_versions": 7,
+            "batches": 4,
+            "batch_files": 8,
+            "jobs": 2,
+        }
+        runner = FakeRunner(restored_counts=restored_counts)
+
+        self.assert_failed_backup(runner, "关键表行数.*不一致")
+
+        self.assertTrue(any("dropdb" in command for command in runner.commands))
+
+    def test_pg_restore_failure_drops_temporary_database(self):
+        runner = FakeRunner(fail_restore=True)
+
+        self.assert_failed_backup(runner, "模拟 pg_restore 失败")
+
+        self.assertTrue(any("dropdb" in command for command in runner.commands))
+
+    def test_restore_validation_failure_drops_temporary_database(self):
+        runner = FakeRunner(fail_validation=True)
+
+        self.assert_failed_backup(runner, "模拟恢复库验证失败")
+
+        self.assertTrue(any("dropdb" in command for command in runner.commands))
+
+    def test_restore_database_creation_failure_still_attempts_drop(self):
+        runner = FakeRunner(fail_create_database=True)
+
+        self.assert_failed_backup(runner, "模拟临时数据库创建失败")
+
+        self.assertTrue(any("dropdb" in command for command in runner.commands))
+
+    def test_restore_database_drop_failure_cannot_mark_backup_ready(self):
+        runner = FakeRunner(fail_drop_database=True)
+
+        failed = self.assert_failed_backup(runner, "临时恢复数据库清理失败")
+
+        failure_marker = (failed / "FAILED.txt").read_text(encoding="utf-8")
+        self.assertIn("模拟临时数据库清理失败", failure_marker)
 
     def test_archive_failure_leaves_incomplete_marker_and_resumes_services(self):
         runner = FakeRunner(fail_archive=True)
@@ -153,7 +360,7 @@ class BackupDeliveryNoteTests(unittest.TestCase):
         self.assertEqual(len(failed), 1)
         self.assertTrue((failed[0] / "FAILED.txt").is_file())
         self.assertFalse((failed[0] / "READY").exists())
-        self.assertTrue(any("up" in command for command in runner.commands))
+        self.assertTrue(any("start" in command for command in runner.commands))
 
     def test_retention_only_prunes_old_completed_standard_directories(self):
         self.destination.mkdir()
