@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,7 @@ from delivery_note.input_inspection import (
     position_change_warnings,
     position_diff,
     preview_input_version,
+    preview_input_version_page,
     validate_position_frame,
     write_position_workbook,
 )
@@ -134,6 +136,52 @@ class InputInspectionTests(unittest.TestCase):
                     "品类A": "配件",
                 }
             ],
+        )
+
+    def test_streaming_next_page_stops_at_page_end(self):
+        consumed_rows: list[int] = []
+
+        def workbook_rows():
+            yield tuple(PRODUCT_COLUMNS)
+            for index in range(100):
+                consumed_rows.append(index)
+                yield (f"SKU-{index}", "SEEKWAY:US", "水鞋", "锁")
+
+        workbook = SimpleNamespace(
+            worksheets=[
+                SimpleNamespace(
+                    iter_rows=lambda **_kwargs: workbook_rows(),
+                )
+            ],
+            close=lambda: None,
+        )
+        summary = {
+            "kind": "product",
+            "row_count": 100,
+            "columns": PRODUCT_COLUMNS,
+            "metrics": {},
+            "issues": [],
+        }
+
+        with patch(
+            "delivery_note.input_inspection.load_workbook",
+            return_value=workbook,
+        ):
+            preview = preview_input_version_page(
+                "product",
+                self.root / "product.xlsx",
+                offset=20,
+                limit=10,
+                summary=summary,
+            )
+
+        self.assertEqual(consumed_rows, list(range(30)))
+        self.assertEqual(preview["total"], 100)
+        self.assertEqual(preview["offset"], 20)
+        self.assertEqual(preview["limit"], 10)
+        self.assertEqual(
+            [row["SKU"] for row in preview["rows"]],
+            [f"SKU-{index}" for index in range(20, 30)],
         )
 
     def test_purchase_inspection_marks_shared_site_as_warning(self):

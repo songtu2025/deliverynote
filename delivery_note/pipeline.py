@@ -100,10 +100,90 @@ class OverreceiptAllowance:
     destination_warehouse: str
 
 
+@dataclass
+class _PurchaseBalance:
+    destination_warehouse: object
+    remaining: int | float
+
+
+@dataclass
+class PurchaseBalanceLedger:
+    """保存单批次内按匹配键聚合且可扣减的采购余额。"""
+
+    balances: dict[
+        tuple[object, object, object],
+        tuple[_PurchaseBalance, ...],
+    ]
+
+    def active_candidates(
+        self,
+        supplier: object,
+        sku: object,
+        site: object,
+    ) -> tuple[_PurchaseBalance, ...]:
+        """返回当前仍有余额的候选仓，并保持既定仓库顺序。"""
+
+        return tuple(
+            balance
+            for balance in self.balances.get((supplier, sku, site), ())
+            if balance.remaining > 0
+        )
+
+
 def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> None:
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"{source}缺少必要字段：{', '.join(missing)}")
+
+
+def build_purchase_balance_ledger(
+    purchase_rows: pd.DataFrame,
+) -> PurchaseBalanceLedger:
+    """从不可变采购输入一次构建批次作用域的聚合余额账本。"""
+
+    _require_columns(
+        purchase_rows,
+        {"单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"},
+        "采购需求",
+    )
+    purchases = purchase_rows.loc[
+        purchase_rows["单据状态"].isin(PURCHASE_STATUSES),
+        ["SKU", "供应商", "平台站点", "目的仓", "未交量"],
+    ].copy()
+    purchases["未交量"] = pd.to_numeric(
+        purchases["未交量"],
+        errors="coerce",
+    ).fillna(0)
+    purchases = purchases[purchases["未交量"] > 0]
+    needs = (
+        purchases.groupby(
+            ["SKU", "供应商", "平台站点", "目的仓"],
+            as_index=False,
+        )["未交量"]
+        .sum()
+        .reset_index(drop=True)
+    )
+
+    grouped: dict[
+        tuple[object, object, object],
+        list[_PurchaseBalance],
+    ] = {}
+    for sku, supplier, site, destination, quantity in needs.itertuples(
+        index=False,
+        name=None,
+    ):
+        grouped.setdefault((supplier, sku, site), []).append(
+            _PurchaseBalance(destination, quantity)
+        )
+    for balances in grouped.values():
+        balances.sort(
+            key=lambda balance: warehouse_sort_key(
+                str(balance.destination_warehouse)
+            )
+        )
+    return PurchaseBalanceLedger(
+        {key: tuple(balances) for key, balances in grouped.items()}
+    )
 
 
 def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
@@ -483,6 +563,8 @@ def process_data(
     supplier_code: str | None = None,
     overreceipt_allowances: MutableMapping[OverreceiptKey, OverreceiptAllowance]
     | None = None,
+    *,
+    _purchase_ledger: PurchaseBalanceLedger | None = None,
 ) -> BatchResult:
     """完成产品映射、采购需求汇总和交货数量分配。"""
     supplier_code = supplier_code or supplier_name
@@ -498,29 +580,16 @@ def process_data(
 
     delivery = resolve_delivery_sites(delivery_lines, product_info)
 
-    purchases = purchase_rows[
-        purchase_rows["单据状态"].isin(PURCHASE_STATUSES)
-        & purchase_rows["供应商"].eq(supplier_name)
-    ].copy()
-    purchases["未交量"] = pd.to_numeric(purchases["未交量"], errors="coerce").fillna(0)
-    purchases = purchases[purchases["未交量"] > 0]
-    needs = (
-        purchases.groupby(["SKU", "供应商", "平台站点", "目的仓"], as_index=False)[
-            "未交量"
-        ]
-        .sum()
-        .reset_index(drop=True)
-    )
-    need_indexes = {}
-    for key, group in needs.groupby(["SKU", "平台站点"], sort=False):
-        indexes = group.index.tolist()
-        indexes.sort(
-            key=lambda index: warehouse_sort_key(str(needs.at[index, "目的仓"]))
-        )
-        need_indexes[key] = indexes
+    purchase_ledger = _purchase_ledger
+    if purchase_ledger is None:
+        purchase_ledger = build_purchase_balance_ledger(purchase_rows)
 
     import_rows: list[dict] = []
     exceptions: list[dict] = []
+    candidates_by_key: dict[
+        tuple[object, object],
+        tuple[_PurchaseBalance, ...],
+    ] = {}
 
     for _, delivery_row in delivery.iterrows():
         delivery_quantity = int(delivery_row["交货量"])
@@ -537,22 +606,26 @@ def process_data(
             continue
 
         full_site = delivery_row["完整站点"]
-        candidate_indexes = need_indexes.get(
-            (delivery_row["SKU"], full_site),
-            [],
-        )
+        candidate_key = (delivery_row["SKU"], full_site)
+        if candidate_key not in candidates_by_key:
+            candidates_by_key[candidate_key] = purchase_ledger.active_candidates(
+                supplier_name,
+                delivery_row["SKU"],
+                full_site,
+            )
+        candidate_balances = candidates_by_key[candidate_key]
 
         remaining = delivery_quantity
         allocated = 0
         purchase_allocated = 0
         overreceipt_allocated = 0
         last_destination_warehouse = ""
-        for index in candidate_indexes:
-            available = int(needs.at[index, "未交量"])
+        for balance in candidate_balances:
+            available = int(balance.remaining)
             quantity = min(remaining, available)
             if quantity <= 0:
                 continue
-            destination_warehouse = needs.at[index, "目的仓"]
+            destination_warehouse = balance.destination_warehouse
             import_rows.append(
                 {
                     "*目的仓": destination_warehouse,
@@ -564,7 +637,7 @@ def process_data(
                     "交货备注": "",
                 }
             )
-            needs.at[index, "未交量"] = available - quantity
+            balance.remaining -= quantity
             remaining -= quantity
             allocated += quantity
             purchase_allocated += quantity
@@ -606,7 +679,9 @@ def process_data(
                 reason = "超出允许超收量"
             else:
                 reason = (
-                    "超出采购未交量" if candidate_indexes else "未找到可交货采购需求"
+                    "超出采购未交量"
+                    if candidate_balances
+                    else "未找到可交货采购需求"
                 )
             if allocated > 0 and allowance is None:
                 import_rows[-1]["交货备注"] = f"{reason}：{remaining}"

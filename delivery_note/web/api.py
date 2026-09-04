@@ -1,7 +1,9 @@
 import asyncio
 from collections import OrderedDict
+from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import logging
 import os
 from pathlib import Path
 import re
@@ -27,7 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, func, select, text
+from sqlalchemy import and_, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -50,6 +52,7 @@ from ..input_inspection import (
     inspect_input_version_with_preview,
     position_change_warnings,
     position_diff,
+    preview_input_version_page,
     validate_position_frame,
     write_position_workbook,
 )
@@ -91,18 +94,22 @@ from .models import (
 )
 from .position_drafts import (
     FIELD_TO_COLUMN,
+    POSITION_FRAME_CACHE_SESSION_KEY,
     ROW_FIELDS,
     DraftConflictError,
     create_or_resume_draft,
     delete_draft_rows,
     discard_draft,
     list_draft_rows,
-    load_draft_frames,
+    load_base_frame,
     mutate_draft_row,
     publish_draft,
     replace_draft_from_frame,
     require_revision,
 )
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
@@ -139,6 +146,8 @@ POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
 INPUT_INSPECTION_CACHE_SIZE = 32
+INPUT_INSPECTION_PAGES_PER_VERSION = 4
+DRAFT_ANALYSIS_CACHE_SIZE = 32
 SESSION_COOKIE_NAME = "delivery_note_session"
 _TRUE_BOOLEAN_VALUES = {"1", "true", "yes", "on"}
 _FALSE_BOOLEAN_VALUES = {"0", "false", "no", "off"}
@@ -195,12 +204,36 @@ def _deleted_session_cookie_header(*, secure: bool) -> str:
 
 
 class _InputInspectionCache:
-    """按最近使用顺序缓存不可变基础资料的检查结果。"""
+    """按版本缓存摘要和少量页面，并协调并发加载。"""
 
-    def __init__(self, max_entries: int):
+    def __init__(self, max_entries: int, max_pages_per_version: int = 4):
+        if max_entries <= 0 or max_pages_per_version <= 0:
+            raise ValueError("输入检查缓存容量必须大于 0")
         self._max_entries = max_entries
-        self._inspections: OrderedDict[tuple[int, int, int], dict] = OrderedDict()
+        self._max_pages_per_version = max_pages_per_version
+        self._inspections: OrderedDict[int, dict] = OrderedDict()
+        self._version_loads: dict[int, Future[None]] = {}
+        self._page_loads: dict[tuple[int, int, int], Future[dict]] = {}
         self._lock = Lock()
+
+    @staticmethod
+    def _result(entry: dict, page_key: tuple[int, int]) -> dict:
+        return {
+            "summary": entry["summary"],
+            "preview": entry["pages"][page_key],
+        }
+
+    def _store_page(
+        self,
+        entry: dict,
+        page_key: tuple[int, int],
+        preview: dict,
+    ) -> None:
+        pages = entry["pages"]
+        pages[page_key] = preview
+        pages.move_to_end(page_key)
+        if len(pages) > self._max_pages_per_version:
+            pages.popitem(last=False)
 
     def get(
         self,
@@ -208,19 +241,84 @@ class _InputInspectionCache:
         offset: int,
         limit: int,
         loader: Callable[[], dict],
+        page_loader: Callable[[dict], dict],
     ) -> dict:
-        key = (version_id, offset, limit)
+        page_key = (offset, limit)
         with self._lock:
-            inspection = self._inspections.get(key)
-            if inspection is not None:
-                self._inspections.move_to_end(key)
-                return inspection
+            entry = self._inspections.get(version_id)
+            if entry is not None:
+                self._inspections.move_to_end(version_id)
+                if page_key in entry["pages"]:
+                    entry["pages"].move_to_end(page_key)
+                    return self._result(entry, page_key)
+                load_key = (version_id, offset, limit)
+                page_future = self._page_loads.get(load_key)
+                load_page = page_future is None
+                if load_page:
+                    page_future = Future()
+                    self._page_loads[load_key] = page_future
+            else:
+                version_future = self._version_loads.get(version_id)
+                load_version = version_future is None
+                if load_version:
+                    version_future = Future()
+                    self._version_loads[version_id] = version_future
 
-            inspection = loader()
-            self._inspections[key] = inspection
-            if len(self._inspections) > self._max_entries:
-                self._inspections.popitem(last=False)
-            return inspection
+        if entry is None:
+            if not load_version:
+                version_future.result()
+                return self.get(
+                    version_id,
+                    offset,
+                    limit,
+                    loader,
+                    page_loader,
+                )
+            try:
+                inspection = loader()
+                loaded_entry = {
+                    "summary": inspection["summary"],
+                    "pages": OrderedDict(),
+                }
+                self._store_page(
+                    loaded_entry,
+                    page_key,
+                    inspection["preview"],
+                )
+            except BaseException as error:
+                with self._lock:
+                    self._version_loads.pop(version_id, None)
+                version_future.set_exception(error)
+                raise
+
+            with self._lock:
+                self._inspections[version_id] = loaded_entry
+                self._inspections.move_to_end(version_id)
+                if len(self._inspections) > self._max_entries:
+                    self._inspections.popitem(last=False)
+                self._version_loads.pop(version_id, None)
+            version_future.set_result(None)
+            return self._result(loaded_entry, page_key)
+
+        if not load_page:
+            preview = page_future.result()
+            return {"summary": entry["summary"], "preview": preview}
+
+        try:
+            preview = page_loader(entry["summary"])
+        except BaseException as error:
+            with self._lock:
+                self._page_loads.pop(load_key, None)
+            page_future.set_exception(error)
+            raise
+
+        with self._lock:
+            current_entry = self._inspections.get(version_id)
+            if current_entry is entry:
+                self._store_page(entry, page_key, preview)
+            self._page_loads.pop(load_key, None)
+        page_future.set_result(preview)
+        return {"summary": entry["summary"], "preview": preview}
 
 
 class _PositionFrameCache:
@@ -233,18 +331,54 @@ class _PositionFrameCache:
         self._frames: OrderedDict[int, pd.DataFrame] = OrderedDict()
         self._lock = Lock()
 
-    def get(self, version_id: int, path: Path) -> pd.DataFrame:
+    def get(
+        self,
+        version_id: int,
+        path: Path,
+        loader: Callable[[Path], pd.DataFrame] | None = None,
+    ) -> pd.DataFrame:
+        frame_loader = loader or read_position_workbook
         with self._lock:
             frame = self._frames.get(version_id)
             if frame is not None:
                 self._frames.move_to_end(version_id)
                 return frame
 
-            frame = read_position_workbook(path)
+            frame = frame_loader(path)
             self._frames[version_id] = frame
             if len(self._frames) > self._max_entries:
                 self._frames.popitem(last=False)
             return frame
+
+
+class _DraftAnalysisCache:
+    """按草稿修订缓存纯数据分析结果，不保留跨会话 ORM 实体。"""
+
+    def __init__(self, max_entries: int):
+        if max_entries <= 0:
+            raise ValueError("草稿分析缓存容量必须大于 0")
+        self._max_entries = max_entries
+        self._analyses: OrderedDict[tuple[int, int], dict] = OrderedDict()
+        self._lock = Lock()
+
+    def get(
+        self,
+        draft_id: int,
+        revision: int,
+        loader: Callable[[], dict],
+    ) -> dict:
+        key = (draft_id, revision)
+        with self._lock:
+            analysis = self._analyses.get(key)
+            if analysis is not None:
+                self._analyses.move_to_end(key)
+                return analysis
+
+            analysis = loader()
+            self._analyses[key] = analysis
+            if len(self._analyses) > self._max_entries:
+                self._analyses.popitem(last=False)
+            return analysis
 
 
 def _utc_isoformat(value: datetime) -> str:
@@ -572,18 +706,47 @@ def _position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
     return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
 
 
+def _draft_row_snapshots(session: Session, draft_id: int) -> list[dict]:
+    """按稳定顺序加载分析所需标量，避免把整表 ORM 实体放入缓存。"""
+
+    columns = [
+        PositionDraftRow.id,
+        PositionDraftRow.row_order,
+        PositionDraftRow.change_type,
+        PositionDraftRow.deleted,
+        *(getattr(PositionDraftRow, field) for field in ROW_FIELDS),
+    ]
+    return [
+        dict(row)
+        for row in session.execute(
+            select(*columns)
+            .where(PositionDraftRow.draft_id == draft_id)
+            .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
+        ).mappings()
+    ]
+
+
+def _snapshot_position_frame(rows: list[dict]) -> pd.DataFrame:
+    records = [
+        {FIELD_TO_COLUMN[field]: row[field] for field in ROW_FIELDS}
+        for row in rows
+        if not row["deleted"]
+    ]
+    return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
+
+
 def _position_issue_map(
-    rows: list[PositionDraftRow],
-) -> tuple[list[dict], dict[int, list[dict]]]:
-    active_rows = [row for row in rows if not row.deleted]
-    issues = validate_position_frame(_position_frame(active_rows))
-    by_row_id: dict[int, list[dict]] = {row.id: [] for row in active_rows}
+    rows: list[dict],
+    issues: list[dict],
+) -> dict[int, list[dict]]:
+    active_rows = [row for row in rows if not row["deleted"]]
+    by_row_id: dict[int, list[dict]] = {}
     for issue in issues:
         for row_number in issue["row_numbers"]:
             offset = row_number - 2
             if 0 <= offset < len(active_rows):
-                by_row_id[active_rows[offset].id].append(issue)
-    return issues, by_row_id
+                by_row_id.setdefault(active_rows[offset]["id"], []).append(issue)
+    return by_row_id
 
 
 def _issue_summary(issues: list[dict]) -> dict:
@@ -608,20 +771,44 @@ def _issue_summary(issues: list[dict]) -> dict:
 def _draft_analysis(
     session: Session,
     draft: InputDraft,
-) -> tuple[list[PositionDraftRow], dict[str, int], list[dict]]:
-    """一次生成草稿摘要所需的行、差异和校验结果。"""
+    cache: _DraftAnalysisCache,
+) -> dict:
+    """按草稿修订复用摘要、差异和逐行问题分析。"""
 
-    rows, base_frame, current_frame = load_draft_frames(session, draft)
-    issues = [
-        *validate_position_frame(current_frame),
-        *position_change_warnings(base_frame, current_frame),
-    ]
-    return rows, position_diff(base_frame, current_frame), issues
+    def load() -> dict:
+        rows = _draft_row_snapshots(session, draft.id)
+        base_frame = load_base_frame(session, draft)
+        current_frame = _snapshot_position_frame(rows)
+        validation_issues = validate_position_frame(current_frame)
+        issues = [
+            *validation_issues,
+            *position_change_warnings(base_frame, current_frame),
+        ]
+        issues_by_row = _position_issue_map(rows, validation_issues)
+        return {
+            "row_count": sum(not row["deleted"] for row in rows),
+            "modified_count": sum(
+                row["change_type"] != "unchanged" for row in rows
+            ),
+            "diff": position_diff(base_frame, current_frame),
+            "issues": issues,
+            "issues_by_row": issues_by_row,
+            "error_row_ids": tuple(
+                row_id
+                for row_id, row_issues in issues_by_row.items()
+                if any(issue["severity"] == "error" for issue in row_issues)
+            ),
+        }
+
+    return cache.get(draft.id, draft.revision, load)
 
 
-def _draft_json(session: Session, draft: InputDraft) -> dict:
-    rows, diff, issues = _draft_analysis(session, draft)
-    active_rows = [row for row in rows if not row.deleted]
+def _draft_json(
+    session: Session,
+    draft: InputDraft,
+    analysis_cache: _DraftAnalysisCache,
+) -> dict:
+    analysis = _draft_analysis(session, draft, analysis_cache)
     base_version = session.get(InputVersion, draft.base_version_id)
     active_version = session.scalar(
         select(InputVersion).where(
@@ -629,7 +816,7 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
             InputVersion.active.is_(True),
         )
     )
-    issue_summary = _issue_summary(issues)
+    issue_summary = _issue_summary(analysis["issues"])
     return {
         "id": draft.id,
         "kind": draft.kind,
@@ -649,9 +836,9 @@ def _draft_json(session: Session, draft: InputDraft) -> dict:
         "updated_by": draft.updated_by,
         "created_at": _utc_isoformat(draft.created_at),
         "updated_at": _utc_isoformat(draft.updated_at),
-        "row_count": len(active_rows),
-        "modified_count": sum(row.change_type != "unchanged" for row in rows),
-        "diff": diff,
+        "row_count": analysis["row_count"],
+        "modified_count": analysis["modified_count"],
+        "diff": analysis["diff"],
         **issue_summary,
     }
 
@@ -1183,6 +1370,14 @@ def _safe_filename(filename: str) -> str:
     return safe
 
 
+def _unlink_after_commit(path: Path) -> None:
+    """数据库提交后尽力删除旧文件，不让清理故障改变请求结果。"""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        LOGGER.warning("数据库已提交，但旧文件清理失败：%s", path, exc_info=True)
+
+
 async def _save_upload(
     upload: UploadFile,
     destination: Path,
@@ -1358,7 +1553,11 @@ def create_app(
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
     position_frame_cache = _PositionFrameCache(configured_position_frame_cache_size)
-    input_inspection_cache = _InputInspectionCache(INPUT_INSPECTION_CACHE_SIZE)
+    draft_analysis_cache = _DraftAnalysisCache(DRAFT_ANALYSIS_CACHE_SIZE)
+    input_inspection_cache = _InputInspectionCache(
+        INPUT_INSPECTION_CACHE_SIZE,
+        INPUT_INSPECTION_PAGES_PER_VERSION,
+    )
 
     admin_credentials = bootstrap_admin
     if admin_credentials is None:
@@ -1392,6 +1591,8 @@ def create_app(
     app.state.max_batch_upload_files = configured_max_batch_upload_files
     app.state.import_candidate_ttl_seconds = configured_import_candidate_ttl
     app.state.position_frame_cache_size = configured_position_frame_cache_size
+    app.state.position_frame_cache = position_frame_cache
+    app.state.draft_analysis_cache = draft_analysis_cache
     app.state.session_cookie_secure = configured_session_cookie_secure
     app.state.position_import_candidates = import_candidates
     app.add_middleware(
@@ -1412,6 +1613,7 @@ def create_app(
 
     def get_session():
         session = database.SessionLocal()
+        session.info[POSITION_FRAME_CACHE_SESSION_KEY] = position_frame_cache
         try:
             yield session
         except Exception:
@@ -1505,6 +1707,13 @@ def create_app(
                 Path(version.storage_path),
                 offset,
                 limit,
+            ),
+            lambda summary: preview_input_version_page(
+                version.kind,
+                Path(version.storage_path),
+                offset,
+                limit,
+                summary,
             ),
         )
 
@@ -2923,7 +3132,7 @@ def create_app(
         session.refresh(draft)
         if existing is not None:
             response.status_code = status.HTTP_200_OK
-        return _draft_json(session, draft)
+        return _draft_json(session, draft, draft_analysis_cache)
 
     @app.get("/api/input-drafts/position")
     def get_position_draft(
@@ -2938,7 +3147,7 @@ def create_app(
         )
         if draft is None:
             raise HTTPException(status_code=404, detail="当前没有进行中的库位草稿")
-        return _draft_json(session, draft)
+        return _draft_json(session, draft, draft_analysis_cache)
 
     @app.get("/api/input-drafts/{draft_id}/rows")
     def get_position_draft_rows(
@@ -2953,36 +3162,61 @@ def create_app(
         only_errors: bool = False,
         only_modified: bool = False,
     ):
-        get_draft_or_404(draft_id, session)
-        rows = [row for row in list_draft_rows(session, draft_id) if not row.deleted]
-        _issues, issues_by_row = _position_issue_map(rows)
+        draft = get_draft_or_404(draft_id, session)
+        analysis = _draft_analysis(session, draft, draft_analysis_cache)
+        issues_by_row = analysis["issues_by_row"]
         search_value = search.strip().casefold()
         site_value = site.strip().casefold()
         scale_value = scale_position.strip().casefold()
-        filtered = []
-        for row in rows:
-            values = [str(getattr(row, field) or "") for field in ROW_FIELDS]
-            if search_value and not any(
-                search_value in value.casefold() for value in values
-            ):
-                continue
-            if site_value and row.store_site.strip().casefold() != site_value:
-                continue
-            if scale_value and row.scale_position.strip().casefold() != scale_value:
-                continue
-            if only_modified and row.change_type == "unchanged":
-                continue
-            if only_errors and not any(
-                issue["severity"] == "error" for issue in issues_by_row.get(row.id, [])
-            ):
-                continue
-            filtered.append(row)
-        page = filtered[offset : offset + limit]
+        conditions = [
+            PositionDraftRow.draft_id == draft_id,
+            PositionDraftRow.deleted.is_(False),
+        ]
+        if search_value:
+            conditions.append(
+                or_(
+                    *(
+                        func.lower(
+                            func.coalesce(getattr(PositionDraftRow, field), "")
+                        ).contains(search_value, autoescape=True)
+                        for field in ROW_FIELDS
+                    )
+                )
+            )
+        if site_value:
+            conditions.append(
+                func.lower(func.trim(PositionDraftRow.store_site)) == site_value
+            )
+        if scale_value:
+            conditions.append(
+                func.lower(func.trim(PositionDraftRow.scale_position)) == scale_value
+            )
+        if only_modified:
+            conditions.append(PositionDraftRow.change_type != "unchanged")
+        if only_errors:
+            conditions.append(
+                PositionDraftRow.id.in_(analysis["error_row_ids"])
+            )
+
+        total = session.scalar(
+            select(func.count())
+            .select_from(PositionDraftRow)
+            .where(*conditions)
+        )
+        page = list(
+            session.scalars(
+                select(PositionDraftRow)
+                .where(*conditions)
+                .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
+                .offset(offset)
+                .limit(limit)
+            )
+        )
         return {
             "rows": [
                 _position_row_json(row, issues_by_row.get(row.id)) for row in page
             ],
-            "total": len(filtered),
+            "total": total or 0,
             "offset": offset,
             "limit": limit,
         }
@@ -3288,12 +3522,12 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         draft = get_draft_or_404(draft_id, session)
-        _rows, diff, issues = _draft_analysis(session, draft)
+        analysis = _draft_analysis(session, draft, draft_analysis_cache)
         return {
             "draft_id": draft.id,
             "revision": draft.revision,
-            "diff": diff,
-            **_issue_summary(issues),
+            "diff": analysis["diff"],
+            **_issue_summary(analysis["issues"]),
         }
 
     @app.post(
@@ -3369,7 +3603,7 @@ def create_app(
             rollback_integrity_conflict(session, error)
         session.refresh(draft)
         remove_draft_import_candidates(draft.id)
-        return _draft_json(session, draft)
+        return _draft_json(session, draft, draft_analysis_cache)
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
     def create_batch(
@@ -4078,7 +4312,7 @@ def create_app(
         )
         session.commit()
         if old_path is not None and old_path != destination:
-            await run_in_threadpool(old_path.unlink, missing_ok=True)
+            await run_in_threadpool(_unlink_after_commit, old_path)
         return _batch_json(batch, session)
 
     @app.post(
@@ -4256,7 +4490,7 @@ def create_app(
             {"batch_id": batch.id, "original_name": source.original_name},
         )
         session.commit()
-        storage_path.unlink(missing_ok=True)
+        _unlink_after_commit(storage_path)
         return _batch_json(batch, session)
 
     @app.put("/api/batches/{batch_id}/files/order")

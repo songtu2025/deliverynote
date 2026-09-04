@@ -5,7 +5,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 import pandas as pd
-from sqlalchemy import delete, event, func, select
+from sqlalchemy import delete, event, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -39,6 +39,7 @@ ROW_FIELDS = (
 FIELD_TO_COLUMN = dict(zip(ROW_FIELDS, POSITION_SOURCE_COLUMNS))
 IDENTITY_FIELDS = ROW_FIELDS[:3]
 _PENDING_PUBLISH_KEY = "position_draft_pending_publish"
+POSITION_FRAME_CACHE_SESSION_KEY = "position_frame_cache"
 BASE_VERSION_CHANGED_DETAIL = "当前启用的库位版本已变化，请放弃当前草稿后重新开始"
 
 
@@ -156,11 +157,21 @@ def _signature(values: Mapping[str, str]) -> tuple[str, ...]:
     return (*identity, *other_values)
 
 
-def _base_frame(session: Session, draft: InputDraft) -> pd.DataFrame:
+def _version_frame(session: Session, version: InputVersion) -> pd.DataFrame:
+    cache = session.info.get(POSITION_FRAME_CACHE_SESSION_KEY)
+    path = Path(version.storage_path)
+    if cache is None:
+        return read_position_workbook(path)
+    return cache.get(version.id, path, loader=read_position_workbook)
+
+
+def load_base_frame(session: Session, draft: InputDraft) -> pd.DataFrame:
+    """读取草稿锁定的不可变基础版本，并复用当前应用的有界缓存。"""
+
     version = session.get(InputVersion, draft.base_version_id)
     if version is None:
         raise ValueError("草稿的基础版本不存在")
-    return read_position_workbook(Path(version.storage_path))
+    return _version_frame(session, version)
 
 
 def _frame_from_rows(rows: list[PositionDraftRow]) -> pd.DataFrame:
@@ -243,17 +254,22 @@ def create_or_resume_draft(
             session.add(draft)
             session.flush()
 
-            frame = read_position_workbook(Path(version.storage_path))
+            frame = _version_frame(session, version)
+            row_mappings = []
             for row_order, record in enumerate(frame.to_dict("records"), start=1):
-                session.add(
-                    _make_row(
-                        draft_id=draft.id,
-                        row_order=row_order,
-                        values=_record_values(record),
-                        base_row_number=row_order + 1,
-                        change_type="unchanged",
-                    )
+                values = _record_values(record)
+                row_mappings.append(
+                    {
+                        "draft_id": draft.id,
+                        "row_order": row_order,
+                        "base_row_number": row_order + 1,
+                        "change_type": "unchanged",
+                        "deleted": False,
+                        **values,
+                    }
                 )
+            if row_mappings:
+                session.execute(insert(PositionDraftRow), row_mappings)
             _audit(
                 session,
                 user_id,
@@ -292,7 +308,7 @@ def load_draft_frames(
     """一次加载草稿行、基础版本和当前数据。"""
 
     rows = list_draft_rows(session, draft.id)
-    return rows, _base_frame(session, draft), _frame_from_rows(rows)
+    return rows, load_base_frame(session, draft), _frame_from_rows(rows)
 
 
 def _base_values_for_row(
@@ -302,7 +318,7 @@ def _base_values_for_row(
 ) -> dict[str, str]:
     if row.base_row_number is None:
         return {}
-    frame = _base_frame(session, draft)
+    frame = load_base_frame(session, draft)
     frame_offset = row.base_row_number - 2
     if frame_offset < 0 or frame_offset >= len(frame):
         raise ValueError("草稿来源行不存在")
@@ -400,7 +416,7 @@ def replace_draft_from_frame(
     require_revision(draft, expected_revision)
     candidate = frame[POSITION_SOURCE_COLUMNS].copy()
     current = _frame_from_rows(list_draft_rows(session, draft.id))
-    base = _base_frame(session, draft)
+    base = load_base_frame(session, draft)
     diff = position_diff(current, candidate)
 
     base_rows: dict[tuple[str, str, str], deque[tuple[int, dict[str, str]]]] = (
@@ -464,7 +480,7 @@ def replace_draft_from_frame(
 
 def draft_diff(session: Session, draft: InputDraft) -> dict[str, int]:
     return position_diff(
-        _base_frame(session, draft),
+        load_base_frame(session, draft),
         _frame_from_rows(list_draft_rows(session, draft.id)),
     )
 
@@ -473,7 +489,7 @@ def validate_draft(session: Session, draft: InputDraft) -> list[dict]:
     frame = _frame_from_rows(list_draft_rows(session, draft.id))
     return [
         *validate_position_frame(frame),
-        *position_change_warnings(_base_frame(session, draft), frame),
+        *position_change_warnings(load_base_frame(session, draft), frame),
     ]
 
 

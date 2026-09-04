@@ -925,6 +925,14 @@ def _load_export_inputs(database: Database, batch_id: int):
             .where(BatchFile.batch_id == batch.id)
             .order_by(BatchFile.file_order)
         ).all()
+        previous_export_paths = [
+            path
+            for path in [
+                batch.zip_path,
+                *(source.result_path for source in sources),
+            ]
+            if path
+        ]
         source_ids = [source.id for source in sources]
         exceptions = (
             session.scalars(
@@ -993,7 +1001,7 @@ def _load_export_inputs(database: Database, batch_id: int):
                     "exceptions": exception_payloads,
                 }
             )
-    return version_paths, payloads
+    return version_paths, payloads, previous_export_paths
 
 
 def _prepare_export_result(source: dict, position_rows: pd.DataFrame):
@@ -1046,6 +1054,64 @@ def _prepare_export_result(source: dict, position_rows: pd.DataFrame):
     return result, import_rows, pending_rows
 
 
+def _cleanup_previous_export_directories(
+    database: Database,
+    export_root: Path,
+    current_published: Path,
+    previous_paths: list[str | Path],
+) -> None:
+    """尽力清理已失去数据库引用的上一代导出目录。"""
+    try:
+        resolved_root = export_root.resolve()
+        resolved_current = current_published.resolve()
+        candidates: set[Path] = set()
+        for previous_path in previous_paths:
+            parent = Path(previous_path).parent
+            if parent.is_symlink():
+                continue
+            candidate = parent.resolve()
+            if (
+                candidate.parent == resolved_root
+                and candidate.name.startswith("export-")
+                and candidate != resolved_current
+            ):
+                candidates.add(candidate)
+        if not candidates:
+            return
+
+        with database.session() as session:
+            registered_paths = [
+                *session.scalars(
+                    select(Batch.zip_path).where(Batch.zip_path.is_not(None))
+                ).all(),
+                *session.scalars(
+                    select(BatchFile.result_path).where(
+                        BatchFile.result_path.is_not(None)
+                    )
+                ).all(),
+                *session.scalars(
+                    select(Job.output_path).where(Job.output_path.is_not(None))
+                ).all(),
+            ]
+        registered = [Path(path).resolve() for path in registered_paths]
+    except Exception:
+        LOGGER.warning("无法确认旧导出目录引用，已跳过清理", exc_info=True)
+        return
+
+    for candidate in candidates:
+        if any(
+            output_path == candidate or candidate in output_path.parents
+            for output_path in registered
+        ):
+            continue
+        if not candidate.is_dir():
+            continue
+        try:
+            shutil.rmtree(candidate)
+        except Exception:
+            LOGGER.warning("旧导出目录清理失败：%s", candidate, exc_info=True)
+
+
 def _execute_self_operated_export(
     database: Database,
     job_id: int,
@@ -1077,6 +1143,14 @@ def _execute_self_operated_export(
                 "import_rows": source.import_rows or [],
             }
             for source in sources
+        ]
+        previous_export_paths = [
+            path
+            for path in [
+                batch.zip_path,
+                *(source.result_path for source in sources),
+            ]
+            if path
         ]
         template_path = Path(template.storage_path)
 
@@ -1183,6 +1257,12 @@ def _execute_self_operated_export(
                 )
             )
             session.commit()
+        _cleanup_previous_export_directories(
+            database,
+            export_root,
+            published,
+            previous_export_paths,
+        )
     except Exception:
         if temporary.exists():
             shutil.rmtree(temporary)
@@ -1216,7 +1296,10 @@ def _execute_export(
         )
         return
     _heartbeat(database, job_id, claim_token)
-    version_paths, sources = _load_export_inputs(database, batch_id)
+    version_paths, sources, previous_export_paths = _load_export_inputs(
+        database,
+        batch_id,
+    )
     position_rows = read_position_workbook(version_paths["position"])
     _heartbeat(database, job_id, claim_token)
     export_root = storage_root / "batches" / str(batch_id) / "exports"
@@ -1323,6 +1406,12 @@ def _execute_export(
                 )
             )
             session.commit()
+        _cleanup_previous_export_directories(
+            database,
+            export_root,
+            published,
+            previous_export_paths,
+        )
     except Exception:
         if temporary.exists():
             shutil.rmtree(temporary)
