@@ -31,6 +31,7 @@ class FakeRunner:
         fail_restore: bool = False,
         fail_validation: bool = False,
         fail_drop_database: bool = False,
+        fail_compose_reconcile: bool = False,
         restored_counts: dict[str, int] | None = None,
     ):
         self.fail_archive = fail_archive
@@ -38,6 +39,7 @@ class FakeRunner:
         self.fail_restore = fail_restore
         self.fail_validation = fail_validation
         self.fail_drop_database = fail_drop_database
+        self.fail_compose_reconcile = fail_compose_reconcile
         self.source_counts = {
             "users": 3,
             "input_versions": 7,
@@ -59,6 +61,13 @@ class FakeRunner:
     ) -> str:
         command = tuple(arguments)
         self.commands.append(command)
+
+        if (
+            command[:2] == ("docker", "compose")
+            and self.fail_compose_reconcile
+            and ("up" in command or "start" in command)
+        ):
+            raise BackupError("模拟新 Compose 镜像尚不存在")
 
         if "pg_dump" in command:
             if stdout is None:
@@ -101,6 +110,9 @@ class FakeRunner:
         if "images" in command and "--quiet" in command:
             service = command[-1]
             return f"sha256:{service}-image\n"
+        if "ps" in command and "--quiet" in command:
+            service = command[-1]
+            return f"deliverynote-{service}-1\n"
         if "ps" in command and "--status" in command and "--services" in command:
             return "db\napi\nworker\npurchase-sync-worker\ninbound-sync-worker\nweb\n"
         if "psql" in command:
@@ -213,7 +225,9 @@ class BackupDeliveryNoteTests(unittest.TestCase):
             if "pg_dump" in command
         )
         resume = next(
-            index for index, command in enumerate(runner.commands) if "up" in command
+            index
+            for index, command in enumerate(runner.commands)
+            if command[:2] == ("docker", "start")
         )
         source_counts = next(
             index
@@ -263,6 +277,31 @@ class BackupDeliveryNoteTests(unittest.TestCase):
         )
         self.assertEqual(runner.commands[drop_database][-1], temporary_database)
         self.assertEqual(runner.restored_payload, b"PGDMP\x01\x0funit-test")
+
+    def test_resume_uses_existing_containers_when_new_compose_image_is_missing(self):
+        runner = FakeRunner(fail_compose_reconcile=True)
+
+        result = create_backup(
+            self.config,
+            runner=runner,
+            now=lambda: self.fixed_time,
+        )
+
+        self.assertEqual(result["status"], "complete")
+        resume = next(
+            command
+            for command in runner.commands
+            if command[:2] == ("docker", "start")
+            and command[-5:]
+            == (
+                "deliverynote-api-1",
+                "deliverynote-worker-1",
+                "deliverynote-purchase-sync-worker-1",
+                "deliverynote-inbound-sync-worker-1",
+                "deliverynote-web-1",
+            )
+        )
+        self.assertNotIn("compose", resume)
 
     def test_restore_count_mismatch_fails_and_drops_temporary_database(self):
         restored_counts = {
@@ -321,7 +360,7 @@ class BackupDeliveryNoteTests(unittest.TestCase):
         self.assertEqual(len(failed), 1)
         self.assertTrue((failed[0] / "FAILED.txt").is_file())
         self.assertFalse((failed[0] / "READY").exists())
-        self.assertTrue(any("up" in command for command in runner.commands))
+        self.assertTrue(any("start" in command for command in runner.commands))
 
     def test_retention_only_prunes_old_completed_standard_directories(self):
         self.destination.mkdir()

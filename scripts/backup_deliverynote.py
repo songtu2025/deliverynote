@@ -31,7 +31,25 @@ CRITICAL_TABLE_COUNTS_SQL = "\nUNION ALL\n".join(
     f"SELECT '{table}', count(*) FROM public.{table}" for table in CRITICAL_TABLES
 )
 WORKER_SERVICES = ("worker", "purchase-sync-worker", "inbound-sync-worker")
+RESUMED_SERVICES = ("api", *WORKER_SERVICES, "web")
 REQUIRED_SERVICES = frozenset({"db", "api", "web", *WORKER_SERVICES})
+API_READINESS_PROBE = """\
+import time
+import urllib.request
+
+deadline = time.monotonic() + {timeout}
+while True:
+    try:
+        with urllib.request.urlopen(
+            "http://127.0.0.1:8000/health", timeout=5
+        ) as response:
+            if response.status == 200:
+                break
+    except Exception:
+        if time.monotonic() >= deadline:
+            raise
+        time.sleep(1)
+"""
 
 
 class BackupError(RuntimeError):
@@ -270,6 +288,17 @@ def _resolve_image(config: BackupConfig, runner: Runner, service: str) -> str:
     return _single_output_line(output, f"{service} 镜像")
 
 
+def _resolve_service_containers(
+    config: BackupConfig,
+    runner: Runner,
+) -> dict[str, str]:
+    containers = {}
+    for service in RESUMED_SERVICES:
+        output = runner.run(_compose(config, "ps", "--quiet", service))
+        containers[service] = _single_output_line(output, f"{service} 容器")
+    return containers
+
+
 def inspect_environment(config: BackupConfig, runner: Runner) -> dict:
     config.validate()
     runner.run(_compose(config, "config", "--quiet"))
@@ -295,6 +324,7 @@ def inspect_environment(config: BackupConfig, runner: Runner) -> dict:
         "active_jobs": _active_job_count(config, runner),
         "data_volume": _resolve_volume(config, runner),
         "api_image": _resolve_image(config, runner, "api"),
+        "service_containers": _resolve_service_containers(config, runner),
     }
 
 
@@ -499,21 +529,39 @@ def _validate_data_archive(path: Path) -> tuple[int, int]:
     return entries, files
 
 
-def _resume_services(config: BackupConfig, runner: Runner) -> None:
+def _resume_services(
+    config: BackupConfig,
+    runner: Runner,
+    service_containers: dict[str, str],
+) -> None:
+    missing_containers = [
+        service for service in RESUMED_SERVICES if service not in service_containers
+    ]
+    if missing_containers:
+        raise BackupError(
+            "缺少维护前容器标识：" + ", ".join(missing_containers)
+        )
+    container_ids = [
+        service_containers[service] for service in RESUMED_SERVICES
+    ]
+    # 直接启动维护前解析出的容器，避免新版 Compose 的依赖图或尚未构建镜像
+    # 阻断旧生产版本在备份窗口后的恢复。
     runner.run(
-        _compose(
-            config,
-            "up",
-            "-d",
-            "--no-build",
-            "--wait",
-            "--wait-timeout",
-            str(config.service_wait_timeout_seconds),
-            "api",
-            *WORKER_SERVICES,
-            "web",
-        ),
+        ["docker", "start", *container_ids],
         timeout_seconds=config.service_wait_timeout_seconds + 60,
+    )
+    runner.run(
+        [
+            "docker",
+            "exec",
+            service_containers["api"],
+            "python",
+            "-c",
+            API_READINESS_PROBE.format(
+                timeout=config.service_wait_timeout_seconds
+            ),
+        ],
+        timeout_seconds=config.service_wait_timeout_seconds + 10,
     )
     missing = sorted(REQUIRED_SERVICES - _running_services(config, runner))
     if missing:
@@ -635,7 +683,11 @@ def create_backup(
         finally:
             if maintenance_started:
                 try:
-                    _resume_services(config, runner)
+                    _resume_services(
+                        config,
+                        runner,
+                        environment["service_containers"],
+                    )
                 except Exception as resume_error:
                     if primary_error is None:
                         primary_error = resume_error
