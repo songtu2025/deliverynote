@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useCallback, useState } from "react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InputVersion } from "../types";
@@ -97,6 +98,7 @@ describe("PurchaseSyncPanel", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -149,5 +151,59 @@ describe("PurchaseSyncPanel", () => {
       expect.objectContaining({ method: "POST" })
     ));
     expect(refreshVersions).toHaveBeenCalled();
+  });
+
+  it("polls only purchase status and refreshes versions once on completion", async () => {
+    vi.useFakeTimers();
+    const requests: string[] = [];
+    let statusRequestCount = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requests.push(url.replace(/^.*(?=\/api\/)/, ""));
+      statusRequestCount += 1;
+      return jsonResponse({
+        configured: true,
+        job: statusRequestCount < 3
+          ? { ...succeededJob, status: "running", candidate_version_id: null }
+          : succeededJob
+      });
+    }));
+    const refreshed = vi.fn();
+
+    function Harness() {
+      const [versions, setVersions] = useState([activeVersion]);
+      const refreshVersions = useCallback(async () => {
+        refreshed();
+        const nextVersions = [activeVersion, candidateVersion];
+        setVersions(nextVersions);
+        return nextVersions;
+      }, []);
+      return (
+        <PurchaseSyncPanel
+          versions={versions}
+          canActivate
+          refreshVersions={refreshVersions}
+        />
+      );
+    }
+
+    render(<Harness />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    requests.length = 0;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(requests).toEqual(["/api/purchase-sync"]);
+    expect(refreshed).not.toHaveBeenCalled();
+    requests.length = 0;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(requests).toEqual(["/api/purchase-sync"]);
+    expect(refreshed).toHaveBeenCalledTimes(1);
   });
 });

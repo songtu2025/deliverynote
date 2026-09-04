@@ -22,12 +22,12 @@ import {
   UserOutlined
 } from "@ant-design/icons";
 
-import { api, AUTH_EXPIRED_EVENT, getToken, setToken } from "./api";
+import { api, AUTH_EXPIRED_EVENT, clearLegacyToken } from "./api";
 import type { User } from "./types";
 
 const USER_KEY = "delivery-note-user";
 
-type LoginResponse = { token: string; user: User };
+type LoginResponse = { user: User };
 type WorkspacePage = "batches" | "self-operated" | "overreceipt" | "admin";
 type WorkspaceRoute = {
   page: WorkspacePage;
@@ -97,18 +97,11 @@ function workspacePath(route: WorkspaceRoute): string {
   return "/batches";
 }
 
-function readStoredUser(): User | null {
-  if (!getToken()) {
-    localStorage.removeItem(USER_KEY);
-    return null;
-  }
-  const raw = localStorage.getItem(USER_KEY);
-  if (!raw) return null;
+function clearStoredUser(): void {
   try {
-    return JSON.parse(raw) as User;
-  } catch {
     localStorage.removeItem(USER_KEY);
-    return null;
+  } catch {
+    // 浏览器禁用存储时无需清理旧的非敏感用户缓存。
   }
 }
 
@@ -122,8 +115,6 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
         method: "POST",
         body: JSON.stringify(values)
       });
-      setToken(result.token);
-      localStorage.setItem(USER_KEY, JSON.stringify(result.user));
       onLogin(result.user);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "登录失败");
@@ -303,11 +294,12 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(() => readStoredUser());
+  const [user, setUser] = useState<User | null>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
 
   useEffect(() => {
     const handleExpired = (event: Event) => {
-      localStorage.removeItem(USER_KEY);
+      clearStoredUser();
       setUser(null);
       const detail = (event as CustomEvent<{ message?: string }>).detail;
       message.warning(detail?.message ?? "登录已过期，请重新登录");
@@ -316,14 +308,33 @@ export default function App() {
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    clearLegacyToken();
+    clearStoredUser();
+    void api<User>("/api/auth/me", {}, { notifyUnauthorized: false })
+      .then((currentUser) => {
+        if (!cancelled) setUser(currentUser);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const logout = async () => {
     try {
       await api<void>("/api/auth/logout", { method: "POST" });
     } catch {
       // Local logout must still work if the session already expired.
     }
-    setToken(null);
-    localStorage.removeItem(USER_KEY);
+    clearLegacyToken();
+    clearStoredUser();
     setUser(null);
   };
 
@@ -344,7 +355,13 @@ export default function App() {
       }}
     >
       <AntApp>
-        {user ? <Workspace user={user} onLogout={logout} /> : <LoginPage onLogin={setUser} />}
+        {checkingSession ? (
+          <WorkspacePageFallback />
+        ) : user ? (
+          <Workspace user={user} onLogout={logout} />
+        ) : (
+          <LoginPage onLogin={setUser} />
+        )}
       </AntApp>
     </ConfigProvider>
   );

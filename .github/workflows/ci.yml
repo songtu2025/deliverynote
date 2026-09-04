@@ -15,6 +15,22 @@ jobs:
   backend:
     name: 后端与 Python 质量检查
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: delivery_note_test
+          POSTGRES_USER: delivery_note
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U delivery_note -d delivery_note_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      POSTGRES_TEST_URL: postgresql+psycopg://delivery_note:ci-postgres-password@127.0.0.1:5432/delivery_note_test
     steps:
       - uses: actions/checkout@v6
         with:

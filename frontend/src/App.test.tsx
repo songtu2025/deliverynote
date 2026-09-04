@@ -3,6 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
 import "./styles.css";
+import type { User } from "./types";
+
+const adminUser: User = { id: 1, username: "admin", role: "admin", active: true };
+const operatorUser: User = { id: 2, username: "operator", role: "operator", active: true };
+let authenticatedUser: User | null;
 
 const routeBatch = {
   id: 7,
@@ -40,11 +45,22 @@ const readyInputVersions = ["purchase", "product", "supplier", "position", "temp
 describe("App", () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
+    authenticatedUser = null;
     window.history.replaceState({}, "", "/");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/auth/me")) {
+          return new Response(
+            JSON.stringify(authenticatedUser ?? { detail: "未登录" }),
+            {
+              status: authenticatedUser ? 200 : 401,
+              headers: { "Content-Type": "application/json" }
+            }
+          );
+        }
         if (url.endsWith("/api/auth/login")) {
           return new Response(
             JSON.stringify({
@@ -129,9 +145,10 @@ describe("App", () => {
   });
 
   it("logs in and opens the batch workspace", async () => {
+    localStorage.setItem("delivery-note-token", "legacy-token");
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "供应链单据处理" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "供应链单据处理" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("用户名"), {
       target: { value: "admin" }
@@ -146,7 +163,8 @@ describe("App", () => {
     expect(screen.getByRole("menuitem", { name: /交货批次/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /超收规则/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /管理员维护/ })).toBeInTheDocument();
-    expect(localStorage.getItem("delivery-note-token")).toBe("token-1");
+    expect(localStorage.getItem("delivery-note-token")).toBeNull();
+    expect(sessionStorage.getItem("delivery-note-token")).toBeNull();
     await waitFor(() => {
       const requestedUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
       expect(requestedUrls).toEqual(expect.arrayContaining([
@@ -156,17 +174,15 @@ describe("App", () => {
         "/api/purchase-sync",
         "/api/overreceipt-rule-versions"
       ]));
+      for (const [, init] of vi.mocked(fetch).mock.calls) {
+        expect(init).toEqual(expect.objectContaining({ credentials: "include" }));
+        expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+      }
     });
   });
 
   it("shows overreceipt rule management to operators", async () => {
-    localStorage.setItem("delivery-note-token", "operator-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 2,
-      username: "operator",
-      role: "operator",
-      active: true
-    }));
+    authenticatedUser = operatorUser;
 
     render(<App />);
 
@@ -176,13 +192,7 @@ describe("App", () => {
   });
 
   it("shows a structured account area and keeps logout working", async () => {
-    localStorage.setItem("delivery-note-token", "admin-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 1,
-      username: "admin",
-      role: "admin",
-      active: true
-    }));
+    authenticatedUser = adminUser;
 
     render(<App />);
     await screen.findByRole("heading", { name: "交货批次" });
@@ -204,13 +214,7 @@ describe("App", () => {
   });
 
   it("keeps the standard account header appearance in the batch workspace", async () => {
-    localStorage.setItem("delivery-note-token", "admin-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 1,
-      username: "admin",
-      role: "admin",
-      active: true
-    }));
+    authenticatedUser = adminUser;
 
     render(<App />);
 
@@ -250,18 +254,18 @@ describe("App", () => {
   });
 
   it("keeps loaded batch actions stable while returning from another workspace", async () => {
-    localStorage.setItem("delivery-note-token", "admin-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 1,
-      username: "admin",
-      role: "admin",
-      active: true
-    }));
+    authenticatedUser = adminUser;
 
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith("/api/auth/me")) {
+          return new Response(JSON.stringify(adminUser), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
         if (url.endsWith("/api/batches")) {
           return new Response(JSON.stringify([routeBatch]), {
             status: 200,
@@ -308,13 +312,7 @@ describe("App", () => {
   }, 15000);
 
   it("returns to the top when switching workspaces", async () => {
-    localStorage.setItem("delivery-note-token", "operator-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 2,
-      username: "operator",
-      role: "operator",
-      active: true
-    }));
+    authenticatedUser = operatorUser;
     const scrollTo = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
 
     render(<App />);
@@ -325,18 +323,19 @@ describe("App", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: "auto" });
   });
 
-  it("returns to login when a stored session expires", async () => {
-    localStorage.setItem("delivery-note-token", "expired-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 1,
-      username: "admin",
-      role: "admin",
-      active: true
+  it("returns to login when a cookie session expires", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/api/auth/me")) {
+        return new Response(JSON.stringify(adminUser), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+      return new Response(
+        JSON.stringify({ detail: "未登录" }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
     }));
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ detail: "未登录" }),
-      { status: 401, headers: { "Content-Type": "application/json" } }
-    )));
 
     render(<App />);
 
@@ -347,13 +346,7 @@ describe("App", () => {
   });
 
   it("restores a batch detail from its URL and returns to the list URL", async () => {
-    localStorage.setItem("delivery-note-token", "admin-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 1,
-      username: "admin",
-      role: "admin",
-      active: true
-    }));
+    authenticatedUser = adminUser;
     window.history.replaceState({}, "", "/batches/7");
 
     render(<App />);
@@ -368,13 +361,7 @@ describe("App", () => {
   });
 
   it("updates the workspace when browser history emits popstate", async () => {
-    localStorage.setItem("delivery-note-token", "admin-token");
-    localStorage.setItem("delivery-note-user", JSON.stringify({
-      id: 1,
-      username: "admin",
-      role: "admin",
-      active: true
-    }));
+    authenticatedUser = adminUser;
     window.history.replaceState({}, "", "/batches");
 
     render(<App />);

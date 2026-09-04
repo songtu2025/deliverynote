@@ -14,6 +14,17 @@ services:
       timeout: 5s
       retries: 20
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["python", "-m", "delivery_note.migrations"]
+    environment:
+      DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -25,19 +36,23 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      SESSION_COOKIE_SECURE: "${SESSION_COOKIE_SECURE:-false}"
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+      MAX_CONCURRENT_UPLOAD_PARSES: ${MAX_CONCURRENT_UPLOAD_PARSES:-2}
+      MAX_BATCH_UPLOAD_FILES: ${MAX_BATCH_UPLOAD_FILES:-50}
       IMPORT_CANDIDATE_TTL_SECONDS: ${IMPORT_CANDIDATE_TTL_SECONDS:-900}
       POSITION_FRAME_CACHE_SIZE: ${POSITION_FRAME_CACHE_SIZE:-8}
       GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://open.gerpgo.com}
       GERPGO_APP_ID: ${GERPGO_APP_ID:-}
       GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}
+      AUTO_MIGRATE_SCHEMA: "false"
     volumes:
       - delivery_data:/data
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -51,6 +66,7 @@ services:
     environment:
       DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
       STORAGE_ROOT: /data/storage
+      WORKER_MAX_ATTEMPTS: "${WORKER_MAX_ATTEMPTS:-3}"
       GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://open.gerpgo.com}
       GERPGO_APP_ID: ${GERPGO_APP_ID:-}
       GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}
@@ -69,6 +85,7 @@ services:
     environment:
       DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
       STORAGE_ROOT: /data/storage
+      WORKER_MAX_ATTEMPTS: "${WORKER_MAX_ATTEMPTS:-3}"
       PURCHASE_SYNC_MODE: ${PURCHASE_SYNC_MODE:-incremental}
       GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://open.gerpgo.com}
       GERPGO_APP_ID: ${GERPGO_APP_ID:-}
@@ -88,6 +105,7 @@ services:
     environment:
       DATABASE_URL: "postgresql+psycopg://delivery_note:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/delivery_note"
       STORAGE_ROOT: /data/storage
+      WORKER_MAX_ATTEMPTS: "${WORKER_MAX_ATTEMPTS:-3}"
       GERPGO_API_BASE_URL: ${GERPGO_API_BASE_URL:-https://open.gerpgo.com}
       GERPGO_APP_ID: ${GERPGO_APP_ID:-}
       GERPGO_APP_KEY: ${GERPGO_APP_KEY:-}

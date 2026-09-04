@@ -1,3 +1,4 @@
+import asyncio
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
@@ -26,10 +27,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from ..application import SplitPart, project_split
 from ..config import PURCHASE_STATUSES, resolve_supplier, warehouse_sort_key
@@ -51,9 +53,7 @@ from ..input_inspection import (
     validate_position_frame,
     write_position_workbook,
 )
-from ..migrations.purchase_sync_optional_versions import (
-    migrate as migrate_purchase_sync_optional_versions,
-)
+from ..migrations.runner import migrate_schema as run_schema_migrations
 from ..gerpgo import (
     GerpgoClient,
     GerpgoError,
@@ -139,6 +139,59 @@ POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
 INPUT_INSPECTION_CACHE_SIZE = 32
+SESSION_COOKIE_NAME = "delivery_note_session"
+_TRUE_BOOLEAN_VALUES = {"1", "true", "yes", "on"}
+_FALSE_BOOLEAN_VALUES = {"0", "false", "no", "off"}
+
+
+def _boolean_environment(name: str, default: bool) -> bool:
+    """读取布尔环境变量，并拒绝无法识别的配置。"""
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    value = raw_value.strip().lower()
+    if value in _TRUE_BOOLEAN_VALUES:
+        return True
+    if value in _FALSE_BOOLEAN_VALUES:
+        return False
+    raise ValueError(f"{name} 必须是 true 或 false")
+
+
+def _set_session_cookie(
+    response: Response,
+    token: str,
+    expires_at: datetime,
+    *,
+    secure: bool,
+) -> None:
+    """写入与数据库会话同期限的浏览器会话 Cookie。"""
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        expires=expires_at.replace(tzinfo=timezone.utc),
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _delete_session_cookie(response: Response, *, secure: bool) -> None:
+    """按登录时的属性清除浏览器会话 Cookie。"""
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _deleted_session_cookie_header(*, secure: bool) -> str:
+    """生成可附加到鉴权错误响应的 Cookie 清理头。"""
+    response = Response()
+    _delete_session_cookie(response, secure=secure)
+    return response.headers["set-cookie"]
 
 
 class _InputInspectionCache:
@@ -723,31 +776,16 @@ def _merged_export_ready(batch: Batch, source_count: int) -> bool:
     return source_count > 1 and path is not None and path.is_file()
 
 
-def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
-    sources = session.scalars(
-        select(BatchFile)
-        .where(BatchFile.batch_id == batch.id)
-        .order_by(BatchFile.file_order)
-    ).all()
-    exceptions_by_source, splits_by_exception = _batch_exception_data(
-        session,
-        sources,
-    )
-    overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
-    overreceipt_rule = (
-        session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
-        if overreceipt_binding is not None
-        else None
-    )
-    self_operated = session.get(SelfOperatedBatch, batch.id)
-    self_operated_rule = (
-        session.get(
-            SelfOperatedOverreceiptRuleVersion,
-            self_operated.rule_version_id,
-        )
-        if self_operated is not None and self_operated.rule_version_id is not None
-        else None
-    )
+def _batch_base_json(
+    batch: Batch,
+    sources: list[BatchFile],
+    exceptions_by_source: dict[int, list[ExceptionRecord]],
+    splits_by_exception: dict[int, list[SplitRecord]],
+    overreceipt_rule: OverreceiptRuleVersion | None,
+    self_operated: SelfOperatedBatch | None,
+    self_operated_rule: SelfOperatedOverreceiptRuleVersion | None,
+    inbound_source: InputVersion | None,
+) -> dict:
     result = {
         "id": batch.id,
         "name": batch.name,
@@ -793,6 +831,38 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
             splits_by_exception,
         ),
     }
+    if self_operated is not None and self_operated.inbound_storage_path:
+        result["version_ids"]["self_operated_inbound"] = (
+            inbound_source.id if inbound_source is not None else None
+        )
+    return result
+
+
+def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
+    sources = session.scalars(
+        select(BatchFile)
+        .where(BatchFile.batch_id == batch.id)
+        .order_by(BatchFile.file_order)
+    ).all()
+    exceptions_by_source, splits_by_exception = _batch_exception_data(
+        session,
+        sources,
+    )
+    overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
+    overreceipt_rule = (
+        session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
+        if overreceipt_binding is not None
+        else None
+    )
+    self_operated = session.get(SelfOperatedBatch, batch.id)
+    self_operated_rule = (
+        session.get(
+            SelfOperatedOverreceiptRuleVersion,
+            self_operated.rule_version_id,
+        )
+        if self_operated is not None and self_operated.rule_version_id is not None
+        else None
+    )
     inbound_source = None
     if self_operated is not None and self_operated.inbound_storage_path:
         inbound_source = session.scalar(
@@ -801,9 +871,16 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
                 InputVersion.storage_path == self_operated.inbound_storage_path,
             )
         )
-        result["version_ids"]["self_operated_inbound"] = (
-            inbound_source.id if inbound_source is not None else None
-        )
+    result = _batch_base_json(
+        batch,
+        sources,
+        exceptions_by_source,
+        splits_by_exception,
+        overreceipt_rule,
+        self_operated,
+        self_operated_rule,
+        inbound_source,
+    )
     if include_files:
         result["files"] = [
             _file_json(
@@ -857,6 +934,84 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
     return result
 
 
+def _batch_list_json(batches: list[Batch], session: Session) -> list[dict]:
+    if not batches:
+        return []
+    batch_ids = [batch.id for batch in batches]
+    sources = session.scalars(
+        select(BatchFile)
+        .where(BatchFile.batch_id.in_(batch_ids))
+        .order_by(BatchFile.batch_id, BatchFile.file_order)
+    ).all()
+    sources_by_batch: dict[int, list[BatchFile]] = {}
+    for source in sources:
+        sources_by_batch.setdefault(source.batch_id, []).append(source)
+    exceptions_by_source, splits_by_exception = _batch_exception_data(
+        session,
+        sources,
+    )
+
+    overreceipt_rules = {
+        binding.batch_id: rule
+        for binding, rule in session.execute(
+            select(BatchOverreceiptRule, OverreceiptRuleVersion)
+            .join(
+                OverreceiptRuleVersion,
+                OverreceiptRuleVersion.id == BatchOverreceiptRule.rule_version_id,
+            )
+            .where(BatchOverreceiptRule.batch_id.in_(batch_ids))
+        ).all()
+    }
+    self_operated_by_batch: dict[int, SelfOperatedBatch] = {}
+    self_operated_rules: dict[int, SelfOperatedOverreceiptRuleVersion] = {}
+    inbound_sources: dict[int, InputVersion] = {}
+    self_operated_rows = session.execute(
+        select(
+            SelfOperatedBatch,
+            SelfOperatedOverreceiptRuleVersion,
+            InputVersion,
+        )
+        .select_from(SelfOperatedBatch)
+        .outerjoin(
+            SelfOperatedOverreceiptRuleVersion,
+            SelfOperatedOverreceiptRuleVersion.id
+            == SelfOperatedBatch.rule_version_id,
+        )
+        .outerjoin(
+            InputVersion,
+            and_(
+                SelfOperatedBatch.inbound_storage_path != "",
+                InputVersion.kind == "self_operated_inbound",
+                InputVersion.storage_path == SelfOperatedBatch.inbound_storage_path,
+            ),
+        )
+        .where(SelfOperatedBatch.batch_id.in_(batch_ids))
+        .order_by(SelfOperatedBatch.batch_id, InputVersion.id)
+    ).all()
+    for self_operated, rule, inbound_source in self_operated_rows:
+        if self_operated.batch_id in self_operated_by_batch:
+            continue
+        self_operated_by_batch[self_operated.batch_id] = self_operated
+        if rule is not None:
+            self_operated_rules[self_operated.batch_id] = rule
+        if inbound_source is not None:
+            inbound_sources[self_operated.batch_id] = inbound_source
+
+    return [
+        _batch_base_json(
+            batch,
+            sources_by_batch.get(batch.id, []),
+            exceptions_by_source,
+            splits_by_exception,
+            overreceipt_rules.get(batch.id),
+            self_operated_by_batch.get(batch.id),
+            self_operated_rules.get(batch.id),
+            inbound_sources.get(batch.id),
+        )
+        for batch in batches
+    ]
+
+
 def _job_json(job: Job) -> dict:
     return {
         "id": job.id,
@@ -888,6 +1043,19 @@ def _validate_input_version(kind: str, path: Path) -> None:
         validate_self_operated_template_workbook(path)
     else:
         raise ValueError(f"不支持的输入资料类型：{kind}")
+
+
+def _inspect_position_import(
+    path: Path,
+    current_frame: pd.DataFrame,
+) -> tuple[pd.DataFrame, list, dict]:
+    """在线程池中读取并检查库位导入文件。"""
+    candidate_frame = read_position_workbook(path)
+    issues = [
+        *validate_position_frame(candidate_frame),
+        *position_change_warnings(current_frame, candidate_frame),
+    ]
+    return candidate_frame, issues, position_diff(current_frame, candidate_frame)
 
 
 def _exception_position_values(
@@ -1022,11 +1190,13 @@ async def _save_upload(
     destination: Path,
     max_bytes: int,
 ) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
     bytes_written = 0
+    output = None
     try:
-        with temporary.open("wb") as output:
+        output = await run_in_threadpool(temporary.open, "wb")
+        try:
             while chunk := await upload.read(1024 * 1024):
                 bytes_written += len(chunk)
                 if bytes_written > max_bytes:
@@ -1034,11 +1204,15 @@ async def _save_upload(
                         status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         detail=f"上传文件不能超过 {max_bytes} 字节",
                     )
-                output.write(chunk)
-        os.replace(temporary, destination)
+                await run_in_threadpool(output.write, chunk)
+        finally:
+            await run_in_threadpool(output.close)
+            output = None
+        await run_in_threadpool(os.replace, temporary, destination)
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        if output is not None:
+            await run_in_threadpool(output.close)
+        await run_in_threadpool(temporary.unlink, missing_ok=True)
         await upload.close()
 
 
@@ -1107,13 +1281,23 @@ def create_app(
     max_upload_bytes: int | None = None,
     import_candidate_ttl_seconds: int | None = None,
     position_frame_cache_size: int | None = None,
+    auto_migrate_schema: bool | None = None,
+    max_concurrent_upload_parses: int | None = None,
+    max_batch_upload_files: int | None = None,
+    session_cookie_secure: bool | None = None,
 ) -> FastAPI:
     resolved_database_url = database_url or os.getenv(
         "DATABASE_URL", "sqlite+pysqlite:///delivery_note.db"
     )
+    if auto_migrate_schema is None:
+        auto_migrate_schema = os.getenv("AUTO_MIGRATE_SCHEMA", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
+    if auto_migrate_schema:
+        run_schema_migrations(resolved_database_url)
     database = Database(resolved_database_url)
-    database.create_schema()
-    migrate_purchase_sync_optional_versions(resolved_database_url)
     storage = Path(storage_root or os.getenv("STORAGE_ROOT", "storage")).resolve()
     storage.mkdir(parents=True, exist_ok=True)
     configured_max_upload_bytes = (
@@ -1123,6 +1307,20 @@ def create_app(
     )
     if configured_max_upload_bytes <= 0:
         raise ValueError("MAX_UPLOAD_BYTES 必须大于 0")
+    configured_max_concurrent_upload_parses = (
+        max_concurrent_upload_parses
+        if max_concurrent_upload_parses is not None
+        else int(os.getenv("MAX_CONCURRENT_UPLOAD_PARSES", "2"))
+    )
+    if configured_max_concurrent_upload_parses <= 0:
+        raise ValueError("MAX_CONCURRENT_UPLOAD_PARSES 必须大于 0")
+    configured_max_batch_upload_files = (
+        max_batch_upload_files
+        if max_batch_upload_files is not None
+        else int(os.getenv("MAX_BATCH_UPLOAD_FILES", "50"))
+    )
+    if configured_max_batch_upload_files <= 0:
+        raise ValueError("MAX_BATCH_UPLOAD_FILES 必须大于 0")
     configured_import_candidate_ttl = (
         import_candidate_ttl_seconds
         if import_candidate_ttl_seconds is not None
@@ -1137,6 +1335,11 @@ def create_app(
     )
     if configured_position_frame_cache_size <= 0:
         raise ValueError("POSITION_FRAME_CACHE_SIZE 必须大于 0")
+    configured_session_cookie_secure = (
+        session_cookie_secure
+        if session_cookie_secure is not None
+        else _boolean_environment("SESSION_COOKIE_SECURE", False)
+    )
     import_candidate_root = storage / "temporary" / "position-imports"
     import_candidate_root.mkdir(parents=True, exist_ok=True)
     startup_expiry_cutoff = datetime.now().timestamp() - configured_import_candidate_ttl
@@ -1150,7 +1353,10 @@ def create_app(
     # 多进程部署时，必须将该注册表迁移到共享数据库。
     import_candidates: dict[str, dict] = {}
     import_candidates_lock = Lock()
-    batch_file_upload_lock = Lock()
+    batch_file_upload_lock = asyncio.Lock()
+    upload_parse_semaphore = asyncio.Semaphore(
+        configured_max_concurrent_upload_parses
+    )
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
     position_frame_cache = _PositionFrameCache(configured_position_frame_cache_size)
@@ -1184,8 +1390,11 @@ def create_app(
     app.state.database = database
     app.state.storage_root = storage
     app.state.max_upload_bytes = configured_max_upload_bytes
+    app.state.max_concurrent_upload_parses = configured_max_concurrent_upload_parses
+    app.state.max_batch_upload_files = configured_max_batch_upload_files
     app.state.import_candidate_ttl_seconds = configured_import_candidate_ttl
     app.state.position_frame_cache_size = configured_position_frame_cache_size
+    app.state.session_cookie_secure = configured_session_cookie_secure
     app.state.position_import_candidates = import_candidates
     app.add_middleware(
         CORSMiddleware,
@@ -1213,25 +1422,58 @@ def create_app(
         finally:
             session.close()
 
+    async def parse_uploaded_workbook(function: Callable, *args):
+        """限制进程内并发，并在线程池执行工作簿解析。"""
+        async with upload_parse_semaphore:
+            return await run_in_threadpool(function, *args)
+
     def current_user(
+        request: Request,
         credentials: Annotated[
             HTTPAuthorizationCredentials | None,
             Depends(bearer),
         ],
         session: Annotated[Session, Depends(get_session)],
     ) -> User:
-        if credentials is None:
+        cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
+        token = credentials.credentials if credentials is not None else cookie_token
+        using_cookie = credentials is None and cookie_token is not None
+        if token is None:
             raise HTTPException(status_code=401, detail="未登录")
         auth_session = session.scalar(
             select(AuthSession).where(
-                AuthSession.token_hash == hash_token(credentials.credentials)
+                AuthSession.token_hash == hash_token(token)
             )
         )
         if auth_session is None or auth_session.expires_at <= datetime.utcnow():
-            raise HTTPException(status_code=401, detail="登录已失效")
+            raise HTTPException(
+                status_code=401,
+                detail="登录已失效",
+                headers=(
+                    {
+                        "Set-Cookie": _deleted_session_cookie_header(
+                            secure=configured_session_cookie_secure
+                        )
+                    }
+                    if using_cookie
+                    else None
+                ),
+            )
         user = session.get(User, auth_session.user_id)
         if user is None or not user.active:
-            raise HTTPException(status_code=401, detail="用户不可用")
+            raise HTTPException(
+                status_code=401,
+                detail="用户不可用",
+                headers=(
+                    {
+                        "Set-Cookie": _deleted_session_cookie_header(
+                            secure=configured_session_cookie_secure
+                        )
+                    }
+                    if using_cookie
+                    else None
+                ),
+            )
         return user
 
     def admin_user(user: Annotated[User, Depends(current_user)]) -> User:
@@ -1308,6 +1550,10 @@ def create_app(
             Path(candidate["path"]).unlink(missing_ok=True)
         return candidate
 
+    def register_import_candidate(token: str, candidate: dict) -> None:
+        with import_candidates_lock:
+            import_candidates[token] = candidate
+
     def remove_draft_import_candidates(draft_id: int) -> None:
         with import_candidates_lock:
             tokens = [
@@ -1344,12 +1590,35 @@ def create_app(
             ):
                 candidate_path.unlink(missing_ok=True)
 
-    @app.get("/health")
-    def health() -> dict:
+    def readiness() -> dict:
+        try:
+            with database.session() as session:
+                session.execute(text("SELECT 1"))
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="服务尚未就绪",
+            ) from None
         return {"status": "ok"}
 
+    @app.get("/health/live")
+    def health_live() -> dict:
+        return {"status": "ok"}
+
+    @app.get("/health/ready")
+    def health_ready() -> dict:
+        return readiness()
+
+    @app.get("/health")
+    def health() -> dict:
+        return readiness()
+
     @app.post("/api/auth/login")
-    def login(payload: LoginPayload, session: Annotated[Session, Depends(get_session)]):
+    def login(
+        payload: LoginPayload,
+        response: Response,
+        session: Annotated[Session, Depends(get_session)],
+    ):
         user = session.scalar(select(User).where(User.username == payload.username))
         if (
             user is None
@@ -1367,6 +1636,12 @@ def create_app(
         )
         _audit(session, user.id, "login", "user", user.id)
         session.commit()
+        _set_session_cookie(
+            response,
+            token,
+            expires_at,
+            secure=configured_session_cookie_secure,
+        )
         return {
             "token": token,
             "expires_at": _utc_isoformat(expires_at),
@@ -1375,18 +1650,36 @@ def create_app(
 
     @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
     def logout(
-        credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer)],
+        request: Request,
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None,
+            Depends(bearer),
+        ],
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
+        selected_token = (
+            credentials.credentials
+            if credentials is not None
+            else request.cookies.get(SESSION_COOKIE_NAME)
+        )
+        presented_tokens = {
+            token
+            for token in (selected_token, request.cookies.get(SESSION_COOKIE_NAME))
+            if token
+        }
         session.execute(
             delete(AuthSession).where(
-                AuthSession.token_hash == hash_token(credentials.credentials)
+                AuthSession.token_hash.in_(
+                    hash_token(token) for token in presented_tokens
+                )
             )
         )
         _audit(session, user.id, "logout", "user", user.id)
         session.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+        response = Response(status_code=status.HTTP_204_NO_CONTENT)
+        _delete_session_cookie(response, secure=configured_session_cookie_secure)
+        return response
 
     @app.get("/api/auth/me")
     def me(user: Annotated[User, Depends(current_user)]):
@@ -1496,9 +1789,9 @@ def create_app(
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            _validate_input_version(kind, destination)
+            await parse_uploaded_workbook(_validate_input_version, kind, destination)
         except Exception as error:
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise HTTPException(
                 status_code=400,
                 detail=f"输入版本校验失败：{error}",
@@ -2846,7 +3139,7 @@ def create_app(
         _admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
     ):
-        remove_expired_import_candidates()
+        await run_in_threadpool(remove_expired_import_candidates)
         draft = get_draft_or_404(draft_id, session)
         try:
             require_revision(draft, revision)
@@ -2862,31 +3155,33 @@ def create_app(
         destination = import_candidate_root / f"{draft.id}_{revision}_{token}{suffix}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            candidate_frame = read_position_workbook(destination)
             current_frame = _position_frame(list_draft_rows(session, draft.id))
-            issues = [
-                *validate_position_frame(candidate_frame),
-                *position_change_warnings(current_frame, candidate_frame),
-            ]
-            diff = position_diff(current_frame, candidate_frame)
+            candidate_frame, issues, diff = await parse_uploaded_workbook(
+                _inspect_position_import,
+                destination,
+                current_frame,
+            )
         except Exception as error:
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             if session.in_transaction():
                 session.rollback()
             raise HTTPException(
                 status_code=400,
                 detail=f"导入文件校验失败：{error}",
             ) from error
-        remove_draft_import_candidates(draft.id)
-        with import_candidates_lock:
-            import_candidates[token] = {
+        await run_in_threadpool(remove_draft_import_candidates, draft.id)
+        await run_in_threadpool(
+            register_import_candidate,
+            token,
+            {
                 "draft_id": draft.id,
                 "revision": revision,
                 "path": str(destination),
                 "created_by": _admin.id,
                 "expires_at": datetime.utcnow()
                 + timedelta(seconds=app.state.import_candidate_ttl_seconds),
-            }
+            },
+        )
         return {
             "token": token,
             "draft_id": draft.id,
@@ -3149,6 +3444,13 @@ def create_app(
             raise HTTPException(status_code=400, detail="批次名称不能超过 200 个字符")
         if not files:
             raise HTTPException(status_code=400, detail="请至少上传一份交货文件")
+        if len(files) > app.state.max_batch_upload_files:
+            for upload in files:
+                await upload.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"单批次最多上传 {app.state.max_batch_upload_files} 份交货文件",
+            )
 
         active_versions = {
             version.kind: version
@@ -3190,7 +3492,10 @@ def create_app(
                     temporary_path,
                     app.state.max_upload_bytes,
                 )
-                read_delivery_workbook(temporary_path)
+                await parse_uploaded_workbook(
+                    read_delivery_workbook,
+                    temporary_path,
+                )
 
             batch = Batch(
                 name=batch_name,
@@ -3203,13 +3508,13 @@ def create_app(
             session.add(batch)
             session.flush()
             input_root = storage / "batches" / str(batch.id) / "inputs"
-            input_root.mkdir(parents=True, exist_ok=True)
+            await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
             for file_order, (original_name, temporary_path) in enumerate(
                 zip(original_names, temporary_paths),
                 start=1,
             ):
                 destination = input_root / f"{uuid4().hex}_{original_name}"
-                os.replace(temporary_path, destination)
+                await run_in_threadpool(os.replace, temporary_path, destination)
                 created_paths.append(destination)
                 session.add(
                     BatchFile(
@@ -3245,12 +3550,12 @@ def create_app(
         except HTTPException:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             raise
         except Exception as error:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             if isinstance(error, ValueError):
                 raise HTTPException(
                     status_code=400,
@@ -3259,7 +3564,7 @@ def create_app(
             raise
         finally:
             for temporary_path in temporary_paths:
-                temporary_path.unlink(missing_ok=True)
+                await run_in_threadpool(temporary_path.unlink, missing_ok=True)
         return _batch_json(batch, session)
 
     @app.post(
@@ -3378,20 +3683,29 @@ def create_app(
                 temporary_delivery,
                 app.state.max_upload_bytes,
             )
-            read_self_operated_delivery_workbook(temporary_delivery)
+            await parse_uploaded_workbook(
+                read_self_operated_delivery_workbook,
+                temporary_delivery,
+            )
             if inbound_file is not None and temporary_inbound is not None:
                 await _save_upload(
                     inbound_file,
                     temporary_inbound,
                     app.state.max_upload_bytes,
                 )
-                read_self_operated_inbound_workbook(temporary_inbound)
+                await parse_uploaded_workbook(
+                    read_self_operated_inbound_workbook,
+                    temporary_inbound,
+                )
                 inbound_source_path = temporary_inbound
             else:
                 inbound_source_path = Path(api_inbound_version.storage_path)
-                if not inbound_source_path.is_file():
+                if not await run_in_threadpool(inbound_source_path.is_file):
                     raise ValueError("启用的待入库 API 数据文件不存在")
-                read_self_operated_inbound_workbook(inbound_source_path)
+                await parse_uploaded_workbook(
+                    read_self_operated_inbound_workbook,
+                    inbound_source_path,
+                )
 
             batch = Batch(
                 name=batch_name,
@@ -3405,13 +3719,13 @@ def create_app(
             session.add(batch)
             session.flush()
             input_root = storage / "batches" / str(batch.id) / "inputs"
-            input_root.mkdir(parents=True, exist_ok=True)
+            await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
             delivery_path = input_root / f"{uuid4().hex}_{delivery_name}"
-            os.replace(temporary_delivery, delivery_path)
+            await run_in_threadpool(os.replace, temporary_delivery, delivery_path)
             created_paths.append(delivery_path)
             if inbound_file is not None:
                 inbound_path = input_root / f"{uuid4().hex}_{inbound_name}"
-                os.replace(inbound_source_path, inbound_path)
+                await run_in_threadpool(os.replace, inbound_source_path, inbound_path)
                 created_paths.append(inbound_path)
             else:
                 inbound_path = inbound_source_path
@@ -3457,12 +3771,12 @@ def create_app(
         except HTTPException:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             raise
         except Exception as error:
             session.rollback()
             for path in created_paths:
-                path.unlink(missing_ok=True)
+                await run_in_threadpool(path.unlink, missing_ok=True)
             if isinstance(error, ValueError):
                 raise HTTPException(
                     status_code=400,
@@ -3470,9 +3784,9 @@ def create_app(
                 ) from error
             raise
         finally:
-            temporary_delivery.unlink(missing_ok=True)
+            await run_in_threadpool(temporary_delivery.unlink, missing_ok=True)
             if temporary_inbound is not None:
-                temporary_inbound.unlink(missing_ok=True)
+                await run_in_threadpool(temporary_inbound.unlink, missing_ok=True)
         return _batch_json(batch, session)
 
     @app.get("/api/batches")
@@ -3481,7 +3795,7 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         batches = session.scalars(select(Batch).order_by(Batch.id.desc())).all()
-        return [_batch_json(batch, session, include_files=False) for batch in batches]
+        return _batch_list_json(batches, session)
 
     @app.delete("/api/batches")
     def delete_batches(
@@ -3686,9 +4000,12 @@ def create_app(
         )
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            read_self_operated_inbound_workbook(destination)
+            await parse_uploaded_workbook(
+                read_self_operated_inbound_workbook,
+                destination,
+            )
         except Exception as error:
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise HTTPException(
                 status_code=400,
                 detail=f"自营仓收货入库单校验失败：{error}",
@@ -3712,7 +4029,7 @@ def create_app(
         )
         session.commit()
         if old_path is not None and old_path != destination:
-            old_path.unlink(missing_ok=True)
+            await run_in_threadpool(old_path.unlink, missing_ok=True)
         return _batch_json(batch, session)
 
     @app.post(
@@ -3729,17 +4046,22 @@ def create_app(
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
         self_operated = session.get(SelfOperatedBatch, batch.id)
-        if self_operated is not None:
-            source_count = session.scalar(
-                select(func.count())
-                .select_from(BatchFile)
-                .where(BatchFile.batch_id == batch.id)
+        source_count = session.scalar(
+            select(func.count())
+            .select_from(BatchFile)
+            .where(BatchFile.batch_id == batch.id)
+        )
+        if self_operated is not None and source_count:
+            raise HTTPException(
+                status_code=409,
+                detail="自营仓入库批次只能上传一份质检交货单",
             )
-            if source_count:
-                raise HTTPException(
-                    status_code=409,
-                    detail="自营仓入库批次只能上传一份质检交货单",
-                )
+        if source_count >= app.state.max_batch_upload_files:
+            await file.close()
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"单批次最多上传 {app.state.max_batch_upload_files} 份交货文件",
+            )
         original_name = _safe_filename(file.filename or "")
         if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
             raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
@@ -3760,7 +4082,7 @@ def create_app(
         )
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            with batch_file_upload_lock:
+            async with batch_file_upload_lock:
                 batch = session.scalar(
                     select(Batch)
                     .where(Batch.id == batch_id)
@@ -3774,17 +4096,25 @@ def create_app(
                         status_code=409,
                         detail="当前批次状态不可修改文件",
                     )
-                if session.get(SelfOperatedBatch, batch.id) is not None:
-                    source_count = session.scalar(
-                        select(func.count())
-                        .select_from(BatchFile)
-                        .where(BatchFile.batch_id == batch.id)
+                self_operated = session.get(SelfOperatedBatch, batch.id)
+                source_count = session.scalar(
+                    select(func.count())
+                    .select_from(BatchFile)
+                    .where(BatchFile.batch_id == batch.id)
+                )
+                if self_operated is not None and source_count:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="自营仓入库批次只能上传一份质检交货单",
                     )
-                    if source_count:
-                        raise HTTPException(
-                            status_code=409,
-                            detail="自营仓入库批次只能上传一份质检交货单",
-                        )
+                if source_count >= app.state.max_batch_upload_files:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        detail=(
+                            "单批次最多上传 "
+                            f"{app.state.max_batch_upload_files} 份交货文件"
+                        ),
+                    )
                 duplicate = session.scalar(
                     select(BatchFile).where(
                         BatchFile.batch_id == batch.id,
@@ -3825,11 +4155,11 @@ def create_app(
                 session.commit()
         except HTTPException:
             session.rollback()
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise
         except IntegrityError as error:
             session.rollback()
-            destination.unlink(missing_ok=True)
+            await run_in_threadpool(destination.unlink, missing_ok=True)
             raise HTTPException(
                 status_code=409,
                 detail="文件上传发生并发冲突，请刷新后重试",

@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+import logging
 import os
 from pathlib import Path
 import signal
@@ -103,6 +104,68 @@ VERSION_FIELDS = {
 
 PURCHASE_DETAIL_WORKERS = 8
 PURCHASE_SYNC_MODES = {"full", "shadow", "incremental"}
+WORKER_QUEUES = ("all", "batch", "purchase-sync", "inbound-sync")
+LEASE_HEARTBEAT_INTERVAL_SECONDS = 30.0
+LOGGER = logging.getLogger(__name__)
+
+
+class _LeaseKeeper:
+    """业务调用阻塞时，使用独立会话周期续租当前任务。"""
+
+    def __init__(
+        self,
+        heartbeat: Callable[[], None],
+        queue: str,
+        job_id: int,
+        claim_token: str,
+    ) -> None:
+        self._heartbeat = heartbeat
+        self._queue = queue
+        self._job_id = job_id
+        self._claim_prefix = claim_token[:8]
+        self._stop_event = Event()
+        self._error: Exception | None = None
+        self._stopped = False
+        self._thread = Thread(
+            target=self._run,
+            name=f"delivery-note-lease-{queue}-{job_id}",
+            daemon=True,
+        )
+
+    def _run(self) -> None:
+        while not self._stop_event.wait(LEASE_HEARTBEAT_INTERVAL_SECONDS):
+            try:
+                self._heartbeat()
+            except Exception as error:
+                self._error = error
+                LOGGER.exception(
+                    "Worker 租约续期失败 queue=%s job_id=%s claim=%s",
+                    self._queue,
+                    self._job_id,
+                    self._claim_prefix,
+                )
+                return
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        if not self._stopped:
+            self._stop_event.set()
+            self._thread.join()
+            self._stopped = True
+        if self._error is not None:
+            raise self._error
+
+    def __exit__(self, exception_type, _exception, _traceback) -> None:
+        if exception_type is None:
+            self.stop()
+            return
+        if not self._stopped:
+            self._stop_event.set()
+            self._thread.join()
+            self._stopped = True
 
 
 def _json_value(value):
@@ -270,15 +333,16 @@ def _self_operated_inbound_sync_heartbeat(
             raise LostJobLeaseError("待入库同步任务租约已失效")
 
 
-def recover_stale_jobs(
-    database_url: str,
+def _recover_stale_jobs(
+    database: Database,
     stale_after: timedelta = timedelta(minutes=30),
+    queue: str = "all",
+    max_attempts: int = 3,
 ) -> int:
-    database = Database(database_url)
     cutoff = datetime.utcnow() - stale_after
     recovered = 0
-    try:
-        with database.session() as session:
+    with database.session() as session:
+        if queue in {"all", "batch"}:
             jobs = session.scalars(
                 select(Job)
                 .where(Job.status == "running")
@@ -288,16 +352,31 @@ def recover_stale_jobs(
                 marker = job.heartbeat_at or job.claimed_at
                 if marker is None or marker >= cutoff:
                     continue
-                job.status = "queued"
-                job.claim_token = None
-                job.claimed_at = None
-                job.heartbeat_at = None
-                job.error_message = "任务运行超时，已自动重试"
                 batch = session.get(Batch, job.batch_id)
-                if batch is not None and job.kind == "compute":
-                    batch.status = "queued"
-                    batch.error_message = job.error_message
+                if job.attempts >= max_attempts:
+                    now = datetime.utcnow()
+                    job.status = "failed"
+                    job.finished_at = now
+                    job.heartbeat_at = now
+                    job.error_message = (
+                        f"任务运行超时，已达到最大自动尝试次数（{max_attempts}）"
+                    )
+                    if batch is not None:
+                        batch.error_message = job.error_message
+                        if job.kind == "compute":
+                            batch.status = "failed"
+                else:
+                    job.status = "queued"
+                    job.claimed_at = None
+                    job.heartbeat_at = None
+                    job.finished_at = None
+                    job.error_message = "任务运行超时，已自动重试"
+                    if batch is not None and job.kind == "compute":
+                        batch.status = "queued"
+                        batch.error_message = job.error_message
+                job.claim_token = None
                 recovered += 1
+        if queue in {"all", "purchase-sync"}:
             sync_jobs = session.scalars(
                 select(PurchaseSyncJob)
                 .where(PurchaseSyncJob.status == "running")
@@ -307,12 +386,25 @@ def recover_stale_jobs(
                 marker = job.heartbeat_at or job.claimed_at
                 if marker is None or marker >= cutoff:
                     continue
-                job.status = "queued"
+                if job.attempts >= max_attempts:
+                    now = datetime.utcnow()
+                    job.status = "failed"
+                    job.active_slot = None
+                    job.finished_at = now
+                    job.heartbeat_at = now
+                    job.error_message = (
+                        "采购同步运行超时，"
+                        f"已达到最大自动尝试次数（{max_attempts}）"
+                    )
+                else:
+                    job.status = "queued"
+                    job.claimed_at = None
+                    job.heartbeat_at = None
+                    job.finished_at = None
+                    job.error_message = "采购同步运行超时，已自动重试"
                 job.claim_token = None
-                job.claimed_at = None
-                job.heartbeat_at = None
-                job.error_message = "采购同步运行超时，已自动重试"
                 recovered += 1
+        if queue in {"all", "inbound-sync"}:
             inbound_sync_jobs = session.scalars(
                 select(SelfOperatedInboundSyncJob)
                 .where(SelfOperatedInboundSyncJob.status == "running")
@@ -322,16 +414,48 @@ def recover_stale_jobs(
                 marker = job.heartbeat_at or job.claimed_at
                 if marker is None or marker >= cutoff:
                     continue
-                job.status = "queued"
+                if job.attempts >= max_attempts:
+                    now = datetime.utcnow()
+                    job.status = "failed"
+                    job.active_slot = None
+                    job.finished_at = now
+                    job.heartbeat_at = now
+                    job.error_message = (
+                        "待入库同步运行超时，"
+                        f"已达到最大自动尝试次数（{max_attempts}）"
+                    )
+                else:
+                    job.status = "queued"
+                    job.claimed_at = None
+                    job.heartbeat_at = None
+                    job.finished_at = None
+                    job.error_message = "待入库同步运行超时，已自动重试"
                 job.claim_token = None
-                job.claimed_at = None
-                job.heartbeat_at = None
-                job.error_message = "待入库同步运行超时，已自动重试"
                 recovered += 1
-            session.commit()
+        session.commit()
+    return recovered
+
+
+def recover_stale_jobs(
+    database_url: str,
+    stale_after: timedelta = timedelta(minutes=30),
+    queue: str = "all",
+    max_attempts: int = 3,
+) -> int:
+    if queue not in WORKER_QUEUES:
+        raise ValueError(f"未知 Worker 队列：{queue}")
+    if max_attempts <= 0:
+        raise ValueError("最大尝试次数必须大于 0")
+    database = Database(database_url)
+    try:
+        return _recover_stale_jobs(
+            database,
+            stale_after=stale_after,
+            queue=queue,
+            max_attempts=max_attempts,
+        )
     finally:
         database.dispose()
-    return recovered
 
 
 def _load_compute_inputs(database: Database, batch_id: int):
@@ -415,6 +539,7 @@ def _execute_self_operated_compute(
     version_paths: dict[str, Path],
     sources: list[dict],
     self_operated_data: dict,
+    before_finalize: Callable[[], None],
 ) -> None:
     supplier_rows = read_supplier_workbook(version_paths["supplier"])
     product_rows = read_product_workbook(version_paths["product"])
@@ -436,6 +561,7 @@ def _execute_self_operated_compute(
         site_overrides=self_operated_data["site_overrides"],
     )
     _heartbeat(database, job_id, claim_token)
+    before_finalize()
 
     with database.session() as session:
         job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
@@ -524,6 +650,7 @@ def _execute_compute(
     job_id: int,
     batch_id: int,
     claim_token: str,
+    before_finalize: Callable[[], None],
 ) -> None:
     _heartbeat(database, job_id, claim_token)
     (
@@ -541,6 +668,7 @@ def _execute_compute(
             version_paths,
             sources,
             self_operated_data,
+            before_finalize,
         )
         return
     supplier_rows = read_supplier_workbook(version_paths["supplier"])
@@ -596,6 +724,7 @@ def _execute_compute(
             }
         )
 
+    before_finalize()
     with database.session() as session:
         job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
         batch = session.get(Batch, batch_id)
@@ -868,6 +997,7 @@ def _execute_self_operated_export(
     batch_id: int,
     claim_token: str,
     storage_root: Path,
+    before_finalize: Callable[[], None],
 ) -> None:
     with database.session() as session:
         batch = session.get(Batch, batch_id)
@@ -913,6 +1043,7 @@ def _execute_self_operated_export(
             allocation_rows,
         )
         _heartbeat(database, job_id, claim_token)
+        before_finalize()
         os.replace(temporary, published)
 
         with database.session() as session:
@@ -965,6 +1096,7 @@ def _execute_export(
     batch_id: int,
     claim_token: str,
     storage_root: Path,
+    before_finalize: Callable[[], None],
 ) -> None:
     with database.session() as session:
         self_operated = session.get(SelfOperatedBatch, batch_id)
@@ -975,6 +1107,7 @@ def _execute_export(
             batch_id,
             claim_token,
             storage_root,
+            before_finalize,
         )
         return
     _heartbeat(database, job_id, claim_token)
@@ -1047,6 +1180,7 @@ def _execute_export(
                 output_name = output_names[source["id"]]
                 archive.write(temporary / output_name, arcname=output_name)
         _heartbeat(database, job_id, claim_token)
+        before_finalize()
         os.replace(temporary, published)
 
         with database.session() as session:
@@ -1286,6 +1420,7 @@ def _execute_purchase_sync(
     job_id: int,
     claim_token: str,
     storage_root: Path,
+    before_finalize: Callable[[], None],
 ) -> None:
     sync_mode = os.getenv("PURCHASE_SYNC_MODE", "incremental").strip().lower()
     if sync_mode not in PURCHASE_SYNC_MODES:
@@ -1383,6 +1518,7 @@ def _execute_purchase_sync(
         current_order=None,
     )
     if mapped.issues:
+        before_finalize()
         with database.session() as session:
             job = session.scalar(
                 select(PurchaseSyncJob)
@@ -1424,6 +1560,7 @@ def _execute_purchase_sync(
     write_purchase_workbook(candidate_path, candidate)
     read_purchase_workbook(candidate_path)
     try:
+        before_finalize()
         with database.session() as session:
             job = session.scalar(
                 select(PurchaseSyncJob)
@@ -1536,6 +1673,7 @@ def _execute_self_operated_inbound_sync(
     job_id: int,
     claim_token: str,
     storage_root: Path,
+    before_finalize: Callable[[], None],
 ) -> None:
     with database.session() as session:
         job = session.get(SelfOperatedInboundSyncJob, job_id)
@@ -1563,6 +1701,7 @@ def _execute_self_operated_inbound_sync(
         issues=findings,
     )
     if mapped.issues:
+        before_finalize()
         with database.session() as session:
             job = session.scalar(
                 select(SelfOperatedInboundSyncJob)
@@ -1607,6 +1746,7 @@ def _execute_self_operated_inbound_sync(
     write_self_operated_inbound_source(candidate_path, candidate)
     read_self_operated_inbound_workbook(candidate_path)
     try:
+        before_finalize()
         with database.session() as session:
             job = session.scalar(
                 select(SelfOperatedInboundSyncJob)
@@ -1716,7 +1856,124 @@ def _fail_job(
         session.commit()
 
 
-WORKER_QUEUES = ("all", "batch", "purchase-sync", "inbound-sync")
+def _run_once(
+    database: Database,
+    storage_root: Path | str,
+    queue: str = "all",
+) -> int | None:
+    if queue not in WORKER_QUEUES:
+        raise ValueError(f"未知 Worker 队列：{queue}")
+    claimed = _claim_job(database) if queue in {"all", "batch"} else None
+    if claimed is not None:
+        job_id, batch_id, kind, claim_token = claimed
+        try:
+            with _LeaseKeeper(
+                lambda: _heartbeat(database, job_id, claim_token),
+                "batch",
+                job_id,
+                claim_token,
+            ) as lease_keeper:
+                if kind == "compute":
+                    _execute_compute(
+                        database,
+                        job_id,
+                        batch_id,
+                        claim_token,
+                        lease_keeper.stop,
+                    )
+                elif kind == "export":
+                    _execute_export(
+                        database,
+                        job_id,
+                        batch_id,
+                        claim_token,
+                        Path(storage_root),
+                        lease_keeper.stop,
+                    )
+                else:
+                    raise RuntimeError(f"未知任务类型：{kind}")
+        except Exception as error:
+            LOGGER.exception(
+                "Worker 任务执行失败 queue=batch job_id=%s claim=%s",
+                job_id,
+                claim_token[:8],
+            )
+            _fail_job(database, job_id, claim_token, str(error))
+        return job_id
+    if queue == "batch":
+        return None
+
+    sync_claimed = (
+        _claim_purchase_sync_job(database)
+        if queue in {"all", "purchase-sync"}
+        else None
+    )
+    if sync_claimed is not None:
+        job_id, claim_token = sync_claimed
+        try:
+            with _LeaseKeeper(
+                lambda: _purchase_sync_heartbeat(
+                    database,
+                    job_id,
+                    claim_token,
+                ),
+                "purchase-sync",
+                job_id,
+                claim_token,
+            ) as lease_keeper:
+                _execute_purchase_sync(
+                    database,
+                    job_id,
+                    claim_token,
+                    Path(storage_root),
+                    lease_keeper.stop,
+                )
+        except Exception as error:
+            LOGGER.exception(
+                "Worker 任务执行失败 queue=purchase-sync job_id=%s claim=%s",
+                job_id,
+                claim_token[:8],
+            )
+            _fail_purchase_sync(database, job_id, claim_token, str(error))
+        return job_id
+    if queue == "purchase-sync":
+        return None
+
+    inbound_sync_claimed = _claim_self_operated_inbound_sync_job(database)
+    if inbound_sync_claimed is None:
+        return None
+    job_id, claim_token = inbound_sync_claimed
+    try:
+        with _LeaseKeeper(
+            lambda: _self_operated_inbound_sync_heartbeat(
+                database,
+                job_id,
+                claim_token,
+            ),
+            "inbound-sync",
+            job_id,
+            claim_token,
+        ) as lease_keeper:
+            _execute_self_operated_inbound_sync(
+                database,
+                job_id,
+                claim_token,
+                Path(storage_root),
+                lease_keeper.stop,
+            )
+    except Exception as error:
+        LOGGER.exception(
+            "Worker 任务执行失败 queue=inbound-sync job_id=%s claim=%s",
+            job_id,
+            claim_token[:8],
+        )
+        _fail_self_operated_inbound_sync(
+            database,
+            job_id,
+            claim_token,
+            str(error),
+        )
+    return job_id
 
 
 def run_once(
@@ -1728,69 +1985,19 @@ def run_once(
         raise ValueError(f"未知 Worker 队列：{queue}")
     database = Database(database_url)
     try:
-        claimed = _claim_job(database) if queue in {"all", "batch"} else None
-        if claimed is not None:
-            job_id, batch_id, kind, claim_token = claimed
-            try:
-                if kind == "compute":
-                    _execute_compute(database, job_id, batch_id, claim_token)
-                elif kind == "export":
-                    _execute_export(
-                        database,
-                        job_id,
-                        batch_id,
-                        claim_token,
-                        Path(storage_root),
-                    )
-                else:
-                    raise RuntimeError(f"未知任务类型：{kind}")
-            except Exception as error:
-                _fail_job(database, job_id, claim_token, str(error))
-            return job_id
-        if queue == "batch":
-            return None
-
-        sync_claimed = (
-            _claim_purchase_sync_job(database)
-            if queue in {"all", "purchase-sync"}
-            else None
-        )
-        if sync_claimed is not None:
-            job_id, claim_token = sync_claimed
-            try:
-                _execute_purchase_sync(
-                    database,
-                    job_id,
-                    claim_token,
-                    Path(storage_root),
-                )
-            except Exception as error:
-                _fail_purchase_sync(database, job_id, claim_token, str(error))
-            return job_id
-        if queue == "purchase-sync":
-            return None
-
-        inbound_sync_claimed = _claim_self_operated_inbound_sync_job(database)
-        if inbound_sync_claimed is None:
-            return None
-        job_id, claim_token = inbound_sync_claimed
-        try:
-            _execute_self_operated_inbound_sync(
-                database,
-                job_id,
-                claim_token,
-                Path(storage_root),
-            )
-        except Exception as error:
-            _fail_self_operated_inbound_sync(
-                database,
-                job_id,
-                claim_token,
-                str(error),
-            )
-        return job_id
+        return _run_once(database, storage_root, queue)
     finally:
         database.dispose()
+
+
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("必须是整数") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("必须大于 0")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1808,25 +2015,37 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--poll-interval", type=float, default=2.0)
     parser.add_argument("--stale-minutes", type=int, default=30)
+    parser.add_argument(
+        "--max-attempts",
+        type=_positive_int,
+        default=os.getenv("WORKER_MAX_ATTEMPTS", "3"),
+    )
     return parser
 
 
 def _watch_stale_jobs(
-    database_url: str,
+    database: Database,
     stale_after: timedelta,
     stop_event: Event,
+    queue: str = "all",
+    max_attempts: int = 3,
 ) -> None:
     while not stop_event.wait(60):
         try:
-            recovered = recover_stale_jobs(database_url, stale_after=stale_after)
+            recovered = _recover_stale_jobs(
+                database,
+                stale_after=stale_after,
+                queue=queue,
+                max_attempts=max_attempts,
+            )
             if recovered:
-                print(
-                    f"已回收 {recovered} 个超时任务，退出 Worker 交由进程管理器重启",
-                    flush=True,
+                LOGGER.info(
+                    "已处理 %s 个超时任务 queue=%s",
+                    recovered,
+                    queue,
                 )
-                os._exit(1)
-        except Exception as error:
-            print(f"任务恢复扫描失败：{error}", flush=True)
+        except Exception:
+            LOGGER.exception("任务恢复扫描失败 queue=%s", queue)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1840,29 +2059,41 @@ def main(argv: list[str] | None = None) -> int:
     for signum in (signal.SIGTERM, signal.SIGINT):
         previous_handlers[signum] = signal.signal(signum, request_stop)
     try:
-        recover_stale_jobs(
-            args.database_url,
-            stale_after=timedelta(minutes=args.stale_minutes),
-        )
-        if args.once:
-            run_once(args.database_url, args.storage_root, args.queue)
-            return 0
-        stale_after = timedelta(minutes=args.stale_minutes)
-        watcher = Thread(
-            target=_watch_stale_jobs,
-            args=(args.database_url, stale_after, stop_event),
-            name="delivery-note-stale-job-watcher",
-            daemon=True,
-        )
-        watcher.start()
+        database = Database(args.database_url)
         try:
-            while not stop_event.is_set():
-                if run_once(args.database_url, args.storage_root, args.queue) is None:
-                    stop_event.wait(args.poll_interval)
+            _recover_stale_jobs(
+                database,
+                stale_after=timedelta(minutes=args.stale_minutes),
+                queue=args.queue,
+                max_attempts=args.max_attempts,
+            )
+            if args.once:
+                _run_once(database, args.storage_root, args.queue)
+                return 0
+            stale_after = timedelta(minutes=args.stale_minutes)
+            watcher = Thread(
+                target=_watch_stale_jobs,
+                args=(
+                    database,
+                    stale_after,
+                    stop_event,
+                    args.queue,
+                    args.max_attempts,
+                ),
+                name="delivery-note-stale-job-watcher",
+                daemon=True,
+            )
+            watcher.start()
+            try:
+                while not stop_event.is_set():
+                    if _run_once(database, args.storage_root, args.queue) is None:
+                        stop_event.wait(args.poll_interval)
+            finally:
+                stop_event.set()
+                watcher.join()
+            return 0
         finally:
-            stop_event.set()
-            watcher.join(timeout=5)
-        return 0
+            database.dispose()
     finally:
         for signum, previous_handler in previous_handlers.items():
             signal.signal(signum, previous_handler)

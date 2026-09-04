@@ -1,13 +1,14 @@
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock, Thread
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zipfile import ZipFile
 
 from openpyxl import Workbook, load_workbook
@@ -16,6 +17,7 @@ import pandas as pd
 from delivery_note.pipeline import IMPORT_COLUMNS
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from tests.asgi_client import SyncASGIClient
+import delivery_note.worker as worker_module
 from delivery_note.web.api import create_app
 from delivery_note.web.database import Database
 from delivery_note.web.models import (
@@ -468,10 +470,13 @@ class WorkerIntegrationTests(unittest.TestCase):
         parser = build_parser()
 
         self.assertEqual(parser.parse_args([]).queue, "all")
+        self.assertEqual(parser.parse_args([]).max_attempts, 3)
         self.assertEqual(
             parser.parse_args(["--queue", "purchase-sync"]).queue,
             "purchase-sync",
         )
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            parser.parse_args(["--max-attempts", "0"])
 
     def create_batch(self, delivery_paths: list[Path]) -> tuple[int, int]:
         created = self.client.post(
@@ -914,7 +919,8 @@ class WorkerIntegrationTests(unittest.TestCase):
         self.assertEqual(recovered, 1)
         with self.app.state.database.session() as session:
             self.assertIsNone(session.get(Job, job_id).claim_token)
-        self.assertEqual(run_once(self.database_url, self.storage_root), job_id)
+        with self.assertLogs("delivery_note.worker", level="ERROR"):
+            self.assertEqual(run_once(self.database_url, self.storage_root), job_id)
 
         with self.app.state.database.session() as session:
             batch = session.get(Batch, batch_id)
@@ -937,6 +943,306 @@ class WorkerIntegrationTests(unittest.TestCase):
                 [(0, 0, []), (0, 0, [])],
             )
             self.assertEqual(exceptions, [])
+
+    def test_stale_recovery_only_scans_the_selected_queue(self):
+        delivery = self.create_delivery(
+            self.root / "260717-狂飙-A交货单-发货10箱.xlsx",
+            20,
+        )
+        _batch_id, batch_job_id = self.create_batch([delivery])
+        stale_at = datetime.utcnow() - timedelta(hours=2)
+        with self.app.state.database.session() as session:
+            batch_job = session.get(Job, batch_job_id)
+            batch_job.status = "running"
+            batch_job.attempts = 1
+            batch_job.claim_token = "batch-claim"
+            batch_job.heartbeat_at = stale_at
+            purchase_job = PurchaseSyncJob(
+                status="running",
+                active_slot=1,
+                created_by=1,
+                attempts=1,
+                claim_token="purchase-claim",
+                heartbeat_at=stale_at,
+            )
+            inbound_job = SelfOperatedInboundSyncJob(
+                status="running",
+                active_slot=1,
+                created_by=1,
+                attempts=1,
+                claim_token="inbound-claim",
+                heartbeat_at=stale_at,
+            )
+            session.add_all([purchase_job, inbound_job])
+            session.commit()
+            purchase_job_id = purchase_job.id
+            inbound_job_id = inbound_job.id
+
+        recovered = recover_stale_jobs(
+            self.database_url,
+            stale_after=timedelta(minutes=30),
+            queue="purchase-sync",
+        )
+
+        self.assertEqual(recovered, 1)
+        with self.app.state.database.session() as session:
+            self.assertEqual(session.get(Job, batch_job_id).status, "running")
+            self.assertEqual(
+                session.get(PurchaseSyncJob, purchase_job_id).status,
+                "queued",
+            )
+            self.assertEqual(
+                session.get(SelfOperatedInboundSyncJob, inbound_job_id).status,
+                "running",
+            )
+
+    def test_stale_jobs_stop_at_retry_cap_and_batch_can_be_retried_manually(self):
+        delivery = self.create_delivery(
+            self.root / "260717-狂飙-A交货单-发货10箱.xlsx",
+            20,
+        )
+        batch_id, batch_job_id = self.create_batch([delivery])
+        stale_at = datetime.utcnow() - timedelta(hours=2)
+        with self.app.state.database.session() as session:
+            batch = session.get(Batch, batch_id)
+            batch.status = "running"
+            batch_job = session.get(Job, batch_job_id)
+            batch_job.status = "running"
+            batch_job.attempts = 3
+            batch_job.claim_token = "batch-claim"
+            batch_job.heartbeat_at = stale_at
+            purchase_job = PurchaseSyncJob(
+                status="running",
+                active_slot=1,
+                created_by=1,
+                attempts=3,
+                claim_token="purchase-claim",
+                heartbeat_at=stale_at,
+            )
+            inbound_job = SelfOperatedInboundSyncJob(
+                status="running",
+                active_slot=1,
+                created_by=1,
+                attempts=3,
+                claim_token="inbound-claim",
+                heartbeat_at=stale_at,
+            )
+            session.add_all([purchase_job, inbound_job])
+            session.commit()
+            purchase_job_id = purchase_job.id
+            inbound_job_id = inbound_job.id
+
+        recovered = recover_stale_jobs(
+            self.database_url,
+            stale_after=timedelta(minutes=30),
+            max_attempts=3,
+        )
+
+        self.assertEqual(recovered, 3)
+        with self.app.state.database.session() as session:
+            batch = session.get(Batch, batch_id)
+            batch_job = session.get(Job, batch_job_id)
+            purchase_job = session.get(PurchaseSyncJob, purchase_job_id)
+            inbound_job = session.get(
+                SelfOperatedInboundSyncJob,
+                inbound_job_id,
+            )
+            self.assertEqual(batch.status, "failed")
+            self.assertEqual(batch_job.status, "failed")
+            self.assertIsNotNone(batch_job.finished_at)
+            self.assertEqual(purchase_job.status, "failed")
+            self.assertIsNone(purchase_job.active_slot)
+            self.assertEqual(inbound_job.status, "failed")
+            self.assertIsNone(inbound_job.active_slot)
+
+        retried = self.client.post(
+            f"/api/batches/{batch_id}/compute",
+            headers=self.headers,
+        )
+        self.assertEqual(retried.status_code, 202, retried.text)
+        self.assertEqual(retried.json()["attempts"], 3)
+        self.assertEqual(
+            run_once(self.database_url, self.storage_root, queue="batch"),
+            batch_job_id,
+        )
+        with self.app.state.database.session() as session:
+            retried_job = session.get(Job, batch_job_id)
+            self.assertEqual(retried_job.status, "succeeded")
+            self.assertEqual(retried_job.attempts, 4)
+
+    def test_background_heartbeat_runs_during_blocking_execution_and_stops(self):
+        delivery = self.create_delivery(
+            self.root / "260717-狂飙-A交货单-发货10箱.xlsx",
+            20,
+        )
+        _batch_id, job_id = self.create_batch([delivery])
+        execution_started = Event()
+        release_execution = Event()
+        heartbeat_seen = Event()
+        original_heartbeat = worker_module._heartbeat
+
+        def block_execution(*_args):
+            execution_started.set()
+            self.assertTrue(release_execution.wait(2))
+
+        def observe_heartbeat(*args):
+            original_heartbeat(*args)
+            heartbeat_seen.set()
+
+        result = []
+        with (
+            patch.object(worker_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.01),
+            patch.object(
+                worker_module,
+                "_execute_compute",
+                side_effect=block_execution,
+            ),
+            patch.object(
+                worker_module,
+                "_heartbeat",
+                side_effect=observe_heartbeat,
+            ) as beat,
+        ):
+            thread = Thread(
+                target=lambda: result.append(
+                    run_once(self.database_url, self.storage_root, queue="batch")
+                )
+            )
+            thread.start()
+            self.assertTrue(execution_started.wait(2))
+            self.assertTrue(heartbeat_seen.wait(2))
+            release_execution.set()
+            thread.join(timeout=2)
+            self.assertFalse(thread.is_alive())
+            heartbeat_count = beat.call_count
+            time.sleep(0.05)
+            self.assertEqual(beat.call_count, heartbeat_count)
+
+        self.assertEqual(result, [job_id])
+
+    def test_lost_lease_is_logged_and_cannot_be_overwritten(self):
+        delivery = self.create_delivery(
+            self.root / "260717-狂飙-A交货单-发货10箱.xlsx",
+            20,
+        )
+        batch_id, job_id = self.create_batch([delivery])
+        execution_started = Event()
+        release_execution = Event()
+        lease_lost = Event()
+        original_heartbeat = worker_module._heartbeat
+        original_process = worker_module.process_delivery_batch
+
+        def block_execution(*args, **kwargs):
+            execution_started.set()
+            self.assertTrue(release_execution.wait(2))
+            return original_process(*args, **kwargs)
+
+        def observe_lease_loss(*args):
+            try:
+                original_heartbeat(*args)
+            except worker_module.LostJobLeaseError:
+                lease_lost.set()
+                raise
+
+        result = []
+        with self.assertLogs("delivery_note.worker", level="ERROR") as logs:
+            with (
+                patch.object(
+                    worker_module,
+                    "LEASE_HEARTBEAT_INTERVAL_SECONDS",
+                    0.01,
+                ),
+                patch.object(
+                    worker_module,
+                    "process_delivery_batch",
+                    side_effect=block_execution,
+                ),
+                patch.object(
+                    worker_module,
+                    "_heartbeat",
+                    side_effect=observe_lease_loss,
+                ),
+            ):
+                thread = Thread(
+                    target=lambda: result.append(
+                        run_once(
+                            self.database_url,
+                            self.storage_root,
+                            queue="batch",
+                        )
+                    )
+                )
+                thread.start()
+                self.assertTrue(execution_started.wait(2))
+                with self.app.state.database.session() as session:
+                    job = session.get(Job, job_id)
+                    original_claim_prefix = job.claim_token[:8]
+                    job.claim_token = "replacement-claim"
+                    batch = session.get(Batch, batch_id)
+                    batch.status = "running"
+                    session.commit()
+                self.assertTrue(lease_lost.wait(2))
+                release_execution.set()
+                thread.join(timeout=2)
+                self.assertFalse(thread.is_alive())
+
+        self.assertEqual(result, [job_id])
+        with self.app.state.database.session() as session:
+            job = session.get(Job, job_id)
+            batch = session.get(Batch, batch_id)
+            self.assertEqual(job.status, "running")
+            self.assertEqual(job.claim_token, "replacement-claim")
+            self.assertEqual(batch.status, "running")
+        log_output = "\n".join(logs.output)
+        self.assertIn(f"queue=batch job_id={job_id}", log_output)
+        self.assertIn(f"claim={original_claim_prefix}", log_output)
+        self.assertIn("Traceback", log_output)
+
+    def test_successful_finalize_stops_heartbeat_before_terminal_state(self):
+        delivery = self.create_delivery(
+            self.root / "260717-狂飙-A交货单-发货10箱.xlsx",
+            20,
+        )
+        _batch_id, job_id = self.create_batch([delivery])
+        heartbeat_after_terminal = Event()
+        original_execute = worker_module._execute_compute
+        original_heartbeat = worker_module._heartbeat
+
+        def delay_after_finalize(*args):
+            original_execute(*args)
+            time.sleep(0.05)
+
+        def observe_heartbeat(database, current_job_id, claim_token):
+            with database.session() as session:
+                if session.get(Job, current_job_id).status != "running":
+                    heartbeat_after_terminal.set()
+            original_heartbeat(database, current_job_id, claim_token)
+
+        with (
+            patch.object(worker_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.005),
+            patch.object(
+                worker_module,
+                "_execute_compute",
+                side_effect=delay_after_finalize,
+            ),
+            patch.object(
+                worker_module,
+                "_heartbeat",
+                side_effect=observe_heartbeat,
+            ),
+            patch.object(worker_module.LOGGER, "exception") as log_failure,
+        ):
+            completed_id = run_once(
+                self.database_url,
+                self.storage_root,
+                queue="batch",
+            )
+
+        self.assertEqual(completed_id, job_id)
+        self.assertFalse(heartbeat_after_terminal.is_set())
+        log_failure.assert_not_called()
+        with self.app.state.database.session() as session:
+            self.assertEqual(session.get(Job, job_id).status, "succeeded")
 
     def test_stale_worker_cannot_overwrite_new_claim(self):
         delivery = self.create_delivery(
@@ -964,6 +1270,78 @@ class WorkerIntegrationTests(unittest.TestCase):
 
 
 class WorkerProcessLifecycleTests(unittest.TestCase):
+    def test_persistent_main_reuses_one_database_and_disposes_it(self):
+        class StopAfterOnePoll:
+            def __init__(self):
+                self.wait_count = 0
+                self.stopped = False
+
+            def is_set(self):
+                return self.stopped or self.wait_count > 0
+
+            def wait(self, _timeout):
+                self.wait_count += 1
+                return False
+
+            def set(self):
+                self.stopped = True
+
+        database = MagicMock()
+        session = database.session.return_value.__enter__.return_value
+        session.scalar.return_value = None
+        session.scalars.return_value.all.return_value = []
+        with (
+            patch.object(worker_module, "Database", return_value=database) as factory,
+            patch.object(worker_module, "Event", StopAfterOnePoll),
+            patch.object(worker_module, "Thread") as thread_factory,
+            patch.object(worker_module.signal, "signal", return_value=None),
+        ):
+            exit_code = worker_module.main(
+                [
+                    "--database-url",
+                    "sqlite+pysqlite:///unused.db",
+                    "--poll-interval",
+                    "0.01",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        factory.assert_called_once_with("sqlite+pysqlite:///unused.db")
+        database.dispose.assert_called_once_with()
+        thread_factory.return_value.start.assert_called_once_with()
+        thread_factory.return_value.join.assert_called_once()
+
+    def test_stale_watcher_continues_after_recovering_a_job(self):
+        class StopAfterRecovery:
+            def __init__(self):
+                self.wait_count = 0
+
+            def wait(self, _timeout):
+                self.wait_count += 1
+                return self.wait_count > 1
+
+        database = MagicMock()
+        with patch.object(
+            worker_module,
+            "_recover_stale_jobs",
+            return_value=1,
+            create=True,
+        ) as recover:
+            worker_module._watch_stale_jobs(
+                database,
+                timedelta(minutes=30),
+                StopAfterRecovery(),
+                "batch",
+                3,
+            )
+
+        recover.assert_called_once_with(
+            database,
+            stale_after=timedelta(minutes=30),
+            queue="batch",
+            max_attempts=3,
+        )
+
     def test_worker_exits_cleanly_on_sigterm(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)

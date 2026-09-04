@@ -1,23 +1,30 @@
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Barrier, BrokenBarrierError
+from threading import Barrier, BrokenBarrierError, Lock
 import unittest
 from unittest.mock import patch
 
+from httpx2 import ASGITransport, AsyncClient
 from openpyxl import Workbook, load_workbook
 import pandas as pd
 from sqlalchemy import event, select
 
 from delivery_note.pipeline import IMPORT_COLUMNS
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+from delivery_note.web.auth import hash_token
 from tests.asgi_client import SyncASGIClient
 
 try:
     import delivery_note.web.api as web_api_module
     from delivery_note.web.api import create_app
     from delivery_note.web.models import (
+        AuthSession,
         Batch,
         BatchFile,
         ExceptionRecord,
@@ -27,10 +34,12 @@ try:
         SelfOperatedBatch,
         SelfOperatedInboundSyncJob,
         SplitRecord,
+        User,
     )
 except ImportError:
     web_api_module = None
     create_app = None
+    AuthSession = None
     Batch = None
     BatchFile = None
     ExceptionRecord = None
@@ -39,6 +48,7 @@ except ImportError:
     SelfOperatedBatch = None
     SelfOperatedInboundSyncJob = None
     SplitRecord = None
+    User = None
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
@@ -56,6 +66,7 @@ class WebApiTests(unittest.TestCase):
             database_url=f"sqlite+pysqlite:///{root / 'test.db'}",
             storage_root=root / "storage",
             bootstrap_admin=("admin", "admin-pass"),
+            session_cookie_secure=False,
         )
         self.client = SyncASGIClient(self.app)
 
@@ -251,6 +262,324 @@ class WebApiTests(unittest.TestCase):
             self.client.get("/api/auth/me", headers=operator_headers).status_code,
             401,
         )
+
+    def test_login_sets_http_only_strict_cookie_and_rejects_bad_credentials(self):
+        bad_login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "wrong"},
+        )
+        self.assertEqual(bad_login.status_code, 401)
+        self.assertNotIn("set-cookie", bad_login.headers)
+
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        cookie = login.headers["set-cookie"]
+        self.assertIn("delivery_note_session=", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=strict", cookie)
+        self.assertIn("Path=/", cookie)
+        self.assertIn("expires=", cookie.lower())
+        self.assertNotIn("; Secure", cookie)
+        cookie_expiry = parsedate_to_datetime(
+            next(
+                attribute.split("=", 1)[1]
+                for attribute in cookie.split("; ")
+                if attribute.lower().startswith("expires=")
+            )
+        )
+        response_expiry = datetime.fromisoformat(
+            login.json()["expires_at"].replace("Z", "+00:00")
+        )
+        self.assertLessEqual(
+            abs(
+                (
+                    cookie_expiry.astimezone(timezone.utc)
+                    - response_expiry.astimezone(timezone.utc)
+                ).total_seconds()
+            ),
+            1,
+        )
+
+    def test_session_cookie_secure_environment_is_parsed_strictly(self):
+        for configured, expected_secure in (("false", False), ("true", True)):
+            with self.subTest(configured=configured), TemporaryDirectory() as directory:
+                root = Path(directory)
+                with patch.dict(
+                    web_api_module.os.environ,
+                    {"SESSION_COOKIE_SECURE": configured},
+                ):
+                    app = create_app(
+                        database_url=f"sqlite+pysqlite:///{root / 'cookie.db'}",
+                        storage_root=root / "storage",
+                        bootstrap_admin=("admin", "admin-pass"),
+                    )
+                client = SyncASGIClient(app)
+                try:
+                    response = client.post(
+                        "/api/auth/login",
+                        json={"username": "admin", "password": "admin-pass"},
+                    )
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertEqual(
+                        "; Secure" in response.headers["set-cookie"],
+                        expected_secure,
+                    )
+                finally:
+                    client.close()
+                    app.state.database.dispose()
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                patch.dict(
+                    web_api_module.os.environ,
+                    {"SESSION_COOKIE_SECURE": "sometimes"},
+                ),
+                self.assertRaisesRegex(ValueError, "SESSION_COOKIE_SECURE"),
+            ):
+                create_app(
+                    database_url=f"sqlite+pysqlite:///{root / 'invalid-cookie.db'}",
+                    storage_root=root / "storage",
+                    auto_migrate_schema=False,
+                )
+
+    def test_cookie_auth_supports_me_and_business_requests_with_bearer_priority(self):
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        token = login.json()["token"]
+        cookie_headers = {"Cookie": f"delivery_note_session={token}"}
+
+        me = self.client.get("/api/auth/me", headers=cookie_headers)
+        self.assertEqual(me.status_code, 200, me.text)
+        self.assertEqual(me.json()["username"], "admin")
+        batches = self.client.get("/api/batches", headers=cookie_headers)
+        self.assertEqual(batches.status_code, 200, batches.text)
+
+        bearer = self.client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        self.assertEqual(bearer.status_code, 200, bearer.text)
+        rejected = self.client.get(
+            "/api/auth/me",
+            headers={
+                "Authorization": "Bearer invalid-bearer",
+                "Cookie": f"delivery_note_session={token}",
+            },
+        )
+        self.assertEqual(rejected.status_code, 401, rejected.text)
+        self.assertNotIn("set-cookie", rejected.headers)
+
+    def test_cookie_logout_revokes_session_and_clears_cookie(self):
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        token = login.json()["token"]
+        cookie_headers = {"Cookie": f"delivery_note_session={token}"}
+
+        logout = self.client.post("/api/auth/logout", headers=cookie_headers)
+        self.assertEqual(logout.status_code, 204, logout.text)
+        expired_cookie = logout.headers["set-cookie"]
+        self.assertIn("delivery_note_session=", expired_cookie)
+        self.assertIn("Max-Age=0", expired_cookie)
+        self.assertIn("HttpOnly", expired_cookie)
+        self.assertIn("SameSite=strict", expired_cookie)
+        with self.app.state.database.session() as session:
+            auth_session = session.scalar(
+                select(AuthSession).where(
+                    AuthSession.token_hash == hash_token(token)
+                )
+            )
+        self.assertIsNone(auth_session)
+        self.assertEqual(
+            self.client.get("/api/auth/me", headers=cookie_headers).status_code,
+            401,
+        )
+
+    def test_invalid_or_disabled_cookie_session_is_cleared(self):
+        invalid = self.client.get(
+            "/api/auth/me",
+            headers={"Cookie": "delivery_note_session=invalid-token"},
+        )
+        self.assertEqual(invalid.status_code, 401)
+        self.assertIn("Max-Age=0", invalid.headers["set-cookie"])
+
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        token = login.json()["token"]
+        with self.app.state.database.session() as session:
+            session.get(User, 1).active = False
+            session.commit()
+        disabled = self.client.get(
+            "/api/auth/me",
+            headers={"Cookie": f"delivery_note_session={token}"},
+        )
+        self.assertEqual(disabled.status_code, 401)
+        self.assertIn("Max-Age=0", disabled.headers["set-cookie"])
+
+    def test_expired_cookie_session_is_cleared(self):
+        login = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass"},
+        )
+        token = login.json()["token"]
+        with self.app.state.database.session() as session:
+            auth_session = session.scalar(
+                select(AuthSession).where(
+                    AuthSession.token_hash == hash_token(token)
+                )
+            )
+            auth_session.expires_at = (
+                web_api_module.datetime.utcnow()
+                - web_api_module.timedelta(seconds=1)
+            )
+            session.commit()
+
+        expired = self.client.get(
+            "/api/auth/me",
+            headers={"Cookie": f"delivery_note_session={token}"},
+        )
+        self.assertEqual(expired.status_code, 401)
+        self.assertIn("Max-Age=0", expired.headers["set-cookie"])
+
+    def test_health_endpoints_distinguish_liveness_and_readiness(self):
+        for path in ("/health/live", "/health/ready", "/health"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), {"status": "ok"})
+
+        with patch.object(
+            self.app.state.database,
+            "session",
+            side_effect=RuntimeError("database-secret"),
+        ):
+            live = self.client.get("/health/live")
+            ready = self.client.get("/health/ready")
+            legacy = self.client.get("/health")
+
+        self.assertEqual(live.status_code, 200, live.text)
+        self.assertEqual(live.json(), {"status": "ok"})
+        for response in (ready, legacy):
+            self.assertEqual(response.status_code, 503, response.text)
+            self.assertNotIn("database-secret", response.text)
+
+    def test_upload_concurrency_and_file_count_limits_must_be_positive(self):
+        settings = (
+            ("max_concurrent_upload_parses", "MAX_CONCURRENT_UPLOAD_PARSES"),
+            ("max_batch_upload_files", "MAX_BATCH_UPLOAD_FILES"),
+        )
+        for option, message in settings:
+            with self.subTest(option=option), TemporaryDirectory() as directory:
+                root = Path(directory)
+                with self.assertRaisesRegex(ValueError, message):
+                    create_app(
+                        database_url=f"sqlite+pysqlite:///{root / 'invalid.db'}",
+                        storage_root=root / "storage",
+                        auto_migrate_schema=False,
+                        **{option: 0},
+                    )
+
+    def test_upload_parsing_runs_off_loop_and_obeys_concurrency_limit(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            app = create_app(
+                database_url=f"sqlite+pysqlite:///{root / 'parse-limit.db'}",
+                storage_root=root / "storage",
+                bootstrap_admin=("admin", "admin-pass"),
+                max_concurrent_upload_parses=1,
+            )
+            client = SyncASGIClient(app)
+            login = client.post(
+                "/api/auth/login",
+                json={"username": "admin", "password": "admin-pass"},
+            )
+            self.assertEqual(login.status_code, 200, login.text)
+            headers = {"Authorization": f"Bearer {login.json()['token']}"}
+            counter_lock = Lock()
+            concurrent_parses = Barrier(2)
+            active = 0
+            maximum_active = 0
+            observed_running_loops = []
+
+            def slow_validation(_kind, _path):
+                nonlocal active, maximum_active
+                try:
+                    asyncio.get_running_loop()
+                except RuntimeError:
+                    observed_running_loops.append(False)
+                else:
+                    observed_running_loops.append(True)
+                with counter_lock:
+                    active += 1
+                    maximum_active = max(maximum_active, active)
+                try:
+                    concurrent_parses.wait(timeout=0.3)
+                except BrokenBarrierError:
+                    pass
+                with counter_lock:
+                    active -= 1
+
+            async def upload_versions():
+                async def keep_event_loop_awake():
+                    while True:
+                        await asyncio.sleep(0.01)
+
+                heartbeat = asyncio.create_task(keep_event_loop_awake())
+                async with AsyncClient(
+                    transport=ASGITransport(app=app),
+                    base_url="http://testserver",
+                ) as async_client:
+                    try:
+                        return await asyncio.gather(
+                            *(
+                                async_client.post(
+                                    f"/api/input-versions/{kind}",
+                                    headers=headers,
+                                    data={
+                                        "name": f"{kind}-threaded",
+                                        "activate": "false",
+                                    },
+                                    files={
+                                        "file": (
+                                            f"{kind}.xlsx",
+                                            BytesIO(b"content"),
+                                        )
+                                    },
+                                )
+                                for kind in ("purchase", "product")
+                            )
+                        )
+                    finally:
+                        heartbeat.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await heartbeat
+
+            try:
+                with patch.object(
+                    web_api_module,
+                    "_validate_input_version",
+                    side_effect=slow_validation,
+                ):
+                    responses = asyncio.run(upload_versions())
+            finally:
+                client.close()
+                app.state.database.dispose()
+
+        self.assertTrue(
+            all(response.status_code == 201 for response in responses),
+            [response.text for response in responses],
+        )
+        self.assertEqual(observed_running_loops, [False, False])
+        self.assertEqual(maximum_active, 1)
 
     def test_input_version_activation_keeps_one_active_version(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -939,6 +1268,8 @@ class WebApiTests(unittest.TestCase):
             [version["kind"] for version in versions],
             ["inbound_template", "template"],
         )
+        purchase_root = self.app.state.storage_root / "master" / "purchase"
+        self.assertEqual(list(purchase_root.glob("*")), [])
 
     def test_initial_state_creates_batches_without_overreceipt_rule(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -1284,6 +1615,23 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(batch["file_count"], 1)
         self.assertTrue(batch["inbound_file"]["uploaded"])
+        listed_batch = next(
+            item
+            for item in self.client.get("/api/batches", headers=headers).json()
+            if item["id"] == batch_id
+        )
+        self.assertEqual(
+            listed_batch,
+            {key: batch[key] for key in listed_batch},
+        )
+        self.app.state.max_batch_upload_files = 1
+        extra_file = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=headers,
+            files={"file": ("额外质检交货单.xlsx", BytesIO(self.delivery_bytes()))},
+        )
+        self.assertEqual(extra_file.status_code, 409, extra_file.text)
+        self.assertIn("只能上传一份质检交货单", extra_file.json()["detail"])
         preflight = self.client.post(
             f"/api/batches/{batch_id}/preflight",
             headers=headers,
@@ -1312,6 +1660,10 @@ class WebApiTests(unittest.TestCase):
         batches = self.client.get("/api/batches", headers=headers)
         self.assertEqual(batches.status_code, 200, batches.text)
         self.assertEqual(batches.json(), [])
+        temporary_root = (
+            self.app.state.storage_root / "temporary" / "self-operated-batches"
+        )
+        self.assertEqual(list(temporary_root.glob("*")), [])
 
     def test_delivery_creation_with_files_is_atomic(self):
         headers = self.login("admin", "admin-pass")
@@ -1328,6 +1680,10 @@ class WebApiTests(unittest.TestCase):
             self.client.get("/api/batches", headers=headers).json(),
             [],
         )
+        temporary_root = (
+            self.app.state.storage_root / "temporary" / "delivery-batches"
+        )
+        self.assertEqual(list(temporary_root.glob("*")), [])
 
         created = self.client.post(
             "/api/batches/with-files",
@@ -1337,6 +1693,32 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(created.status_code, 201, created.text)
         self.assertEqual(created.json()["file_count"], 1)
+
+    def test_delivery_creation_rejects_too_many_files_before_writing(self):
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        self.app.state.max_batch_upload_files = 1
+
+        response = self.client.post(
+            "/api/batches/with-files",
+            headers=headers,
+            data={"name": "文件过多"},
+            files=[
+                ("files", ("one.xlsx", BytesIO(self.delivery_bytes()))),
+                ("files", ("two.xlsx", BytesIO(self.delivery_bytes()))),
+            ],
+        )
+
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertIn("最多上传 1 份", response.json()["detail"])
+        self.assertEqual(
+            self.client.get("/api/batches", headers=headers).json(),
+            [],
+        )
+        temporary_root = (
+            self.app.state.storage_root / "temporary" / "delivery-batches"
+        )
+        self.assertFalse(temporary_root.exists())
 
     def test_empty_delivery_drafts_are_removed_without_touching_uploaded_batches(self):
         headers = self.login("admin", "admin-pass")
@@ -1798,12 +2180,112 @@ class WebApiTests(unittest.TestCase):
             repeated_exceptions.text,
         )
         self.assertEqual(detail.json()["summary"]["import_total"], 10)
+        listed_batch = next(
+            batch for batch in listed.json() if batch["id"] == batch_id
+        )
+        self.assertEqual(
+            listed_batch,
+            {key: detail.json()[key] for key in listed_batch},
+        )
         self.assertEqual(len(exceptions.json()), 10)
         self.assertEqual(repeated_exceptions.json(), exceptions.json())
         self.assertEqual(reader.call_count, 1)
         self.assertLessEqual(detail_queries, 15)
         self.assertLessEqual(list_queries, 8)
         self.assertLessEqual(exception_queries, 8)
+
+    def test_batch_list_query_count_is_constant_as_batches_grow(self):
+        admin_headers = self.login("admin", "admin-pass")
+        version_ids = self.upload_active_versions(admin_headers)
+
+        def add_batch(index: int) -> None:
+            with self.app.state.database.session() as session:
+                batch = Batch(
+                    name=f"批次 {index}",
+                    status="succeeded",
+                    created_by=1,
+                    purchase_version_id=version_ids["purchase"],
+                    product_version_id=version_ids["product"],
+                    supplier_version_id=version_ids["supplier"],
+                    position_version_id=version_ids["position"],
+                    template_version_id=version_ids["template"],
+                )
+                session.add(batch)
+                session.flush()
+                source = BatchFile(
+                    batch_id=batch.id,
+                    original_name=f"批次 {index}.xlsx",
+                    storage_path=f"unused-{index}.xlsx",
+                    file_order=1,
+                    delivery_total=5,
+                    import_total=2,
+                    manual_total=3,
+                    import_rows=[],
+                )
+                session.add(source)
+                session.flush()
+                exception = ExceptionRecord(
+                    batch_file_id=source.id,
+                    sku="SKU-A",
+                    delivery_quantity=3,
+                    allocated_quantity=0,
+                    manual_quantity=3,
+                    reason="数量超出采购余额",
+                    status="resolved",
+                )
+                session.add(exception)
+                session.flush()
+                session.add_all(
+                    [
+                        SplitRecord(
+                            exception_id=exception.id,
+                            quantity=2,
+                            destination="水鞋-广州仓",
+                            site="AMAZON:SEEKWAY:US",
+                            supplier_code="GYS-023",
+                            sku="SKU-A",
+                            resolved=True,
+                        ),
+                        SplitRecord(
+                            exception_id=exception.id,
+                            quantity=1,
+                            sku="SKU-A",
+                            resolved=False,
+                        ),
+                    ]
+                )
+                session.commit()
+
+        add_batch(1)
+        single, single_queries = self.get_with_query_count(
+            "/api/batches",
+            admin_headers,
+        )
+        for index in range(2, 11):
+            add_batch(index)
+        multiple, multiple_queries = self.get_with_query_count(
+            "/api/batches",
+            admin_headers,
+        )
+
+        self.assertEqual(single.status_code, 200, single.text)
+        self.assertEqual(multiple.status_code, 200, multiple.text)
+        self.assertEqual(single_queries, multiple_queries)
+        self.assertLessEqual(multiple_queries, 8)
+        self.assertEqual(
+            [batch["name"] for batch in multiple.json()],
+            [f"批次 {index}" for index in range(10, 0, -1)],
+        )
+        for batch in multiple.json():
+            self.assertEqual(
+                batch["summary"],
+                {
+                    "delivery_total": 5,
+                    "import_total": 4,
+                    "manual_total": 1,
+                    "conserved": True,
+                },
+            )
 
     def test_position_frame_cache_evicts_least_recent_version(self):
         cache = web_api_module._PositionFrameCache(max_entries=2)
@@ -1901,6 +2383,95 @@ class WebApiTests(unittest.TestCase):
             {item["original_name"] for item in batch["files"]},
             set(filenames),
         )
+
+    def test_batch_file_limit_rejects_append_before_writing(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "普通追加数量上限"},
+        ).json()["id"]
+        self.app.state.max_batch_upload_files = 1
+        first = self.client.post(
+            f"/api/batches/{batch_id}/files",
+            headers=admin_headers,
+            files={"file": ("first.xlsx", BytesIO(self.delivery_bytes()))},
+        )
+        self.assertEqual(first.status_code, 201, first.text)
+        input_root = self.app.state.storage_root / "batches" / str(batch_id) / "inputs"
+        files_before = set(input_root.iterdir())
+
+        with patch.object(
+            web_api_module,
+            "_save_upload",
+            wraps=web_api_module._save_upload,
+        ) as save_upload:
+            rejected = self.client.post(
+                f"/api/batches/{batch_id}/files",
+                headers=admin_headers,
+                files={"file": ("second.xlsx", BytesIO(self.delivery_bytes()))},
+            )
+
+        self.assertEqual(rejected.status_code, 413, rejected.text)
+        self.assertIn("最多上传 1 份", rejected.json()["detail"])
+        save_upload.assert_not_awaited()
+        self.assertEqual(set(input_root.iterdir()), files_before)
+        with self.app.state.database.session() as session:
+            sources = session.scalars(
+                select(BatchFile).where(BatchFile.batch_id == batch_id)
+            ).all()
+        self.assertEqual([source.original_name for source in sources], ["first.xlsx"])
+
+    def test_concurrent_batch_appends_enforce_file_limit_after_writing(self):
+        admin_headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(admin_headers)
+        batch_id = self.client.post(
+            "/api/batches",
+            headers=admin_headers,
+            json={"name": "并发追加数量上限"},
+        ).json()["id"]
+        self.app.state.max_batch_upload_files = 1
+        saved_uploads = Barrier(2)
+        original_save_upload = web_api_module._save_upload
+
+        async def synchronized_save_upload(*args, **kwargs):
+            await original_save_upload(*args, **kwargs)
+            saved_uploads.wait(timeout=5)
+
+        def upload(filename: str):
+            return self.client.post(
+                f"/api/batches/{batch_id}/files",
+                headers=admin_headers,
+                files={"file": (filename, BytesIO(self.delivery_bytes()))},
+            )
+
+        with (
+            patch.object(
+                web_api_module,
+                "_save_upload",
+                new=synchronized_save_upload,
+            ),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            responses = list(executor.map(upload, ("first.xlsx", "second.xlsx")))
+
+        self.assertEqual(
+            sorted(response.status_code for response in responses),
+            [201, 413],
+            [response.text for response in responses],
+        )
+        rejected = next(
+            response for response in responses if response.status_code == 413
+        )
+        self.assertIn("最多上传 1 份", rejected.json()["detail"])
+        input_root = self.app.state.storage_root / "batches" / str(batch_id) / "inputs"
+        self.assertEqual(len(list(input_root.iterdir())), 1)
+        with self.app.state.database.session() as session:
+            sources = session.scalars(
+                select(BatchFile).where(BatchFile.batch_id == batch_id)
+            ).all()
+        self.assertEqual(len(sources), 1)
 
     def test_delivery_file_can_be_deleted_before_compute(self):
         admin_headers = self.login("admin", "admin-pass")

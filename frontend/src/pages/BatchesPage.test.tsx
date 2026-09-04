@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
@@ -150,6 +150,7 @@ describe("BatchesPage", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -314,6 +315,78 @@ describe("BatchesPage", () => {
     const progress = await screen.findByRole("progressbar", { name: "正在同步待入库数据" });
     expect(progress).toHaveClass("is-indeterminate");
     expect(progress).not.toHaveAttribute("aria-valuenow");
+  });
+
+  it("polls only inbound sync status without overlap and fully refreshes once on completion", async () => {
+    vi.useFakeTimers();
+    const initialFetch = vi.mocked(fetch);
+    const requests: string[] = [];
+    let statusRequestCount = 0;
+    let releaseRunningPoll!: () => void;
+    const runningJob = {
+      ...(inboundSyncStatus.job as Record<string, unknown>),
+      status: "running",
+      candidate_version_id: null,
+      finished_at: null
+    };
+    const completedStatus = {
+      ...inboundSyncStatus,
+      job: {
+        ...(inboundSyncStatus.job as Record<string, unknown>),
+        status: "succeeded"
+      }
+    };
+    vi.stubGlobal("fetch", vi.fn(async (
+      input: RequestInfo | URL,
+      init: RequestInit = {}
+    ) => {
+      const url = String(input);
+      requests.push(url.replace(/^.*(?=\/api\/)/, ""));
+      if (url.endsWith("/api/self-operated-inbound-sync") && !init.method) {
+        statusRequestCount += 1;
+        if (statusRequestCount === 1) {
+          return jsonResponse({ ...inboundSyncStatus, job: runningJob });
+        }
+        if (statusRequestCount === 2) {
+          return new Promise<Response>((resolve) => {
+            releaseRunningPoll = () => resolve(jsonResponse({
+              ...inboundSyncStatus,
+              job: runningJob
+            }));
+          });
+        }
+        return jsonResponse(completedStatus);
+      }
+      return initialFetch(input, init);
+    }));
+
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    requests.length = 0;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(requests).toEqual(["/api/self-operated-inbound-sync"]);
+
+    await act(async () => {
+      releaseRunningPoll();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    requests.length = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    expect(requests).toEqual(expect.arrayContaining([
+      "/api/self-operated-inbound-sync",
+      "/api/batches",
+      "/api/input-versions",
+      "/api/self-operated-overreceipt-rule-versions"
+    ]));
+    expect(requests).toHaveLength(4);
   });
 
   it("only requires the quality delivery file before creating a self-operated batch", async () => {

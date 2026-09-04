@@ -8,12 +8,14 @@ from delivery_note.migrations.overreceipt_rules import migrate
 from delivery_note.migrations.purchase_sync_optional_versions import (
     migrate as migrate_purchase_sync_optional_versions,
 )
+from delivery_note.migrations.runner import migrate_schema
 from delivery_note.migrations.self_operated_optional_versions import (
     migrate as migrate_self_operated_optional_versions,
 )
 from delivery_note.web.database import Database
 from delivery_note.web.models import (
     Base,
+    Batch,
     BatchOverreceiptRule,
     ExceptionRecord,
     InputVersion,
@@ -21,6 +23,52 @@ from delivery_note.web.models import (
     PurchaseSyncJob,
     User,
 )
+
+
+class SchemaMigrationRunnerTests(unittest.TestCase):
+    def test_fresh_schema_is_complete_and_runner_is_idempotent(self):
+        with TemporaryDirectory() as directory:
+            database_url = f"sqlite+pysqlite:///{Path(directory) / 'migration.db'}"
+
+            migrate_schema(database_url)
+            migrate_schema(database_url)
+
+            database = Database(database_url)
+            try:
+                inspector = inspect(database.engine)
+                tables = set(inspector.get_table_names())
+                batch_columns = {
+                    column["name"]: column
+                    for column in inspector.get_columns(Batch.__tablename__)
+                }
+                purchase_sync_columns = {
+                    column["name"]: column
+                    for column in inspector.get_columns(PurchaseSyncJob.__tablename__)
+                }
+                exception_columns = {
+                    column["name"]
+                    for column in inspector.get_columns(ExceptionRecord.__tablename__)
+                }
+            finally:
+                database.dispose()
+
+        self.assertIn(OverreceiptRuleVersion.__tablename__, tables)
+        self.assertIn(BatchOverreceiptRule.__tablename__, tables)
+        for column in (
+            "purchase_version_id",
+            "position_version_id",
+            "template_version_id",
+        ):
+            self.assertTrue(batch_columns[column]["nullable"])
+        for column in ("product_version_id", "supplier_version_id"):
+            self.assertTrue(purchase_sync_columns[column]["nullable"])
+        self.assertTrue(
+            {
+                "purchase_allocated_quantity",
+                "overreceipt_allocated_quantity",
+                "overreceipt_remaining_quantity",
+            }.issubset(exception_columns)
+        )
 
 
 class OverreceiptMigrationTests(unittest.TestCase):

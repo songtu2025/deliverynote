@@ -205,6 +205,7 @@ export default function BatchesPage({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>();
   const loadedRef = useRef(false);
+  const inboundSyncPollInFlightRef = useRef(false);
   const [form] = Form.useForm<{ name: string }>();
 
   const refreshVersions = useCallback(async () => {
@@ -213,7 +214,10 @@ export default function BatchesPage({
     return nextVersions;
   }, []);
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (
+    background = false,
+    knownInboundSyncStatus?: SelfOperatedInboundSyncStatus
+  ) => {
     if (!background) setLoading(true);
     try {
       const [batchRows, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
@@ -223,7 +227,9 @@ export default function BatchesPage({
           ? api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
           : api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions"),
         workflow === "self_operated_inbound"
-          ? api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
+          ? knownInboundSyncStatus
+            ? Promise.resolve(knownInboundSyncStatus)
+            : api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
           : Promise.resolve(null)
       ]);
       setBatches(batchRows);
@@ -255,8 +261,47 @@ export default function BatchesPage({
     if (!active || workflow !== "self_operated_inbound" || (status !== "queued" && status !== "running")) {
       return undefined;
     }
-    const timer = window.setInterval(() => void load(true), 2000);
-    return () => window.clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const pollSyncStatus = async () => {
+      if (inboundSyncPollInFlightRef.current) {
+        if (!cancelled) {
+          timer = window.setTimeout(() => void pollSyncStatus(), 2000);
+        }
+        return;
+      }
+      inboundSyncPollInFlightRef.current = true;
+      let shouldContinue = false;
+      try {
+        const next = await api<SelfOperatedInboundSyncStatus>(
+          "/api/self-operated-inbound-sync"
+        );
+        if (cancelled) return;
+        setSyncStatus(next);
+        setSyncError("");
+        shouldContinue = next.job?.status === "queued" || next.job?.status === "running";
+        if (!shouldContinue) {
+          await load(true, next);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSyncError(error instanceof Error ? error.message : "读取同步状态失败");
+          shouldContinue = true;
+        }
+      } finally {
+        inboundSyncPollInFlightRef.current = false;
+        if (!cancelled && shouldContinue) {
+          timer = window.setTimeout(() => void pollSyncStatus(), 2000);
+        }
+      }
+    };
+
+    timer = window.setTimeout(() => void pollSyncStatus(), 2000);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
   }, [active, load, syncStatus?.job?.status, workflow]);
 
   const activeVersions = useMemo(
