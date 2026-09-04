@@ -1030,6 +1030,7 @@ export default function BatchesPage({
                 可同时选择多份；系统将按列表顺序共享扣减待入库余额和超收额度。
               </Typography.Text>
               <Alert
+                className="self-operated-version-lock"
                 type="info"
                 showIcon
                 title="锁定待入库数据版本"

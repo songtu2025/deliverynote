@@ -586,6 +586,21 @@ button, input { font: inherit; }
 .locked-overreceipt-rule { display: flex; flex-direction: column; gap: 2px; }
 .locked-overreceipt-rule small { color: #66736f; }
 
+.self-operated-version-lock.ant-alert-info {
+  border-color: var(--dn-primary-border);
+  background: var(--dn-primary-soft);
+}
+
+.self-operated-version-lock.ant-alert-info .ant-alert-icon,
+.self-operated-version-lock.ant-alert-info .ant-alert-message,
+.self-operated-version-lock.ant-alert-info .ant-alert-title {
+  color: var(--dn-primary);
+}
+
+.self-operated-version-lock.ant-alert-info .ant-alert-description {
+  color: #426f63;
+}
+
 .overreceipt-page-heading { margin-bottom: 16px; }
 
 .overreceipt-scope-switcher {

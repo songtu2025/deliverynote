@@ -415,6 +415,8 @@ describe("BatchesPage", () => {
     expect(within(dialog).getByText("质检交货单")).toBeInTheDocument();
     expect(within(dialog).queryByText("自营仓收货入库单")).not.toBeInTheDocument();
     expect(within(dialog).getByText("锁定待入库数据版本")).toBeInTheDocument();
+    expect(within(dialog).getByText("锁定待入库数据版本").closest(".ant-alert"))
+      .toHaveClass("self-operated-version-lock", "ant-alert-info");
     expect(within(dialog).getByRole("button", { name: "创建批次" })).toBeDisabled();
     expect(within(dialog).getByText(/本批次将使用：self_operated_inbound-v1/)).toBeInTheDocument();
 
