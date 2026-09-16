@@ -393,9 +393,7 @@ def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
 
     scale = _text_values(frame, "规模定位")
     stocking = _text_values(frame, "备货定位")
-    days = _text_values(frame, "已下单可售天数")
     unknown_scale = ~scale.isin(_KNOWN_SCALES)
-    non_numeric_days = pd.to_numeric(days, errors="coerce").isna()
 
     issues: list[dict] = []
     _append_issue(
@@ -432,13 +430,6 @@ def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
         code="empty_stocking",
         message="备货定位不能为空",
         mask=stocking.eq(""),
-    )
-    _append_issue(
-        issues,
-        severity="warning",
-        code="non_numeric_days",
-        message="已下单可售天数必须为数值",
-        mask=non_numeric_days,
     )
     return issues
 

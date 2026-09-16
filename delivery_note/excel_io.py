@@ -332,7 +332,7 @@ def _populate_pending_position_columns(sheet, pending_rows: pd.DataFrame) -> Non
     data_style = copy(sheet.cell(row=3, column=7)._style)
     row_count = max(len(pending_rows), 1)
     for column, (letter, header) in enumerate(
-        zip(("H", "I", "J"), POSITION_VALUE_COLUMNS), start=8
+        zip(("H", "I"), POSITION_VALUE_COLUMNS), start=8
     ):
         header_cell = sheet.cell(row=2, column=column)
         header_cell._style = copy(header_style)
@@ -350,9 +350,6 @@ def _populate_pending_position_columns(sheet, pending_rows: pd.DataFrame) -> Non
             if row_offset < len(pending_rows):
                 cell.value = _excel_value(pending_rows.iloc[row_offset][header])
             cell.alignment = Alignment(vertical="top", wrap_text=True)
-            if header == "已下单可售天数" and not isinstance(cell.value, str):
-                cell.number_format = "0.00"
-
     for row_offset in range(len(pending_rows)):
         helper_values = pending_rows.iloc[row_offset][POSITION_VALUE_COLUMNS]
         if any(

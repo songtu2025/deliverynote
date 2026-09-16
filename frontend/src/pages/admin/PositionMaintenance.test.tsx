@@ -70,7 +70,6 @@ const baseRow = {
   msku: "MSKU-A",
   scale_position: "短尾",
   stocking_position: "备货",
-  ordered_days: "90",
   change_type: "unchanged",
   deleted: false,
   issues: []
@@ -628,7 +627,6 @@ describe("PositionMaintenance", () => {
       issues: [
         { severity: "warning", code: "custom_scale", message: "规模定位必须为短尾、中尾或长尾", row_numbers: [3] },
         { severity: "warning", code: "empty_stocking", message: "备货定位不能为空", row_numbers: [3] },
-        { severity: "warning", code: "invalid_days", message: "已下单可售天数必须为数值", row_numbers: [3] },
         { severity: "warning", code: "row_count_changed", message: "行数变化达到或超过 50%", row_numbers: [] }
       ]
     };

@@ -123,7 +123,6 @@ export interface DeliveryException {
   status: string;
   scale_position: string | number;
   stocking_position: string | number;
-  ordered_days: string | number;
   parts: SplitPart[];
 }
 
@@ -303,7 +302,6 @@ export interface PositionDraftRow {
   msku: string;
   scale_position: string;
   stocking_position: string;
-  ordered_days: string;
   change_type: PositionChangeType;
   deleted: boolean;
   issues: PositionIssue[];

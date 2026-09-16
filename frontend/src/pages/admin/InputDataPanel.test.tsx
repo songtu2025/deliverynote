@@ -175,7 +175,7 @@ describe("InputDataPanel", () => {
           summary: {
             kind: "position",
             row_count: 1,
-            columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"],
+            columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位"],
             metrics: { sites: 1, skus: 1, mskus: 1 },
             issues: [{
               severity: "warning",

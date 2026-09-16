@@ -121,7 +121,11 @@ class PositionDraftRow(Base):
     msku: Mapped[str] = mapped_column(Text, default="")
     scale_position: Mapped[str] = mapped_column(Text, default="")
     stocking_position: Mapped[str] = mapped_column(Text, default="")
-    ordered_days: Mapped[str] = mapped_column(Text, default="")
+    _legacy_ordered_days: Mapped[str] = mapped_column(
+        "ordered_days",
+        Text,
+        default="",
+    )
     change_type: Mapped[str] = mapped_column(String(20), default="unchanged")
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 

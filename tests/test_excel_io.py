@@ -9,6 +9,7 @@ from openpyxl.styles import Font, PatternFill
 try:
     from delivery_note.excel_io import (
         read_delivery_workbook,
+        read_position_workbook,
         read_supplier_workbook,
         write_self_operated_inbound_workbook,
         write_delivery_workbook,
@@ -20,9 +21,11 @@ try:
         EXCEPTION_COLUMNS,
         IMPORT_COLUMNS,
         PENDING_COLUMNS,
+        POSITION_SOURCE_COLUMNS,
     )
 except ImportError:
     read_delivery_workbook = None
+    read_position_workbook = None
     read_supplier_workbook = None
     write_delivery_workbook = None
     write_exception_workbook = None
@@ -32,6 +35,7 @@ except ImportError:
     EXCEPTION_COLUMNS = []
     IMPORT_COLUMNS = []
     PENDING_COLUMNS = []
+    POSITION_SOURCE_COLUMNS = []
 
 
 class ExcelInputTests(unittest.TestCase):
@@ -133,6 +137,19 @@ class ExcelInputTests(unittest.TestCase):
             result = read_supplier_workbook(path)
 
         self.assertEqual(result.iloc[0]["供应商别名"], "瑞智雅|RIVBOS")
+
+    def test_read_position_workbook_ignores_ordered_days(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "position.xlsx"
+            pd.DataFrame(
+                [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]],
+                columns=[*POSITION_SOURCE_COLUMNS, "已下单可售天数"],
+            ).to_excel(path, sheet_name="MSKU_视图", index=False)
+
+            result = read_position_workbook(path)
+
+        self.assertEqual(result.columns.tolist(), POSITION_SOURCE_COLUMNS)
+        self.assertNotIn("已下单可售天数", result.columns)
 
 
 class ExcelOutputTests(unittest.TestCase):
@@ -280,7 +297,6 @@ class ExcelOutputTests(unittest.TestCase):
                         "超出采购未交量：40",
                         '{"MSKU-B":"短尾","MSKU-A":"长尾"}',
                         '{"MSKU-B":"备货","MSKU-A":"不备货"}',
-                        '{"MSKU-B":120,"MSKU-A":30}',
                     ]
                 ],
                 columns=PENDING_COLUMNS,
@@ -337,10 +353,8 @@ class ExcelOutputTests(unittest.TestCase):
             workbook["待处理导入"]["H3"].value,
             '{"MSKU-B":"短尾","MSKU-A":"长尾"}',
         )
-        self.assertEqual(
-            workbook["待处理导入"]["J3"].value,
-            '{"MSKU-B":120,"MSKU-A":30}',
-        )
+        self.assertIsNone(workbook["待处理导入"]["J2"].value)
+        self.assertIsNone(workbook["待处理导入"]["J3"].value)
         self.assertTrue(workbook["待处理导入"]["H2"].protection.locked)
         self.assertFalse(workbook["待处理导入"]["H3"].protection.locked)
         self.assertTrue(workbook["待处理导入"]["H3"].alignment.wrap_text)

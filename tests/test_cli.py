@@ -175,9 +175,11 @@ class RunBatchOutputTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [pending_sheet.cell(3, column).value for column in range(8, 11)],
-            ["短尾", "备货", 90.5],
+            [pending_sheet.cell(3, column).value for column in range(8, 10)],
+            ["短尾", "备货"],
         )
+        self.assertIsNone(pending_sheet["J2"].value)
+        self.assertIsNone(pending_sheet["J3"].value)
 
     def test_no_manual_rows_keep_empty_pending_import_sheet(self):
         with TemporaryDirectory() as directory:

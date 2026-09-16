@@ -101,7 +101,6 @@ describe("BatchDetail", () => {
         status: "pending",
         scale_position: "短尾",
         stocking_position: "备货",
-        ordered_days: 90,
         parts: []
       },
       {
@@ -121,7 +120,6 @@ describe("BatchDetail", () => {
         status: "pending",
         scale_position: "中尾",
         stocking_position: "不备货",
-        ordered_days: 60,
         parts: []
       },
       {
@@ -141,7 +139,6 @@ describe("BatchDetail", () => {
         status: "pending",
         scale_position: "",
         stocking_position: "",
-        ordered_days: "",
         parts: []
       },
       {
@@ -161,7 +158,6 @@ describe("BatchDetail", () => {
         status: "pending",
         scale_position: "短尾",
         stocking_position: "备货",
-        ordered_days: 90,
         parts: []
       }
     ];
@@ -255,8 +251,7 @@ describe("BatchDetail", () => {
     expect(within(drawer).getByText("短尾")).toBeInTheDocument();
     expect(within(drawer).getByText("备货定位")).toBeInTheDocument();
     expect(within(drawer).getByText("备货")).toBeInTheDocument();
-    expect(within(drawer).getByText("已下单可售天数")).toBeInTheDocument();
-    expect(within(drawer).getByText("90")).toBeInTheDocument();
+    expect(within(drawer).queryByText("已下单可售天数")).not.toBeInTheDocument();
     const saveButton = screen.getByRole("button", { name: "保存" });
     expect(saveButton).toBeEnabled();
     const quantity = screen.getByRole("spinbutton", { name: "数量" });

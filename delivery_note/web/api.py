@@ -447,7 +447,6 @@ class PositionRowPayload(DraftMutationPayload):
     msku: str = ""
     scale_position: str = ""
     stocking_position: str = ""
-    ordered_days: str = ""
 
 
 class BulkDeletePayload(DraftMutationPayload):
@@ -695,7 +694,6 @@ def _position_row_json(
         "msku": row.msku,
         "scale_position": row.scale_position,
         "stocking_position": row.stocking_position,
-        "ordered_days": row.ordered_days,
         "change_type": row.change_type,
         "deleted": row.deleted,
         "issues": issues or [],
@@ -1303,7 +1301,7 @@ def _exception_position_values(
         values = {}
         for column, key in zip(
             POSITION_VALUE_COLUMNS,
-            ("scale_position", "stocking_position", "ordered_days"),
+            ("scale_position", "stocking_position"),
             strict=True,
         ):
             value = row[column]
@@ -1339,7 +1337,6 @@ def _exception_json(
         "status": exception.status,
         "scale_position": position_values.get("scale_position", ""),
         "stocking_position": position_values.get("stocking_position", ""),
-        "ordered_days": position_values.get("ordered_days", ""),
         "parts": [
             {
                 "id": part.id,

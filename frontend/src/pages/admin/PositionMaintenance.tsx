@@ -53,7 +53,6 @@ interface PositionRowValues {
   msku: string;
   scale_position: string;
   stocking_position: string;
-  ordered_days: string;
 }
 
 interface RevisionResponse {
@@ -104,8 +103,7 @@ function rowValues(row: PositionDraftRow): PositionRowValues {
     jiaji_sku: row.jiaji_sku,
     msku: row.msku,
     scale_position: row.scale_position,
-    stocking_position: row.stocking_position,
-    ordered_days: row.ordered_days
+    stocking_position: row.stocking_position
   };
 }
 
@@ -231,9 +229,6 @@ function RowEditorDrawer({
           </Form.Item>
           <Form.Item label="备货定位（可选）" name="stocking_position" extra="用于补充待处理导出中的备货定位。">
             <Input aria-label="备货定位" placeholder="例如：备货" />
-          </Form.Item>
-          <Form.Item label="已下单可售天数（可选）" name="ordered_days" extra="保留源资料文本，常见值为数字天数。">
-            <Input aria-label="已下单可售天数" placeholder="例如：90" />
           </Form.Item>
         </div>
       </Form>
@@ -591,8 +586,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       jiaji_sku: "",
       msku: "",
       scale_position: "",
-      stocking_position: "",
-      ordered_days: ""
+      stocking_position: ""
     });
     setDrawerDirty(false);
     setDrawerOpen(true);
@@ -851,7 +845,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     { title: "MSKU", dataIndex: "msku", width: 120, ellipsis: true, render: (value: string) => value || "—" },
     { title: "规模定位", dataIndex: "scale_position", width: 90, ellipsis: true, render: (value: string) => value || "—" },
     { title: "备货定位", dataIndex: "stocking_position", width: 100, ellipsis: true, render: (value: string) => value || "—" },
-    { title: "可售天数", dataIndex: "ordered_days", width: 95, ellipsis: true, render: (value: string) => value || "—" },
     {
       title: "修改状态",
       dataIndex: "change_type",

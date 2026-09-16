@@ -32,7 +32,7 @@ class InputInspectionTests(unittest.TestCase):
         self.root = Path(self.temporary_directory.name)
         self.path = self.root / "position.xlsx"
         self.frame = pd.DataFrame(
-            [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]],
+            [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"]],
             columns=POSITION_SOURCE_COLUMNS,
         )
 
@@ -42,15 +42,14 @@ class InputInspectionTests(unittest.TestCase):
     def test_position_summary_preview_and_quality_issues(self):
         frame = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90],
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "未知", "", "many"],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "未知", ""],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
         issues = validate_position_frame(frame)
         self.assertIn("duplicate_msku", {item["code"] for item in issues})
         self.assertIn("unknown_scale", {item["code"] for item in issues})
-        self.assertIn("non_numeric_days", {item["code"] for item in issues})
         duplicate_issue = next(
             item for item in issues if item["code"] == "duplicate_msku"
         )
@@ -70,7 +69,7 @@ class InputInspectionTests(unittest.TestCase):
         self.assertEqual(preview["offset"], 1)
         self.assertEqual(preview["limit"], 1)
         self.assertEqual(preview["columns"], POSITION_SOURCE_COLUMNS)
-        self.assertEqual(preview["rows"][0]["已下单可售天数"], "many")
+        self.assertNotIn("已下单可售天数", preview["rows"][0])
 
     def test_combined_position_inspection_reads_the_workbook_once(self):
         write_position_workbook(self.path, self.frame)
@@ -226,8 +225,8 @@ class InputInspectionTests(unittest.TestCase):
     def test_position_validation_reports_errors_and_warnings(self):
         frame = pd.DataFrame(
             [
-                [None, "SKU-A", "MSKU-A", "短尾", "备货", 30],
-                ["SEEKWAY:US", "", "MSKU-B", "中尾", None, 60],
+                [None, "SKU-A", "MSKU-A", "短尾", "备货"],
+                ["SEEKWAY:US", "", "MSKU-B", "中尾", None],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
@@ -243,15 +242,15 @@ class InputInspectionTests(unittest.TestCase):
     def test_position_diff_counts_composite_key_changes(self):
         base = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
-                ["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货", 60],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"],
+                ["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货"],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
         candidate = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "不备货", 30],
-                ["SEEKWAY:UK", "SKU-C", "MSKU-C", "长尾", "备货", 90],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "不备货"],
+                ["SEEKWAY:UK", "SKU-C", "MSKU-C", "长尾", "备货"],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
@@ -275,16 +274,16 @@ class InputInspectionTests(unittest.TestCase):
     def test_position_diff_stably_pairs_duplicate_identity_rows(self):
         base = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "中尾", "备货", 60],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "中尾", "备货"],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
         candidate = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "长尾", "备货", 90],
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "长尾", "备货", 90],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "长尾", "备货"],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "长尾", "备货"],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
@@ -297,7 +296,7 @@ class InputInspectionTests(unittest.TestCase):
     def test_position_change_warnings_cover_empty_and_fifty_percent_changes(self):
         base = pd.DataFrame(
             [
-                [f"STORE:{index}", f"SKU-{index}", f"MSKU-{index}", "短尾", "备货", 30]
+                [f"STORE:{index}", f"SKU-{index}", f"MSKU-{index}", "短尾", "备货"]
                 for index in range(4)
             ],
             columns=POSITION_SOURCE_COLUMNS,
@@ -309,8 +308,8 @@ class InputInspectionTests(unittest.TestCase):
                 base,
                 pd.DataFrame(
                     [
-                        ["STORE:4", "SKU-4", "MSKU-4", "短尾", "备货", 30],
-                        ["STORE:5", "SKU-5", "MSKU-5", "短尾", "备货", 30],
+                        ["STORE:4", "SKU-4", "MSKU-4", "短尾", "备货"],
+                        ["STORE:5", "SKU-5", "MSKU-5", "短尾", "备货"],
                     ],
                     columns=POSITION_SOURCE_COLUMNS,
                 ),
@@ -334,8 +333,8 @@ class InputInspectionTests(unittest.TestCase):
     def test_empty_msku_is_an_error_when_site_and_sku_have_multiple_rows(self):
         frame = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 30],
-                [" seekway:us ", "sku-a", "", "中尾", "备货", 60],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"],
+                [" seekway:us ", "sku-a", "", "中尾", "备货"],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )

@@ -37,7 +37,7 @@ export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
     label: "MSKU定位",
     purpose: "仅用于补充待处理导出的定位信息",
     impact: "不参与采购余额扣减或仓库分配；按店铺-站点与积加 SKU 补充定位字段。",
-    requiredFields: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位", "已下单可售天数"]
+    requiredFields: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位"]
   },
   {
     value: "template",

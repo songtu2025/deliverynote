@@ -503,8 +503,7 @@ export default function BatchDetail({
         item.full_site,
         item.destination,
         formatPositionValue(item.scale_position),
-        formatPositionValue(item.stocking_position),
-        formatPositionValue(item.ordered_days)
+        formatPositionValue(item.stocking_position)
       ].join(" ").toLocaleLowerCase("zh-CN");
       const matchesScope = reviewScope === "all"
         || (reviewScope === "resolved" ? item.status === "resolved" : item.status !== "resolved");
@@ -1197,7 +1196,7 @@ export default function BatchDetail({
                 width: 85,
                 ellipsis: true,
                 render: (value: string | number, record) => (
-                  <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}；已下单可售天数：${formatPositionValue(record.ordered_days)}`}>
+                  <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
                     <span><PositionValue value={value} /></span>
                   </Tooltip>
                 )
@@ -1338,7 +1337,6 @@ export default function BatchDetail({
               <Descriptions.Item label="目的仓">{splitTarget.destination || "—"}</Descriptions.Item>
               <Descriptions.Item label="规模定位"><PositionValue value={splitTarget.scale_position} /></Descriptions.Item>
               <Descriptions.Item label="备货定位"><PositionValue value={splitTarget.stocking_position} /></Descriptions.Item>
-              <Descriptions.Item label="已下单可售天数"><PositionValue value={splitTarget.ordered_days} /></Descriptions.Item>
               <Descriptions.Item label="异常原因"><Tag color="warning">{splitTarget.reason}</Tag></Descriptions.Item>
             </Descriptions>
 

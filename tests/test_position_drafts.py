@@ -50,7 +50,7 @@ class PositionDraftTests(unittest.TestCase):
         self.database.create_schema()
         self.base_path = self.root / "position-v1.xlsx"
         self.base_frame = pd.DataFrame(
-            [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]],
+            [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"]],
             columns=POSITION_SOURCE_COLUMNS,
         )
         write_position_workbook(self.base_path, self.base_frame)
@@ -80,7 +80,6 @@ class PositionDraftTests(unittest.TestCase):
             "msku": "MSKU-B",
             "scale_position": "中尾",
             "stocking_position": "备货",
-            "ordered_days": "60",
         }
 
     def tearDown(self):
@@ -98,7 +97,6 @@ class PositionDraftTests(unittest.TestCase):
             "msku": original.msku,
             "scale_position": original.scale_position,
             "stocking_position": stocking_position,
-            "ordered_days": original.ordered_days,
         }
         mutate_draft_row(
             session,
@@ -169,7 +167,6 @@ class PositionDraftTests(unittest.TestCase):
             self.assertEqual(rows[0].base_row_number, 2)
             self.assertEqual(rows[0].change_type, "unchanged")
             self.assertFalse(rows[0].deleted)
-            self.assertEqual(rows[0].ordered_days, "90")
             self.assertEqual(
                 session.query(AuditLog).filter_by(action="create_input_draft").count(),
                 1,
@@ -220,9 +217,9 @@ class PositionDraftTests(unittest.TestCase):
     def test_create_bulk_inserts_initial_rows_without_adding_orm_rows(self):
         self.base_frame = pd.DataFrame(
             [
-                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90],
-                ["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货", 60],
-                ["SEEKWAY:UK", "SKU-C", "MSKU-C", "长尾", "不备货", 30],
+                ["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"],
+                ["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货"],
+                ["SEEKWAY:UK", "SKU-C", "MSKU-C", "长尾", "不备货"],
             ],
             columns=POSITION_SOURCE_COLUMNS,
         )
@@ -497,7 +494,6 @@ class PositionDraftTests(unittest.TestCase):
                 "msku": original.msku,
                 "scale_position": original.scale_position,
                 "stocking_position": "不备货",
-                "ordered_days": original.ordered_days,
             }
 
             mutate_draft_row(
@@ -516,7 +512,6 @@ class PositionDraftTests(unittest.TestCase):
                 "msku": "MSKU-A",
                 "scale_position": "短尾",
                 "stocking_position": "备货",
-                "ordered_days": "90",
             }
             mutate_draft_row(
                 session,
@@ -566,7 +561,7 @@ class PositionDraftTests(unittest.TestCase):
 
     def test_replace_preserves_base_identity_and_reports_diff(self):
         candidate = pd.DataFrame(
-            [["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货", 60]],
+            [["SEEKWAY:CA", "SKU-B", "MSKU-B", "中尾", "备货"]],
             columns=POSITION_SOURCE_COLUMNS,
         )
         with self.database.session() as session:
@@ -611,7 +606,6 @@ class PositionDraftTests(unittest.TestCase):
                         original.msku,
                         original.scale_position,
                         original.stocking_position,
-                        original.ordered_days,
                     ]
                 ],
                 columns=POSITION_SOURCE_COLUMNS,
@@ -649,7 +643,7 @@ class PositionDraftTests(unittest.TestCase):
                 draft,
                 draft.revision,
                 self.admin_id,
-                dict(self.valid_row, ordered_days="61"),
+                dict(self.valid_row, stocking_position="不备货"),
                 row_id=added.id,
             )
             mutate_draft_row(
@@ -724,7 +718,6 @@ class PositionDraftTests(unittest.TestCase):
                 "msku": original.msku,
                 "scale_position": original.scale_position,
                 "stocking_position": "不备货",
-                "ordered_days": original.ordered_days,
             }
             mutate_draft_row(
                 session,
@@ -1091,7 +1084,6 @@ class PositionDraftTests(unittest.TestCase):
                 "msku": original.msku,
                 "scale_position": "未知",
                 "stocking_position": original.stocking_position,
-                "ordered_days": original.ordered_days,
             }
             mutate_draft_row(
                 session,
@@ -1184,7 +1176,6 @@ class PositionDraftApiTests(unittest.TestCase):
             "msku": "MSKU-B",
             "scale_position": "中尾",
             "stocking_position": "备货",
-            "ordered_days": "60",
         }
 
     def tearDown(self):
@@ -1914,7 +1905,6 @@ class PositionDraftApiTests(unittest.TestCase):
             "msku": original["msku"],
             "scale_position": original["scale_position"],
             "stocking_position": "不备货",
-            "ordered_days": original["ordered_days"],
         }
         modified = self.client.put(
             f"/api/input-drafts/{draft['id']}/rows/{original['id']}",
@@ -2017,10 +2007,13 @@ class PositionDraftApiTests(unittest.TestCase):
         updated = self.client.put(
             f"/api/input-drafts/{draft['id']}/rows/{row_id}",
             headers=self.admin_headers,
-            json={"revision": revision, **dict(self.valid_row, ordered_days="61")},
+            json={
+                "revision": revision,
+                **dict(self.valid_row, stocking_position="不备货"),
+            },
         )
         self.assertEqual(updated.status_code, 200, updated.text)
-        self.assertEqual(updated.json()["row"]["ordered_days"], "61")
+        self.assertEqual(updated.json()["row"]["stocking_position"], "不备货")
         revision = updated.json()["revision"]
 
         deleted = self.client.delete(
@@ -2047,7 +2040,6 @@ class PositionDraftApiTests(unittest.TestCase):
                 f"MSKU-{index:03d}",
                 "短尾" if index % 3 else "中尾",
                 "备货",
-                index,
             ]
             for index in range(1, 121)
         ]
@@ -2532,7 +2524,6 @@ class PositionDraftApiTests(unittest.TestCase):
                 "msku": row["msku"],
                 "scale_position": row["scale_position"],
                 "stocking_position": row["stocking_position"],
-                "ordered_days": row["ordered_days"],
             },
         )
         self.assertEqual(invalid.status_code, 200, invalid.text)

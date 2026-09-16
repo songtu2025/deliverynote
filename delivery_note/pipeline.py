@@ -20,7 +20,6 @@ IMPORT_COLUMNS = [
 POSITION_VALUE_COLUMNS = [
     "规模定位",
     "备货定位",
-    "已下单可售天数",
 ]
 POSITION_SOURCE_COLUMNS = [
     "店铺-站点",

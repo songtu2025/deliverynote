@@ -34,7 +34,6 @@ ROW_FIELDS = (
     "msku",
     "scale_position",
     "stocking_position",
-    "ordered_days",
 )
 FIELD_TO_COLUMN = dict(zip(ROW_FIELDS, POSITION_SOURCE_COLUMNS))
 IDENTITY_FIELDS = ROW_FIELDS[:3]

@@ -818,10 +818,10 @@ class PendingPositionMappingTests(unittest.TestCase):
         )
         position_rows = pd.DataFrame(
             [
-                [" shop:us ", "sku-a", "MSKU-A", "中尾", "备货", 88.5],
-                ["SHOP:CA", "SKU-B", "MSKU-L", "长尾", "不备货", 30],
-                ["SHOP:CA", "SKU-B", "MSKU-S", "短尾", "备货", 120.25],
-                ["SHOP:CA", "SKU-B", "MSKU-M", "中尾", "备货", 60],
+                [" shop:us ", "sku-a", "MSKU-A", "中尾", "备货"],
+                ["SHOP:CA", "SKU-B", "MSKU-L", "长尾", "不备货"],
+                ["SHOP:CA", "SKU-B", "MSKU-S", "短尾", "备货"],
+                ["SHOP:CA", "SKU-B", "MSKU-M", "中尾", "备货"],
             ],
             columns=[
                 "店铺-站点",
@@ -829,16 +829,16 @@ class PendingPositionMappingTests(unittest.TestCase):
                 "MSKU",
                 "规模定位",
                 "备货定位",
-                "已下单可售天数",
             ],
         )
+        position_rows["已下单可售天数"] = [88.5, 30, 120.25, 60]
 
         result = enrich_pending_import_rows(pending_rows, position_rows)
 
         self.assertEqual(result.columns.tolist(), PENDING_COLUMNS)
         self.assertEqual(
-            result.loc[0, ["规模定位", "备货定位", "已下单可售天数"]].tolist(),
-            ["中尾", "备货", 88.5],
+            result.loc[0, ["规模定位", "备货定位"]].tolist(),
+            ["中尾", "备货"],
         )
         self.assertEqual(
             result.loc[1, "规模定位"],
@@ -849,13 +849,10 @@ class PendingPositionMappingTests(unittest.TestCase):
             '{"MSKU-S":"备货","MSKU-M":"备货","MSKU-L":"不备货"}',
         )
         self.assertEqual(
-            result.loc[1, "已下单可售天数"],
-            '{"MSKU-S":120.25,"MSKU-M":60,"MSKU-L":30}',
+            result.loc[2, ["规模定位", "备货定位"]].tolist(),
+            ["", ""],
         )
-        self.assertEqual(
-            result.loc[2, ["规模定位", "备货定位", "已下单可售天数"]].tolist(),
-            ["", "", ""],
-        )
+        self.assertNotIn("已下单可售天数", result.columns)
 
     def test_only_pending_position_keys_are_grouped(self):
         pending_rows = pd.DataFrame(
@@ -882,7 +879,7 @@ class PendingPositionMappingTests(unittest.TestCase):
         )
         position_rows = pd.DataFrame(
             [
-                ["SHOP:US", "SKU-A", "MSKU-A", "短尾", "备货", 90],
+                ["SHOP:US", "SKU-A", "MSKU-A", "短尾", "备货"],
                 *[
                     [
                         "SHOP:CA",
@@ -890,7 +887,6 @@ class PendingPositionMappingTests(unittest.TestCase):
                         f"MSKU-{index}",
                         "长尾",
                         "不备货",
-                        30,
                     ]
                     for index in range(100)
                 ],
@@ -901,7 +897,6 @@ class PendingPositionMappingTests(unittest.TestCase):
                 "MSKU",
                 "规模定位",
                 "备货定位",
-                "已下单可售天数",
             ],
         )
         grouped_row_counts = []
