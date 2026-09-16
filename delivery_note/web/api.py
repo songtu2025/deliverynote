@@ -36,7 +36,12 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from ..application import SplitPart, project_split
-from ..config import PURCHASE_STATUSES, resolve_supplier, warehouse_sort_key
+from ..config import (
+    PURCHASE_STATUSES,
+    resolve_supplier,
+    validate_supplier_frame,
+    warehouse_sort_key,
+)
 from ..excel_io import (
     read_delivery_workbook,
     read_position_workbook,
@@ -1219,7 +1224,15 @@ def _validate_input_version(kind: str, path: Path) -> None:
     elif kind == "product":
         read_product_workbook(path)
     elif kind == "supplier":
-        read_supplier_workbook(path)
+        supplier_rows = read_supplier_workbook(path)
+        issues = validate_supplier_frame(supplier_rows)
+        if issues:
+            details = "；".join(
+                f"Excel 行 {', '.join(map(str, issue['row_numbers']))}："
+                f"{issue['message']}"
+                for issue in issues
+            )
+            raise ValueError(details)
     elif kind == "position":
         read_position_workbook(path)
     elif kind == "template":
@@ -2076,7 +2089,7 @@ def create_app(
                 "configured": False,
                 "base_url": os.getenv(
                     "GERPGO_API_BASE_URL",
-                    "https://open.gerpgo.com",
+                    "https://open.gerpgo.com/api/open",
                 ).strip(),
                 "app_id_hint": "",
                 "has_app_id": False,
@@ -4257,6 +4270,47 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         return _batch_json(get_batch_or_404(batch_id, session), session)
+
+    @app.post("/api/batches/{batch_id}/refresh-supplier-version")
+    def refresh_batch_supplier_version(
+        batch_id: int,
+        admin: Annotated[User, Depends(admin_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        batch = session.scalar(
+            select(Batch).where(Batch.id == batch_id).with_for_update()
+        )
+        if batch is None:
+            raise HTTPException(status_code=404, detail="批次不存在")
+        if batch.status != "draft":
+            raise HTTPException(
+                status_code=409,
+                detail="仅草稿状态批次可以更新供应商资料版本",
+            )
+        active_supplier = session.scalar(
+            select(InputVersion).where(
+                InputVersion.kind == "supplier",
+                InputVersion.active.is_(True),
+            )
+        )
+        if active_supplier is None:
+            raise HTTPException(status_code=409, detail="当前没有启用的供应商资料版本")
+
+        previous_version_id = batch.supplier_version_id
+        batch.supplier_version_id = active_supplier.id
+        _audit(
+            session,
+            admin.id,
+            "refresh_batch_supplier_version",
+            "batch",
+            batch.id,
+            {
+                "previous_supplier_version_id": previous_version_id,
+                "supplier_version_id": active_supplier.id,
+            },
+        )
+        session.commit()
+        return _batch_json(batch, session)
 
     @app.post("/api/self-operated-batches/{batch_id}/inbound-file")
     async def upload_self_operated_inbound_file(

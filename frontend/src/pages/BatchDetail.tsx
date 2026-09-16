@@ -45,6 +45,7 @@ import type {
   Batch,
   BatchFile,
   DeliveryException,
+  InputVersion,
   Job,
   SplitPart
 } from "../types";
@@ -324,8 +325,17 @@ function ReasonGuidance({
   return null;
 }
 
-export default function BatchDetail({ batchId, onBack }: { batchId: number; onBack: () => void }) {
+export default function BatchDetail({
+  batchId,
+  onBack,
+  canRefreshSupplierVersion = false
+}: {
+  batchId: number;
+  onBack: () => void;
+  canRefreshSupplierVersion?: boolean;
+}) {
   const [batch, setBatch] = useState<Batch | null>(null);
+  const [activeSupplierVersion, setActiveSupplierVersion] = useState<InputVersion | null>(null);
   const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
   const [loading, setLoading] = useState(true);
   const [exceptionsLoading, setExceptionsLoading] = useState(true);
@@ -358,7 +368,14 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
       const exceptionsRequest = api<DeliveryException[]>(
         `/api/batches/${batchId}/exceptions`
       ).then(setExceptions);
-      await Promise.all([batchRequest, exceptionsRequest]);
+      const versionsRequest = canRefreshSupplierVersion
+        ? api<InputVersion[]>("/api/input-versions").then((versions) => {
+            setActiveSupplierVersion(
+              versions.find((version) => version.kind === "supplier" && version.active) ?? null
+            );
+          })
+        : Promise.resolve();
+      await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "读取批次失败");
     } finally {
@@ -371,7 +388,7 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
 
   useEffect(() => {
     void load();
-  }, [batchId]);
+  }, [batchId, canRefreshSupplierVersion]);
 
   const activeJob = useMemo(() => {
     const jobs = batch?.jobs;
@@ -569,6 +586,16 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
     message.success("所有基础资料和交货文件均已通过预检");
   });
 
+  const refreshSupplierVersion = () => runAction("refresh-supplier-version", async () => {
+    const updated = await api<Batch>(
+      `/api/batches/${batchId}/refresh-supplier-version`,
+      { method: "POST" }
+    );
+    setBatch(updated);
+    await load(true);
+    message.success("批次已采用当前供应商资料");
+  });
+
   const compute = () => runAction("compute", async () => {
     await api<Job>(`/api/batches/${batchId}/compute`, { method: "POST" });
     await load(true);
@@ -657,6 +684,12 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
   }
 
   const canEditFiles = ["draft", "preflight_ready", "failed"].includes(batch.status);
+  const canAdoptCurrentSupplier = Boolean(
+    canRefreshSupplierVersion
+    && batch.status === "draft"
+    && activeSupplierVersion
+    && activeSupplierVersion.id !== batch.version_ids.supplier
+  );
   const computed = batch.status === "succeeded" || batch.download_ready;
   const exportJob = batch.jobs?.export;
   const showFileActions = canEditFiles || files.some((file) => file.download_ready);
@@ -955,14 +988,25 @@ export default function BatchDetail({ batchId, onBack }: { batchId: number; onBa
         title={<span className="locked-data-title"><LockOutlined /> 批次锁定版本</span>}
         className={`section-card compact-card locked-data-card ${lockedDataOpen ? "" : "is-collapsed"}`}
         extra={(
-          <Button
-            type="link"
-            size="small"
-            aria-expanded={lockedDataOpen}
-            onClick={() => setLockedDataOpen((open) => !open)}
-          >
-            {lockedDataOpen ? "收起锁定版本" : "查看锁定版本"}
-          </Button>
+          <Space size="small">
+            {canAdoptCurrentSupplier && (
+              <Button
+                size="small"
+                loading={action === "refresh-supplier-version"}
+                onClick={() => void refreshSupplierVersion()}
+              >
+                采用当前供应商资料
+              </Button>
+            )}
+            <Button
+              type="link"
+              size="small"
+              aria-expanded={lockedDataOpen}
+              onClick={() => setLockedDataOpen((open) => !open)}
+            >
+              {lockedDataOpen ? "收起锁定版本" : "查看锁定版本"}
+            </Button>
+          </Space>
         )}
       >
         {lockedDataOpen && (

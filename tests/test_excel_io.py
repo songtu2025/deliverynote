@@ -119,6 +119,20 @@ class ExcelInputTests(unittest.TestCase):
 
         self.assertEqual(zhangdun["供应商编号"], "GYS-027")
         self.assertEqual(zhangdun["状态"], "启用")
+        self.assertIn("供应商别名", result.columns)
+        self.assertEqual(zhangdun["供应商别名"], "")
+
+    def test_read_supplier_workbook_keeps_optional_alias_column(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "supplier.xlsx"
+            pd.DataFrame(
+                [["STGYS001", "RUIZY", "启用", "瑞智雅|RIVBOS"]],
+                columns=["供应商编号", "供应商名称", "状态", "供应商别名"],
+            ).to_excel(path, index=False)
+
+            result = read_supplier_workbook(path)
+
+        self.assertEqual(result.iloc[0]["供应商别名"], "瑞智雅|RIVBOS")
 
 
 class ExcelOutputTests(unittest.TestCase):

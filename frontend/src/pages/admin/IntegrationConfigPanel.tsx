@@ -230,7 +230,7 @@ export function IntegrationConfigPanel() {
                 }
               ]}
             >
-              <Input placeholder="https://open.gerpgo.com" />
+              <Input placeholder="https://open.gerpgo.com/api/open" />
             </Form.Item>
 
             <div className="integration-config-credentials">

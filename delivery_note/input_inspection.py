@@ -15,6 +15,7 @@ from .excel_io import (
     validate_self_operated_template_workbook,
     validate_template_workbook,
 )
+from .config import supplier_aliases, validate_supplier_frame
 from .pipeline import POSITION_SOURCE_COLUMNS
 
 
@@ -90,6 +91,13 @@ def _inspect_frame(kind: str, frame: pd.DataFrame) -> dict:
         result["issues"] = validate_position_frame(frame)
     elif kind == "purchase":
         result["issues"] = validate_purchase_frame(frame)
+    elif kind == "supplier":
+        aliases = frame["供应商别名"].map(supplier_aliases)
+        result["metrics"] = {
+            "aliases": int(aliases.map(len).sum()),
+            "suppliers_with_aliases": int(aliases.map(bool).sum()),
+        }
+        result["issues"] = validate_supplier_frame(frame)
     return result
 
 

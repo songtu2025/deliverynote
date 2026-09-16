@@ -151,14 +151,19 @@ describe("InputDataPanel", () => {
           summary: {
             kind: "supplier",
             row_count: 1,
-            columns: ["供应商编号", "供应商名称", "状态"],
-            metrics: {},
+            columns: ["供应商编号", "供应商名称", "状态", "供应商别名"],
+            metrics: { aliases: 2, suppliers_with_aliases: 1 },
             issues: []
           },
           preview: {
             kind: "supplier",
-            columns: ["供应商编号", "供应商名称", "状态"],
-            rows: [{ 供应商编号: "SUPPLIER-GYS", 供应商名称: "测试供应商", 状态: "启用" }],
+            columns: ["供应商编号", "供应商名称", "状态", "供应商别名"],
+            rows: [{
+              供应商编号: "SUPPLIER-GYS",
+              供应商名称: "RUIZY",
+              状态: "启用",
+              供应商别名: "瑞智雅|RIVBOS"
+            }],
             total: 1,
             offset: 0,
             limit: 20
@@ -193,6 +198,11 @@ describe("InputDataPanel", () => {
         if (failUpload) return jsonResponse({ detail: "输入版本校验失败：缺少 SKU" }, 400);
         if (pendingUpload) return pendingUpload.promise;
         return jsonResponse({ ...versions[6], id: 9, name: "product-replacement" }, 201);
+      }
+      if (url.endsWith("/api/input-versions/supplier") && method === "POST") {
+        return jsonResponse({
+          detail: "输入版本校验失败：Excel 行 2, 3：供应商名称或别名会造成匹配歧义"
+        }, 400);
       }
       if (url.endsWith("/api/input-versions/2/activate") && method === "POST") {
         return jsonResponse({ ...versions[1], active: true });
@@ -404,6 +414,62 @@ describe("InputDataPanel", () => {
         String(input).endsWith(`/api/input-versions/${versionId}/inspection`)
       )).toHaveLength(1);
     }
+  });
+
+  it("shows supplier alias format, metrics, preview, and quality result", async () => {
+    const versionsWithSupplier = versions.map((version) =>
+      version.id === 5 ? { ...version, active: true } : version
+    );
+    render(
+      <InputDataPanel
+        versions={versionsWithSupplier}
+        loading={false}
+        onVersionsChanged={vi.fn()}
+        onOpenPositionDraft={vi.fn()}
+      />
+    );
+
+    fireEvent.click(getCatalogButton("供应商资料"));
+
+    expect(await screen.findByText("瑞智雅|RIVBOS")).toBeInTheDocument();
+    expect(screen.getByText("2 个别名")).toBeInTheDocument();
+    expect(screen.getByText("1 个供应商已配置别名")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看字段说明" }));
+    expect(screen.getByText("供应商别名（多个别名用 | 分隔）")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /质量检查/ }));
+    expect(screen.getByText("未发现资料质量问题")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
+    expect(screen.getByText("供应商别名为可选列")).toBeInTheDocument();
+    expect(screen.getByText(/名称或别名相同、互为子串/)).toBeInTheDocument();
+  });
+
+  it("shows supplier alias conflict rows returned by upload validation", async () => {
+    const versionsWithSupplier = versions.map((version) =>
+      version.id === 5 ? { ...version, active: true } : version
+    );
+    render(
+      <InputDataPanel
+        versions={versionsWithSupplier}
+        loading={false}
+        onVersionsChanged={vi.fn()}
+        onOpenPositionDraft={vi.fn()}
+      />
+    );
+
+    fireEvent.click(getCatalogButton("供应商资料"));
+    await screen.findByText("瑞智雅|RIVBOS");
+    fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
+    fireEvent.change(screen.getByLabelText("新版本名称"), {
+      target: { value: "supplier-conflict" }
+    });
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(fileInput, {
+      target: { files: [new File(["excel"], "supplier.xlsx", { type: "application/vnd.ms-excel" })] }
+    });
+    await screen.findByText("supplier.xlsx");
+    fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
+
+    expect(await screen.findByText(/Excel 行 2, 3.*匹配歧义/)).toBeInTheDocument();
   });
 
   it("renders boolean preview values explicitly", async () => {

@@ -6,6 +6,7 @@ export interface InputKindDefinition {
   purpose: string;
   impact: string;
   requiredFields: string[];
+  optionalFields?: string[];
 }
 
 export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
@@ -28,7 +29,8 @@ export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
     label: "供应商资料",
     purpose: "把交货文件识别为已登记供应商，并提供正式供应商编码。",
     impact: "未能唯一识别供应商会导致批次预检失败，需修正供应商资料或交货文件名后重试。",
-    requiredFields: ["供应商编号", "供应商名称", "状态"]
+    requiredFields: ["供应商编号", "供应商名称", "状态"],
+    optionalFields: ["供应商别名（多个别名用 | 分隔）"]
   },
   {
     value: "position",

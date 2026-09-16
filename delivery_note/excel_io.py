@@ -25,7 +25,8 @@ from .self_operated_inbound import (
 
 PURCHASE_COLUMNS = ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"]
 PRODUCT_COLUMNS = ["SKU", "店铺/站点", "品类A", "锁仓MKSU"]
-SUPPLIER_COLUMNS = ["供应商编号", "供应商名称", "状态"]
+SUPPLIER_REQUIRED_COLUMNS = ["供应商编号", "供应商名称", "状态"]
+SUPPLIER_COLUMNS = [*SUPPLIER_REQUIRED_COLUMNS, "供应商别名"]
 
 
 def _is_delivery_header(values: list[Any]) -> bool:
@@ -76,7 +77,13 @@ def read_purchase_workbook(path: Path) -> pd.DataFrame:
 
 
 def read_supplier_workbook(path: Path) -> pd.DataFrame:
-    return pd.read_excel(path, usecols=SUPPLIER_COLUMNS)
+    rows = pd.read_excel(path)
+    missing = [column for column in SUPPLIER_REQUIRED_COLUMNS if column not in rows]
+    if missing:
+        raise ValueError(f"供应商资料缺少必要字段：{', '.join(missing)}")
+    if "供应商别名" not in rows:
+        rows["供应商别名"] = ""
+    return rows[SUPPLIER_COLUMNS]
 
 
 def read_position_workbook(path: Path) -> pd.DataFrame:

@@ -168,6 +168,23 @@ describe("BatchDetail", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/api/batches/7/exceptions")) return jsonResponse(exceptionPayload);
+      if (url.endsWith("/api/input-versions")) {
+        return jsonResponse([{ ...version(9, "supplier"), name: "supplier-v2" }]);
+      }
+      if (
+        url.endsWith("/api/batches/7/refresh-supplier-version")
+        && init?.method === "POST"
+      ) {
+        batchPayload = {
+          ...batchPayload,
+          version_ids: { ...batchPayload.version_ids, supplier: 9 },
+          versions: {
+            ...batchPayload.versions,
+            supplier: { ...version(9, "supplier"), name: "supplier-v2" }
+          }
+        };
+        return jsonResponse(batchPayload);
+      }
       if (url.endsWith("/api/batches/7")) return jsonResponse(batchPayload);
       const splitMatch = url.match(/\/api\/exceptions\/(\d+)\/split$/);
       if (splitMatch && init?.method === "PUT") {
@@ -269,6 +286,51 @@ describe("BatchDetail", () => {
 
     finishExceptions(jsonResponse(exceptionPayload));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+  });
+
+  it("lets an admin draft adopt the current supplier version", async () => {
+    batchPayload.status = "draft";
+    render(
+      <BatchDetail
+        batchId={7}
+        canRefreshSupplierVersion
+        onBack={vi.fn()}
+      />
+    );
+
+    const refreshButton = await screen.findByRole("button", {
+      name: "采用当前供应商资料"
+    });
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input, init]) =>
+      String(input).endsWith("/api/batches/7/refresh-supplier-version")
+      && init?.method === "POST"
+    )).toBe(true));
+    await screen.findByText("supplier-v2");
+    expect(screen.queryByRole("button", { name: "采用当前供应商资料" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("does not show supplier refresh outside an admin draft", async () => {
+    batchPayload.status = "draft";
+    const { rerender } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    await screen.findByText("批次锁定版本");
+    expect(screen.queryByRole("button", { name: "采用当前供应商资料" }))
+      .not.toBeInTheDocument();
+
+    batchPayload.status = "failed";
+    rerender(
+      <BatchDetail
+        batchId={7}
+        canRefreshSupplierVersion
+        onBack={vi.fn()}
+      />
+    );
+    await waitFor(() => expect(screen.queryByRole("button", {
+      name: "采用当前供应商资料"
+    })).not.toBeInTheDocument());
   });
 
   it("shows exception loading during a silent job refresh", async () => {

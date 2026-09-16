@@ -228,8 +228,8 @@ class WorkerIntegrationTests(unittest.TestCase):
         supplier = root / "supplier.xlsx"
         workbook = Workbook()
         sheet = workbook.active
-        sheet.append(["供应商编号", "供应商名称", "状态"])
-        sheet.append(["GYS-023", "KuangBiao", "启用"])
+        sheet.append(["供应商编号", "供应商名称", "状态", "供应商别名"])
+        sheet.append(["GYS-023", "KuangBiao", "启用", "瑞智雅|RIVBOS"])
         workbook.save(supplier)
 
         position = root / "position.xlsx"
@@ -523,6 +523,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             f"/api/batches/{batch_id}/preflight", headers=self.headers
         )
         self.assertEqual(illegal_preflight.status_code, 409)
+
         self.assertEqual(
             self.client.get(f"/api/batches/{batch_id}", headers=self.headers).json()[
                 "status"
@@ -708,6 +709,22 @@ class WorkerIntegrationTests(unittest.TestCase):
         self.assertNotEqual(third_export_dir, second_export_dir)
         self.assertTrue(third_export_dir.is_dir())
         self.assertTrue(second_export_dir.is_dir())
+
+    def test_worker_compute_uses_supplier_alias_from_locked_version(self):
+        delivery = self.create_delivery(
+            self.root / "260903-瑞智雅RIVBOS眼镜交货单-发货53箱 (1).xlsx",
+            40,
+        )
+        batch_id, compute_job_id = self.create_batch([delivery])
+
+        self.assertEqual(run_once(self.database_url, self.storage_root), compute_job_id)
+        batch = self.client.get(
+            f"/api/batches/{batch_id}", headers=self.headers
+        ).json()
+
+        self.assertEqual(batch["status"], "succeeded")
+        self.assertEqual(batch["files"][0]["supplier_code"], "GYS-023")
+        self.assertEqual(batch["files"][0]["supplier_name"], "KuangBiao")
 
     def test_compute_uses_the_overreceipt_rule_locked_when_batch_was_created(self):
         first_rule = self.client.post(

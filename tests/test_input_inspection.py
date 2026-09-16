@@ -369,7 +369,10 @@ class InputInspectionTests(unittest.TestCase):
                 frame.to_excel(path, index=False)
                 inspection = inspect_input_version(kind, path)
                 self.assertEqual(inspection["row_count"], 1)
-                self.assertEqual(inspection["columns"], list(frame.columns))
+                expected_columns = list(frame.columns)
+                if kind == "supplier":
+                    expected_columns.append("供应商别名")
+                self.assertEqual(inspection["columns"], expected_columns)
                 preview = preview_input_version(kind, path, offset=0, limit=10)
                 self.assertEqual(
                     preview["rows"][0][frame.columns[-1]], frame.iloc[0, -1]
@@ -389,6 +392,28 @@ class InputInspectionTests(unittest.TestCase):
         self.assertEqual(inspection["row_count"], 1)
         self.assertEqual(preview["rows"][0]["*本次交货量"], 10)
         self.assertIsNone(preview["rows"][0]["单据备注"])
+
+    def test_supplier_inspection_reports_alias_metrics_and_conflicts(self):
+        path = self.root / "supplier-aliases.xlsx"
+        pd.DataFrame(
+            [
+                ["GYS-1", "Alpha", "启用", " A-One | shared "],
+                ["GYS-2", "Beta", "启用", "shared-shop|B-One"],
+            ],
+            columns=["供应商编号", "供应商名称", "状态", "供应商别名"],
+        ).to_excel(path, index=False)
+
+        inspection = inspect_input_version("supplier", path)
+
+        self.assertEqual(
+            inspection["metrics"],
+            {"aliases": 4, "suppliers_with_aliases": 2},
+        )
+        self.assertEqual(inspection["issues"][0]["row_numbers"], [2, 3])
+        self.assertEqual(
+            inspection["issues"][0]["code"],
+            "supplier_identifier_conflict",
+        )
 
     def test_unknown_input_kind_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "不支持的输入资料类型"):

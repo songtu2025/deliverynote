@@ -313,6 +313,7 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
             {batchId !== null && (
               <BatchDetail
                 batchId={batchId}
+                canRefreshSupplierVersion={user.role === "admin"}
                 onBack={() => navigate({ page, batchId: null })}
               />
             )}

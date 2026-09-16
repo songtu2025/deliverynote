@@ -124,7 +124,7 @@ describe("AdminPage", () => {
       ) {
         return jsonResponse({
           configured: false,
-          base_url: "https://open.gerpgo.com",
+          base_url: "https://open.gerpgo.com/api/open",
           app_id_hint: "",
           has_app_id: false,
           has_app_key: false,

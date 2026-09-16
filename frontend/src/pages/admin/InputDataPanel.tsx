@@ -330,7 +330,12 @@ export function InputDataPanel({
           `${summary.metrics.skus ?? 0} 个积加 SKU`,
           `${summary.metrics.mskus ?? 0} 个 MSKU`
         ]
-      : [];
+      : selectedKind === "supplier"
+        ? [
+            `${summary.metrics.aliases ?? 0} 个别名`,
+            `${summary.metrics.suppliers_with_aliases ?? 0} 个供应商已配置别名`
+          ]
+        : [];
 
     return (
       <>
@@ -368,7 +373,7 @@ export function InputDataPanel({
     if (!inspectionReady || !summary) {
       return <Typography.Text type="secondary">等待检查结果。</Typography.Text>;
     }
-    if (selectedKind !== "position") {
+    if (selectedKind !== "position" && selectedKind !== "supplier") {
       return <Alert type="info" showIcon title="文件结构已通过校验，当前未执行内容质量诊断" />;
     }
     if (summary.issues.length === 0) {
@@ -592,6 +597,14 @@ export function InputDataPanel({
                 <Space wrap size={[6, 6]}>
                   {selectedDefinition.requiredFields.map((field) => <Tag key={field}>{field}</Tag>)}
                 </Space>
+                {selectedDefinition.optionalFields && (
+                  <>
+                    <Typography.Text type="secondary">可选字段</Typography.Text>
+                    <Space wrap size={[6, 6]}>
+                      {selectedDefinition.optionalFields.map((field) => <Tag key={field}>{field}</Tag>)}
+                    </Space>
+                  </>
+                )}
               </div>
               <div className="input-data-impact">
                 <span>对业务的影响</span>
@@ -677,6 +690,14 @@ export function InputDataPanel({
           <Typography.Paragraph type="secondary">
             选择文件并确认版本名称；校验通过后立即启用。
           </Typography.Paragraph>
+          {selectedKind === "supplier" && (
+            <Alert
+              type="info"
+              showIcon
+              title="供应商别名为可选列"
+              description="一个单元格内的多个别名请用 | 分隔。启用供应商之间名称或别名相同、互为子串时，上传会被拒绝并提示 Excel 行号。"
+            />
+          )}
           {uploadError?.kind === selectedKind && (
             <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError.message} />
           )}
