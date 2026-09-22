@@ -415,6 +415,9 @@ class WorkerIntegrationTests(unittest.TestCase):
                     {
                         "sku": "SKU-A",
                         "marketName": "共享",
+                        "id": 1001,
+                        "sourceItemId": 2001,
+                        "releatedItemId": 3001,
                         "arriveNum": 10,
                     }
                 ],
@@ -440,6 +443,9 @@ class WorkerIntegrationTests(unittest.TestCase):
                 rows = pd.read_excel(candidate.storage_path)
                 self.assertEqual(rows.iloc[0]["入库单号"], "IN-1")
                 self.assertEqual(rows.iloc[0]["平台站点"], "共享")
+                self.assertEqual(rows.iloc[0]["积加明细ID"], 1001)
+                self.assertEqual(rows.iloc[0]["来源明细ID"], 2001)
+                self.assertEqual(rows.iloc[0]["关联明细ID"], 3001)
                 self.assertEqual(job.issues[0]["code"], "shared_site")
         finally:
             database.dispose()

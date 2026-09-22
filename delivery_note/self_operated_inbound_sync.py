@@ -16,6 +16,9 @@ INBOUND_SYNC_COLUMNS = [
     "入库状态",
     "接口站点",
     "供应商编号",
+    "积加明细ID",
+    "来源明细ID",
+    "关联明细ID",
 ]
 
 INBOUND_SYNC_STATUSES = {"WAIT_INBOUND", "PART_INBOUND"}
@@ -177,6 +180,9 @@ def map_self_operated_inbound_orders(
                     "入库状态": status,
                     "接口站点": source_site,
                     "供应商编号": supplier_code,
+                    "积加明细ID": _text(item.get("id")),
+                    "来源明细ID": _text(item.get("sourceItemId")),
+                    "关联明细ID": _text(item.get("releatedItemId")),
                 }
             )
             rows.append(row)

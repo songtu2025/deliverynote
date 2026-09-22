@@ -315,6 +315,9 @@ class SelfOperatedInboundMappingTests(unittest.TestCase):
                 {
                     "sku": "SKU-A",
                     "marketName": site,
+                    "id": 1001,
+                    "sourceItemId": 2001,
+                    "releatedItemId": 3001,
                     "arriveNum": 12,
                     "maxReceiveNum": 15,
                     "receiveNum": 0,
@@ -339,6 +342,9 @@ class SelfOperatedInboundMappingTests(unittest.TestCase):
         self.assertEqual(result.rows[0]["平台站点"], "AMAZON:SEEKWAY:US")
         self.assertEqual(result.rows[0]["应收货"], 12)
         self.assertEqual(result.rows[0]["关联交货单/调拨单"], "LN-1")
+        self.assertEqual(result.rows[0]["积加明细ID"], "1001")
+        self.assertEqual(result.rows[0]["来源明细ID"], "2001")
+        self.assertEqual(result.rows[0]["关联明细ID"], "3001")
 
     def test_partial_inbound_uses_only_remaining_quantity(self):
         partial = self.order()
