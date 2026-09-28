@@ -61,12 +61,12 @@ class RunBatchOutputTests(unittest.TestCase):
         delivery_path = directory / "260717-狂飙-SEEKWAY交货单-发货96箱.xlsx"
         delivery_book = Workbook()
         delivery_sheet = delivery_book.active
-        delivery_sheet.title = "汇总"
+        delivery_sheet.title = "明细"
         delivery_sheet.append([])
         delivery_sheet.append([])
         delivery_sheet.append([])
-        delivery_sheet.append(["SKU", "US站", "总计"])
-        delivery_sheet.append(["SKU-A", 120, 120])
+        delivery_sheet.append(["积加SKU", "数量", "站点"])
+        delivery_sheet.append(["SKU-A", 120, "US站"])
         delivery_book.save(delivery_path)
 
         product_path = directory / "产品信息.xlsx"

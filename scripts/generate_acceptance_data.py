@@ -24,12 +24,12 @@ def _write_table(path: Path, headers: list[str], row: list[object]) -> None:
 def _write_delivery(path: Path, quantity: int) -> None:
     workbook = Workbook()
     sheet = workbook.active
-    sheet.title = "汇总"
+    sheet.title = "明细"
     sheet.append([])
     sheet.append([])
     sheet.append([])
-    sheet.append(["SKU", "US站", "总计"])
-    sheet.append(["SKU-A", quantity, quantity])
+    sheet.append(["积加SKU", "数量", "站点"])
+    sheet.append(["SKU-A", quantity, "US站"])
     workbook.save(path)
 
 

@@ -39,22 +39,28 @@ except ImportError:
 
 
 class ExcelInputTests(unittest.TestCase):
-    def test_read_delivery_workbook_current_layout(self):
+    def test_read_delivery_workbook_uses_detail_even_with_summary(self):
         self.assertIsNotNone(read_delivery_workbook, "交货单读取函数尚未实现")
         if read_delivery_workbook is None:
             return
 
         with TemporaryDirectory() as directory:
-            path = Path(directory) / "狂飙交货单.xlsx"
+            path = Path(directory) / "明细交货单.xlsx"
             workbook = Workbook()
             sheet = workbook.active
-            sheet.title = "汇总"
+            sheet.title = "明细"
             sheet.append([])
             sheet.append([])
             sheet.append([])
-            sheet.append(["SKU", "CA站", "US站", "总计"])
-            sheet.append(["SKU-A", 5, 10, 15])
-            sheet.append(["总计", 5, 10, 15])
+            sheet.append(["积加SKU", "数量", "站点"])
+            sheet.append(["SKU-A", 5, "CA站"])
+            sheet.append(["SKU-A", 10, "US站"])
+            sheet.append(["SKU-A", 2, "CA站"])
+            sheet.append(["合计", None, None])
+            sheet.append(["次品问题描述", None, None])
+            summary = workbook.create_sheet("汇总")
+            summary.append(["SKU", "US站"])
+            summary.append(["SKU-A", 999])
             workbook.save(path)
 
             result = read_delivery_workbook(path)
@@ -62,54 +68,39 @@ class ExcelInputTests(unittest.TestCase):
         self.assertEqual(
             result.to_dict("records"),
             [
-                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 5},
+                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 7},
                 {"SKU": "SKU-A", "原始站点": "US", "交货量": 10},
             ],
         )
 
-    def test_read_delivery_workbook_with_second_row_header(self):
-        self.assertIsNotNone(read_delivery_workbook, "交货单读取函数尚未实现")
-        if read_delivery_workbook is None:
-            return
-
+    def test_read_delivery_workbook_requires_detail_sheet(self):
         with TemporaryDirectory() as directory:
-            path = Path(directory) / "第二行表头交货单.xlsx"
+            path = Path(directory) / "只有汇总的交货单.xlsx"
             workbook = Workbook()
             sheet = workbook.active
             sheet.title = "汇总"
-            sheet.append(["交货单标题"])
-            sheet.append(["SKU", "CA站", "US站", "总计"])
-            sheet.append(["SKU-A", 5, 10, 15])
-            sheet.append(["总计", 5, 10, 15])
+            sheet.append([])
+            sheet.append(["SKU", "US站"])
+            sheet.append(["SKU-A", 10])
             workbook.save(path)
 
-            result = read_delivery_workbook(path)
+            with self.assertRaisesRegex(ValueError, "明细"):
+                read_delivery_workbook(path)
 
-        self.assertEqual(
-            result.to_dict("records"),
-            [
-                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 5},
-                {"SKU": "SKU-A", "原始站点": "US", "交货量": 10},
-            ],
-        )
-
-    def test_read_delivery_workbook_rejects_missing_supported_header(self):
-        self.assertIsNotNone(read_delivery_workbook, "交货单读取函数尚未实现")
-        if read_delivery_workbook is None:
-            return
-
+    def test_read_delivery_workbook_rejects_missing_detail_columns(self):
         with TemporaryDirectory() as directory:
-            path = Path(directory) / "无有效表头交货单.xlsx"
+            path = Path(directory) / "缺少数量的交货单.xlsx"
             workbook = Workbook()
             sheet = workbook.active
-            sheet.title = "汇总"
-            sheet.append(["交货单标题"])
-            sheet.append(["商品", "US", "数量"])
-            sheet.append(["SKU-A", 10, 10])
-            sheet.append(["明细", "US", "数量"])
+            sheet.title = "明细"
+            sheet.append([])
+            sheet.append([])
+            sheet.append([])
+            sheet.append(["积加SKU", "站点"])
+            sheet.append(["SKU-A", "US站"])
             workbook.save(path)
 
-            with self.assertRaisesRegex(ValueError, "第 2 行或第 4 行"):
+            with self.assertRaisesRegex(ValueError, "数量"):
                 read_delivery_workbook(path)
 
     def test_read_added_supplier_xls(self):

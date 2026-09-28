@@ -163,12 +163,12 @@ class WebApiTests(unittest.TestCase):
     def delivery_bytes(quantity: int = 40) -> bytes:
         workbook = Workbook()
         sheet = workbook.active
-        sheet.title = "汇总"
+        sheet.title = "明细"
         sheet.append([])
         sheet.append([])
         sheet.append([])
-        sheet.append(["SKU", "US站", "总计"])
-        sheet.append(["SKU-A", quantity, quantity])
+        sheet.append(["积加SKU", "数量", "站点"])
+        sheet.append(["SKU-A", quantity, "US站"])
         buffer = BytesIO()
         workbook.save(buffer)
         return buffer.getvalue()

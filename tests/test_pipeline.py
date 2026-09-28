@@ -170,18 +170,20 @@ class SupplierConfigTests(unittest.TestCase):
 
 
 class DeliveryNormalizationTests(unittest.TestCase):
-    def test_normalize_current_summary_sheet(self):
+    def test_normalize_detail_sheet(self):
         self.assertIsNotNone(normalize_delivery_sheet, "交货单归一化函数尚未实现")
         if normalize_delivery_sheet is None:
             return
 
         sheet = pd.DataFrame(
             [
-                ["SKU-A", 5, 10, 15],
-                ["SKU-B", 0, 8, 8],
-                ["总计", 5, 18, 23],
+                ["SKU-A", 5, "CA站"],
+                ["SKU-A", 10, "US站"],
+                ["SKU-A", 2, "CA站"],
+                ["合计", None, None],
+                ["次品问题描述", None, None],
             ],
-            columns=["SKU", "CA站", "US站", "总计"],
+            columns=["积加SKU", "数量", "站点"],
         )
 
         result = normalize_delivery_sheet(sheet)
@@ -189,24 +191,28 @@ class DeliveryNormalizationTests(unittest.TestCase):
         self.assertEqual(
             result.to_dict("records"),
             [
-                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 5},
+                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 7},
                 {"SKU": "SKU-A", "原始站点": "US", "交货量": 10},
-                {"SKU": "SKU-B", "原始站点": "US", "交货量": 8},
             ],
         )
 
-    def test_normalize_summary_with_vendor_specific_sku_header(self):
+    def test_normalize_detail_rejects_incomplete_row(self):
         sheet = pd.DataFrame(
-            [["SKU-A", 12, 12]],
-            columns=["积加SKU", "US站", "总计"],
+            [["SKU-A", 12, "US站"], ["SKU-B", None, "US站"]],
+            columns=["积加SKU", "数量", "站点"],
         )
 
-        result = normalize_delivery_sheet(sheet)
+        with self.assertRaisesRegex(ValueError, "第 6 行"):
+            normalize_delivery_sheet(sheet)
 
-        self.assertEqual(
-            result.to_dict("records"),
-            [{"SKU": "SKU-A", "原始站点": "US", "交货量": 12}],
+    def test_normalize_detail_rejects_fractional_quantity(self):
+        sheet = pd.DataFrame(
+            [["SKU-A", 1.5, "US站"]],
+            columns=["积加SKU", "数量", "站点"],
         )
+
+        with self.assertRaisesRegex(ValueError, "第 5 行"):
+            normalize_delivery_sheet(sheet)
 
 
 class AllocationTests(unittest.TestCase):

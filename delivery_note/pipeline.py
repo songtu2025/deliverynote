@@ -186,46 +186,45 @@ def build_purchase_balance_ledger(
 
 
 def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
-    """把当前供应商汇总表转换为 SKU、原始站点、交货量明细。"""
-    sku_columns = [
-        column
-        for column in sheet.columns
-        if str(column).strip().upper().endswith("SKU")
-    ]
-    if len(sku_columns) != 1:
-        raise ValueError("交货单汇总表未找到唯一的 SKU 字段")
-    sheet = sheet.rename(columns={sku_columns[0]: "SKU"})
-    site_columns = [column for column in sheet.columns if str(column).endswith("站")]
-    if not site_columns:
-        raise ValueError("交货单汇总表未找到以“站”结尾的站点列")
+    """把交货单明细转换为 SKU、原始站点、交货量。"""
+    columns = ["积加SKU", "数量", "站点"]
+    _require_columns(sheet, set(columns), "交货单明细表")
+    data = sheet[columns].reset_index(drop=True)
+    sku = data["积加SKU"].fillna("").astype(str).str.strip()
+    footer = sku.isin({"合计", "总计", "Grand Total"})
+    if footer.any():
+        footer_index = int(footer.to_numpy().argmax())
+        if data.iloc[footer_index + 1 :][["数量", "站点"]].notna().any().any():
+            raise ValueError("交货单明细表合计行之后仍有交货数据")
+        data = data.iloc[:footer_index].copy()
+        sku = sku.iloc[:footer_index]
 
-    data = sheet[["SKU", *site_columns]].copy()
-    data = data.dropna(subset=["SKU"])
-    sku_text = data["SKU"].astype(str).str.strip()
-    data = data[~sku_text.str.fullmatch(r"总计|Grand Total", case=False)]
-
-    result = data.melt(
-        id_vars=["SKU"],
-        value_vars=site_columns,
-        var_name="原始站点",
-        value_name="交货量",
+    site = data["站点"].fillna("").astype(str).str.strip()
+    present = sku.ne("") | site.ne("") | data["数量"].notna()
+    data = data.loc[present]
+    if data.empty:
+        raise ValueError("交货单明细表没有交货数据")
+    sku = sku.loc[present]
+    site = site.loc[present].str.removesuffix("站").str.strip()
+    quantities = pd.to_numeric(data["数量"], errors="coerce")
+    invalid = (
+        sku.eq("")
+        | site.eq("")
+        | quantities.isna()
+        | quantities.le(0)
+        | quantities.mod(1).ne(0)
     )
-    raw_quantities = result["交货量"]
-    quantities = pd.to_numeric(raw_quantities, errors="coerce")
-    invalid = raw_quantities.notna() & quantities.isna()
     if invalid.any():
-        raise ValueError("交货单存在无法识别的数量")
+        row_number = int(invalid[invalid].index[0]) + 5
+        raise ValueError(f"交货单明细表第 {row_number} 行的积加SKU、数量或站点无效")
 
-    result["交货量"] = quantities.fillna(0)
-    positive = result["交货量"] > 0
-    non_integer = positive & (result["交货量"] % 1 != 0)
-    if non_integer.any():
-        raise ValueError("交货量必须为整数")
-
-    result = result[positive].copy()
-    result["SKU"] = result["SKU"].astype(str).str.strip()
-    result["原始站点"] = result["原始站点"].astype(str).str.removesuffix("站")
-    result["交货量"] = result["交货量"].astype(int)
+    result = pd.DataFrame(
+        {
+            "SKU": sku,
+            "原始站点": site,
+            "交货量": quantities.astype(int),
+        }
+    )
     return (
         result.groupby(["SKU", "原始站点"], as_index=False, sort=True)["交货量"]
         .sum()
