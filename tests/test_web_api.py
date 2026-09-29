@@ -945,6 +945,72 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(started.status_code, 201, started.text)
         self.assertEqual(started.json()["status"], "queued")
         self.assertIsNone(started.json()["base_version_id"])
+        current = self.client.get(
+            "/api/self-operated-inbound-sync",
+            headers=operator_headers,
+        )
+        self.assertEqual(current.status_code, 200, current.text)
+        self.assertEqual(current.json()["job"]["id"], started.json()["id"])
+        self.assertIsNone(current.json()["active_version"])
+
+    def test_sync_routes_require_authentication(self):
+        routes = (
+            ("get", "/api/purchase-sync"),
+            ("post", "/api/purchase-sync"),
+            ("get", "/api/purchase-sync/1/issues"),
+            ("get", "/api/purchase-sync/1/issues/download"),
+            ("get", "/api/purchase-sync/1/preview"),
+            ("get", "/api/self-operated-inbound-sync"),
+            ("post", "/api/self-operated-inbound-sync"),
+            ("get", "/api/self-operated-inbound-sync/1/issues"),
+            ("get", "/api/self-operated-inbound-sync/1/issues/download"),
+            ("get", "/api/self-operated-inbound-sync/1/preview"),
+            ("post", "/api/self-operated-inbound-sync/1/activate"),
+        )
+        for method, path in routes:
+            with self.subTest(method=method, path=path):
+                response = getattr(self.client, method)(path)
+                self.assertEqual(response.status_code, 401, response.text)
+
+    def test_operator_can_activate_self_operated_sync_candidate(self):
+        admin_headers = self.login("admin", "admin-pass")
+        candidate_path = self.root / "self-operated-activation.xlsx"
+        candidate_path.write_bytes(self.self_operated_inbound_bytes())
+        with self.app.state.database.session() as session:
+            version = InputVersion(
+                kind="self_operated_inbound",
+                name="待入库候选版本",
+                original_name=candidate_path.name,
+                storage_path=str(candidate_path),
+                active=False,
+                created_by=1,
+            )
+            session.add(version)
+            session.flush()
+            job = SelfOperatedInboundSyncJob(
+                status="succeeded",
+                created_by=1,
+                candidate_version_id=version.id,
+            )
+            session.add(job)
+            session.commit()
+            job_id = job.id
+            version_id = version.id
+
+        operator = self.create_operator(admin_headers)
+        operator_headers = self.login(operator["username"], "operator-pass")
+        activated = self.client.post(
+            f"/api/self-operated-inbound-sync/{job_id}/activate",
+            headers=operator_headers,
+        )
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertEqual(activated.json()["id"], version_id)
+        self.assertTrue(activated.json()["active"])
+        current = self.client.get(
+            "/api/self-operated-inbound-sync",
+            headers=operator_headers,
+        )
+        self.assertEqual(current.json()["active_version"]["id"], version_id)
 
     def test_admin_can_test_and_save_gerpgo_config(self):
         admin_headers = self.login("admin", "admin-pass")
