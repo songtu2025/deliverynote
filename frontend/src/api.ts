@@ -54,7 +54,9 @@ export async function api<T>(
     if (response.status === 401 && options.notifyUnauthorized !== false) {
       expireSession();
     }
-    let message = `请求失败（${response.status}）`;
+    let message = response.status === 429 && path === "/api/auth/login"
+      ? "登录尝试过于频繁，请稍后再试"
+      : `请求失败（${response.status}）`;
     try {
       const payload = (await response.json()) as { detail?: unknown };
       if (typeof payload.detail === "string") {

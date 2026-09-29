@@ -41,4 +41,14 @@ describe("browser API authentication", () => {
     expect(init).toEqual(expect.objectContaining({ credentials: "include" }));
     expect(new Headers(init?.headers).has("Authorization")).toBe(false);
   });
+
+  it("explains login throttling when the gateway returns HTML", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<h1>429</h1>", {
+      status: 429,
+      headers: { "Content-Type": "text/html" }
+    })));
+
+    await expect(api("/api/auth/login", { method: "POST" }))
+      .rejects.toThrow("登录尝试过于频繁，请稍后再试");
+  });
 });
