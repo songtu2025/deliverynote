@@ -52,7 +52,7 @@ export interface Batch {
   };
 }
 
-export interface SelfOperatedSiteResolution {
+interface SelfOperatedSiteResolution {
   id: number;
   sku: string;
   original_site: string;
@@ -151,7 +151,7 @@ export interface InputVersion {
   created_at: string;
 }
 
-export interface PurchaseSyncJob {
+interface PurchaseSyncJob {
   id: number;
   status: "queued" | "running" | "succeeded" | "blocked" | "failed";
   base_version_id: number | null;
@@ -198,7 +198,7 @@ export interface PurchaseSyncPreview {
   total: number;
 }
 
-export interface SelfOperatedInboundSyncJob {
+interface SelfOperatedInboundSyncJob {
   id: number;
   status: "queued" | "running" | "succeeded" | "blocked" | "failed";
   base_version_id: number | null;
@@ -253,7 +253,7 @@ export interface PositionIssue {
   after?: number;
 }
 
-export interface InputVersionSummary {
+interface InputVersionSummary {
   kind: string;
   row_count: number;
   columns: string[];
@@ -263,7 +263,7 @@ export interface InputVersionSummary {
 
 export type InputVersionPreviewValue = string | number | boolean | null;
 
-export interface InputVersionPreview {
+interface InputVersionPreview {
   kind: string;
   columns: string[];
   rows: Record<string, InputVersionPreviewValue>[];
@@ -277,7 +277,7 @@ export interface InputVersionInspection {
   preview: InputVersionPreview;
 }
 
-export type PositionChangeType = "unchanged" | "added" | "modified" | "deleted";
+type PositionChangeType = "unchanged" | "added" | "modified" | "deleted";
 
 export interface PositionDiff {
   added: number;

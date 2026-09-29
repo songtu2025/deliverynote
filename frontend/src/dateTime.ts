@@ -1,4 +1,4 @@
-export const BEIJING_TIME_ZONE = "Asia/Shanghai";
+const BEIJING_TIME_ZONE = "Asia/Shanghai";
 
 const TIMEZONE_SUFFIX = /(?:Z|[+-]\d{2}:?\d{2})$/i;
 
