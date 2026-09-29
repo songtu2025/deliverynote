@@ -1485,6 +1485,34 @@ def _audit(
     )
 
 
+def _sync_preview_json(frame: pd.DataFrame, limit: int) -> dict:
+    preview = frame.head(limit)
+    rows = [
+        {
+            "_row_number": row_number,
+            **{
+                column: (
+                    None
+                    if pd.isna(value)
+                    else value.item()
+                    if hasattr(value, "item")
+                    else value
+                )
+                for column, value in record.items()
+            },
+        }
+        for row_number, record in enumerate(
+            preview.to_dict("records"),
+            start=1,
+        )
+    ]
+    return {
+        "columns": list(frame.columns),
+        "rows": rows,
+        "total": len(frame),
+    }
+
+
 def _safe_filename(filename: str) -> str:
     safe = Path(filename).name
     safe = re.sub(r"[<>:\"/\\|?*\x00-\x1f]", "_", safe).strip(" .")
@@ -2436,31 +2464,7 @@ def create_app(
                 status_code=409,
                 detail=f"候选版本无法读取：{error}",
             ) from error
-        preview = frame.head(limit)
-        rows = [
-            {
-                "_row_number": row_number,
-                **{
-                    column: (
-                        None
-                        if pd.isna(value)
-                        else value.item()
-                        if hasattr(value, "item")
-                        else value
-                    )
-                    for column, value in record.items()
-                },
-            }
-            for row_number, record in enumerate(
-                preview.to_dict("records"),
-                start=1,
-            )
-        ]
-        return {
-            "columns": list(frame.columns),
-            "rows": rows,
-            "total": len(frame),
-        }
+        return _sync_preview_json(frame, limit)
 
     @app.get("/api/self-operated-inbound-sync")
     def self_operated_inbound_sync_status(
@@ -2632,31 +2636,7 @@ def create_app(
                 status_code=409,
                 detail=f"候选版本无法读取：{error}",
             ) from error
-        preview = frame.head(limit)
-        rows = [
-            {
-                "_row_number": row_number,
-                **{
-                    column: (
-                        None
-                        if pd.isna(value)
-                        else value.item()
-                        if hasattr(value, "item")
-                        else value
-                    )
-                    for column, value in record.items()
-                },
-            }
-            for row_number, record in enumerate(
-                preview.to_dict("records"),
-                start=1,
-            )
-        ]
-        return {
-            "columns": list(frame.columns),
-            "rows": rows,
-            "total": len(frame),
-        }
+        return _sync_preview_json(frame, limit)
 
     @app.post("/api/self-operated-inbound-sync/{job_id}/activate")
     def activate_self_operated_inbound_sync(
