@@ -614,6 +614,10 @@ export default function BatchDetail({
     message.info("正在生成导出文件");
   });
 
+  const downloadResult = (path: string, filename: string) => (
+    runAction("download", () => download(path, filename))
+  );
+
   const openSplit = (record: DeliveryException) => {
     setSplitTarget(record);
   };
@@ -831,7 +835,7 @@ export default function BatchDetail({
                     <Button
                       type={needsReview ? "default" : "primary"}
                       icon={<DownloadOutlined />}
-                      onClick={() => void download(
+                      onClick={() => void downloadResult(
                         `/api/batches/${batch.id}/download-merged`,
                         `${batch.name}_${selfOperated ? "合并积加入库" : "合并处理"}.xlsx`
                       )}
@@ -840,7 +844,7 @@ export default function BatchDetail({
                     </Button>
                     <Button
                       icon={<DownloadOutlined />}
-                      onClick={() => void download(
+                      onClick={() => void downloadResult(
                         `/api/batches/${batch.id}/download`,
                         `${batch.name}_分文件.zip`
                       )}
@@ -853,7 +857,7 @@ export default function BatchDetail({
                     <Button
                       type={needsReview ? "default" : "primary"}
                       icon={<DownloadOutlined />}
-                      onClick={() => void download(
+                      onClick={() => void downloadResult(
                         `/api/batch-files/${files[0].id}/download`,
                         `${files[0].original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
                       )}
@@ -998,7 +1002,7 @@ export default function BatchDetail({
                       aria-label="下载单文件结果"
                       size="small"
                       icon={<DownloadOutlined />}
-                      onClick={() => void download(`/api/batch-files/${file.id}/download`, `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`)}
+                      onClick={() => void downloadResult(`/api/batch-files/${file.id}/download`, `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`)}
                     >
                       下载单文件结果
                     </Button>

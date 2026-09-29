@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchDetail from "./BatchDetail";
@@ -577,6 +578,24 @@ describe("BatchDetail", () => {
       );
     });
   }, 30_000);
+
+  it("shows a download error when the file request fails", async () => {
+    batchPayload.download_ready = true;
+    batchPayload.file_count = 1;
+    batchPayload.files = [{ ...batchPayload.files[0], download_ready: true }];
+    const error = vi.spyOn(message, "error").mockImplementation(() => ({}) as never);
+    const originalFetch = fetch;
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => (
+      String(input).endsWith("/api/batch-files/10/download")
+        ? Promise.resolve(new Response("unavailable", { status: 503 }))
+        : originalFetch(input, init)
+    )));
+
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: /下载处理结果/ }));
+
+    await waitFor(() => expect(error).toHaveBeenCalledWith("下载失败"));
+  });
 
   it("keeps only the necessary footer actions for a single review item", async () => {
     exceptionPayload = [exceptionPayload[0]];
