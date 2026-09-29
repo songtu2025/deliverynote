@@ -885,6 +885,27 @@ def _batch_exception_data(
     return grouped, _split_records_by_exception(session, exceptions)
 
 
+def _batch_input_signature(
+    batch: Batch,
+    sources: list[BatchFile],
+    self_operated: SelfOperatedBatch | None,
+) -> tuple:
+    return (
+        tuple(getattr(batch, VERSION_FIELDS[kind]) for kind in INPUT_KINDS),
+        tuple(
+            (source.id, source.storage_path, source.original_name, source.file_order)
+            for source in sources
+        ),
+        (
+            self_operated.template_version_id,
+            self_operated.rule_version_id,
+            self_operated.inbound_storage_path,
+        )
+        if self_operated is not None
+        else None,
+    )
+
+
 def _file_totals(
     source: BatchFile,
     exceptions: list[ExceptionRecord],
@@ -1691,8 +1712,19 @@ def create_app(
             raise HTTPException(status_code=403, detail="需要管理员权限")
         return user
 
-    def get_batch_or_404(batch_id: int, session: Session) -> Batch:
-        batch = session.get(Batch, batch_id)
+    def get_batch_or_404(
+        batch_id: int, session: Session, *, for_update: bool = False
+    ) -> Batch:
+        batch = (
+            session.scalar(
+                select(Batch)
+                .where(Batch.id == batch_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if for_update
+            else session.get(Batch, batch_id)
+        )
         if batch is None:
             raise HTTPException(status_code=404, detail="批次不存在")
         return batch
@@ -4097,7 +4129,12 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         batch_ids = list(dict.fromkeys(payload.batch_ids))
-        batches = session.scalars(select(Batch).where(Batch.id.in_(batch_ids))).all()
+        batches = session.scalars(
+            select(Batch)
+            .where(Batch.id.in_(batch_ids))
+            .order_by(Batch.id)
+            .with_for_update()
+        ).all()
         found_ids = {batch.id for batch in batches}
         missing_ids = [batch_id for batch_id in batch_ids if batch_id not in found_ids]
         if missing_ids:
@@ -4107,8 +4144,19 @@ def create_app(
                 detail=f"批次不存在：{missing_text}",
             )
 
+        active_job_batch_ids = set(
+            session.scalars(
+                select(Job.batch_id).where(
+                    Job.batch_id.in_(batch_ids),
+                    Job.status.in_({"queued", "running"}),
+                )
+            ).all()
+        )
         active_batches = [
-            batch for batch in batches if batch.status in {"queued", "running"}
+            batch
+            for batch in batches
+            if batch.status in {"queued", "running"}
+            or batch.id in active_job_batch_ids
         ]
         if active_batches:
             active_text = "、".join(
@@ -4116,7 +4164,7 @@ def create_app(
             )
             raise HTTPException(
                 status_code=409,
-                detail=f"以下批次正在运行，不能删除：{active_text}",
+                detail=f"以下批次存在排队或运行中的任务，不能删除：{active_text}",
             )
 
         sources = session.scalars(
@@ -4345,23 +4393,40 @@ def create_app(
                 detail=f"自营仓收货入库单校验失败：{error}",
             ) from error
 
-        old_path = (
-            Path(profile.inbound_storage_path) if profile.inbound_storage_path else None
-        )
-        profile.inbound_original_name = original_name
-        profile.inbound_storage_path = str(destination)
-        batch.status = "draft"
-        batch.error_message = None
-        batch.zip_path = None
-        _audit(
-            session,
-            user.id,
-            "upload_self_operated_inbound_file",
-            "batch",
-            batch.id,
-            {"original_name": original_name},
-        )
-        session.commit()
+        try:
+            batch = get_batch_or_404(batch_id, session, for_update=True)
+            if batch.status not in {"draft", "preflight_ready", "failed"}:
+                raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
+            profile = session.scalar(
+                select(SelfOperatedBatch)
+                .where(SelfOperatedBatch.batch_id == batch_id)
+                .execution_options(populate_existing=True)
+            )
+            if profile is None:
+                raise HTTPException(status_code=404, detail="自营仓入库批次不存在")
+            old_path = (
+                Path(profile.inbound_storage_path)
+                if profile.inbound_storage_path
+                else None
+            )
+            profile.inbound_original_name = original_name
+            profile.inbound_storage_path = str(destination)
+            batch.status = "draft"
+            batch.error_message = None
+            batch.zip_path = None
+            _audit(
+                session,
+                user.id,
+                "upload_self_operated_inbound_file",
+                "batch",
+                batch.id,
+                {"original_name": original_name},
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            await run_in_threadpool(destination.unlink, missing_ok=True)
+            raise
         if old_path is not None and old_path != destination:
             await run_in_threadpool(_unlink_after_commit, old_path)
         return _batch_json(batch, session)
@@ -4411,14 +4476,7 @@ def create_app(
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
             async with batch_file_upload_lock:
-                batch = session.scalar(
-                    select(Batch)
-                    .where(Batch.id == batch_id)
-                    .with_for_update()
-                    .execution_options(populate_existing=True)
-                )
-                if batch is None:
-                    raise HTTPException(status_code=404, detail="批次不存在")
+                batch = get_batch_or_404(batch_id, session, for_update=True)
                 if batch.status not in {"draft", "preflight_ready", "failed"}:
                     raise HTTPException(
                         status_code=409,
@@ -4495,7 +4553,7 @@ def create_app(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        batch = get_batch_or_404(batch_id, session)
+        batch = get_batch_or_404(batch_id, session, for_update=True)
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="当前批次状态不可删除文件")
         source = session.scalar(
@@ -4551,7 +4609,7 @@ def create_app(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        batch = get_batch_or_404(batch_id, session)
+        batch = get_batch_or_404(batch_id, session, for_update=True)
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="当前批次状态不可调整顺序")
         sources = session.scalars(
@@ -4596,6 +4654,7 @@ def create_app(
         if not sources:
             raise HTTPException(status_code=400, detail="批次至少需要一个交货文件")
         self_operated = session.get(SelfOperatedBatch, batch.id)
+        input_signature = _batch_input_signature(batch, sources, self_operated)
         versions = {}
         version_kinds = (
             ("product", "supplier") if self_operated is not None else INPUT_KINDS
@@ -4614,6 +4673,7 @@ def create_app(
         if any(not Path(source.storage_path).is_file() for source in sources):
             raise HTTPException(status_code=400, detail="批次锁定的输入文件不完整")
 
+        validation_error = None
         try:
             supplier_rows = read_supplier_workbook(versions["supplier"])
             read_product_workbook(versions["product"])
@@ -4647,10 +4707,31 @@ def create_app(
                     read_delivery_workbook(Path(source.storage_path))
                     resolve_supplier(Path(source.original_name), supplier_rows)
         except Exception as error:
+            validation_error = error
+        batch = get_batch_or_404(batch_id, session, for_update=True)
+        current_sources = session.scalars(
+            select(BatchFile)
+            .where(BatchFile.batch_id == batch_id)
+            .order_by(BatchFile.file_order)
+            .execution_options(populate_existing=True)
+        ).all()
+        current_self_operated = session.scalar(
+            select(SelfOperatedBatch)
+            .where(SelfOperatedBatch.batch_id == batch_id)
+            .execution_options(populate_existing=True)
+        )
+        if batch.status not in {"draft", "failed"} or _batch_input_signature(
+            batch, current_sources, current_self_operated
+        ) != input_signature:
+            raise HTTPException(
+                status_code=409,
+                detail="预检期间批次输入已变更，请重新执行预检",
+            )
+        if validation_error is not None:
             raise HTTPException(
                 status_code=400,
-                detail=f"预检失败：{error}",
-            ) from error
+                detail=f"预检失败：{validation_error}",
+            ) from validation_error
         batch.status = "preflight_ready"
         batch.error_message = None
         _audit(session, user.id, "preflight_batch", "batch", batch.id)
@@ -4691,7 +4772,7 @@ def create_app(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        batch = get_batch_or_404(batch_id, session)
+        batch = get_batch_or_404(batch_id, session, for_update=True)
         existing = session.scalar(
             select(Job).where(Job.batch_id == batch.id, Job.kind == "compute")
         )
