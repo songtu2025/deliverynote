@@ -29,6 +29,7 @@ from delivery_note.web.models import (
     Job,
     PurchaseSyncJob,
     SelfOperatedInboundSyncJob,
+    SelfOperatedSiteResolution,
 )
 
 try:
@@ -899,6 +900,20 @@ class WorkerIntegrationTests(unittest.TestCase):
         self.assertEqual(exceptions[0]["reason"], "产品信息站点不唯一")
         self.assertIn("AMAZON:RIVMOUNT:US", exceptions[0]["full_site"])
         self.assertIn("AMAZON:SEEKWAY:US", exceptions[0]["full_site"])
+        rejected = self.client.put(
+            f"/api/exceptions/{exceptions[0]['id']}/self-operated-site",
+            headers=self.headers,
+            json={"full_site": "AMAZON:OTHER:US"},
+        )
+        self.assertEqual(rejected.status_code, 400)
+        with self.app.state.database.session() as session:
+            self.assertIsNone(
+                session.scalar(
+                    select(SelfOperatedSiteResolution).where(
+                        SelfOperatedSiteResolution.batch_id == batch_id
+                    )
+                )
+            )
         selected = self.client.put(
             f"/api/exceptions/{exceptions[0]['id']}/self-operated-site",
             headers=self.headers,
