@@ -52,6 +52,13 @@ describe("BatchDetail", () => {
     stocking: [...new Set(exceptionPayload.map((item) => item.stocking_position).filter(Boolean))]
   });
 
+  const pagedExceptions = () => Array.from({ length: 12 }, (_, index) => ({
+    ...exceptionPayload[0],
+    id: 100 + index,
+    sku: `SKU-${index + 1}`,
+    manual_quantity: 1
+  }));
+
   beforeEach(() => {
     const version = (id: number, kind: string) => ({
       id,
@@ -457,12 +464,7 @@ describe("BatchDetail", () => {
   }, 30_000);
 
   it("keeps review navigation working across server pages", async () => {
-    exceptionPayload = Array.from({ length: 12 }, (_, index) => ({
-      ...exceptionPayload[0],
-      id: 100 + index,
-      sku: `SKU-${index + 1}`,
-      manual_quantity: 1
-    }));
+    exceptionPayload = pagedExceptions();
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     expect(await screen.findByRole("button", { name: "全部 12 条" })).toBeInTheDocument();
@@ -485,6 +487,27 @@ describe("BatchDetail", () => {
     });
     await waitFor(() => expect(within(drawer).getByRole("button", { name: "上一条" })).toBeDisabled());
   }, 30_000);
+
+  it("returns to the first review page when searching from a later page", async () => {
+    exceptionPayload = pagedExceptions();
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    await screen.findByRole("button", { name: "全部 12 条" });
+    fireEvent.click(screen.getByTitle("2"));
+    await screen.findByText("SKU-11");
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), {
+      target: { value: "SKU-1" }
+    });
+
+    await waitFor(() => {
+      const urls = vi.mocked(fetch).mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => url.includes("/exceptions?") && url.includes("search=SKU-1"));
+      expect(urls.length).toBeGreaterThan(0);
+      expect(new URL(urls.at(-1)!, "http://localhost").searchParams.get("offset")).toBe("0");
+    });
+    expect(await screen.findByText("SKU-1")).toBeInTheDocument();
+  });
 
   it("shows complete SKU and site identifiers in the review table", async () => {
     exceptionPayload[0] = {

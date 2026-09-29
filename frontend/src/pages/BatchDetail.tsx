@@ -41,7 +41,6 @@ import {
 
 import { api, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
-import { useDebouncedValue } from "../useDebouncedValue";
 import type {
   Batch,
   BatchFile,
@@ -51,6 +50,7 @@ import type {
   SplitPart
 } from "../types";
 import { StatusTag } from "./BatchesPage";
+import { useExceptionReview } from "./useExceptionReview";
 
 const VERSION_LABELS: Record<string, string> = {
   purchase: "采购需求",
@@ -68,23 +68,6 @@ const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
 };
 
 type SplitFormValues = { parts: SplitPart[] };
-type ReviewScope = "unfinished" | "resolved" | "all";
-type ExceptionPage = {
-  items: DeliveryException[];
-  total: number;
-  stats: {
-    unfinished_count: number;
-    unfinished_quantity: number;
-    resolved_count: number;
-    total_count: number;
-  };
-};
-type ExceptionFilters = {
-  reasons: string[];
-  sites: string[];
-  scales: string[];
-  stocking: string[];
-};
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -327,29 +310,9 @@ export default function BatchDetail({
 }) {
   const [batch, setBatch] = useState<Batch | null>(null);
   const [activeSupplierVersion, setActiveSupplierVersion] = useState<InputVersion | null>(null);
-  const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
-  const [exceptionTotal, setExceptionTotal] = useState(0);
-  const [reviewPage, setReviewPage] = useState(1);
-  const [reviewStats, setReviewStats] = useState({
-    unfinishedCount: 0,
-    unfinishedQuantity: 0,
-    resolvedCount: 0,
-    totalCount: 0
-  });
-  const [exceptionFilters, setExceptionFilters] = useState<ExceptionFilters>({
-    reasons: [], sites: [], scales: [], stocking: []
-  });
   const [loading, setLoading] = useState(true);
-  const [exceptionsLoading, setExceptionsLoading] = useState(true);
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
-  const [query, setQuery] = useState("");
-  const debouncedQuery = useDebouncedValue(query, 250);
-  const [siteFilter, setSiteFilter] = useState<string>();
-  const [scaleFilter, setScaleFilter] = useState<string>();
-  const [stockingFilter, setStockingFilter] = useState<string>();
-  const [reviewScope, setReviewScope] = useState<ReviewScope>("unfinished");
-  const [reasonFilter, setReasonFilter] = useState<string>();
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
   const [reviewDirty, setReviewDirty] = useState(false);
   const [splitForm] = Form.useForm<SplitFormValues>();
@@ -357,22 +320,31 @@ export default function BatchDetail({
   const pollingJob = useRef<number | null>(null);
   const announcedJobs = useRef(new Set<number>());
   const reviewSection = useRef<HTMLDivElement | null>(null);
-  const pendingReviewDirection = useRef<"first" | "last" | null>(null);
   const loadRequestRef = useRef(0);
-
-  const fetchExceptionPage = (requestedPage = reviewPage) => {
-    const params = new URLSearchParams({
-      offset: String((requestedPage - 1) * 10),
-      limit: "10",
-      review_scope: reviewScope
-    });
-    if (debouncedQuery.trim()) params.set("search", debouncedQuery.trim());
-    if (siteFilter) params.set("site", siteFilter);
-    if (scaleFilter) params.set("scale_position", scaleFilter);
-    if (stockingFilter) params.set("stocking_position", stockingFilter);
-    if (reasonFilter) params.set("reason", reasonFilter);
-    return api<ExceptionPage>(`/api/batches/${batchId}/exceptions?${params}`);
-  };
+  const {
+    exceptions,
+    exceptionTotal,
+    reviewPage,
+    setReviewPage,
+    reviewStats,
+    exceptionFilters,
+    exceptionsLoading,
+    setExceptionsLoading,
+    query,
+    reviewScope,
+    siteFilter,
+    scaleFilter,
+    stockingFilter,
+    reasonFilter,
+    debouncedQuery,
+    fetchExceptionPage,
+    applyExceptionPage,
+    changeScope,
+    changeQuery,
+    changeFilter,
+    queueReviewDirection,
+    replaceException
+  } = useExceptionReview(batchId, batch?.status);
 
   const load = async (silent = false) => {
     const request = ++loadRequestRef.current;
@@ -388,20 +360,8 @@ export default function BatchDetail({
       });
       const exceptionsRequest = fetchExceptionPage().then((result) => {
         if (request !== loadRequestRef.current) return result;
-        setExceptions(result.items);
-        setExceptionTotal(result.total);
-        setReviewStats({
-          unfinishedCount: result.stats.unfinished_count,
-          unfinishedQuantity: result.stats.unfinished_quantity,
-          resolvedCount: result.stats.resolved_count,
-          totalCount: result.stats.total_count
-        });
-        if (pendingReviewDirection.current) {
-          setSplitTarget(pendingReviewDirection.current === "first"
-            ? result.items[0] ?? null
-            : result.items.at(-1) ?? null);
-          pendingReviewDirection.current = null;
-        }
+        const pendingTarget = applyExceptionPage(result);
+        if (pendingTarget !== undefined) setSplitTarget(pendingTarget);
         return result;
       });
       const versionsRequest = canRefreshSupplierVersion
@@ -432,12 +392,6 @@ export default function BatchDetail({
   useEffect(() => {
     void load();
   }, [batchId, canRefreshSupplierVersion, reviewPage, reviewScope, debouncedQuery, siteFilter, scaleFilter, stockingFilter, reasonFilter]);
-
-  useEffect(() => {
-    void api<ExceptionFilters>(`/api/batches/${batchId}/exceptions/filters`)
-      .then(setExceptionFilters)
-      .catch(() => setExceptionFilters({ reasons: [], sites: [], scales: [], stocking: [] }));
-  }, [batchId, batch?.status]);
 
   const activeJob = useMemo(() => {
     const jobs = batch?.jobs;
@@ -641,7 +595,7 @@ export default function BatchDetail({
       openSplit(withinPage);
       return;
     }
-    pendingReviewDirection.current = direction === "previous" ? "last" : "first";
+    queueReviewDirection(direction === "previous" ? "last" : "first");
     setReviewPage((current) => current + (direction === "previous" ? -1 : 1));
   };
   const reviewNavigationLocked = reviewDirty;
@@ -674,7 +628,7 @@ export default function BatchDetail({
         method: "PUT",
         body: JSON.stringify(values)
       });
-      setExceptions((current) => current.map((item) => item.id === updated.id ? updated : item));
+      replaceException(updated);
       const refreshed = await load(true);
       const savedStillVisible = refreshed?.items.findIndex((item) => item.id === savedId) ?? -1;
       const nextIndex = savedStillVisible >= 0 ? savedStillVisible + 1 : savedIndex;
@@ -682,7 +636,7 @@ export default function BatchDetail({
       if (next) {
         openSplit(next);
       } else if (advance && refreshed && reviewPage * 10 < refreshed.total) {
-        pendingReviewDirection.current = "first";
+        queueReviewDirection("first");
         setReviewPage(reviewPage + 1);
       } else {
         setSplitTarget(null);
@@ -1086,7 +1040,7 @@ export default function BatchDetail({
                 className="review-scope-card"
                 aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
                 aria-pressed={reviewScope === "unfinished"}
-                onClick={() => { setReviewPage(1); setReviewScope("unfinished"); setSplitTarget(null); }}
+                onClick={() => { changeScope("unfinished"); setSplitTarget(null); }}
               >
                 <span>未完成</span>
                 <strong>{reviewStats.unfinishedCount} 条</strong>
@@ -1097,7 +1051,7 @@ export default function BatchDetail({
                 className="review-scope-card"
                 aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
                 aria-pressed={reviewScope === "resolved"}
-                onClick={() => { setReviewPage(1); setReviewScope("resolved"); setSplitTarget(null); }}
+                onClick={() => { changeScope("resolved"); setSplitTarget(null); }}
               >
                 <span>已处理</span>
                 <strong>{reviewStats.resolvedCount} 条</strong>
@@ -1108,7 +1062,7 @@ export default function BatchDetail({
                 className="review-scope-card"
                 aria-label={`全部 ${reviewStats.totalCount} 条`}
                 aria-pressed={reviewScope === "all"}
-                onClick={() => { setReviewPage(1); setReviewScope("all"); setSplitTarget(null); }}
+                onClick={() => { changeScope("all"); setSplitTarget(null); }}
               >
                 <span>全部</span>
                 <strong>{reviewStats.totalCount} 条</strong>
@@ -1126,7 +1080,7 @@ export default function BatchDetail({
                 prefix={<SearchOutlined />}
                 placeholder="搜索来源、SKU、站点或目的仓"
                 value={query}
-                onChange={(event) => { setReviewPage(1); setQuery(event.target.value); setSplitTarget(null); }}
+                onChange={(event) => { changeQuery(event.target.value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1140,7 +1094,7 @@ export default function BatchDetail({
                 placeholder="全部站点"
                 options={siteOptions}
                 value={siteFilter}
-                onChange={(value) => { setReviewPage(1); setSiteFilter(value); setSplitTarget(null); }}
+                onChange={(value) => { changeFilter("site", value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1154,7 +1108,7 @@ export default function BatchDetail({
                 placeholder="全部规模定位"
                 options={scaleOptions}
                 value={scaleFilter}
-                onChange={(value) => { setReviewPage(1); setScaleFilter(value); setSplitTarget(null); }}
+                onChange={(value) => { changeFilter("scale", value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1168,7 +1122,7 @@ export default function BatchDetail({
                 placeholder="全部备货定位"
                 options={stockingOptions}
                 value={stockingFilter}
-                onChange={(value) => { setReviewPage(1); setStockingFilter(value); setSplitTarget(null); }}
+                onChange={(value) => { changeFilter("stocking", value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1180,7 +1134,7 @@ export default function BatchDetail({
                 placeholder="全部原因"
                 options={reasonOptions}
                 value={reasonFilter}
-                onChange={(value) => { setReviewPage(1); setReasonFilter(value); setSplitTarget(null); }}
+                onChange={(value) => { changeFilter("reason", value); setSplitTarget(null); }}
               />
             </div>
           </div>
