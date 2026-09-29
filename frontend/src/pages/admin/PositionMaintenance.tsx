@@ -30,6 +30,7 @@ import type { FormInstance, TableProps, UploadProps } from "antd";
 
 import { ApiError, api, download } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
+import { useDebouncedValue } from "../../useDebouncedValue";
 import type {
   InputVersion,
   PositionDiff,
@@ -69,7 +70,6 @@ type PendingLeave = "close" | "back" | null;
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
 const ROW_PAGE_SIZE = 20;
-const FILTER_DEBOUNCE_MS = 300;
 const SCALE_OPTIONS = ["短尾", "中尾", "长尾"].map((value) => ({ value }));
 const REVISION_CONFLICT_DETAILS = [
   "草稿已被其他管理员更新，请刷新后重试",
@@ -78,19 +78,6 @@ const REVISION_CONFLICT_DETAILS = [
 const POSITION_TABLE_COMPONENTS: NonNullable<TableProps<PositionDraftRow>["components"]> = {
   table: (props) => <table {...props} aria-label="库位草稿记录" />
 };
-
-function useDebouncedValue(value: string): string {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedValue(value);
-    }, FILTER_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [value]);
-
-  return debouncedValue;
-}
 
 function defaultVersionName(): string {
   const parts = beijingDateTimeParts();

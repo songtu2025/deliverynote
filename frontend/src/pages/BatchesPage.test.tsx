@@ -10,6 +10,14 @@ const jsonResponse = (payload: unknown) => new Response(JSON.stringify(payload),
 
 let inboundSyncStatus: Record<string, unknown>;
 let batchRows: Array<Record<string, unknown>>;
+
+function setFourteenBatches() {
+  batchRows = Array.from({ length: 14 }, (_, index) => ({
+    ...batchRows[0],
+    id: index + 1,
+    name: `交货批次 ${index + 1}`
+  }));
+}
 let deleteRequests: number[][];
 
 describe("BatchesPage", () => {
@@ -144,7 +152,29 @@ describe("BatchesPage", () => {
         ]);
       }
       if (url.endsWith("/api/self-operated-inbound-sync")) return jsonResponse(inboundSyncStatus);
-      if (url.endsWith("/api/batches")) return jsonResponse(batchRows);
+      if (url.includes("/api/batches?")) {
+        const params = new URL(url, "http://localhost").searchParams;
+        const workflow = params.get("workflow");
+        const search = params.get("search")?.toLocaleLowerCase("zh-CN") ?? "";
+        const status = params.get("batch_status");
+        const matching = batchRows.filter((batch) => (
+          (batch.workflow ?? "delivery") === workflow
+          && String(batch.name).toLocaleLowerCase("zh-CN").includes(search)
+          && (!status || batch.status === status)
+        ));
+        const offset = Number(params.get("offset") ?? 0);
+        const limit = Number(params.get("limit") ?? 12);
+        return jsonResponse({
+          items: matching.slice(offset, offset + limit),
+          total: matching.length,
+          empty_draft_count: batchRows.filter((batch) => (
+            (batch.workflow ?? "delivery") === workflow
+            && batch.status === "draft"
+            && batch.file_count === 0
+            && (workflow !== "self_operated_inbound" || !(batch.inbound_file as { uploaded?: boolean } | undefined)?.uploaded)
+          )).length
+        });
+      }
       throw new Error(`Unexpected request: ${url}`);
     }));
   });
@@ -258,6 +288,36 @@ describe("BatchesPage", () => {
       expect(screen.queryByText("第二个可删除批次")).not.toBeInTheDocument();
     });
     expect(screen.getByText("正在计算的批次")).toBeInTheDocument();
+  });
+
+  it("loads batch pages and applies search on the server", async () => {
+    setFourteenBatches();
+    render(<BatchesPage onOpen={vi.fn()} />);
+
+    expect(await screen.findByText("14 个批次")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "交货批次 12" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "交货批次 14" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("2"));
+    expect(await screen.findByRole("button", { name: "交货批次 14" })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("搜索"), { target: { value: "批次 14" } });
+    expect(await screen.findByText("1 个批次")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "交货批次 14" })).toBeInTheDocument();
+  });
+
+  it("keeps batch selections across server pages", async () => {
+    setFourteenBatches();
+    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 交货批次 1" }));
+    fireEvent.click(screen.getByTitle("2"));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 交货批次 14" }));
+    expect(screen.getByText("已选 2 项")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "删除已选（2）" }));
+    fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
+    await waitFor(() => expect(deleteRequests).toEqual([[1, 14]]));
   });
 
   it("shows the independent self-operated inbound workspace", async () => {
@@ -382,7 +442,7 @@ describe("BatchesPage", () => {
 
     expect(requests).toEqual(expect.arrayContaining([
       "/api/self-operated-inbound-sync",
-      "/api/batches",
+      "/api/batches?workflow=self_operated_inbound&offset=0&limit=12",
       "/api/input-versions",
       "/api/self-operated-overreceipt-rule-versions"
     ]));

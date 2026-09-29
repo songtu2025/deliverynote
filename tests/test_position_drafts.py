@@ -2088,6 +2088,34 @@ class PositionDraftApiTests(unittest.TestCase):
             ["SKU-010", "SKU-012", "SKU-014", "SKU-016", "SKU-018"],
         )
 
+        first_row = page["rows"][0]
+        values = {
+            field: first_row[field]
+            for field in (
+                "store_site",
+                "jiaji_sku",
+                "msku",
+                "scale_position",
+                "stocking_position",
+            )
+        }
+        values["scale_position"] = "长尾"
+        updated = self.client.put(
+            f"/api/input-drafts/{draft['id']}/rows/{first_row['id']}",
+            headers=self.admin_headers,
+            json={"revision": draft["revision"], **values},
+        )
+        self.assertEqual(updated.status_code, 200, updated.text)
+        original_snapshots = web_api_module._draft_row_snapshots
+        with patch.object(
+            web_api_module,
+            "_draft_row_snapshots",
+            wraps=original_snapshots,
+        ) as snapshots:
+            self.list_rows(draft["id"], offset=0, limit=50)
+            self.list_rows(draft["id"], offset=50, limit=50)
+        self.assertEqual(snapshots.call_count, 1)
+
     def test_only_errors_filter_and_bulk_delete_are_atomic(self):
         draft = self.create_draft()
         invalid = self.client.post(

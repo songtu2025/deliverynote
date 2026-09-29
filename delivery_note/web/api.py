@@ -3,6 +3,7 @@ from collections import OrderedDict
 from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+import json
 import logging
 import os
 from pathlib import Path
@@ -29,9 +30,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -864,27 +865,6 @@ def _split_records_by_exception(
     return grouped
 
 
-def _batch_exception_data(
-    session: Session,
-    sources: list[BatchFile],
-) -> tuple[
-    dict[int, list[ExceptionRecord]],
-    dict[int, list[SplitRecord]],
-]:
-    source_ids = [source.id for source in sources]
-    if not source_ids:
-        return {}, {}
-    exceptions = session.scalars(
-        select(ExceptionRecord)
-        .where(ExceptionRecord.batch_file_id.in_(source_ids))
-        .order_by(ExceptionRecord.batch_file_id, ExceptionRecord.id)
-    ).all()
-    grouped: dict[int, list[ExceptionRecord]] = {}
-    for exception in exceptions:
-        grouped.setdefault(exception.batch_file_id, []).append(exception)
-    return grouped, _split_records_by_exception(session, exceptions)
-
-
 def _batch_input_signature(
     batch: Batch,
     sources: list[BatchFile],
@@ -906,37 +886,43 @@ def _batch_input_signature(
     )
 
 
-def _file_totals(
-    source: BatchFile,
-    exceptions: list[ExceptionRecord],
-    splits_by_exception: dict[int, list[SplitRecord]],
-) -> tuple[int, int]:
-    import_total = source.import_total
-    manual_total = 0
-    for exception in exceptions:
-        parts = splits_by_exception.get(exception.id, [])
-        if not parts:
-            manual_total += exception.manual_quantity
-            continue
-        import_total += sum(part.quantity for part in parts if part.resolved)
-        manual_total += sum(part.quantity for part in parts if not part.resolved)
-    return import_total, manual_total
+def _exception_totals_by_source(
+    session: Session, source_ids: list[int]
+) -> dict[int, tuple[int, int]]:
+    if not source_ids:
+        return {}
+    return {
+        source_id: (resolved_total or 0, manual_total or 0)
+        for source_id, resolved_total, manual_total in session.execute(
+            select(
+                ExceptionRecord.batch_file_id,
+                func.sum(
+                    case(
+                        (SplitRecord.resolved.is_(True), SplitRecord.quantity),
+                        else_=0,
+                    )
+                ),
+                func.sum(
+                    case(
+                        (SplitRecord.id.is_(None), ExceptionRecord.manual_quantity),
+                        (SplitRecord.resolved.is_(False), SplitRecord.quantity),
+                        else_=0,
+                    )
+                ),
+            )
+            .outerjoin(SplitRecord, SplitRecord.exception_id == ExceptionRecord.id)
+            .where(ExceptionRecord.batch_file_id.in_(source_ids))
+            .group_by(ExceptionRecord.batch_file_id)
+        )
+    }
 
 
 def _file_json(
     source: BatchFile,
-    exceptions: list[ExceptionRecord] | None = None,
-    splits_by_exception: dict[int, list[SplitRecord]] | None = None,
+    *,
+    import_total: int | None = None,
+    manual_total: int | None = None,
 ) -> dict:
-    if exceptions is None or splits_by_exception is None:
-        import_total = source.import_total
-        manual_total = source.manual_total
-    else:
-        import_total, manual_total = _file_totals(
-            source,
-            exceptions,
-            splits_by_exception,
-        )
     return {
         "id": source.id,
         "batch_id": source.batch_id,
@@ -946,33 +932,9 @@ def _file_json(
         "supplier_code": source.supplier_code,
         "document_note": source.document_note,
         "delivery_total": source.delivery_total,
-        "import_total": import_total,
-        "manual_total": manual_total,
+        "import_total": source.import_total if import_total is None else import_total,
+        "manual_total": source.manual_total if manual_total is None else manual_total,
         "download_ready": bool(source.result_path),
-    }
-
-
-def _batch_summary(
-    sources: list[BatchFile],
-    exceptions_by_source: dict[int, list[ExceptionRecord]],
-    splits_by_exception: dict[int, list[SplitRecord]],
-) -> dict:
-    delivery_total = sum(source.delivery_total for source in sources)
-    import_total = sum(source.import_total for source in sources)
-    manual_total = 0
-    for source in sources:
-        for exception in exceptions_by_source.get(source.id, []):
-            parts = splits_by_exception.get(exception.id, [])
-            if not parts:
-                manual_total += exception.manual_quantity
-                continue
-            import_total += sum(part.quantity for part in parts if part.resolved)
-            manual_total += sum(part.quantity for part in parts if not part.resolved)
-    return {
-        "delivery_total": delivery_total,
-        "import_total": import_total,
-        "manual_total": manual_total,
-        "conserved": delivery_total == import_total + manual_total,
     }
 
 
@@ -990,12 +952,13 @@ def _merged_export_ready(batch: Batch, source_count: int) -> bool:
 def _batch_base_json(
     batch: Batch,
     sources: list[BatchFile],
-    exceptions_by_source: dict[int, list[ExceptionRecord]],
-    splits_by_exception: dict[int, list[SplitRecord]],
     overreceipt_rule: OverreceiptRuleVersion | None,
     self_operated: SelfOperatedBatch | None,
     self_operated_rule: SelfOperatedOverreceiptRuleVersion | None,
     inbound_source: InputVersion | None,
+    *,
+    file_count: int | None = None,
+    summary: dict,
 ) -> dict:
     result = {
         "id": batch.id,
@@ -1028,17 +991,13 @@ def _batch_base_json(
         ),
         "error_message": batch.error_message,
         "download_ready": bool(batch.zip_path),
-        "merged_download_ready": (
-            _merged_export_ready(batch, len(sources))
+        "merged_download_ready": _merged_export_ready(
+            batch, file_count if file_count is not None else len(sources)
         ),
         "created_at": _utc_isoformat(batch.created_at),
         "updated_at": _utc_isoformat(batch.updated_at),
-        "file_count": len(sources),
-        "summary": _batch_summary(
-            sources,
-            exceptions_by_source,
-            splits_by_exception,
-        ),
+        "file_count": file_count if file_count is not None else len(sources),
+        "summary": summary,
     }
     if self_operated is not None and self_operated.inbound_storage_path:
         result["version_ids"]["self_operated_inbound"] = (
@@ -1052,10 +1011,32 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
         select(BatchFile)
         .where(BatchFile.batch_id == batch.id)
         .order_by(BatchFile.file_order)
+        .options(
+            load_only(
+                BatchFile.id,
+                BatchFile.batch_id,
+                BatchFile.original_name,
+                BatchFile.file_order,
+                BatchFile.supplier_name,
+                BatchFile.supplier_code,
+                BatchFile.document_note,
+                BatchFile.delivery_total,
+                BatchFile.import_total,
+                BatchFile.manual_total,
+                BatchFile.result_path,
+            )
+        )
     ).all()
-    exceptions_by_source, splits_by_exception = _batch_exception_data(
-        session,
-        sources,
+    exception_totals = _exception_totals_by_source(
+        session, [source.id for source in sources]
+    )
+    delivery_total = sum(source.delivery_total for source in sources)
+    import_total = sum(
+        source.import_total + exception_totals.get(source.id, (0, 0))[0]
+        for source in sources
+    )
+    manual_total = sum(
+        exception_totals.get(source.id, (0, 0))[1] for source in sources
     )
     overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
     overreceipt_rule = (
@@ -1083,19 +1064,24 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
     result = _batch_base_json(
         batch,
         sources,
-        exceptions_by_source,
-        splits_by_exception,
         overreceipt_rule,
         self_operated,
         self_operated_rule,
         inbound_source,
+        summary={
+            "delivery_total": delivery_total,
+            "import_total": import_total,
+            "manual_total": manual_total,
+            "conserved": delivery_total == import_total + manual_total,
+        },
     )
     if include_files:
         result["files"] = [
             _file_json(
                 source,
-                exceptions_by_source.get(source.id, []),
-                splits_by_exception,
+                import_total=source.import_total
+                + exception_totals.get(source.id, (0, 0))[0],
+                manual_total=exception_totals.get(source.id, (0, 0))[1],
             )
             for source in sources
         ]
@@ -1147,18 +1133,25 @@ def _batch_list_json(batches: list[Batch], session: Session) -> list[dict]:
     if not batches:
         return []
     batch_ids = [batch.id for batch in batches]
-    sources = session.scalars(
-        select(BatchFile)
-        .where(BatchFile.batch_id.in_(batch_ids))
-        .order_by(BatchFile.batch_id, BatchFile.file_order)
+    source_rows = session.execute(
+        select(
+            BatchFile.id,
+            BatchFile.batch_id,
+            BatchFile.delivery_total,
+            BatchFile.import_total,
+        ).where(BatchFile.batch_id.in_(batch_ids))
     ).all()
-    sources_by_batch: dict[int, list[BatchFile]] = {}
-    for source in sources:
-        sources_by_batch.setdefault(source.batch_id, []).append(source)
-    exceptions_by_source, splits_by_exception = _batch_exception_data(
-        session,
-        sources,
+    exception_totals = _exception_totals_by_source(
+        session, [source_id for source_id, *_ in source_rows]
     )
+    file_stats: dict[int, list[int]] = {}
+    for source_id, batch_id, delivery_total, import_total in source_rows:
+        stats = file_stats.setdefault(batch_id, [0, 0, 0, 0])
+        resolved_total, manual_total = exception_totals.get(source_id, (0, 0))
+        stats[0] += 1
+        stats[1] += delivery_total
+        stats[2] += import_total + resolved_total
+        stats[3] += manual_total
 
     overreceipt_rules = {
         binding.batch_id: rule
@@ -1206,19 +1199,29 @@ def _batch_list_json(batches: list[Batch], session: Session) -> list[dict]:
         if inbound_source is not None:
             inbound_sources[self_operated.batch_id] = inbound_source
 
-    return [
-        _batch_base_json(
-            batch,
-            sources_by_batch.get(batch.id, []),
-            exceptions_by_source,
-            splits_by_exception,
-            overreceipt_rules.get(batch.id),
-            self_operated_by_batch.get(batch.id),
-            self_operated_rules.get(batch.id),
-            inbound_sources.get(batch.id),
+    result = []
+    for batch in batches:
+        file_count, delivery_total, import_total, manual_total = file_stats.get(
+            batch.id, (0, 0, 0, 0)
         )
-        for batch in batches
-    ]
+        result.append(
+            _batch_base_json(
+                batch,
+                [],
+                overreceipt_rules.get(batch.id),
+                self_operated_by_batch.get(batch.id),
+                self_operated_rules.get(batch.id),
+                inbound_sources.get(batch.id),
+                file_count=file_count,
+                summary={
+                    "delivery_total": delivery_total,
+                    "import_total": import_total,
+                    "manual_total": manual_total,
+                    "conserved": delivery_total == import_total + manual_total,
+                },
+            )
+        )
+    return result
 
 
 def _job_json(job: Job) -> dict:
@@ -1371,6 +1374,83 @@ def _exception_json(
             }
             for part in parts
         ],
+    }
+
+
+def _position_filter_values(value: str | int | float) -> list[str]:
+    value_text = str(value if value is not None else "").strip()
+    if not value_text:
+        return []
+    if not value_text.startswith("{"):
+        return [value_text]
+    try:
+        mapping = json.loads(value_text)
+    except ValueError:
+        return [value_text]
+    if not isinstance(mapping, dict):
+        return [value_text]
+    return list(
+        dict.fromkeys(
+            value
+            for item in mapping.values()
+            if (value := str(item if item is not None else "").strip())
+        )
+    )
+
+
+def _position_display_value(value: str | int | float) -> str:
+    value_text = str(value if value is not None else "").strip()
+    if not value_text:
+        return "—"
+    if not value_text.startswith("{"):
+        return value_text
+    try:
+        mapping = json.loads(value_text)
+    except ValueError:
+        return value_text
+    if not isinstance(mapping, dict):
+        return value_text
+    return "；".join(
+        f"{msku}：{str(item if item is not None else '').strip() or '—'}"
+        for msku, item in mapping.items()
+    )
+
+
+def _exception_review_stats(session: Session, batch_id: int) -> dict:
+    rows = session.execute(
+        select(
+            ExceptionRecord.status,
+            func.count(func.distinct(ExceptionRecord.id)),
+            func.sum(
+                case(
+                    (
+                        SplitRecord.id.is_(None),
+                        case(
+                            (
+                                ExceptionRecord.status != "resolved",
+                                ExceptionRecord.manual_quantity,
+                            ),
+                            else_=0,
+                        ),
+                    ),
+                    (SplitRecord.resolved.is_(False), SplitRecord.quantity),
+                    else_=0,
+                )
+            ),
+        )
+        .join(BatchFile, BatchFile.id == ExceptionRecord.batch_file_id)
+        .outerjoin(SplitRecord, SplitRecord.exception_id == ExceptionRecord.id)
+        .where(BatchFile.batch_id == batch_id)
+        .group_by(ExceptionRecord.status)
+    )
+    counts = {status: (count, quantity or 0) for status, count, quantity in rows}
+    resolved_count = counts.get("resolved", (0, 0))[0]
+    total_count = sum(count for count, _ in counts.values())
+    return {
+        "unfinished_count": total_count - resolved_count,
+        "unfinished_quantity": sum(quantity for _, quantity in counts.values()),
+        "resolved_count": resolved_count,
+        "total_count": total_count,
     }
 
 
@@ -4118,9 +4198,62 @@ def create_app(
     def list_batches(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+        workflow: Annotated[
+            str, Query(pattern="^(|delivery|self_operated_inbound)$")
+        ] = "",
+        batch_status: str = "",
+        search: str = "",
     ):
-        batches = session.scalars(select(Batch).order_by(Batch.id.desc())).all()
-        return _batch_list_json(batches, session)
+        conditions = []
+        if workflow == "delivery":
+            conditions.append(
+                ~select(SelfOperatedBatch.batch_id)
+                .where(SelfOperatedBatch.batch_id == Batch.id)
+                .exists()
+            )
+        elif workflow == "self_operated_inbound":
+            conditions.append(
+                select(SelfOperatedBatch.batch_id)
+                .where(SelfOperatedBatch.batch_id == Batch.id)
+                .exists()
+            )
+        if batch_status:
+            conditions.append(Batch.status == batch_status)
+        if search.strip():
+            conditions.append(
+                func.lower(Batch.name).contains(
+                    search.strip().lower(), autoescape=True
+                )
+            )
+        query = select(Batch).where(*conditions).order_by(Batch.id.desc())
+        if limit is None:
+            return _batch_list_json(session.scalars(query).all(), session)
+
+        total = session.scalar(select(func.count(Batch.id)).where(*conditions)) or 0
+        batches = session.scalars(query.offset(offset).limit(limit)).all()
+        empty_conditions = [
+            Batch.status == "draft",
+            ~select(BatchFile.id).where(BatchFile.batch_id == Batch.id).exists(),
+        ]
+        if workflow == "self_operated_inbound":
+            empty_query = (
+                select(func.count(Batch.id))
+                .join(SelfOperatedBatch, SelfOperatedBatch.batch_id == Batch.id)
+                .where(*empty_conditions, SelfOperatedBatch.inbound_storage_path == "")
+            )
+        else:
+            empty_query = (
+                select(func.count(Batch.id))
+                .outerjoin(SelfOperatedBatch, SelfOperatedBatch.batch_id == Batch.id)
+                .where(*empty_conditions, SelfOperatedBatch.batch_id.is_(None))
+            )
+        return {
+            "items": _batch_list_json(batches, session),
+            "total": total,
+            "empty_draft_count": session.scalar(empty_query) or 0,
+        }
 
     @app.delete("/api/batches")
     def delete_batches(
@@ -4810,29 +4943,102 @@ def create_app(
         batch_id: int,
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+        review_scope: Annotated[
+            str, Query(pattern="^(all|unfinished|resolved)$")
+        ] = "all",
+        reason: str = "",
+        site: str = "",
+        scale_position: str = "",
+        stocking_position: str = "",
+        search: str = "",
     ):
         batch = get_batch_or_404(batch_id, session)
-        exceptions = session.scalars(
+        self_operated = session.get(SelfOperatedBatch, batch.id) is not None
+        conditions = [BatchFile.batch_id == batch_id]
+        if review_scope == "resolved":
+            conditions.append(ExceptionRecord.status == "resolved")
+        elif review_scope == "unfinished":
+            conditions.append(ExceptionRecord.status != "resolved")
+        if reason:
+            conditions.append(ExceptionRecord.reason == reason)
+        if site:
+            conditions.append(ExceptionRecord.full_site == site)
+        query = (
             select(ExceptionRecord)
             .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
-            .where(BatchFile.batch_id == batch_id)
+            .where(*conditions)
             .order_by(BatchFile.file_order, ExceptionRecord.id)
-        ).all()
+        )
+        all_positions = None
+        if search.strip() or scale_position or stocking_position:
+            candidates = session.execute(
+                select(ExceptionRecord, BatchFile.original_name)
+                .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
+                .where(*conditions)
+                .order_by(BatchFile.file_order, ExceptionRecord.id)
+            ).all()
+            candidate_rows = [record for record, _ in candidates]
+            all_positions = {} if self_operated else _exception_position_values(
+                candidate_rows, batch, session, position_frame_cache
+            )
+            keyword = search.strip().casefold()
+            matches = []
+            for record, filename in candidates:
+                positions = all_positions.get(record.id, {})
+                scale = positions.get("scale_position", "")
+                stocking = positions.get("stocking_position", "")
+                haystack = " ".join(
+                    (
+                        filename,
+                        record.sku,
+                        record.full_site,
+                        record.destination,
+                        _position_display_value(scale),
+                        _position_display_value(stocking),
+                    )
+                ).casefold()
+                if keyword and keyword not in haystack:
+                    continue
+                if scale_position and scale_position not in _position_filter_values(
+                    scale
+                ):
+                    continue
+                if stocking_position and stocking_position not in (
+                    _position_filter_values(stocking)
+                ):
+                    continue
+                matches.append(record)
+            total = len(matches)
+            exceptions = (
+                matches[offset : offset + limit] if limit is not None else matches
+            )
+        elif limit is None:
+            exceptions = session.scalars(query).all()
+        else:
+            total = session.scalar(
+                select(func.count(ExceptionRecord.id))
+                .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
+                .where(*conditions)
+            ) or 0
+            exceptions = session.scalars(query.offset(offset).limit(limit)).all()
         position_values = (
-            {}
-            if session.get(SelfOperatedBatch, batch.id) is not None
-            else _exception_position_values(
-                exceptions,
-                batch,
-                session,
-                position_frame_cache,
+            all_positions
+            if all_positions is not None
+            else (
+                {}
+                if self_operated
+                else _exception_position_values(
+                    exceptions, batch, session, position_frame_cache
+                )
             )
         )
         splits_by_exception = _split_records_by_exception(
             session,
             exceptions,
         )
-        return [
+        items = [
             _exception_json(
                 exception,
                 splits_by_exception.get(exception.id, []),
@@ -4840,6 +5046,64 @@ def create_app(
             )
             for exception in exceptions
         ]
+        if limit is None:
+            return items
+        return {
+            "items": items,
+            "total": total,
+            "stats": _exception_review_stats(session, batch_id),
+        }
+
+    @app.get("/api/batches/{batch_id}/exceptions/filters")
+    def exception_filters(
+        batch_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+    ):
+        batch = get_batch_or_404(batch_id, session)
+        reasons = session.scalars(
+            select(ExceptionRecord.reason)
+            .join(BatchFile, BatchFile.id == ExceptionRecord.batch_file_id)
+            .where(BatchFile.batch_id == batch_id)
+            .distinct()
+        ).all()
+        sites = session.scalars(
+            select(ExceptionRecord.full_site)
+            .join(BatchFile, BatchFile.id == ExceptionRecord.batch_file_id)
+            .where(BatchFile.batch_id == batch_id)
+            .distinct()
+        ).all()
+        scales: set[str] = set()
+        stocking: set[str] = set()
+        if session.get(SelfOperatedBatch, batch_id) is None:
+            keys = session.execute(
+                select(ExceptionRecord.sku, ExceptionRecord.full_site)
+                .join(BatchFile, BatchFile.id == ExceptionRecord.batch_file_id)
+                .where(BatchFile.batch_id == batch_id)
+                .distinct()
+            ).all()
+            representatives = [
+                ExceptionRecord(
+                    id=index,
+                    sku=sku,
+                    full_site=site,
+                    destination="",
+                    manual_quantity=0,
+                    reason="",
+                )
+                for index, (sku, site) in enumerate(keys, start=1)
+            ]
+            for values in _exception_position_values(
+                representatives, batch, session, position_frame_cache
+            ).values():
+                scales.update(_position_filter_values(values["scale_position"]))
+                stocking.update(_position_filter_values(values["stocking_position"]))
+        return {
+            "reasons": sorted(filter(None, reasons)),
+            "sites": sorted(filter(None, sites)),
+            "scales": sorted(scales),
+            "stocking": sorted(stocking),
+        }
 
     @app.put(
         "/api/exceptions/{exception_id}/self-operated-site",

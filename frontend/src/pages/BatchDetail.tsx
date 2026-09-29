@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Button,
@@ -41,6 +41,7 @@ import {
 
 import { api, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
+import { useDebouncedValue } from "../useDebouncedValue";
 import type {
   Batch,
   BatchFile,
@@ -68,6 +69,22 @@ const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
 
 type SplitFormValues = { parts: SplitPart[] };
 type ReviewScope = "unfinished" | "resolved" | "all";
+type ExceptionPage = {
+  items: DeliveryException[];
+  total: number;
+  stats: {
+    unfinished_count: number;
+    unfinished_quantity: number;
+    resolved_count: number;
+    total_count: number;
+  };
+};
+type ExceptionFilters = {
+  reasons: string[];
+  sites: string[];
+  scales: string[];
+  stocking: string[];
+};
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -106,15 +123,6 @@ function EvidenceMetric({ label, value }: { label: string; value: number }) {
       <strong>{value}</strong>
     </span>
   );
-}
-
-function unresolvedQuantity(exception: DeliveryException): number {
-  if (exception.parts.length) {
-    return exception.parts
-      .filter((part) => !part.resolved)
-      .reduce((sum, part) => sum + Number(part.quantity), 0);
-  }
-  return exception.status === "resolved" ? 0 : exception.manual_quantity;
 }
 
 function ExceptionEvidence({
@@ -195,23 +203,6 @@ function formatPositionValue(value: string | number): string {
       .join("；");
   } catch {
     return text;
-  }
-}
-
-function positionFilterValues(value: string | number): string[] {
-  const text = String(value ?? "").trim();
-  if (!text) return [];
-  if (!text.startsWith("{")) return [text];
-  try {
-    const mapping = JSON.parse(text) as Record<string, unknown>;
-    if (!mapping || Array.isArray(mapping) || typeof mapping !== "object") return [text];
-    return Array.from(new Set(
-      Object.values(mapping)
-        .map((item) => String(item ?? "").trim())
-        .filter(Boolean)
-    ));
-  } catch {
-    return [text];
   }
 }
 
@@ -337,58 +328,116 @@ export default function BatchDetail({
   const [batch, setBatch] = useState<Batch | null>(null);
   const [activeSupplierVersion, setActiveSupplierVersion] = useState<InputVersion | null>(null);
   const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
+  const [exceptionTotal, setExceptionTotal] = useState(0);
+  const [reviewPage, setReviewPage] = useState(1);
+  const [reviewStats, setReviewStats] = useState({
+    unfinishedCount: 0,
+    unfinishedQuantity: 0,
+    resolvedCount: 0,
+    totalCount: 0
+  });
+  const [exceptionFilters, setExceptionFilters] = useState<ExceptionFilters>({
+    reasons: [], sites: [], scales: [], stocking: []
+  });
   const [loading, setLoading] = useState(true);
   const [exceptionsLoading, setExceptionsLoading] = useState(true);
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [query, setQuery] = useState("");
-  const deferredQuery = useDeferredValue(query);
+  const debouncedQuery = useDebouncedValue(query, 250);
   const [siteFilter, setSiteFilter] = useState<string>();
   const [scaleFilter, setScaleFilter] = useState<string>();
   const [stockingFilter, setStockingFilter] = useState<string>();
   const [reviewScope, setReviewScope] = useState<ReviewScope>("unfinished");
   const [reasonFilter, setReasonFilter] = useState<string>();
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
+  const [reviewDirty, setReviewDirty] = useState(false);
   const [splitForm] = Form.useForm<SplitFormValues>();
   const splitParts = Form.useWatch("parts", splitForm) ?? [];
   const pollingJob = useRef<number | null>(null);
   const announcedJobs = useRef(new Set<number>());
   const reviewSection = useRef<HTMLDivElement | null>(null);
+  const pendingReviewDirection = useRef<"first" | "last" | null>(null);
+  const loadRequestRef = useRef(0);
+
+  const fetchExceptionPage = (requestedPage = reviewPage) => {
+    const params = new URLSearchParams({
+      offset: String((requestedPage - 1) * 10),
+      limit: "10",
+      review_scope: reviewScope
+    });
+    if (debouncedQuery.trim()) params.set("search", debouncedQuery.trim());
+    if (siteFilter) params.set("site", siteFilter);
+    if (scaleFilter) params.set("scale_position", scaleFilter);
+    if (stockingFilter) params.set("stocking_position", stockingFilter);
+    if (reasonFilter) params.set("reason", reasonFilter);
+    return api<ExceptionPage>(`/api/batches/${batchId}/exceptions?${params}`);
+  };
 
   const load = async (silent = false) => {
+    const request = ++loadRequestRef.current;
     if (!silent) {
       setLoading(true);
     }
     setExceptionsLoading(true);
     try {
       const batchRequest = api<Batch>(`/api/batches/${batchId}`).then((result) => {
+        if (request !== loadRequestRef.current) return;
         setBatch(result);
         if (!silent) setLoading(false);
       });
-      const exceptionsRequest = api<DeliveryException[]>(
-        `/api/batches/${batchId}/exceptions`
-      ).then(setExceptions);
+      const exceptionsRequest = fetchExceptionPage().then((result) => {
+        if (request !== loadRequestRef.current) return result;
+        setExceptions(result.items);
+        setExceptionTotal(result.total);
+        setReviewStats({
+          unfinishedCount: result.stats.unfinished_count,
+          unfinishedQuantity: result.stats.unfinished_quantity,
+          resolvedCount: result.stats.resolved_count,
+          totalCount: result.stats.total_count
+        });
+        if (pendingReviewDirection.current) {
+          setSplitTarget(pendingReviewDirection.current === "first"
+            ? result.items[0] ?? null
+            : result.items.at(-1) ?? null);
+          pendingReviewDirection.current = null;
+        }
+        return result;
+      });
       const versionsRequest = canRefreshSupplierVersion
         ? api<InputVersion[]>("/api/input-versions").then((versions) => {
+            if (request !== loadRequestRef.current) return;
             setActiveSupplierVersion(
               versions.find((version) => version.kind === "supplier" && version.active) ?? null
             );
           })
         : Promise.resolve();
-      await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
+      const [, loadedPage] = await Promise.all([
+        batchRequest, exceptionsRequest, versionsRequest
+      ]);
+      return request === loadRequestRef.current ? loadedPage : null;
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "读取批次失败");
-    } finally {
-      if (!silent) {
-        setLoading(false);
+      if (request === loadRequestRef.current) {
+        message.error(error instanceof Error ? error.message : "读取批次失败");
       }
-      setExceptionsLoading(false);
+      return null;
+    } finally {
+      if (request === loadRequestRef.current) {
+        if (!silent) setLoading(false);
+        setExceptionsLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     void load();
-  }, [batchId, canRefreshSupplierVersion]);
+  }, [batchId, canRefreshSupplierVersion, reviewPage, reviewScope, debouncedQuery, siteFilter, scaleFilter, stockingFilter, reasonFilter]);
+
+  useEffect(() => {
+    void api<ExceptionFilters>(`/api/batches/${batchId}/exceptions/filters`)
+      .then(setExceptionFilters)
+      .catch(() => setExceptionFilters({ reasons: [], sites: [], scales: [], stocking: [] }));
+  }, [batchId, batch?.status]);
 
   const activeJob = useMemo(() => {
     const jobs = batch?.jobs;
@@ -400,6 +449,7 @@ export default function BatchDetail({
   useEffect(() => {
     if (!splitTarget) return;
     splitForm.resetFields();
+    setReviewDirty(false);
     splitForm.setFieldsValue({
       parts: splitTarget.parts.length
         ? splitTarget.parts
@@ -468,53 +518,10 @@ export default function BatchDetail({
     () => Object.fromEntries(files.map((file) => [file.id, file])),
     [files]
   );
-  const reasonOptions = useMemo(
-    () => Array.from(new Set(exceptions.map((item) => item.reason))).map((reason) => ({ value: reason, label: reason })),
-    [exceptions]
-  );
-  const siteOptions = useMemo(
-    () => filterOptions(exceptions.map((item) => item.full_site)),
-    [exceptions]
-  );
-  const scaleOptions = useMemo(
-    () => filterOptions(exceptions.flatMap((item) => positionFilterValues(item.scale_position))),
-    [exceptions]
-  );
-  const stockingOptions = useMemo(
-    () => filterOptions(exceptions.flatMap((item) => positionFilterValues(item.stocking_position))),
-    [exceptions]
-  );
-  const reviewStats = useMemo(() => {
-    const unfinished = exceptions.filter((item) => item.status !== "resolved");
-    return {
-      unfinishedCount: unfinished.length,
-      unfinishedQuantity: unfinished.reduce((sum, item) => sum + unresolvedQuantity(item), 0),
-      resolvedCount: exceptions.filter((item) => item.status === "resolved").length,
-      totalCount: exceptions.length
-    };
-  }, [exceptions]);
-  const filteredExceptions = useMemo(() => {
-    const keyword = deferredQuery.trim().toLocaleLowerCase("zh-CN");
-    return exceptions.filter((item) => {
-      const source = fileById[item.batch_file_id]?.original_name ?? "";
-      const haystack = [
-        source,
-        item.sku,
-        item.full_site,
-        item.destination,
-        formatPositionValue(item.scale_position),
-        formatPositionValue(item.stocking_position)
-      ].join(" ").toLocaleLowerCase("zh-CN");
-      const matchesScope = reviewScope === "all"
-        || (reviewScope === "resolved" ? item.status === "resolved" : item.status !== "resolved");
-      return (!keyword || haystack.includes(keyword))
-        && (!siteFilter || item.full_site === siteFilter)
-        && (!scaleFilter || positionFilterValues(item.scale_position).includes(scaleFilter))
-        && (!stockingFilter || positionFilterValues(item.stocking_position).includes(stockingFilter))
-        && matchesScope
-        && (!reasonFilter || item.reason === reasonFilter);
-    });
-  }, [deferredQuery, exceptions, fileById, reasonFilter, reviewScope, scaleFilter, siteFilter, stockingFilter]);
+  const reasonOptions = filterOptions(exceptionFilters.reasons);
+  const siteOptions = filterOptions(exceptionFilters.sites);
+  const scaleOptions = filterOptions(exceptionFilters.scales);
+  const stockingOptions = filterOptions(exceptionFilters.stocking);
 
   const runAction = async (name: string, operation: () => Promise<void>) => {
     setAction(name);
@@ -612,15 +619,28 @@ export default function BatchDetail({
   };
 
   const currentReviewIndex = splitTarget
-    ? filteredExceptions.findIndex((item) => item.id === splitTarget.id)
+    ? exceptions.findIndex((item) => item.id === splitTarget.id)
     : -1;
   const previousReviewTarget = currentReviewIndex > 0
-    ? filteredExceptions[currentReviewIndex - 1]
+    ? exceptions[currentReviewIndex - 1]
     : undefined;
   const nextReviewTarget = currentReviewIndex >= 0
-    ? filteredExceptions[currentReviewIndex + 1]
+    ? exceptions[currentReviewIndex + 1]
     : undefined;
-  const reviewNavigationLocked = splitForm.isFieldsTouched(true);
+  const canReviewPrevious = Boolean(previousReviewTarget || reviewPage > 1);
+  const canReviewNext = Boolean(nextReviewTarget || reviewPage * 10 < exceptionTotal);
+  const navigateReview = (direction: "previous" | "next") => {
+    const withinPage = direction === "previous"
+      ? previousReviewTarget
+      : nextReviewTarget;
+    if (withinPage) {
+      openSplit(withinPage);
+      return;
+    }
+    pendingReviewDirection.current = direction === "previous" ? "last" : "first";
+    setReviewPage((current) => current + (direction === "previous" ? -1 : 1));
+  };
+  const reviewNavigationLocked = reviewDirty;
 
   const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
   const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
@@ -642,7 +662,8 @@ export default function BatchDetail({
 
   const saveSplit = async (advance: boolean) => {
     if (!splitTarget || !splitValid) return;
-    const targetToOpen = advance ? nextReviewTarget : undefined;
+    const savedId = splitTarget.id;
+    const savedIndex = currentReviewIndex;
     const values = await splitForm.validateFields();
     await runAction("split", async () => {
       const updated = await api<DeliveryException>(`/api/exceptions/${splitTarget.id}/split`, {
@@ -650,14 +671,20 @@ export default function BatchDetail({
         body: JSON.stringify(values)
       });
       setExceptions((current) => current.map((item) => item.id === updated.id ? updated : item));
-      if (targetToOpen) {
-        openSplit(targetToOpen);
+      const refreshed = await load(true);
+      const savedStillVisible = refreshed?.items.findIndex((item) => item.id === savedId) ?? -1;
+      const nextIndex = savedStillVisible >= 0 ? savedStillVisible + 1 : savedIndex;
+      const next = advance ? refreshed?.items[nextIndex] : undefined;
+      if (next) {
+        openSplit(next);
+      } else if (advance && refreshed && reviewPage * 10 < refreshed.total) {
+        pendingReviewDirection.current = "first";
+        setReviewPage(reviewPage + 1);
       } else {
         setSplitTarget(null);
         splitForm.resetFields();
       }
-      await load(true);
-      message.success(targetToOpen
+      message.success(advance && (next || (refreshed && reviewPage * 10 < refreshed.total))
         ? "当前记录已保存，已打开下一条未完成记录"
         : "处理结果已保存，批次数量保持守恒");
     });
@@ -1039,8 +1066,8 @@ export default function BatchDetail({
       {computed && (
         <div ref={reviewSection} tabIndex={-1} className="review-section-anchor">
         <Card
-          title={`待处理审校（共 ${exceptions.length} 条）`}
-          extra={<span className="toolbar-count">当前显示 {filteredExceptions.length} 条</span>}
+          title={`待处理审校（共 ${reviewStats.totalCount} 条）`}
+          extra={<span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
           className="section-card exception-review-card"
           loading={exceptionsLoading}
         >
@@ -1055,7 +1082,7 @@ export default function BatchDetail({
                 className="review-scope-card"
                 aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
                 aria-pressed={reviewScope === "unfinished"}
-                onClick={() => setReviewScope("unfinished")}
+                onClick={() => { setReviewPage(1); setReviewScope("unfinished"); setSplitTarget(null); }}
               >
                 <span>未完成</span>
                 <strong>{reviewStats.unfinishedCount} 条</strong>
@@ -1066,7 +1093,7 @@ export default function BatchDetail({
                 className="review-scope-card"
                 aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
                 aria-pressed={reviewScope === "resolved"}
-                onClick={() => setReviewScope("resolved")}
+                onClick={() => { setReviewPage(1); setReviewScope("resolved"); setSplitTarget(null); }}
               >
                 <span>已处理</span>
                 <strong>{reviewStats.resolvedCount} 条</strong>
@@ -1077,7 +1104,7 @@ export default function BatchDetail({
                 className="review-scope-card"
                 aria-label={`全部 ${reviewStats.totalCount} 条`}
                 aria-pressed={reviewScope === "all"}
-                onClick={() => setReviewScope("all")}
+                onClick={() => { setReviewPage(1); setReviewScope("all"); setSplitTarget(null); }}
               >
                 <span>全部</span>
                 <strong>{reviewStats.totalCount} 条</strong>
@@ -1095,7 +1122,7 @@ export default function BatchDetail({
                 prefix={<SearchOutlined />}
                 placeholder="搜索来源、SKU、站点或目的仓"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => { setReviewPage(1); setQuery(event.target.value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1109,7 +1136,7 @@ export default function BatchDetail({
                 placeholder="全部站点"
                 options={siteOptions}
                 value={siteFilter}
-                onChange={setSiteFilter}
+                onChange={(value) => { setReviewPage(1); setSiteFilter(value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1123,7 +1150,7 @@ export default function BatchDetail({
                 placeholder="全部规模定位"
                 options={scaleOptions}
                 value={scaleFilter}
-                onChange={setScaleFilter}
+                onChange={(value) => { setReviewPage(1); setScaleFilter(value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1137,7 +1164,7 @@ export default function BatchDetail({
                 placeholder="全部备货定位"
                 options={stockingOptions}
                 value={stockingFilter}
-                onChange={setStockingFilter}
+                onChange={(value) => { setReviewPage(1); setStockingFilter(value); setSplitTarget(null); }}
               />
             </div>
             <div className="exception-filter-field">
@@ -1149,17 +1176,23 @@ export default function BatchDetail({
                 placeholder="全部原因"
                 options={reasonOptions}
                 value={reasonFilter}
-                onChange={setReasonFilter}
+                onChange={(value) => { setReviewPage(1); setReasonFilter(value); setSplitTarget(null); }}
               />
             </div>
           </div>
           <Table<DeliveryException>
             rowKey="id"
-            dataSource={filteredExceptions}
-            pagination={filteredExceptions.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
+            dataSource={exceptions}
+            pagination={exceptionTotal > 10 ? {
+              current: reviewPage,
+              pageSize: 10,
+              total: exceptionTotal,
+              showSizeChanger: false,
+              onChange: setReviewPage
+            } : false}
             scroll={{ x: 1260 }}
             locale={{ emptyText: <Empty description={
-              exceptions.length
+              reviewStats.totalCount
                 ? reviewScope === "unfinished"
                   ? "当前没有未完成记录"
                   : "没有匹配的审校记录"
@@ -1251,7 +1284,7 @@ export default function BatchDetail({
           <div className="review-drawer-title">
             <strong>审校处理 · {splitTarget?.sku ?? ""}</strong>
             {currentReviewIndex >= 0 && (
-              <span>第 {currentReviewIndex + 1} / {filteredExceptions.length} 条</span>
+              <span>第 {(reviewPage - 1) * 10 + currentReviewIndex + 1} / {exceptionTotal} 条</span>
             )}
           </div>
         )}
@@ -1261,13 +1294,13 @@ export default function BatchDetail({
         extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
         footer={(
           <div className="drawer-footer">
-            {!selfOperatedSiteSelection && filteredExceptions.length > 1 && (
+            {!selfOperatedSiteSelection && exceptionTotal > 1 && (
               <div className="drawer-review-navigation">
                 <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
                   <span>
                     <Button
-                      disabled={!previousReviewTarget || reviewNavigationLocked}
-                      onClick={() => previousReviewTarget && openSplit(previousReviewTarget)}
+                        disabled={!canReviewPrevious || reviewNavigationLocked}
+                        onClick={() => navigateReview("previous")}
                     >
                       上一条
                     </Button>
@@ -1276,8 +1309,8 @@ export default function BatchDetail({
                 <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
                   <span>
                     <Button
-                      disabled={!nextReviewTarget || reviewNavigationLocked}
-                      onClick={() => nextReviewTarget && openSplit(nextReviewTarget)}
+                        disabled={!canReviewNext || reviewNavigationLocked}
+                        onClick={() => navigateReview("next")}
                     >
                       下一条
                     </Button>
@@ -1300,7 +1333,7 @@ export default function BatchDetail({
                 </Tooltip>
               ) : (
                 <>
-                  {nextReviewTarget && (
+                  {canReviewNext && (
                     <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
                       <Button
                         aria-label="保存"
@@ -1314,13 +1347,13 @@ export default function BatchDetail({
                   )}
                   <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
                     <Button
-                      aria-label={nextReviewTarget ? "保存并下一条" : "保存"}
+                      aria-label={canReviewNext ? "保存并下一条" : "保存"}
                       type="primary"
                       disabled={!splitValid}
                       loading={action === "split"}
-                      onClick={() => void saveSplit(Boolean(nextReviewTarget))}
+                      onClick={() => void saveSplit(canReviewNext)}
                     >
-                      {nextReviewTarget ? "保存并下一条" : "保存"}
+                      {canReviewNext ? "保存并下一条" : "保存"}
                     </Button>
                   </Tooltip>
                 </>
@@ -1351,7 +1384,7 @@ export default function BatchDetail({
             />
 
             {selfOperatedSiteSelection ? (
-              <Form form={splitForm} layout="vertical">
+              <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
                 <Form.Item
                   name={["parts", 0, "site"]}
                   label="选择正确的完整站点"
@@ -1382,7 +1415,7 @@ export default function BatchDetail({
               {splitValid && <CheckCircleFilled aria-label="数量守恒通过" />}
             </div>
 
-              <Form form={splitForm} layout="vertical">
+              <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
               <Form.List name="parts">
                 {(fields, { add, remove }) => (
                   <Space orientation="vertical" size={12} style={{ width: "100%" }}>

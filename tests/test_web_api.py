@@ -13,7 +13,8 @@ from unittest.mock import patch
 from httpx2 import ASGITransport, AsyncClient
 from openpyxl import Workbook, load_workbook
 import pandas as pd
-from sqlalchemy import event, select
+from sqlalchemy import delete, event, select
+from sqlalchemy.orm import Session
 
 import delivery_note.input_inspection as input_inspection_module
 from delivery_note.pipeline import IMPORT_COLUMNS
@@ -2929,14 +2930,25 @@ class WebApiTests(unittest.TestCase):
                 )
             session.commit()
 
-        detail, detail_queries = self.get_with_query_count(
-            f"/api/batches/{batch_id}",
-            admin_headers,
-        )
-        listed, list_queries = self.get_with_query_count(
-            "/api/batches",
-            admin_headers,
-        )
+        loaded_exceptions = []
+
+        def record_loaded(_session, instance):
+            if isinstance(instance, (ExceptionRecord, SplitRecord)):
+                loaded_exceptions.append(instance)
+
+        event.listen(Session, "loaded_as_persistent", record_loaded)
+        try:
+            detail, detail_queries = self.get_with_query_count(
+                f"/api/batches/{batch_id}",
+                admin_headers,
+            )
+            listed, list_queries = self.get_with_query_count(
+                "/api/batches",
+                admin_headers,
+            )
+        finally:
+            event.remove(Session, "loaded_as_persistent", record_loaded)
+        self.assertEqual(loaded_exceptions, [])
         original_reader = web_api_module.read_position_workbook
         with patch.object(
             web_api_module,
@@ -2974,6 +2986,95 @@ class WebApiTests(unittest.TestCase):
         self.assertLessEqual(detail_queries, 15)
         self.assertLessEqual(list_queries, 8)
         self.assertLessEqual(exception_queries, 8)
+
+        loaded_page_records = []
+
+        def record_page(_session, instance):
+            if isinstance(instance, (ExceptionRecord, SplitRecord)):
+                loaded_page_records.append(instance)
+
+        event.listen(Session, "loaded_as_persistent", record_page)
+        try:
+            page, page_queries = self.get_with_query_count(
+                f"/api/batches/{batch_id}/exceptions?offset=2&limit=3",
+                admin_headers,
+            )
+        finally:
+            event.remove(Session, "loaded_as_persistent", record_page)
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertEqual(page.json()["total"], 10)
+        self.assertEqual(len(page.json()["items"]), 3)
+        self.assertEqual(
+            sum(isinstance(record, ExceptionRecord) for record in loaded_page_records),
+            3,
+        )
+        self.assertEqual(
+            sum(isinstance(record, SplitRecord) for record in loaded_page_records),
+            3,
+        )
+        self.assertEqual(page.json()["stats"]["resolved_count"], 10)
+        self.assertLessEqual(page_queries, 10)
+
+        filtered = self.client.get(
+            f"/api/batches/{batch_id}/exceptions?limit=3&review_scope=unfinished",
+            headers=admin_headers,
+        )
+        self.assertEqual(filtered.json()["total"], 0)
+        self.assertEqual(filtered.json()["stats"]["total_count"], 10)
+
+        reason = self.client.get(
+            f"/api/batches/{batch_id}/exceptions?limit=3&reason=批量读取测试 4",
+            headers=admin_headers,
+        )
+        self.assertEqual(reason.json()["total"], 1)
+        self.assertEqual(reason.json()["items"][0]["reason"], "批量读取测试 4")
+
+        filters = self.client.get(
+            f"/api/batches/{batch_id}/exceptions/filters",
+            headers=admin_headers,
+        )
+        self.assertEqual(filters.status_code, 200, filters.text)
+        self.assertEqual(len(filters.json()["reasons"]), 10)
+        self.assertEqual(filters.json()["sites"], ["AMAZON:SEEKWAY:US"])
+        self.assertEqual(filters.json()["scales"], ["短尾"])
+        self.assertEqual(filters.json()["stocking"], ["备货"])
+
+        by_position = self.client.get(
+            f"/api/batches/{batch_id}/exceptions?limit=3&scale_position=短尾",
+            headers=admin_headers,
+        )
+        self.assertEqual(by_position.json()["total"], 10)
+        self.assertEqual(len(by_position.json()["items"]), 3)
+
+        by_position_search = self.client.get(
+            f"/api/batches/{batch_id}/exceptions?limit=3&search=短尾",
+            headers=admin_headers,
+        )
+        self.assertEqual(by_position_search.json()["total"], 10)
+
+        invalid = self.client.get(
+            f"/api/batches/{batch_id}/exceptions?limit=201",
+            headers=admin_headers,
+        )
+        self.assertEqual(invalid.status_code, 422)
+
+        first_exception_id = exceptions.json()[0]["id"]
+        with self.app.state.database.session() as session:
+            first_exception = session.get(ExceptionRecord, first_exception_id)
+            first_exception.status = "pending"
+            session.execute(
+                delete(SplitRecord).where(
+                    SplitRecord.exception_id == first_exception_id
+                )
+            )
+            session.commit()
+        updated = self.client.get(
+            f"/api/batches/{batch_id}/exceptions?limit=3",
+            headers=admin_headers,
+        )
+        self.assertEqual(updated.json()["stats"]["unfinished_count"], 1)
+        self.assertEqual(updated.json()["stats"]["unfinished_quantity"], 1)
+        self.assertEqual(updated.json()["stats"]["resolved_count"], 9)
 
     def test_batch_list_query_count_is_constant_as_batches_grow(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -3067,6 +3168,36 @@ class WebApiTests(unittest.TestCase):
                     "conserved": True,
                 },
             )
+
+        page, page_queries = self.get_with_query_count(
+            "/api/batches?workflow=delivery&offset=2&limit=3",
+            admin_headers,
+        )
+        self.assertEqual(page.status_code, 200, page.text)
+        self.assertEqual(page.json()["total"], 10)
+        self.assertEqual(page.json()["empty_draft_count"], 0)
+        self.assertEqual(
+            [batch["name"] for batch in page.json()["items"]],
+            ["批次 8", "批次 7", "批次 6"],
+        )
+        self.assertTrue(all(
+            batch["summary"]["conserved"] for batch in page.json()["items"]
+        ))
+        self.assertLessEqual(page_queries, 9)
+
+        searched = self.client.get(
+            "/api/batches?workflow=delivery&search=批次 1&limit=3",
+            headers=admin_headers,
+        )
+        self.assertEqual(searched.json()["total"], 2)
+        self.assertEqual(
+            [batch["name"] for batch in searched.json()["items"]],
+            ["批次 10", "批次 1"],
+        )
+        invalid = self.client.get(
+            "/api/batches?limit=201", headers=admin_headers
+        )
+        self.assertEqual(invalid.status_code, 422)
 
     def test_position_frame_cache_evicts_least_recent_version(self):
         cache = web_api_module._PositionFrameCache(max_entries=2)

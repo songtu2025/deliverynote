@@ -32,6 +32,7 @@ import type { TableProps, UploadFile, UploadProps } from "antd";
 
 import { api, download } from "../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../dateTime";
+import { useDebouncedValue } from "../useDebouncedValue";
 import PurchaseSyncPanel from "./PurchaseSyncPanel";
 import type {
   Batch,
@@ -143,19 +144,6 @@ function todayBatchName(workflow: "delivery" | "self_operated_inbound"): string 
   return `${parts.year}-${parts.month}-${parts.day} ${suffix}`;
 }
 
-function isEmptySelfOperatedDraft(batch: Batch): boolean {
-  return batch.workflow === "self_operated_inbound"
-    && batch.status === "draft"
-    && batch.file_count === 0
-    && !batch.inbound_file?.uploaded;
-}
-
-function isEmptyDeliveryDraft(batch: Batch): boolean {
-  return (batch.workflow ?? "delivery") === "delivery"
-    && batch.status === "draft"
-    && batch.file_count === 0;
-}
-
 function canDeleteBatch(batch: Batch): boolean {
   return batch.status !== "queued" && batch.status !== "running";
 }
@@ -178,6 +166,9 @@ export default function BatchesPage({
   canDeleteBatches?: boolean;
 }) {
   const [batches, setBatches] = useState<Batch[]>([]);
+  const [batchTotal, setBatchTotal] = useState(0);
+  const [emptyDraftCount, setEmptyDraftCount] = useState(0);
+  const [page, setPage] = useState(1);
   const [versions, setVersions] = useState<InputVersion[]>([]);
   const [overreceiptRules, setOverreceiptRules] = useState<OverreceiptRuleVersion[]>([]);
   const [selfOperatedRules, setSelfOperatedRules] = useState<SelfOperatedOverreceiptRuleVersion[]>([]);
@@ -203,8 +194,10 @@ export default function BatchesPage({
   const [selectedBatchIds, setSelectedBatchIds] = useState<number[]>([]);
   const [deletingBatchIds, setDeletingBatchIds] = useState<number[]>([]);
   const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query, 250);
   const [statusFilter, setStatusFilter] = useState<string>();
   const loadedRef = useRef(false);
+  const loadRequestRef = useRef(0);
   const inboundSyncPollInFlightRef = useRef(false);
   const [form] = Form.useForm<{ name: string }>();
 
@@ -218,10 +211,18 @@ export default function BatchesPage({
     background = false,
     knownInboundSyncStatus?: SelfOperatedInboundSyncStatus
   ) => {
+    const request = ++loadRequestRef.current;
     if (!background) setLoading(true);
     try {
-      const [batchRows, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
-        api<Batch[]>("/api/batches"),
+      const params = new URLSearchParams({
+        workflow,
+        offset: String((page - 1) * 12),
+        limit: "12"
+      });
+      if (debouncedQuery.trim()) params.set("search", debouncedQuery.trim());
+      if (statusFilter) params.set("batch_status", statusFilter);
+      const [batchPage, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
+        api<{ items: Batch[]; total: number; empty_draft_count: number }>(`/api/batches?${params}`),
         api<InputVersion[]>("/api/input-versions"),
         workflow === "self_operated_inbound"
           ? api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
@@ -232,7 +233,10 @@ export default function BatchesPage({
             : api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
           : Promise.resolve(null)
       ]);
-      setBatches(batchRows);
+      if (request !== loadRequestRef.current) return;
+      setBatches(batchPage.items);
+      setBatchTotal(batchPage.total);
+      setEmptyDraftCount(batchPage.empty_draft_count);
       setVersions(versionRows);
       if (workflow === "self_operated_inbound") {
         setSelfOperatedRules(overreceiptRuleRows as SelfOperatedOverreceiptRuleVersion[]);
@@ -241,12 +245,16 @@ export default function BatchesPage({
         setOverreceiptRules(overreceiptRuleRows as OverreceiptRuleVersion[]);
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "读取批次失败");
+      if (request === loadRequestRef.current) {
+        message.error(error instanceof Error ? error.message : "读取批次失败");
+      }
     } finally {
-      loadedRef.current = true;
-      if (!background) setLoading(false);
+      if (request === loadRequestRef.current) {
+        loadedRef.current = true;
+        if (!background) setLoading(false);
+      }
     }
-  }, [workflow]);
+  }, [page, debouncedQuery, statusFilter, workflow]);
 
   useEffect(() => {
     if (!loadedRef.current || active) void load(loadedRef.current);
@@ -315,31 +323,6 @@ export default function BatchesPage({
   const activeOverreceiptRule = overreceiptRules.find((rule) => rule.active);
   const activeSelfOperatedRule = selfOperatedRules.find((rule) => rule.active);
   const ready = missingKinds.length === 0;
-  const emptySelfOperatedDrafts = useMemo(
-    () => workflow === "self_operated_inbound"
-      ? batches.filter(isEmptySelfOperatedDraft)
-      : [],
-    [batches, workflow]
-  );
-  const emptyDeliveryDrafts = useMemo(
-    () => workflow === "delivery" ? batches.filter(isEmptyDeliveryDraft) : [],
-    [batches, workflow]
-  );
-  const emptyDrafts = workflow === "self_operated_inbound"
-    ? emptySelfOperatedDrafts
-    : emptyDeliveryDrafts;
-
-  const filtered = useMemo(() => {
-    const keyword = query.trim().toLocaleLowerCase("zh-CN");
-    return batches.filter((batch) => {
-      const matchesQuery = !keyword || batch.name.toLocaleLowerCase("zh-CN").includes(keyword);
-      const batchWorkflow = batch.workflow ?? "delivery";
-      return batchWorkflow === workflow
-        && matchesQuery
-        && (!statusFilter || batch.status === statusFilter);
-    });
-  }, [batches, query, statusFilter, workflow]);
-
   const create = async () => {
     try {
       const values = await form.validateFields();
@@ -523,8 +506,12 @@ export default function BatchesPage({
         body: JSON.stringify({ batch_ids: batchIds })
       });
       const deletedIds = new Set(result.deleted_ids);
-      setBatches((rows) => rows.filter((batch) => !deletedIds.has(batch.id)));
       setSelectedBatchIds((ids) => ids.filter((id) => !deletedIds.has(id)));
+      if (page > 1 && batches.every((batch) => deletedIds.has(batch.id))) {
+        setPage(page - 1);
+      } else {
+        await load();
+      }
       if (result.file_cleanup_failed_ids.length) {
         message.warning(
           `已删除 ${result.deleted_count} 个批次，但 ${result.file_cleanup_failed_ids.length} 个文件目录清理失败`
@@ -598,9 +585,9 @@ export default function BatchesPage({
           </Typography.Text>
         </div>
         <Space>
-          {emptyDrafts.length > 0 && (
+          {emptyDraftCount > 0 && (
             <Popconfirm
-              title={`删除 ${emptyDrafts.length} 个空批次？`}
+              title={`删除 ${emptyDraftCount} 个空批次？`}
               description={workflow === "self_operated_inbound"
                 ? "仅删除未上传质检交货单和收货入库单的草稿，无法恢复。"
                 : "仅删除未上传任何交货文件的草稿，无法恢复。"}
@@ -609,7 +596,7 @@ export default function BatchesPage({
               onConfirm={() => void cleanEmptyBatches()}
             >
               <Button danger icon={<DeleteOutlined />} loading={cleaningEmpty}>
-                清理空批次（{emptyDrafts.length}）
+                清理空批次（{emptyDraftCount}）
               </Button>
             </Popconfirm>
           )}
@@ -796,7 +783,7 @@ export default function BatchesPage({
         <div className="batch-list-toolbar-heading">
           <strong>{workflow === "self_operated_inbound" ? "入库批次" : "交货批次"}</strong>
           <Typography.Text className="batch-result-count" type="secondary">
-            {filtered.length} 个批次
+            {batchTotal} 个批次
           </Typography.Text>
           {selectedBatchIds.length > 0 && (
             <Typography.Text className="batch-selection-count" aria-live="polite">
@@ -836,7 +823,7 @@ export default function BatchesPage({
             prefix={<SearchOutlined />}
             placeholder="搜索批次名称"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => { setPage(1); setQuery(event.target.value); }}
           />
         </div>
         <div className="table-filter-field">
@@ -848,7 +835,7 @@ export default function BatchesPage({
             placeholder="全部状态"
             options={STATUS_OPTIONS}
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={(value) => { setPage(1); setStatusFilter(value); }}
           />
         </div>
       </div>
@@ -858,6 +845,7 @@ export default function BatchesPage({
         rowKey="id"
         rowSelection={canDeleteBatches ? {
           selectedRowKeys: selectedBatchIds,
+          preserveSelectedRowKeys: true,
           columnWidth: 52,
           onChange: (keys) => {
             setSelectedBatchIds(keys.map(Number));
@@ -868,12 +856,18 @@ export default function BatchesPage({
           })
         } : undefined}
         loading={loading}
-        dataSource={filtered}
+        dataSource={batches}
         components={{
           table: (props) => <table {...props} aria-label={workflow === "self_operated_inbound" ? "自营仓入库批次列表" : "交货批次列表"} />
         }}
         locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "暂无批次"} /> }}
-        pagination={filtered.length > 12 ? { pageSize: 12, showSizeChanger: false } : false}
+        pagination={batchTotal > 12 ? {
+          current: page,
+          pageSize: 12,
+          total: batchTotal,
+          showSizeChanger: false,
+          onChange: setPage
+        } : false}
         columns={[
           {
             title: "批次",

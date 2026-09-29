@@ -12,6 +12,45 @@ describe("BatchDetail", () => {
   let batchPayload: Record<string, any>;
   let exceptionPayload: Record<string, any>[];
 
+  const exceptionPage = (url: string) => {
+    const params = new URL(url, "http://localhost").searchParams;
+    const scope = params.get("review_scope");
+    const rows = exceptionPayload.filter((item) => (
+      (scope !== "resolved" || item.status === "resolved")
+      && (scope !== "unfinished" || item.status !== "resolved")
+      && (!params.get("reason") || item.reason === params.get("reason"))
+      && (!params.get("site") || item.full_site === params.get("site"))
+      && (!params.get("scale_position") || item.scale_position === params.get("scale_position"))
+      && (!params.get("stocking_position") || item.stocking_position === params.get("stocking_position"))
+      && String(item.sku).includes(params.get("search") ?? "")
+    ));
+    const offset = Number(params.get("offset") ?? 0);
+    const limit = Number(params.get("limit") ?? 10);
+    const unfinished = exceptionPayload.filter((item) => item.status !== "resolved");
+    return {
+      items: rows.slice(offset, offset + limit),
+      total: rows.length,
+      stats: {
+        unfinished_count: unfinished.length,
+        unfinished_quantity: unfinished.reduce((sum, item) => sum + (
+          item.parts.length
+            ? item.parts.filter((part: { resolved: boolean }) => !part.resolved)
+              .reduce((partSum: number, part: { quantity: number }) => partSum + part.quantity, 0)
+            : item.manual_quantity
+        ), 0),
+        resolved_count: exceptionPayload.length - unfinished.length,
+        total_count: exceptionPayload.length
+      }
+    };
+  };
+
+  const exceptionFilters = () => ({
+    reasons: [...new Set(exceptionPayload.map((item) => item.reason))],
+    sites: [...new Set(exceptionPayload.map((item) => item.full_site))],
+    scales: [...new Set(exceptionPayload.map((item) => item.scale_position).filter(Boolean))],
+    stocking: [...new Set(exceptionPayload.map((item) => item.stocking_position).filter(Boolean))]
+  });
+
   beforeEach(() => {
     const version = (id: number, kind: string) => ({
       id,
@@ -163,7 +202,8 @@ describe("BatchDetail", () => {
     ];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/api/batches/7/exceptions")) return jsonResponse(exceptionPayload);
+      if (url.endsWith("/api/batches/7/exceptions/filters")) return jsonResponse(exceptionFilters());
+      if (url.includes("/api/batches/7/exceptions?")) return jsonResponse(exceptionPage(url));
       if (url.endsWith("/api/input-versions")) {
         return jsonResponse([{ ...version(9, "supplier"), name: "supplier-v2" }]);
       }
@@ -267,7 +307,8 @@ describe("BatchDetail", () => {
     });
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith("/api/batches/7/exceptions")) return delayedExceptions;
+      if (url.includes("/api/batches/7/exceptions?")) return delayedExceptions;
+      if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
       if (url.endsWith("/api/batches/7")) {
         return Promise.resolve(jsonResponse(batchPayload));
       }
@@ -279,7 +320,7 @@ describe("BatchDetail", () => {
     expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
     expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
 
-    finishExceptions(jsonResponse(exceptionPayload));
+    finishExceptions(jsonResponse(exceptionPage("/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished")));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
   });
 
@@ -350,12 +391,13 @@ describe("BatchDetail", () => {
           status: "succeeded"
         }));
       }
-      if (url.endsWith("/api/batches/7/exceptions")) {
+      if (url.includes("/api/batches/7/exceptions?")) {
         exceptionRequests += 1;
         return exceptionRequests === 1
-          ? Promise.resolve(jsonResponse(exceptionPayload))
+          ? Promise.resolve(jsonResponse(exceptionPage(url)))
           : delayedRefresh;
       }
+      if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
       if (url.endsWith("/api/batches/7")) {
         return Promise.resolve(jsonResponse(batchPayload));
       }
@@ -372,7 +414,7 @@ describe("BatchDetail", () => {
       ).toBeInTheDocument();
     });
 
-    finishRefresh(jsonResponse(exceptionPayload));
+    finishRefresh(jsonResponse(exceptionPage("/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished")));
     await waitFor(() => {
       expect(
         container.querySelector(".exception-review-card.ant-card-loading")
@@ -394,15 +436,45 @@ describe("BatchDetail", () => {
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
     fireEvent.click(await screen.findByText("短尾", { selector: ".ant-select-item-option-content" }));
-    expect(screen.getByText("SKU-A")).toBeInTheDocument();
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "备货定位筛选" }));
     fireEvent.click(await screen.findByText("备货", { selector: ".ant-select-item-option-content" }));
-    expect(screen.getByText("SKU-A")).toBeInTheDocument();
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
     fireEvent.click(await screen.findByText("中尾", { selector: ".ant-select-item-option-content" }));
     await screen.findByText("当前没有未完成记录");
+  }, 30_000);
+
+  it("keeps review navigation working across server pages", async () => {
+    exceptionPayload = Array.from({ length: 12 }, (_, index) => ({
+      ...exceptionPayload[0],
+      id: 100 + index,
+      sku: `SKU-${index + 1}`,
+      manual_quantity: 1
+    }));
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+
+    expect(await screen.findByRole("button", { name: "全部 12 条" })).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("2"));
+    expect(await screen.findByText("SKU-11")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
+    const drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("第 11 / 12 条")).toBeInTheDocument();
+
+    expect(within(drawer).getByRole("button", { name: "上一条" })).toBeEnabled();
+    fireEvent.click(within(drawer).getByRole("button", { name: "上一条" }));
+    expect(await within(drawer).findByText("审校处理 · SKU-10")).toBeInTheDocument();
+    expect(within(drawer).getByText("第 10 / 12 条")).toBeInTheDocument();
+
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "下一条" })).toBeEnabled());
+    fireEvent.click(within(drawer).getByRole("button", { name: "下一条" }));
+    expect(await within(drawer).findByText("审校处理 · SKU-11")).toBeInTheDocument();
+    fireEvent.change(within(drawer).getByRole("spinbutton", { name: "数量" }), {
+      target: { value: "2" }
+    });
+    await waitFor(() => expect(within(drawer).getByRole("button", { name: "上一条" })).toBeDisabled());
   }, 30_000);
 
   it("shows complete SKU and site identifiers in the review table", async () => {

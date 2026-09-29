@@ -73,8 +73,18 @@ describe("App", () => {
         if (url.endsWith("/api/auth/logout")) {
           return new Response(null, { status: 204 });
         }
-        if (url.endsWith("/api/batches/7/exceptions")) {
-          return new Response(JSON.stringify([]), {
+        if (url.endsWith("/api/batches/7/exceptions/filters")) {
+          return new Response(JSON.stringify({ reasons: [], sites: [], scales: [], stocking: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        if (url.includes("/api/batches/7/exceptions?")) {
+          return new Response(JSON.stringify({
+            items: [],
+            total: 0,
+            stats: { unfinished_count: 0, unfinished_quantity: 0, resolved_count: 0, total_count: 0 }
+          }), {
             status: 200,
             headers: { "Content-Type": "application/json" }
           });
@@ -85,8 +95,8 @@ describe("App", () => {
             headers: { "Content-Type": "application/json" }
           });
         }
-        if (url.endsWith("/api/batches")) {
-          return new Response(JSON.stringify([routeBatch]), {
+        if (url.includes("/api/batches?")) {
+          return new Response(JSON.stringify({ items: [routeBatch], total: 1, empty_draft_count: 0 }), {
             status: 200,
             headers: { "Content-Type": "application/json" }
           });
@@ -173,7 +183,7 @@ describe("App", () => {
       const requestedUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
       expect(requestedUrls).toEqual(expect.arrayContaining([
         "/api/auth/login",
-        "/api/batches",
+        "/api/batches?workflow=delivery&offset=0&limit=12",
         "/api/input-versions",
         "/api/purchase-sync",
         "/api/overreceipt-rule-versions"
@@ -296,8 +306,8 @@ describe("App", () => {
             headers: { "Content-Type": "application/json" }
           });
         }
-        if (url.endsWith("/api/batches")) {
-          return new Response(JSON.stringify([routeBatch]), {
+        if (url.includes("/api/batches?")) {
+          return new Response(JSON.stringify({ items: [routeBatch], total: 1, empty_draft_count: 0 }), {
             status: 200,
             headers: { "Content-Type": "application/json" }
           });
