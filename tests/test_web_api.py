@@ -3235,6 +3235,16 @@ class WebApiTests(unittest.TestCase):
             headers=admin_headers,
         )
         self.assertEqual(by_position_search.json()["total"], 10)
+        position_page = self.client.get(
+            f"/api/batches/{batch_id}/exceptions"
+            "?offset=3&limit=3&search=短尾&scale_position=短尾",
+            headers=admin_headers,
+        )
+        self.assertEqual(position_page.json()["total"], 10)
+        self.assertEqual(
+            [item["reason"] for item in position_page.json()["items"]],
+            [f"批量读取测试 {index}" for index in range(3, 6)],
+        )
 
         invalid = self.client.get(
             f"/api/batches/{batch_id}/exceptions?limit=201",
@@ -3304,7 +3314,7 @@ class WebApiTests(unittest.TestCase):
                     manual_quantity=1,
                     reason="未找到可交货采购需求",
                 )
-                for index in range(201)
+                for index in range(601)
             )
             session.commit()
 
@@ -3317,19 +3327,40 @@ class WebApiTests(unittest.TestCase):
             f"/api/batches/{batch.id}/exceptions?limit=200", headers=headers
         )
         self.assertEqual(paged.status_code, 200)
-        self.assertEqual(paged.json()["total"], 201)
+        self.assertEqual(paged.json()["total"], 601)
         self.assertEqual(len(paged.json()["items"]), 200)
 
         searched = self.client.get(
             f"/api/batches/{batch.id}/exceptions?search=SKU", headers=headers
         )
         self.assertEqual(searched.status_code, 422)
-        searched_page = self.client.get(
-            f"/api/batches/{batch.id}/exceptions?search=SKU&limit=200",
+        stream_sizes = []
+
+        def record_stream(execute_state):
+            if size := execute_state.execution_options.get("yield_per"):
+                stream_sizes.append(size)
+
+        event.listen(Session, "do_orm_execute", record_stream)
+        try:
+            searched_page = self.client.get(
+                f"/api/batches/{batch.id}/exceptions?search=SKU&limit=200",
+                headers=headers,
+            )
+        finally:
+            event.remove(Session, "do_orm_execute", record_stream)
+        self.assertEqual(searched_page.status_code, 200)
+        self.assertEqual(searched_page.json()["total"], 601)
+        self.assertEqual(stream_sizes, [200])
+        last_page = self.client.get(
+            f"/api/batches/{batch.id}/exceptions"
+            "?search=SKU&offset=600&limit=10",
             headers=headers,
         )
-        self.assertEqual(searched_page.status_code, 200)
-        self.assertEqual(searched_page.json()["total"], 201)
+        self.assertEqual(last_page.json()["total"], 601)
+        self.assertEqual(
+            [item["sku"] for item in last_page.json()["items"]],
+            ["SKU-600"],
+        )
 
     def test_batch_list_query_count_is_constant_as_batches_grow(self):
         admin_headers = self.login("admin", "admin-pass")

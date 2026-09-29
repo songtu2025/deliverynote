@@ -137,53 +137,58 @@ def register_exception_read_routes(
             .where(*conditions)
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         )
-        all_positions = None
+        filtered_positions = None
         if search.strip() or scale_position or stocking_position:
-            candidates = session.execute(
-                select(ExceptionRecord, BatchFile.original_name)
-                .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
-                .where(*conditions)
-                .order_by(BatchFile.file_order, ExceptionRecord.id)
-            ).all()
-            candidate_rows = [record for record, _ in candidates]
-            all_positions = {} if self_operated else exception_position_values(
-                candidate_rows, batch, session, position_frame_cache
-            )
+            filtered_positions = {}
             keyword = search.strip().casefold()
-            matches = []
-            for record, filename in candidates:
-                positions = all_positions.get(record.id, {})
-                scale = positions.get("scale_position", "")
-                stocking = positions.get("stocking_position", "")
-                haystack = " ".join(
-                    (
-                        filename,
-                        record.sku,
-                        record.full_site,
-                        record.destination,
-                        _position_display_value(scale),
-                        _position_display_value(stocking),
-                    )
-                ).casefold()
-                if keyword and keyword not in haystack:
-                    continue
-                if scale_position and scale_position not in _position_filter_values(
-                    scale
-                ):
-                    continue
-                if stocking_position and stocking_position not in (
-                    _position_filter_values(stocking)
-                ):
-                    continue
-                matches.append(record)
-            total = len(matches)
-            if limit is None and total > MAX_LIST_PAGE_SIZE:
-                raise HTTPException(
-                    status_code=422, detail="结果超过 200 条，请使用分页查询"
+            total = 0
+            exceptions = []
+            with session.execute(
+                query.add_columns(BatchFile.original_name).execution_options(
+                    yield_per=MAX_LIST_PAGE_SIZE
                 )
-            exceptions = (
-                matches[offset : offset + limit] if limit is not None else matches
-            )
+            ) as candidates:
+                for chunk in candidates.partitions(MAX_LIST_PAGE_SIZE):
+                    positions = {} if self_operated else exception_position_values(
+                        [record for record, _ in chunk],
+                        batch,
+                        session,
+                        position_frame_cache,
+                    )
+                    for record, filename in chunk:
+                        values = positions.get(record.id, {})
+                        scale = values.get("scale_position", "")
+                        stocking = values.get("stocking_position", "")
+                        haystack = " ".join(
+                            (
+                                filename,
+                                record.sku,
+                                record.full_site,
+                                record.destination,
+                                _position_display_value(scale),
+                                _position_display_value(stocking),
+                            )
+                        ).casefold()
+                        if keyword and keyword not in haystack:
+                            continue
+                        if scale_position and scale_position not in (
+                            _position_filter_values(scale)
+                        ):
+                            continue
+                        if stocking_position and stocking_position not in (
+                            _position_filter_values(stocking)
+                        ):
+                            continue
+                        if limit is None and total >= MAX_LIST_PAGE_SIZE:
+                            raise HTTPException(
+                                status_code=422,
+                                detail="结果超过 200 条，请使用分页查询",
+                            )
+                        if limit is None or offset <= total < offset + limit:
+                            exceptions.append(record)
+                            if record.id in positions:
+                                filtered_positions[record.id] = values
+                        total += 1
         elif limit is None:
             exceptions = session.scalars(query.limit(MAX_LIST_PAGE_SIZE + 1)).all()
             if len(exceptions) > MAX_LIST_PAGE_SIZE:
@@ -198,8 +203,8 @@ def register_exception_read_routes(
             ) or 0
             exceptions = session.scalars(query.offset(offset).limit(limit)).all()
         position_values = (
-            all_positions
-            if all_positions is not None
+            filtered_positions
+            if filtered_positions is not None
             else (
                 {}
                 if self_operated
