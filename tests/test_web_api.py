@@ -88,6 +88,36 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return {"Authorization": f"Bearer {response.json()['token']}"}
 
+    def test_exception_contract_uses_stable_codes_and_workflow_actions(self):
+        exception = ExceptionRecord(
+            batch_file_id=1,
+            sku="SKU-A",
+            original_site="US",
+            full_site="AMAZON:SEEKWAY:US",
+            destination="",
+            delivery_quantity=10,
+            allocated_quantity=0,
+            manual_quantity=10,
+            reason="产品信息站点不唯一",
+            status="pending",
+        )
+        ambiguous = web_api_module._exception_json(
+            exception,
+            [],
+            self_operated=True,
+        )
+        self.assertEqual(ambiguous["reason_code"], "ambiguous_product_site")
+        self.assertEqual(ambiguous["allowed_actions"], ["resolve_site"])
+
+        exception.reason = "历史批次的未知原因"
+        unknown = web_api_module._exception_json(
+            exception,
+            [],
+            self_operated=True,
+        )
+        self.assertEqual(unknown["reason_code"], "unknown")
+        self.assertEqual(unknown["allowed_actions"], [])
+
     def create_operator(self, admin_headers: dict[str, str]) -> dict:
         response = self.client.post(
             "/api/users",
@@ -3523,6 +3553,8 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(valid.status_code, 200, valid.text)
         self.assertEqual(valid.json()["status"], "partial")
+        self.assertEqual(valid.json()["reason_code"], "purchase_balance_exceeded")
+        self.assertEqual(valid.json()["allowed_actions"], ["split"])
         self.assertEqual(
             [part["quantity"] for part in valid.json()["parts"]],
             [25, 15],

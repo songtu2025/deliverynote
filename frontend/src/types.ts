@@ -106,6 +106,19 @@ export interface SplitPart {
   resolved: boolean;
 }
 
+type ExceptionReasonCode =
+  | "product_not_found"
+  | "ambiguous_product_site"
+  | "purchase_balance_exceeded"
+  | "purchase_not_found"
+  | "overreceipt_limit_exceeded"
+  | "inbound_order_not_found"
+  | "supplier_mismatch"
+  | "po_name_missing"
+  | "receivable_invalid"
+  | "receivable_exceeded"
+  | "unknown";
+
 export interface DeliveryException {
   id: number;
   batch_file_id: number;
@@ -120,6 +133,8 @@ export interface DeliveryException {
   overreceipt_remaining_quantity: number | null;
   manual_quantity: number;
   reason: string;
+  reason_code: ExceptionReasonCode;
+  allowed_actions: ("split" | "resolve_site")[];
   status: string;
   scale_position: string | number;
   stocking_position: string | number;

@@ -137,6 +137,8 @@ describe("BatchDetail", () => {
         overreceipt_remaining_quantity: null,
         manual_quantity: 60,
         reason: "超出采购未交量",
+        reason_code: "purchase_balance_exceeded",
+        allowed_actions: ["split"],
         status: "pending",
         scale_position: "短尾",
         stocking_position: "备货",
@@ -156,6 +158,8 @@ describe("BatchDetail", () => {
         overreceipt_remaining_quantity: null,
         manual_quantity: 20,
         reason: "未找到可交货采购需求",
+        reason_code: "purchase_not_found",
+        allowed_actions: ["split"],
         status: "pending",
         scale_position: "中尾",
         stocking_position: "不备货",
@@ -175,6 +179,8 @@ describe("BatchDetail", () => {
         overreceipt_remaining_quantity: null,
         manual_quantity: 12,
         reason: "产品信息站点不唯一",
+        reason_code: "ambiguous_product_site",
+        allowed_actions: ["split"],
         status: "pending",
         scale_position: "",
         stocking_position: "",
@@ -194,6 +200,8 @@ describe("BatchDetail", () => {
         overreceipt_remaining_quantity: 0,
         manual_quantity: 15,
         reason: "超出允许超收量",
+        reason_code: "overreceipt_limit_exceeded",
+        allowed_actions: ["split"],
         status: "pending",
         scale_position: "短尾",
         stocking_position: "备货",
@@ -591,6 +599,7 @@ describe("BatchDetail", () => {
   }, 30_000);
 
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
+    exceptionPayload[2].reason = "候选站点需要确认";
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     expect(await screen.findByRole("columnheader", { name: "审校依据" })).toBeInTheDocument();
@@ -677,6 +686,8 @@ describe("BatchDetail", () => {
       }
     };
     exceptionPayload = [exceptionPayload[2], exceptionPayload[3]];
+    exceptionPayload[0].allowed_actions = ["resolve_site"];
+    exceptionPayload[1].allowed_actions = [];
 
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 

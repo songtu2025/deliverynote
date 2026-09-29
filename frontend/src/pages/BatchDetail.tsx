@@ -132,7 +132,7 @@ function ExceptionEvidence({
   exception: DeliveryException;
   hasOverreceiptRule: boolean;
 }) {
-  if (exception.reason === "未找到可交货采购需求") {
+  if (exception.reason_code === "purchase_not_found") {
     return (
       <div className="exception-evidence-cell exception-evidence-check">
         <strong>需核对 </strong>
@@ -141,7 +141,7 @@ function ExceptionEvidence({
     );
   }
 
-  if (exception.reason === "超出采购未交量") {
+  if (exception.reason_code === "purchase_balance_exceeded") {
     return (
       <div className="exception-evidence-cell">
         <EvidenceMetric label="已分配" value={exception.allocated_quantity} />
@@ -153,7 +153,7 @@ function ExceptionEvidence({
     );
   }
 
-  if (exception.reason === "产品信息站点不唯一") {
+  if (exception.reason_code === "ambiguous_product_site") {
     return (
       <div className="exception-evidence-cell">
         <strong className="exception-evidence-label">候选站点</strong>
@@ -166,7 +166,7 @@ function ExceptionEvidence({
     );
   }
 
-  if (exception.reason === "超出允许超收量") {
+  if (exception.reason_code === "overreceipt_limit_exceeded") {
     const hasExactBreakdown = (
       exception.purchase_allocated_quantity !== null
       && exception.overreceipt_allocated_quantity !== null
@@ -239,7 +239,7 @@ function ReasonGuidance({
   hasOverreceiptRule: boolean;
   selfOperated?: boolean;
 }) {
-  if (exception.reason === "未找到可交货采购需求") {
+  if (exception.reason_code === "purchase_not_found") {
     return (
       <div className="review-guidance">
         <Alert
@@ -252,7 +252,7 @@ function ReasonGuidance({
     );
   }
 
-  if (exception.reason === "超出采购未交量") {
+  if (exception.reason_code === "purchase_balance_exceeded") {
     return (
       <section className="review-guidance" aria-label="原因指导">
         <strong className="review-guidance-title">采购量与超出量</strong>
@@ -272,7 +272,7 @@ function ReasonGuidance({
     );
   }
 
-  if (exception.reason === "产品信息站点不唯一") {
+  if (exception.reason_code === "ambiguous_product_site") {
     return (
       <div className="review-guidance">
         <Alert
@@ -287,7 +287,7 @@ function ReasonGuidance({
     );
   }
 
-  if (exception.reason === "超出允许超收量") {
+  if (exception.reason_code === "overreceipt_limit_exceeded") {
     const hasExactBreakdown = (
       exception.purchase_allocated_quantity !== null
       && exception.overreceipt_allocated_quantity !== null
@@ -644,12 +644,12 @@ export default function BatchDetail({
 
   const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
   const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
-  const splitCandidateSites = splitTarget?.reason === "产品信息站点不唯一"
+  const splitCandidateSites = splitTarget?.reason_code === "ambiguous_product_site"
     ? candidateSites(splitTarget.full_site)
     : [];
   const selfOperated = batch?.workflow === "self_operated_inbound";
   const selfOperatedSiteSelection = Boolean(
-    selfOperated && splitTarget?.reason === "产品信息站点不唯一"
+    selfOperated && splitTarget?.allowed_actions.includes("resolve_site")
   );
   const selectedSelfOperatedSite = String(splitParts[0]?.site ?? "").trim();
   const selfOperatedSiteValid = splitCandidateSites.includes(selectedSelfOperatedSite);
@@ -1269,7 +1269,7 @@ export default function BatchDetail({
               {
                 title: "操作",
                 width: 100,
-                render: (_, record) => selfOperated && record.reason !== "产品信息站点不唯一"
+                render: (_, record) => record.allowed_actions.length === 0
                   ? <Typography.Text type="secondary">待处理</Typography.Text>
                   : <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
               }
