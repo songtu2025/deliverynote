@@ -4,8 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 COPY delivery_note ./delivery_note
 
 EXPOSE 8000
