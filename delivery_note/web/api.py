@@ -54,6 +54,7 @@ from ..excel_io import (
     validate_self_operated_template_workbook,
     validate_template_workbook,
 )
+from ..exception_reasons import exception_reason_code
 from ..input_inspection import (
     inspect_input_version_with_preview,
     position_change_warnings,
@@ -1338,20 +1339,6 @@ def _exception_position_values(
     return result
 
 
-EXCEPTION_REASON_CODES = {
-    "产品信息未匹配": "product_not_found",
-    "产品信息站点不唯一": "ambiguous_product_site",
-    "超出采购未交量": "purchase_balance_exceeded",
-    "未找到可交货采购需求": "purchase_not_found",
-    "超出允许超收量": "overreceipt_limit_exceeded",
-    "未找到自营仓入库单": "inbound_order_not_found",
-    "供应商不一致": "supplier_mismatch",
-    "PO名称为空": "po_name_missing",
-    "应收货无效": "receivable_invalid",
-    "超出应收货": "receivable_exceeded",
-}
-
-
 def _exception_json(
     exception: ExceptionRecord,
     parts: list[SplitRecord],
@@ -1360,7 +1347,7 @@ def _exception_json(
     self_operated: bool = False,
 ) -> dict:
     position_values = position_values or {}
-    reason_code = EXCEPTION_REASON_CODES.get(exception.reason, "unknown")
+    reason_code = exception_reason_code(exception.reason)
     if self_operated:
         allowed_actions = (
             ["resolve_site"] if reason_code == "ambiguous_product_site" else []
@@ -5157,7 +5144,7 @@ def create_app(
             raise HTTPException(status_code=409, detail="不是自营仓入库待处理记录")
         if batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
-        if EXCEPTION_REASON_CODES.get(exception.reason) != "ambiguous_product_site":
+        if exception_reason_code(exception.reason) != "ambiguous_product_site":
             raise HTTPException(status_code=409, detail="当前记录不需要选择站点")
 
         candidates = [

@@ -23,6 +23,7 @@ from .application import (
     project_split,
 )
 from .config import resolve_supplier
+from .exception_reasons import ExceptionReason
 from .excel_io import (
     read_delivery_workbook,
     read_position_workbook,
@@ -643,7 +644,8 @@ def _execute_self_operated_compute(
                         overreceipt_allocated_quantity=overreceipt,
                         overreceipt_remaining_quantity=(
                             0
-                            if pending["待处理原因"] == "超出允许超收量"
+                            if pending["待处理原因"]
+                            == ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
                             else None
                         ),
                         manual_quantity=int(pending["待处理数量"]),

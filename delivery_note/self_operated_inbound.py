@@ -4,6 +4,7 @@ from typing import Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
 
+from .exception_reasons import ExceptionReason
 from .pipeline import (
     OverreceiptAllowance,
     OverreceiptKey,
@@ -238,7 +239,7 @@ def _resolve_inbound_candidate_sites(
         site_candidates.setdefault((row["_sku_key"], country), set()).add(site)
 
     result = resolved.copy()
-    ambiguous = result["异常原因"].eq("产品信息站点不唯一")
+    ambiguous = result["异常原因"].eq(ExceptionReason.AMBIGUOUS_PRODUCT_SITE)
     for index, row in result[ambiguous].iterrows():
         candidates = site_candidates.get(
             (
@@ -260,7 +261,7 @@ def _resolve_inbound_candidate_sites(
             result.at[index, "完整站点"] = "、".join(matches)
         else:
             result.at[index, "完整站点"] = ""
-            result.at[index, "异常原因"] = "未找到自营仓入库单"
+            result.at[index, "异常原因"] = ExceptionReason.INBOUND_ORDER_NOT_FOUND
     return result
 
 
@@ -277,7 +278,7 @@ def _apply_site_overrides(
         for (sku, site), full_site in site_overrides.items()
     }
     result = resolved.copy()
-    ambiguous = result["异常原因"].eq("产品信息站点不唯一")
+    ambiguous = result["异常原因"].eq(ExceptionReason.AMBIGUOUS_PRODUCT_SITE)
     for index, row in result[ambiguous].iterrows():
         selected = normalized_overrides.get(
             (
@@ -394,7 +395,7 @@ def process_self_operated_inbound(
                     normal=0,
                     overreceipt=0,
                     pending=quantity,
-                    reason="未找到自营仓入库单",
+                    reason=ExceptionReason.INBOUND_ORDER_NOT_FOUND,
                 )
             )
             continue
@@ -411,7 +412,7 @@ def process_self_operated_inbound(
                     normal=0,
                     overreceipt=0,
                     pending=quantity,
-                    reason="供应商不一致",
+                    reason=ExceptionReason.SUPPLIER_MISMATCH,
                 )
             )
             continue
@@ -428,7 +429,7 @@ def process_self_operated_inbound(
                     normal=0,
                     overreceipt=0,
                     pending=quantity,
-                    reason="PO名称为空",
+                    reason=ExceptionReason.PO_NAME_MISSING,
                 )
             )
             continue
@@ -450,7 +451,7 @@ def process_self_operated_inbound(
                     normal=0,
                     overreceipt=0,
                     pending=quantity,
-                    reason="应收货无效",
+                    reason=ExceptionReason.RECEIVABLE_INVALID,
                 )
             )
             continue
@@ -517,7 +518,11 @@ def process_self_operated_inbound(
             remaining -= overreceipt
 
         if remaining > 0:
-            reason = "超出允许超收量" if allowance is not None else "超出应收货"
+            reason = (
+                ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
+                if allowance is not None
+                else ExceptionReason.RECEIVABLE_EXCEEDED
+            )
             pending_records.append(
                 _pending_row(
                     supplier=supplier_name,

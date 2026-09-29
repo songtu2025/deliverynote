@@ -5,6 +5,7 @@ from typing import MutableMapping
 import pandas as pd
 
 from .config import PURCHASE_STATUSES, warehouse_sort_key
+from .exception_reasons import ExceptionReason
 
 
 IMPORT_COLUMNS = [
@@ -287,10 +288,10 @@ def resolve_delivery_sites(
 
         if not full_sites:
             full_site = ""
-            reason = "产品信息未匹配"
+            reason = ExceptionReason.PRODUCT_NOT_FOUND
         elif len(full_sites) > 1:
             full_site = "、".join(sorted(full_sites))
-            reason = "产品信息站点不唯一"
+            reason = ExceptionReason.AMBIGUOUS_PRODUCT_SITE
         else:
             full_site = full_sites[0]
             reason = ""
@@ -358,13 +359,16 @@ def build_manual_import_rows(
             "" if pd.isna(exception["目的仓"]) else exception["目的仓"]
         )
         manual_quantity = int(exception["人工处理量"])
-        site = "" if reason == "产品信息站点不唯一" else full_site
+        site = "" if reason == ExceptionReason.AMBIGUOUS_PRODUCT_SITE else full_site
         note = reason
-        if reason in {"超出采购未交量", "超出允许超收量"}:
+        if reason in {
+            ExceptionReason.PURCHASE_BALANCE_EXCEEDED,
+            ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED,
+        }:
             note = f"{reason}：{manual_quantity}"
-        elif reason == "产品信息未匹配" and original_site:
+        elif reason == ExceptionReason.PRODUCT_NOT_FOUND and original_site:
             note = f"{reason}；原始站点：{original_site}"
-        elif reason == "产品信息站点不唯一" and full_site:
+        elif reason == ExceptionReason.AMBIGUOUS_PRODUCT_SITE and full_site:
             note = f"{reason}：{full_site}"
 
         rows.append(
@@ -674,12 +678,12 @@ def process_data(
 
         if remaining > 0:
             if allowance is not None:
-                reason = "超出允许超收量"
+                reason = ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
             else:
                 reason = (
-                    "超出采购未交量"
+                    ExceptionReason.PURCHASE_BALANCE_EXCEEDED
                     if candidate_balances
-                    else "未找到可交货采购需求"
+                    else ExceptionReason.PURCHASE_NOT_FOUND
                 )
             if allocated > 0 and allowance is None:
                 import_rows[-1]["交货备注"] = f"{reason}：{remaining}"
