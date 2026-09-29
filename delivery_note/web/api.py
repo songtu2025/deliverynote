@@ -77,6 +77,7 @@ from ..pipeline import (
     enrich_pending_import_rows,
 )
 from .auth import hash_password, hash_token, new_session_token, verify_password
+from .batch_read_routes import register_batch_read_routes
 from .database import Database
 from .models import (
     AuditLog,
@@ -2152,6 +2153,14 @@ def create_app(
         version_json=_version_json,
         utc_isoformat=_utc_isoformat,
     )
+    register_batch_read_routes(
+        app=app,
+        get_session=get_session,
+        current_user=current_user,
+        batch_json=_batch_json,
+        batch_list_json=_batch_list_json,
+        get_batch_or_404=get_batch_or_404,
+    )
 
     @app.get("/api/overreceipt-rule-versions/warehouses")
     def list_overreceipt_warehouses(
@@ -3657,67 +3666,6 @@ def create_app(
                 await run_in_threadpool(temporary_inbound.unlink, missing_ok=True)
         return _batch_json(batch, session)
 
-    @app.get("/api/batches")
-    def list_batches(
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-        offset: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int | None, Query(ge=1, le=200)] = None,
-        workflow: Annotated[
-            str, Query(pattern="^(|delivery|self_operated_inbound)$")
-        ] = "",
-        batch_status: str = "",
-        search: str = "",
-    ):
-        conditions = []
-        if workflow == "delivery":
-            conditions.append(
-                ~select(SelfOperatedBatch.batch_id)
-                .where(SelfOperatedBatch.batch_id == Batch.id)
-                .exists()
-            )
-        elif workflow == "self_operated_inbound":
-            conditions.append(
-                select(SelfOperatedBatch.batch_id)
-                .where(SelfOperatedBatch.batch_id == Batch.id)
-                .exists()
-            )
-        if batch_status:
-            conditions.append(Batch.status == batch_status)
-        if search.strip():
-            conditions.append(
-                func.lower(Batch.name).contains(
-                    search.strip().lower(), autoescape=True
-                )
-            )
-        query = select(Batch).where(*conditions).order_by(Batch.id.desc())
-        if limit is None:
-            return _batch_list_json(session.scalars(query).all(), session)
-
-        total = session.scalar(select(func.count(Batch.id)).where(*conditions)) or 0
-        batches = session.scalars(query.offset(offset).limit(limit)).all()
-        empty_conditions = [
-            Batch.status == "draft",
-            ~select(BatchFile.id).where(BatchFile.batch_id == Batch.id).exists(),
-        ]
-        if workflow == "self_operated_inbound":
-            empty_query = (
-                select(func.count(Batch.id))
-                .join(SelfOperatedBatch, SelfOperatedBatch.batch_id == Batch.id)
-                .where(*empty_conditions, SelfOperatedBatch.inbound_storage_path == "")
-            )
-        else:
-            empty_query = (
-                select(func.count(Batch.id))
-                .outerjoin(SelfOperatedBatch, SelfOperatedBatch.batch_id == Batch.id)
-                .where(*empty_conditions, SelfOperatedBatch.batch_id.is_(None))
-            )
-        return {
-            "items": _batch_list_json(batches, session),
-            "total": total,
-            "empty_draft_count": session.scalar(empty_query) or 0,
-        }
-
     @app.delete("/api/batches")
     def delete_batches(
         payload: BatchDeletePayload,
@@ -3903,14 +3851,6 @@ def create_app(
         )
         session.commit()
         return {"deleted_count": len(batch_ids), "deleted_ids": batch_ids}
-
-    @app.get("/api/batches/{batch_id}")
-    def get_batch(
-        batch_id: int,
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        return _batch_json(get_batch_or_404(batch_id, session), session)
 
     @app.post("/api/batches/{batch_id}/refresh-supplier-version")
     def refresh_batch_supplier_version(
