@@ -545,6 +545,10 @@ class WorkerIntegrationTests(unittest.TestCase):
         ).json()
         self.assertEqual(len(exceptions), 1)
         self.assertEqual(exceptions[0]["manual_quantity"], 60)
+        self.assertEqual(exceptions[0]["reason_code"], "purchase_balance_exceeded")
+        with self.app.state.database.session() as session:
+            stored = session.get(ExceptionRecord, exceptions[0]["id"])
+            self.assertEqual(stored.reason_code, "purchase_balance_exceeded")
         self.assertEqual(exceptions[0]["scale_position"], "短尾")
         self.assertEqual(exceptions[0]["stocking_position"], "备货")
         self.assertNotIn("ordered_days", exceptions[0])
@@ -782,6 +786,9 @@ class WorkerIntegrationTests(unittest.TestCase):
             f"/api/batches/{batch_id}/exceptions", headers=self.headers
         ).json()
         self.assertEqual(exceptions[0]["reason"], "超出允许超收量")
+        with self.app.state.database.session() as session:
+            stored = session.get(ExceptionRecord, exceptions[0]["id"])
+            self.assertEqual(stored.reason_code, "overreceipt_limit_exceeded")
         self.assertEqual(exceptions[0]["manual_quantity"], 10)
         self.assertEqual(exceptions[0]["purchase_allocated_quantity"], 20)
         self.assertEqual(exceptions[0]["overreceipt_allocated_quantity"], 50)

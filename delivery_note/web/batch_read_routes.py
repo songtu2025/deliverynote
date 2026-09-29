@@ -1,10 +1,13 @@
 from typing import Annotated, Callable
 
-from fastapi import Depends, FastAPI, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .models import Batch, BatchFile, SelfOperatedBatch, User
+
+
+MAX_LIST_PAGE_SIZE = 200
 
 
 def register_batch_read_routes(
@@ -21,7 +24,7 @@ def register_batch_read_routes(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
         offset: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+        limit: Annotated[int | None, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = None,
         workflow: Annotated[
             str, Query(pattern="^(|delivery|self_operated_inbound)$")
         ] = "",
@@ -51,7 +54,12 @@ def register_batch_read_routes(
             )
         query = select(Batch).where(*conditions).order_by(Batch.id.desc())
         if limit is None:
-            return batch_list_json(session.scalars(query).all(), session)
+            batches = session.scalars(query.limit(MAX_LIST_PAGE_SIZE + 1)).all()
+            if len(batches) > MAX_LIST_PAGE_SIZE:
+                raise HTTPException(
+                    status_code=422, detail="结果超过 200 条，请使用分页查询"
+                )
+            return batch_list_json(batches, session)
 
         total = session.scalar(select(func.count(Batch.id)).where(*conditions)) or 0
         batches = session.scalars(query.offset(offset).limit(limit)).all()

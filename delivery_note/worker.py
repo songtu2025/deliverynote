@@ -23,7 +23,7 @@ from .application import (
     project_split,
 )
 from .config import resolve_supplier
-from .exception_reasons import ExceptionReason
+from .exception_reasons import ExceptionReason, exception_reason_code
 from .excel_io import (
     read_delivery_workbook,
     read_position_workbook,
@@ -650,6 +650,7 @@ def _execute_self_operated_compute(
                         ),
                         manual_quantity=int(pending["待处理数量"]),
                         reason=str(pending["待处理原因"]),
+                        reason_code=exception_reason_code(pending["待处理原因"]),
                         status="pending",
                     )
                 )
@@ -813,6 +814,7 @@ def _execute_compute(
                         ),
                         manual_quantity=int(exception["人工处理量"]),
                         reason=str(exception["异常原因"]),
+                        reason_code=exception_reason_code(exception["异常原因"]),
                         status="pending",
                     )
                 )

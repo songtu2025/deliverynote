@@ -77,7 +77,7 @@ from ..pipeline import (
     enrich_pending_import_rows,
 )
 from .auth import hash_password, hash_token, new_session_token, verify_password
-from .batch_read_routes import register_batch_read_routes
+from .batch_read_routes import MAX_LIST_PAGE_SIZE, register_batch_read_routes
 from .database import Database
 from .models import (
     AuditLog,
@@ -1219,7 +1219,7 @@ def _exception_json(
     self_operated: bool = False,
 ) -> dict:
     position_values = position_values or {}
-    reason_code = exception_reason_code(exception.reason)
+    reason_code = exception.reason_code or exception_reason_code(exception.reason)
     if self_operated:
         allowed_actions = (
             ["resolve_site"] if reason_code == "ambiguous_product_site" else []
@@ -4347,7 +4347,7 @@ def create_app(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
         offset: Annotated[int, Query(ge=0)] = 0,
-        limit: Annotated[int | None, Query(ge=1, le=200)] = None,
+        limit: Annotated[int | None, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = None,
         review_scope: Annotated[
             str, Query(pattern="^(all|unfinished|resolved)$")
         ] = "all",
@@ -4414,11 +4414,19 @@ def create_app(
                     continue
                 matches.append(record)
             total = len(matches)
+            if limit is None and total > MAX_LIST_PAGE_SIZE:
+                raise HTTPException(
+                    status_code=422, detail="结果超过 200 条，请使用分页查询"
+                )
             exceptions = (
                 matches[offset : offset + limit] if limit is not None else matches
             )
         elif limit is None:
-            exceptions = session.scalars(query).all()
+            exceptions = session.scalars(query.limit(MAX_LIST_PAGE_SIZE + 1)).all()
+            if len(exceptions) > MAX_LIST_PAGE_SIZE:
+                raise HTTPException(
+                    status_code=422, detail="结果超过 200 条，请使用分页查询"
+                )
         else:
             total = session.scalar(
                 select(func.count(ExceptionRecord.id))
@@ -4535,7 +4543,9 @@ def create_app(
             raise HTTPException(status_code=409, detail="不是自营仓入库待处理记录")
         if batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
-        if exception_reason_code(exception.reason) != "ambiguous_product_site":
+        if (
+            exception.reason_code or exception_reason_code(exception.reason)
+        ) != "ambiguous_product_site":
             raise HTTPException(status_code=409, detail="当前记录不需要选择站点")
 
         candidates = [

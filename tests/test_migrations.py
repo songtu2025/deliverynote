@@ -74,6 +74,49 @@ class SchemaMigrationRunnerTests(unittest.TestCase):
             }.issubset(exception_columns)
         )
 
+    def test_existing_exception_reasons_receive_stable_codes(self):
+        with TemporaryDirectory() as directory:
+            database_url = f"sqlite+pysqlite:///{Path(directory) / 'migration.db'}"
+            database = Database(database_url)
+            try:
+                database.create_schema()
+                with database.engine.begin() as connection:
+                    if "reason_code" in {
+                        column["name"]
+                        for column in inspect(database.engine).get_columns("exceptions")
+                    }:
+                        connection.execute(
+                            text("ALTER TABLE exceptions DROP COLUMN reason_code")
+                        )
+                    connection.execute(
+                        text(
+                            "INSERT INTO exceptions "
+                            "(batch_file_id, sku, original_site, full_site, "
+                            "destination, delivery_quantity, allocated_quantity, "
+                            "manual_quantity, reason, status, created_at) "
+                            "VALUES (1, 'SKU-A', '', '', '', 1, 0, 1, "
+                            "'产品信息站点不唯一', 'pending', CURRENT_TIMESTAMP), "
+                            "(1, 'SKU-B', '', '', '', 1, 0, 1, "
+                            "'历史未知原因', 'pending', CURRENT_TIMESTAMP)"
+                        )
+                    )
+            finally:
+                database.dispose()
+
+            migrate_schema(database_url)
+            migrate_schema(database_url)
+            database = Database(database_url)
+            try:
+                with database.engine.connect() as connection:
+                    rows = connection.execute(
+                        text("SELECT reason, reason_code FROM exceptions ORDER BY id")
+                    ).all()
+            finally:
+                database.dispose()
+
+        self.assertEqual(rows[0], ("产品信息站点不唯一", "ambiguous_product_site"))
+        self.assertEqual(rows[1], ("历史未知原因", "unknown"))
+
 
 class PositionDraftRowIndexMigrationTests(unittest.TestCase):
     @staticmethod

@@ -109,6 +109,17 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(ambiguous["reason_code"], "ambiguous_product_site")
         self.assertEqual(ambiguous["allowed_actions"], ["resolve_site"])
 
+        exception.reason_code = "ambiguous_product_site"
+        exception.reason = "更新后的展示文案"
+        renamed = web_api_module._exception_json(
+            exception,
+            [],
+            self_operated=True,
+        )
+        self.assertEqual(renamed["reason_code"], "ambiguous_product_site")
+        self.assertEqual(renamed["allowed_actions"], ["resolve_site"])
+
+        exception.reason_code = None
         exception.reason = "历史批次的未知原因"
         unknown = web_api_module._exception_json(
             exception,
@@ -3248,6 +3259,77 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(updated.json()["stats"]["unfinished_count"], 1)
         self.assertEqual(updated.json()["stats"]["unfinished_quantity"], 1)
         self.assertEqual(updated.json()["stats"]["resolved_count"], 9)
+
+    def test_unpaged_lists_reject_more_than_200_items_without_truncation(self):
+        headers = self.login("admin", "admin-pass")
+        version_ids = self.upload_active_versions(headers)
+        with self.app.state.database.session() as session:
+            session.add_all(
+                Batch(
+                    name=f"批次 {index}",
+                    created_by=1,
+                    **{
+                        f"{kind}_version_id": version_id
+                        for kind, version_id in version_ids.items()
+                    },
+                )
+                for index in range(201)
+            )
+            session.commit()
+
+        unpaged = self.client.get("/api/batches", headers=headers)
+        self.assertEqual(unpaged.status_code, 422)
+        self.assertIn("分页", unpaged.json()["detail"])
+        paged = self.client.get("/api/batches?limit=200", headers=headers)
+        self.assertEqual(paged.status_code, 200)
+        self.assertEqual(paged.json()["total"], 201)
+        self.assertEqual(len(paged.json()["items"]), 200)
+
+        with self.app.state.database.session() as session:
+            batch = session.query(Batch).first()
+            source = BatchFile(
+                batch_id=batch.id,
+                original_name="测试.xlsx",
+                storage_path="unused.xlsx",
+                file_order=1,
+            )
+            session.add(source)
+            session.flush()
+            session.add_all(
+                ExceptionRecord(
+                    batch_file_id=source.id,
+                    sku=f"SKU-{index}",
+                    delivery_quantity=1,
+                    allocated_quantity=0,
+                    manual_quantity=1,
+                    reason="未找到可交货采购需求",
+                )
+                for index in range(201)
+            )
+            session.commit()
+
+        unpaged = self.client.get(
+            f"/api/batches/{batch.id}/exceptions", headers=headers
+        )
+        self.assertEqual(unpaged.status_code, 422)
+        self.assertIn("分页", unpaged.json()["detail"])
+        paged = self.client.get(
+            f"/api/batches/{batch.id}/exceptions?limit=200", headers=headers
+        )
+        self.assertEqual(paged.status_code, 200)
+        self.assertEqual(paged.json()["total"], 201)
+        self.assertEqual(len(paged.json()["items"]), 200)
+
+        searched = self.client.get(
+            f"/api/batches/{batch.id}/exceptions?search=SKU", headers=headers
+        )
+        self.assertEqual(searched.status_code, 422)
+        searched_page = self.client.get(
+            f"/api/batches/{batch.id}/exceptions?search=SKU&limit=200",
+            headers=headers,
+        )
+        self.assertEqual(searched_page.status_code, 200)
+        self.assertEqual(searched_page.json()["total"], 201)
 
     def test_batch_list_query_count_is_constant_as_batches_grow(self):
         admin_headers = self.login("admin", "admin-pass")

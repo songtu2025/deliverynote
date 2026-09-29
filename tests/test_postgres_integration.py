@@ -399,9 +399,28 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                     supplier_version_id=versions["supplier"],
                 )
                 session.add_all([batch, sync_job])
+                session.flush()
+                source = BatchFile(
+                    batch_id=batch.id,
+                    original_name="legacy.xlsx",
+                    storage_path="/legacy.xlsx",
+                    file_order=1,
+                )
+                session.add(source)
+                session.flush()
+                exception = ExceptionRecord(
+                    batch_file_id=source.id,
+                    sku="SKU-A",
+                    delivery_quantity=1,
+                    allocated_quantity=0,
+                    manual_quantity=1,
+                    reason="产品信息站点不唯一",
+                )
+                session.add(exception)
                 session.commit()
                 batch_id = batch.id
                 sync_job_id = sync_job.id
+                exception_id = exception.id
 
             with database.engine.begin() as connection:
                 connection.execute(text("DROP TABLE batch_overreceipt_rules"))
@@ -410,6 +429,7 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                     "purchase_allocated_quantity",
                     "overreceipt_allocated_quantity",
                     "overreceipt_remaining_quantity",
+                    "reason_code",
                 ):
                     connection.execute(
                         text(f"ALTER TABLE exceptions DROP COLUMN {column}")
@@ -453,8 +473,11 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
             with database.session() as session:
                 batch = session.get(Batch, batch_id)
                 sync_job = session.get(PurchaseSyncJob, sync_job_id)
+                exception = session.get(ExceptionRecord, exception_id)
                 self.assertEqual(batch.name, "legacy-batch")
                 self.assertEqual(sync_job.status, "succeeded")
+                self.assertEqual(exception.reason, "产品信息站点不唯一")
+                self.assertEqual(exception.reason_code, "ambiguous_product_site")
         finally:
             database.dispose()
 
@@ -473,6 +496,7 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                 "purchase_allocated_quantity",
                 "overreceipt_allocated_quantity",
                 "overreceipt_remaining_quantity",
+                "reason_code",
             }.issubset(exception_columns)
         )
 
