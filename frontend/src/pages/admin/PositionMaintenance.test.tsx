@@ -24,10 +24,11 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
-const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
-  status,
-  headers: { "Content-Type": "application/json" }
-});
+const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 
 const version: InputVersion = {
   id: 31,
@@ -94,10 +95,12 @@ let discardRequest: Deferred<Response> | null = null;
 let importApplyRequest: Deferred<Response> | null = null;
 let publishRequest: Deferred<Response> | null = null;
 
-function renderMaintenance(overrides: Partial<{
-  onPublished: (published: InputVersion) => void;
-  onBack: () => void;
-}> = {}) {
+function renderMaintenance(
+  overrides: Partial<{
+    onPublished: (published: InputVersion) => void;
+    onBack: () => void;
+  }> = {}
+) {
   return render(
     <PositionMaintenance
       activeVersion={version}
@@ -108,9 +111,9 @@ function renderMaintenance(overrides: Partial<{
 }
 
 function requests(method: string, suffix: string) {
-  return vi.mocked(fetch).mock.calls.filter(([input, init]) =>
-    String(input).includes(suffix) && (init?.method ?? "GET") === method
-  );
+  return vi
+    .mocked(fetch)
+    .mock.calls.filter(([input, init]) => String(input).includes(suffix) && (init?.method ?? "GET") === method);
 }
 
 async function dialogByTitle(title: string): Promise<HTMLElement> {
@@ -155,88 +158,98 @@ describe("PositionMaintenance", () => {
       result.then = completed.then.bind(completed);
       return result;
     });
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
 
-      if (url.endsWith("/api/input-drafts/position") && method === "POST") {
-        if (entryRequest) return entryRequest.promise;
-        if (failEntry) return jsonResponse({ detail: "草稿服务暂时不可用" }, 500);
-        return jsonResponse(draftResponse);
-      }
-      if (url.endsWith("/api/input-drafts/position") && method === "GET") {
-        if (metadataRequest) return metadataRequest.promise;
-        return jsonResponse(metadataResponse ?? draftResponse);
-      }
-      if (url.includes("/api/input-drafts/7/rows?") && method === "GET") {
-        if (rowRequestHandler) return rowRequestHandler(url);
-        return jsonResponse(rowsResponse);
-      }
-      if (url.endsWith("/api/input-drafts/7/rows") && method === "POST") {
-        if (rowWriteRequest) return rowWriteRequest.promise;
-        if (localConflictNextRowWrite) {
-          localConflictNextRowWrite = false;
-          return jsonResponse({ detail: "记录当前不可复制，请修正后重试" }, 409);
+        if (url.endsWith("/api/input-drafts/position") && method === "POST") {
+          if (entryRequest) return entryRequest.promise;
+          if (failEntry) return jsonResponse({ detail: "草稿服务暂时不可用" }, 500);
+          return jsonResponse(draftResponse);
         }
-        if (conflictNextRowWrite) {
-          conflictNextRowWrite = false;
-          return jsonResponse({ detail: "草稿状态已更新", code: "draft_revision_conflict" }, 409);
+        if (url.endsWith("/api/input-drafts/position") && method === "GET") {
+          if (metadataRequest) return metadataRequest.promise;
+          return jsonResponse(metadataResponse ?? draftResponse);
         }
-        return jsonResponse({ row: { ...baseRow, id: 102, change_type: "added" }, revision: 4 }, 201);
-      }
-      if (url.endsWith("/api/input-drafts/7/rows/101") && method === "PUT") {
-        return jsonResponse({ row: { ...baseRow, stocking_position: "不备货", change_type: "modified" }, revision: 8 });
-      }
-      if (url.endsWith("/api/input-drafts/7/rows/101") && method === "DELETE") {
-        if (singleDeleteRequest) return singleDeleteRequest.promise;
-        return jsonResponse({ row_id: 101, revision: 9 });
-      }
-      if (url.endsWith("/api/input-drafts/7/rows/bulk-delete") && method === "POST") {
-        if (bulkDeleteRequest) return bulkDeleteRequest.promise;
-        return jsonResponse({ deleted_ids: [101], revision: 5 });
-      }
-      if (url.endsWith("/api/input-drafts/7/import-preview") && method === "POST") {
-        return jsonResponse({
-          token: "preview-token",
-          draft_id: 7,
-          revision: 3,
-          row_count: 2,
-          diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 },
-          issues: [{ severity: "warning", code: "row_count_changed", message: "数据量变化较大", row_numbers: [] }],
-          error_count: 0,
-          warning_count: 1,
-          valid: true
-        });
-      }
-      if (url.endsWith("/api/input-drafts/7/import-apply") && method === "POST") {
-        if (importApplyRequest) return importApplyRequest.promise;
-        if (expireImportApply) return jsonResponse({ detail: "请重新上传表格预览", code: "draft_import_preview_expired" }, 409);
-        return jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 });
-      }
-      if (url.endsWith("/api/input-drafts/7/validate") && method === "POST") {
-        return jsonResponse(validationResponse);
-      }
-      if (url.endsWith("/api/input-drafts/7/publish") && method === "POST") {
-        if (publishRequest) return publishRequest.promise;
-        if (duplicatePublishNameOnce) {
-          duplicatePublishNameOnce = false;
-          return jsonResponse({ detail: "请更换版本名称", code: "input_version_name_exists" }, 409);
+        if (url.includes("/api/input-drafts/7/rows?") && method === "GET") {
+          if (rowRequestHandler) return rowRequestHandler(url);
+          return jsonResponse(rowsResponse);
         }
-        return jsonResponse({
-          ...version,
-          id: 32,
-          name: "position-20260721",
-          original_name: "position-20260721.xlsx",
-          draft_revision: 4,
-          draft_status: "published"
-        }, 201);
-      }
-      if (url.endsWith("/api/input-drafts/7/discard") && method === "POST") {
-        if (discardRequest) return discardRequest.promise;
-        return jsonResponse({ ...draftResponse, status: "discarded", revision: 4 });
-      }
-      throw new Error(`Unexpected request: ${method} ${url}`);
-    }));
+        if (url.endsWith("/api/input-drafts/7/rows") && method === "POST") {
+          if (rowWriteRequest) return rowWriteRequest.promise;
+          if (localConflictNextRowWrite) {
+            localConflictNextRowWrite = false;
+            return jsonResponse({ detail: "记录当前不可复制，请修正后重试" }, 409);
+          }
+          if (conflictNextRowWrite) {
+            conflictNextRowWrite = false;
+            return jsonResponse({ detail: "草稿状态已更新", code: "draft_revision_conflict" }, 409);
+          }
+          return jsonResponse({ row: { ...baseRow, id: 102, change_type: "added" }, revision: 4 }, 201);
+        }
+        if (url.endsWith("/api/input-drafts/7/rows/101") && method === "PUT") {
+          return jsonResponse({
+            row: { ...baseRow, stocking_position: "不备货", change_type: "modified" },
+            revision: 8
+          });
+        }
+        if (url.endsWith("/api/input-drafts/7/rows/101") && method === "DELETE") {
+          if (singleDeleteRequest) return singleDeleteRequest.promise;
+          return jsonResponse({ row_id: 101, revision: 9 });
+        }
+        if (url.endsWith("/api/input-drafts/7/rows/bulk-delete") && method === "POST") {
+          if (bulkDeleteRequest) return bulkDeleteRequest.promise;
+          return jsonResponse({ deleted_ids: [101], revision: 5 });
+        }
+        if (url.endsWith("/api/input-drafts/7/import-preview") && method === "POST") {
+          return jsonResponse({
+            token: "preview-token",
+            draft_id: 7,
+            revision: 3,
+            row_count: 2,
+            diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 },
+            issues: [{ severity: "warning", code: "row_count_changed", message: "数据量变化较大", row_numbers: [] }],
+            error_count: 0,
+            warning_count: 1,
+            valid: true
+          });
+        }
+        if (url.endsWith("/api/input-drafts/7/import-apply") && method === "POST") {
+          if (importApplyRequest) return importApplyRequest.promise;
+          if (expireImportApply)
+            return jsonResponse({ detail: "请重新上传表格预览", code: "draft_import_preview_expired" }, 409);
+          return jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 });
+        }
+        if (url.endsWith("/api/input-drafts/7/validate") && method === "POST") {
+          return jsonResponse(validationResponse);
+        }
+        if (url.endsWith("/api/input-drafts/7/publish") && method === "POST") {
+          if (publishRequest) return publishRequest.promise;
+          if (duplicatePublishNameOnce) {
+            duplicatePublishNameOnce = false;
+            return jsonResponse({ detail: "请更换版本名称", code: "input_version_name_exists" }, 409);
+          }
+          return jsonResponse(
+            {
+              ...version,
+              id: 32,
+              name: "position-20260721",
+              original_name: "position-20260721.xlsx",
+              draft_revision: 4,
+              draft_status: "published"
+            },
+            201
+          );
+        }
+        if (url.endsWith("/api/input-drafts/7/discard") && method === "POST") {
+          if (discardRequest) return discardRequest.promise;
+          return jsonResponse({ ...draftResponse, status: "discarded", revision: 4 });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      })
+    );
   });
 
   afterEach(() => {
@@ -371,14 +384,16 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
 
-    metadataRequest.resolve(jsonResponse({
-      ...baseDraft,
-      revision: 5,
-      updated_by: 12,
-      updated_at: "2026-07-21T11:05:00",
-      modified_count: 99,
-      diff: { added: 99, modified: 0, deleted: 0, unchanged: 0 }
-    }));
+    metadataRequest.resolve(
+      jsonResponse({
+        ...baseDraft,
+        revision: 5,
+        updated_by: 12,
+        updated_at: "2026-07-21T11:05:00",
+        modified_count: 99,
+        diff: { added: 99, modified: 0, deleted: 0, unchanged: 0 }
+      })
+    );
 
     expect(await screen.findByText("草稿已在其他位置更新")).toBeInTheDocument();
     expect(screen.getByText("修订号 4")).toBeInTheDocument();
@@ -470,14 +485,18 @@ describe("PositionMaintenance", () => {
 
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "old" } });
     await waitFor(() => {
-      expect(requests("GET", "/api/input-drafts/7/rows?").some(([input]) =>
-        new URL(String(input), "http://test").searchParams.get("search") === "old"
-      )).toBe(true);
+      expect(
+        requests("GET", "/api/input-drafts/7/rows?").some(
+          ([input]) => new URL(String(input), "http://test").searchParams.get("search") === "old"
+        )
+      ).toBe(true);
     });
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "new" } });
     expect(await screen.findByText("LATEST-SKU")).toBeInTheDocument();
     expect(screen.getByText("已选择 0 条")).toBeInTheDocument();
-    slow.resolve(jsonResponse({ rows: [{ ...baseRow, id: 201, jiaji_sku: "STALE-SKU" }], total: 1, offset: 0, limit: 20 }));
+    slow.resolve(
+      jsonResponse({ rows: [{ ...baseRow, id: 201, jiaji_sku: "STALE-SKU" }], total: 1, offset: 0, limit: 20 })
+    );
     await waitFor(() => expect(screen.queryByText("STALE-SKU")).not.toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText("站点筛选"), { target: { value: "SEEKWAY:US" } });
@@ -489,14 +508,17 @@ describe("PositionMaintenance", () => {
 
     await waitFor(() => {
       const urls = requests("GET", "/api/input-drafts/7/rows?").map(([input]) => String(input));
-      expect(urls.some((url) =>
-        url.includes("search=new")
-        && url.includes("site=SEEKWAY%3AUS")
-        && url.includes("scale_position=%E7%9F%AD%E5%B0%BE")
-        && url.includes("only_errors=true")
-        && url.includes("only_modified=true")
-        && url.includes("offset=20")
-      )).toBe(true);
+      expect(
+        urls.some(
+          (url) =>
+            url.includes("search=new") &&
+            url.includes("site=SEEKWAY%3AUS") &&
+            url.includes("scale_position=%E7%9F%AD%E5%B0%BE") &&
+            url.includes("only_errors=true") &&
+            url.includes("only_modified=true") &&
+            url.includes("offset=20")
+        )
+      ).toBe(true);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "重置筛选" }));
@@ -537,9 +559,7 @@ describe("PositionMaintenance", () => {
 
     await waitFor(() => {
       const values = requests("GET", "/api/input-drafts/7/rows?")
-        .map(([input]) =>
-          new URL(String(input), "http://test").searchParams.get("search")
-        )
+        .map(([input]) => new URL(String(input), "http://test").searchParams.get("search"))
         .filter(Boolean);
       expect(values).toEqual(["sku"]);
     });
@@ -717,10 +737,9 @@ describe("PositionMaintenance", () => {
     renderMaintenance({ onBack });
     await screen.findByText("SKU-A");
     fireEvent.click(screen.getByRole("button", { name: "下载草稿" }));
-    await waitFor(() => expect(download).toHaveBeenCalledWith(
-      "/api/input-drafts/7/download",
-      "position-draft-r3.xlsx"
-    ));
+    await waitFor(() =>
+      expect(download).toHaveBeenCalledWith("/api/input-drafts/7/download", "position-draft-r3.xlsx")
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "放弃草稿" }));
     expect(await screen.findByText("确定放弃整个服务器草稿？")).toBeInTheDocument();
@@ -795,7 +814,9 @@ describe("PositionMaintenance", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
       expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
     } finally {
-      importApplyRequest.resolve(jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 }));
+      importApplyRequest.resolve(
+        jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 })
+      );
     }
     expect(await screen.findByText("修订号 6")).toBeInTheDocument();
   });
@@ -821,14 +842,19 @@ describe("PositionMaintenance", () => {
       expect(onBack).not.toHaveBeenCalled();
       expect(screen.getByText("发布新的MSKU定位版本")).toBeInTheDocument();
     } finally {
-      publishRequest.resolve(jsonResponse({
-        ...version,
-        id: 32,
-        name: "position-busy",
-        original_name: "position-busy.xlsx",
-        draft_revision: 4,
-        draft_status: "published"
-      }, 201));
+      publishRequest.resolve(
+        jsonResponse(
+          {
+            ...version,
+            id: 32,
+            name: "position-busy",
+            original_name: "position-busy.xlsx",
+            draft_revision: 4,
+            draft_status: "published"
+          },
+          201
+        )
+      );
     }
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
   }, 30_000);
