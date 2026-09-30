@@ -259,6 +259,7 @@ describe("PositionMaintenance", () => {
     const body = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
     expect(body).toMatchObject({ revision: 3, store_site: "SEEKWAY:UK", jiaji_sku: "SKU-B" });
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+    await waitFor(() => expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
     expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
   });
 
@@ -464,6 +465,9 @@ describe("PositionMaintenance", () => {
     renderMaintenance();
     await screen.findByText("SKU-A");
 
+    fireEvent.click(within(screen.getByText("SKU-A").closest("tr")!).getByRole("checkbox"));
+    expect(screen.getByText("已选择 1 条")).toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "old" } });
     await waitFor(() => {
       expect(requests("GET", "/api/input-drafts/7/rows?").some(([input]) =>
@@ -472,6 +476,7 @@ describe("PositionMaintenance", () => {
     });
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "new" } });
     expect(await screen.findByText("LATEST-SKU")).toBeInTheDocument();
+    expect(screen.getByText("已选择 0 条")).toBeInTheDocument();
     slow.resolve(jsonResponse({ rows: [{ ...baseRow, id: 201, jiaji_sku: "STALE-SKU" }], total: 1, offset: 0, limit: 20 }));
     await waitFor(() => expect(screen.queryByText("STALE-SKU")).not.toBeInTheDocument());
 
@@ -493,6 +498,32 @@ describe("PositionMaintenance", () => {
         && url.includes("offset=20")
       )).toBe(true);
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "重置筛选" }));
+    await waitFor(() => {
+      const calls = requests("GET", "/api/input-drafts/7/rows?");
+      const params = new URL(String(calls.at(-1)![0]), "http://test").searchParams;
+      expect(Object.fromEntries(params)).toEqual({ offset: "0", limit: "20" });
+    });
+    expect(screen.getByLabelText("搜索草稿")).toHaveValue("");
+    expect(screen.getByLabelText("站点筛选")).toHaveValue("");
+    expect(screen.getByLabelText("规模定位筛选")).toHaveValue("");
+    expect(screen.getByRole("checkbox", { name: "仅看已修改" })).not.toBeChecked();
+    expect(screen.queryByRole("button", { name: "重置筛选" })).not.toBeInTheDocument();
+  });
+
+  it("retries a failed row read without reopening the draft", async () => {
+    rowRequestHandler = () => jsonResponse({ detail: "草稿记录暂时不可用" }, 500);
+    renderMaintenance();
+    expect(await screen.findByText("草稿记录暂时不可用")).toBeInTheDocument();
+    expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
+
+    rowRequestHandler = () => jsonResponse(rowsResponse);
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+    expect(screen.queryByText("无法读取草稿记录")).not.toBeInTheDocument();
+    expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2);
+    expect(requests("POST", "/api/input-drafts/position")).toHaveLength(1);
   });
 
   it("debounces rapid text filters before requesting rows", async () => {
@@ -538,6 +569,8 @@ describe("PositionMaintenance", () => {
 
     bulkDeleteRequest.resolve(jsonResponse({ deleted_ids: [101], revision: 5 }));
     expect(await screen.findByText("修订号 5")).toBeInTheDocument();
+    expect(screen.getByText("已选择 0 条")).toBeInTheDocument();
+    await waitFor(() => expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
     await waitFor(() => expect(bulkDeleteButton).not.toHaveClass("ant-popover-open"));
   });
 

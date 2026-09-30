@@ -30,13 +30,12 @@ import type { FormInstance, TableProps, UploadProps } from "antd";
 
 import { ApiError, api, download } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
-import { useDebouncedValue } from "../../useDebouncedValue";
+import { usePositionDraftRows } from "./usePositionDraftRows";
 import type {
   InputVersion,
   PositionDiff,
   PositionDraft,
   PositionDraftRow,
-  PositionDraftRowsPage,
   PositionDraftValidation,
   PositionImportPreview,
   PositionIssue
@@ -69,7 +68,6 @@ type BusyAction = "save" | "copy" | "delete" | "bulk-delete" | "import-preview" 
 type PendingLeave = "close" | "back" | null;
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
-const ROW_PAGE_SIZE = 20;
 const SCALE_OPTIONS = ["短尾", "中尾", "长尾"].map((value) => ({ value }));
 const POSITION_ERROR_CODES = {
   revisionConflict: "draft_revision_conflict",
@@ -345,22 +343,14 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [draft, setDraft] = useState<PositionDraft | null>(null);
   const [entryLoading, setEntryLoading] = useState(true);
   const [entryError, setEntryError] = useState<string | null>(null);
-  const [rows, setRows] = useState<PositionDraftRow[]>([]);
-  const [rowsTotal, setRowsTotal] = useState(0);
-  const [rowsLoading, setRowsLoading] = useState(false);
-  const [rowsError, setRowsError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [site, setSite] = useState("");
-  const [scale, setScale] = useState("");
-  const debouncedSearch = useDebouncedValue(search);
-  const debouncedSite = useDebouncedValue(site);
-  const debouncedScale = useDebouncedValue(scale);
-  const [issueFilter, setIssueFilter] = useState<"all" | "errors">("all");
-  const [onlyModified, setOnlyModified] = useState(false);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(ROW_PAGE_SIZE);
-  const [refreshRowsKey, setRefreshRowsKey] = useState(0);
-  const [selectedRowIds, setSelectedRowIds] = useState<number[]>([]);
+  const {
+    rows, rowsTotal, rowsLoading, rowsError,
+    search, setSearch, site, setSite, scale, setScale,
+    issueFilter, setIssueFilter, onlyModified, setOnlyModified,
+    page, setPage, pageSize, setPageSize,
+    selectedRowIds, setSelectedRowIds,
+    refreshRows, resetFilters, hasActiveFilters
+  } = usePositionDraftRows(draft?.id);
   const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
@@ -384,7 +374,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [warningsConfirmed, setWarningsConfirmed] = useState(false);
 
   const entryRequestRef = useRef(0);
-  const rowsRequestRef = useRef(0);
   const metadataRequestRef = useRef(0);
   const revisionRef = useRef(0);
   const keepDeleteConfirmOpenRef = useRef<number | null>(null);
@@ -460,7 +449,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       setDeleteConfirmRowId(null);
       setBulkDeleteConfirmOpen(false);
       setDiscardConfirmOpen(false);
-      setRefreshRowsKey((value) => value + 1);
+      refreshRows();
     } catch (error) {
       if (request === entryRequestRef.current) setEntryError(errorMessage(error, "无法打开库位草稿"));
     } finally {
@@ -472,54 +461,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     void loadDraft();
     return () => {
       entryRequestRef.current += 1;
-      rowsRequestRef.current += 1;
       metadataRequestRef.current += 1;
     };
     // The position endpoint owns create-or-resume semantics; the active version is informational here.
   }, []);
-
-  useEffect(() => {
-    if (!draft) return undefined;
-    const request = ++rowsRequestRef.current;
-    const params = new URLSearchParams({
-      offset: String((page - 1) * pageSize),
-      limit: String(pageSize)
-    });
-    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
-    if (debouncedSite.trim()) params.set("site", debouncedSite.trim());
-    if (debouncedScale.trim()) params.set("scale_position", debouncedScale.trim());
-    if (issueFilter === "errors") params.set("only_errors", "true");
-    if (onlyModified) params.set("only_modified", "true");
-    setRowsLoading(true);
-    setRowsError(null);
-    void api<PositionDraftRowsPage>(`/api/input-drafts/${draft.id}/rows?${params.toString()}`)
-      .then((result) => {
-        if (request !== rowsRequestRef.current) return;
-        setRows(result.rows);
-        setRowsTotal(result.total);
-        setSelectedRowIds((current) => current.filter((id) => result.rows.some((row) => row.id === id)));
-      })
-      .catch((error: unknown) => {
-        if (request !== rowsRequestRef.current) return;
-        setRows([]);
-        setRowsTotal(0);
-        setRowsError(errorMessage(error, "读取草稿记录失败"));
-      })
-      .finally(() => {
-        if (request === rowsRequestRef.current) setRowsLoading(false);
-      });
-    return undefined;
-  }, [
-    debouncedScale,
-    debouncedSearch,
-    debouncedSite,
-    draft?.id,
-    issueFilter,
-    onlyModified,
-    page,
-    pageSize,
-    refreshRowsKey
-  ]);
 
   const acceptRevision = (revision: number) => {
     revisionRef.current = revision;
@@ -529,7 +474,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       updated_at: new Date().toISOString()
     } : current);
     setSelectedRowIds([]);
-    setRefreshRowsKey((value) => value + 1);
+    refreshRows();
     void refreshMetadata(revision);
   };
 
@@ -955,17 +900,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     || publishValidation.error_count > 0
     || (publishValidation.warning_count > 0 && !warningsConfirmed)
     || !publishName.trim();
-  const hasActiveFilters = Boolean(search.trim() || site.trim() || scale.trim() || issueFilter !== "all" || onlyModified);
-
-  const resetFilters = () => {
-    setSearch("");
-    setSite("");
-    setScale("");
-    setIssueFilter("all");
-    setOnlyModified(false);
-    setPage(1);
-  };
-
   return (
     <div className="position-maintenance">
       <div className="position-workspace-heading">
@@ -1179,7 +1113,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             showIcon
             title="无法读取草稿记录"
             description={rowsError}
-            action={<Button size="small" onClick={() => setRefreshRowsKey((value) => value + 1)}>重新加载</Button>}
+            action={<Button size="small" onClick={refreshRows}>重新加载</Button>}
           />
         )}
         <Table<PositionDraftRow>
