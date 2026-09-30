@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App as AntApp, Button, Card, Form, Modal, Popconfirm, Space, Spin, Typography, Upload } from "antd";
+import { Alert, App as AntApp, Button, Card, Modal, Popconfirm, Space, Spin, Typography, Upload } from "antd";
 import { ArrowLeftOutlined, DownloadOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { UploadProps } from "antd";
 
@@ -7,9 +7,10 @@ import { ApiError } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { usePositionDraftSession } from "./usePositionDraftSession";
+import { rowValues, usePositionRowEditor } from "./usePositionRowEditor";
 import { RowEditorDrawer } from "./RowEditorDrawer";
 import * as positionDraftApi from "./positionDraftApi";
-import type { PositionRevisionResponse, PositionRowValues } from "./positionDraftApi";
+import type { PositionRevisionResponse } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
 import { DraftSummary } from "./PositionFeedback";
@@ -31,7 +32,6 @@ interface PositionMaintenanceProps {
 
 type BusyAction =
   "save" | "copy" | "delete" | "bulk-delete" | "import-preview" | "import-apply" | "validate" | "publish" | "discard";
-type PendingLeave = "close" | "back" | null;
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
 const POSITION_ERROR_CODES = {
@@ -43,16 +43,6 @@ const POSITION_ERROR_CODES = {
 function defaultVersionName(): string {
   const parts = beijingDateTimeParts();
   return `position-${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}`;
-}
-
-function rowValues(row: PositionDraftRow): PositionRowValues {
-  return {
-    store_site: row.store_site,
-    jiaji_sku: row.jiaji_sku,
-    msku: row.msku,
-    scale_position: row.scale_position,
-    stocking_position: row.stocking_position
-  };
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -75,11 +65,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerDirty, setDrawerDirty] = useState(false);
-  const [editingRow, setEditingRow] = useState<PositionDraftRow | null>(null);
-  const [pendingLeave, setPendingLeave] = useState<PendingLeave>(null);
-  const [rowForm] = Form.useForm<PositionRowValues>();
+  const editor = usePositionRowEditor(busyAction !== null, onBack);
 
   const [importPreview, setImportPreview] = useState<PositionImportPreview | null>(null);
   const [importFileName, setImportFileName] = useState("");
@@ -95,10 +81,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const keepDiscardConfirmOpenRef = useRef(false);
 
   const clearLocalState = () => {
-    setDrawerOpen(false);
-    setDrawerDirty(false);
-    setEditingRow(null);
-    if (drawerOpen) rowForm.resetFields();
+    editor.reset();
     setImportPreview(null);
     setPublishValidation(null);
     setPublishNameError(null);
@@ -179,80 +162,19 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     }
   };
 
-  const openNewRow = () => {
-    setEditingRow(null);
-    rowForm.setFieldsValue({
-      store_site: "",
-      jiaji_sku: "",
-      msku: "",
-      scale_position: "",
-      stocking_position: ""
-    });
-    setDrawerDirty(false);
-    setDrawerOpen(true);
-  };
-
-  const openEditRow = (row: PositionDraftRow) => {
-    setEditingRow(row);
-    rowForm.setFieldsValue(rowValues(row));
-    setDrawerDirty(false);
-    setDrawerOpen(true);
-  };
-
-  const requestDrawerClose = () => {
-    if (busyAction !== null) return;
-    if (drawerDirty) {
-      setPendingLeave("close");
-      return;
-    }
-    setDrawerOpen(false);
-    setEditingRow(null);
-    rowForm.resetFields();
-  };
-
-  const requestBack = () => {
-    if (busyAction !== null) return;
-    if (drawerOpen && drawerDirty) {
-      setPendingLeave("back");
-      return;
-    }
-    onBack();
-  };
-
-  const confirmLeave = () => {
-    if (busyAction !== null) return;
-    const leave = pendingLeave;
-    setPendingLeave(null);
-    setDrawerDirty(false);
-    setDrawerOpen(false);
-    setEditingRow(null);
-    rowForm.resetFields();
-    if (leave === "back") onBack();
-  };
-
   const saveRow = async () => {
     if (!draft) return;
-    let values: PositionRowValues;
-    try {
-      values = await rowForm.validateFields();
-    } catch {
-      return;
-    }
-    await runRevisionMutation(
-      "save",
-      () => {
-        const payload = { revision: getRevision(), ...values };
-        return editingRow
-          ? positionDraftApi.updateRow(draft.id, editingRow.id, payload)
-          : positionDraftApi.createRow(draft.id, payload);
-      },
-      "记录已保存",
-      () => {
-        setDrawerDirty(false);
-        setDrawerOpen(false);
-        setEditingRow(null);
-        rowForm.resetFields();
-      }
+    await editor.save((values, row) =>
+      runRevisionMutation(
+        "save",
+        () => {
+          const payload = { revision: getRevision(), ...values };
+          return row
+            ? positionDraftApi.updateRow(draft.id, row.id, payload)
+            : positionDraftApi.createRow(draft.id, payload);
+        },
+        "记录已保存"
+      )
     );
   };
 
@@ -435,7 +357,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         copying: busyAction === "copy",
         deleting: busyAction === "delete",
         deleteConfirmRowId,
-        onEdit: openEditRow,
+        onEdit: editor.openEditRow,
         onCopy: copyRow,
         onDeleteOpenChange: (row, open) => {
           if (!open && keepDeleteConfirmOpenRef.current === row.id) {
@@ -522,7 +444,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             type="link"
             icon={<ArrowLeftOutlined />}
             disabled={busyAction !== null}
-            onClick={requestBack}
+            onClick={editor.requestBack}
           >
             返回基础资料
           </Button>
@@ -658,33 +580,34 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         disabled={actionsDisabled}
         bulkDeleting={busyAction === "bulk-delete"}
         bulkDeleteConfirmOpen={bulkDeleteConfirmOpen}
-        onNewRow={openNewRow}
+        onNewRow={editor.openNewRow}
         onBulkDeleteOpenChange={handleBulkDeleteOpenChange}
         onBulkDeleteConfirm={handleBulkDeleteConfirm}
       />
 
       <RowEditorDrawer
-        open={drawerOpen}
-        editingRow={editingRow}
-        form={rowForm}
+        open={editor.open}
+        editingRow={editor.editingRow}
+        form={editor.form}
         saving={busyAction === "save"}
         conflicted={conflictMessage !== null}
-        onDirty={() => setDrawerDirty(true)}
-        onClose={requestDrawerClose}
+        onDirty={editor.markDirty}
+        onClose={editor.requestClose}
         onSave={() => void saveRow()}
       />
 
+      {/* 抽屉一起关闭时由抽屉恢复外部焦点，避免弹窗抢回已销毁的表单控件。 */}
       <Modal
         title="放弃未保存的表单修改？"
-        open={pendingLeave !== null}
-        okText={pendingLeave === "back" ? "放弃并返回" : "放弃修改"}
+        destroyOnHidden
+        focusable={{ focusTriggerAfterClose: editor.open }}
+        open={editor.pendingLeave !== null}
+        okText={editor.pendingLeave === "back" ? "放弃并返回" : "放弃修改"}
         cancelText="继续编辑"
         okButtonProps={{ danger: true, disabled: busyAction !== null }}
         cancelButtonProps={{ disabled: busyAction !== null }}
-        onOk={confirmLeave}
-        onCancel={() => {
-          if (busyAction === null) setPendingLeave(null);
-        }}
+        onOk={editor.confirmLeave}
+        onCancel={editor.cancelLeave}
       >
         <Typography.Paragraph>右侧编辑面板中的内容尚未保存到服务器，离开后无法恢复。</Typography.Paragraph>
       </Modal>

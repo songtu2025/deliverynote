@@ -1,4 +1,4 @@
-import type { PositionDraft } from "../../types";
+import type { PositionDraft, PositionDraftRow } from "../../types";
 
 export interface Deferred<T> {
   promise: Promise<T>;
@@ -33,4 +33,18 @@ export const baseDraft: PositionDraft = {
   error_count: 0,
   warning_count: 0,
   valid: true
+};
+
+export const baseRow: PositionDraftRow = {
+  id: 101,
+  draft_id: 7,
+  row_order: 1,
+  store_site: "SEEKWAY:US",
+  jiaji_sku: "SKU-A",
+  msku: "MSKU-A",
+  scale_position: "短尾",
+  stocking_position: "备货",
+  change_type: "unchanged",
+  deleted: false,
+  issues: []
 };

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { download } from "../../api";
 import type { InputVersion } from "../../types";
 import { PositionMaintenance } from "./PositionMaintenance";
-import { baseDraft, deferred } from "./positionDraftTestSupport";
+import { baseDraft, baseRow, deferred } from "./positionDraftTestSupport";
 import type { Deferred } from "./positionDraftTestSupport";
 
 vi.mock("../../api", async (importOriginal) => {
@@ -27,20 +27,6 @@ const version: InputVersion = {
   active: true,
   created_by: 1,
   created_at: "2026-07-21T09:00:00"
-};
-
-const baseRow = {
-  id: 101,
-  draft_id: 7,
-  row_order: 1,
-  store_site: "SEEKWAY:US",
-  jiaji_sku: "SKU-A",
-  msku: "MSKU-A",
-  scale_position: "短尾",
-  stocking_position: "备货",
-  change_type: "unchanged",
-  deleted: false,
-  issues: []
 };
 
 let draftResponse = { ...baseDraft };
@@ -83,6 +69,11 @@ function requests(method: string, suffix: string) {
   return vi
     .mocked(fetch)
     .mock.calls.filter(([input, init]) => String(input).includes(suffix) && (init?.method ?? "GET") === method);
+}
+
+function fillNewRow() {
+  fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
+  fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
 }
 
 async function dialogByTitle(title: string): Promise<HTMLElement> {
@@ -228,8 +219,10 @@ describe("PositionMaintenance", () => {
     expect(screen.getByText("修订号 3")).toBeInTheDocument();
     expect(screen.getByText("新增 0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
-    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
-    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+    expect(await screen.findByText("请输入店铺-站点")).toBeInTheDocument();
+    expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(0);
+    fillNewRow();
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
 
     await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
@@ -785,6 +778,34 @@ describe("PositionMaintenance", () => {
     expect(await screen.findAllByText("服务器草稿已放弃，当前正式版本未改变")).toHaveLength(1);
   });
 
+  it.each([500, 409])(
+    "keeps failed form input and retries without advancing revision after %s",
+    async (status) => {
+      rowWriteRequest = deferred<Response>();
+      renderMaintenance();
+      await screen.findByText("SKU-A");
+      fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+      fillNewRow();
+      fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+      await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+      rowWriteRequest.resolve(jsonResponse({ detail: "演示记录保存失败，请重试" }, status));
+      expect(await screen.findByText("演示记录保存失败，请重试")).toBeInTheDocument();
+      expect(screen.getByLabelText("店铺-站点")).toHaveValue("SEEKWAY:UK");
+      expect(screen.getByLabelText("积加 SKU")).toHaveValue("SKU-B");
+      expect(screen.getByText("修订号 3")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
+      rowWriteRequest = null;
+      await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toBeEnabled());
+      fireEvent.click(screen.getByRole("button", { name: /保存到草稿$/ }));
+      expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+      const writes = requests("POST", "/api/input-drafts/7/rows");
+      expect(writes).toHaveLength(2);
+      expect(writes.map(([, init]) => JSON.parse(String(init?.body)).revision)).toEqual([3, 3]);
+      expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
+    },
+    15_000
+  );
+
   it("asks before returning only when the drawer contains unsaved form changes", async () => {
     const onBack = vi.fn();
     renderMaintenance({ onBack });
@@ -795,6 +816,10 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
     expect(await screen.findByText("放弃未保存的表单修改？")).toBeInTheDocument();
     expect(onBack).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "继续编辑" }));
+    expect(screen.getByLabelText("店铺-站点")).toHaveValue("SEEKWAY:UK");
+    fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
+    expect(await screen.findByText("放弃未保存的表单修改？")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "放弃并返回" }));
     expect(onBack).toHaveBeenCalledOnce();
   });
@@ -808,6 +833,7 @@ describe("PositionMaintenance", () => {
     fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
     fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
     const drawer = await dialogByTitle("新增库位记录");
+    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
 
     try {
