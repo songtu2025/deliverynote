@@ -19,13 +19,7 @@ import {
   Upload,
   message
 } from "antd";
-import {
-  ArrowLeftOutlined,
-  DownloadOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  UploadOutlined
-} from "@ant-design/icons";
+import { ArrowLeftOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { FormInstance, TableProps, UploadProps } from "antd";
 
 import { ApiError, api, download } from "../../api";
@@ -64,7 +58,8 @@ interface PublishResponse extends InputVersion {
   draft_status: PositionDraft["status"];
 }
 
-type BusyAction = "save" | "copy" | "delete" | "bulk-delete" | "import-preview" | "import-apply" | "validate" | "publish" | "discard";
+type BusyAction =
+  "save" | "copy" | "delete" | "bulk-delete" | "import-preview" | "import-apply" | "validate" | "publish" | "discard";
 type PendingLeave = "close" | "back" | null;
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
@@ -173,12 +168,16 @@ function RowEditorDrawer({
       onClose={() => {
         if (!saving) onClose();
       }}
-      footer={(
+      footer={
         <div className="drawer-footer">
-          <Button disabled={saving} onClick={onClose}>取消</Button>
-          <Button type="primary" loading={saving} disabled={conflicted} onClick={onSave}>保存到草稿</Button>
+          <Button disabled={saving} onClick={onClose}>
+            取消
+          </Button>
+          <Button type="primary" loading={saving} disabled={conflicted} onClick={onSave}>
+            保存到草稿
+          </Button>
         </div>
-      )}
+      }
     >
       <Alert
         className="inline-alert"
@@ -208,7 +207,11 @@ function RowEditorDrawer({
           <Form.Item label="MSKU（可选）" name="msku" extra="同一站点和积加 SKU 有多行时，MSKU 必须填写且唯一。">
             <Input aria-label="MSKU" placeholder="可留空" />
           </Form.Item>
-          <Form.Item label="规模定位（可选）" name="scale_position" extra="常用值为短尾、中尾、长尾；已有自定义值可以继续保留。">
+          <Form.Item
+            label="规模定位（可选）"
+            name="scale_position"
+            extra="常用值为短尾、中尾、长尾；已有自定义值可以继续保留。"
+          >
             <AutoComplete aria-label="规模定位" options={SCALE_OPTIONS} placeholder="选择常用值或输入自定义值" />
           </Form.Item>
           <Form.Item label="备货定位（可选）" name="stocking_position" extra="用于补充待处理导出中的备货定位。">
@@ -259,7 +262,9 @@ function ImportPreviewDialog({
             description="只有确认应用后才会修改服务器草稿；当前正式版本不会改变。"
           />
           <DiffTags diff={preview.diff} />
-          <Typography.Text>错误 {preview.error_count} · 警告 {preview.warning_count}</Typography.Text>
+          <Typography.Text>
+            错误 {preview.error_count} · 警告 {preview.warning_count}
+          </Typography.Text>
           <IssueList issues={preview.issues} />
         </Space>
       )}
@@ -312,21 +317,25 @@ function PublishDialog({
     >
       {validation && (
         <Space orientation="vertical" size={14} style={{ width: "100%" }}>
-          <Alert
-            type="info"
-            showIcon
-            title="仅用于新批次；已有批次不变"
-            description="发布后立即启用。"
-          />
+          <Alert type="info" showIcon title="仅用于新批次；已有批次不变" description="发布后立即启用。" />
           <Form layout="vertical">
             <Form.Item label="新版本名称" required validateStatus={nameError ? "error" : undefined} help={nameError}>
-              <Input aria-label="新版本名称" value={versionName} maxLength={200} onChange={(event) => onNameChange(event.target.value)} />
+              <Input
+                aria-label="新版本名称"
+                value={versionName}
+                maxLength={200}
+                onChange={(event) => onNameChange(event.target.value)}
+              />
             </Form.Item>
           </Form>
           {publishError && <Alert type="error" showIcon title="发布未完成" description={publishError} />}
           <DiffTags diff={validation.diff} />
-          {validation.error_count > 0 && <Alert type="error" showIcon title={`存在 ${validation.error_count} 个错误，修正后才能发布`} />}
-          {validation.warning_count > 0 && <Alert type="warning" showIcon title={`存在 ${validation.warning_count} 个警告，请确认后发布`} />}
+          {validation.error_count > 0 && (
+            <Alert type="error" showIcon title={`存在 ${validation.error_count} 个错误，修正后才能发布`} />
+          )}
+          {validation.warning_count > 0 && (
+            <Alert type="warning" showIcon title={`存在 ${validation.warning_count} 个警告，请确认后发布`} />
+          )}
           <IssueList issues={validation.issues} />
           {validation.warning_count > 0 && (
             <Checkbox checked={warningsConfirmed} onChange={(event) => onWarningsChange(event.target.checked)}>
@@ -344,12 +353,29 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [entryLoading, setEntryLoading] = useState(true);
   const [entryError, setEntryError] = useState<string | null>(null);
   const {
-    rows, rowsTotal, rowsLoading, rowsError,
-    search, setSearch, site, setSite, scale, setScale,
-    issueFilter, setIssueFilter, onlyModified, setOnlyModified,
-    page, setPage, pageSize, setPageSize,
-    selectedRowIds, setSelectedRowIds,
-    refreshRows, resetFilters, hasActiveFilters
+    rows,
+    rowsTotal,
+    rowsLoading,
+    rowsError,
+    search,
+    setSearch,
+    site,
+    setSite,
+    scale,
+    setScale,
+    issueFilter,
+    setIssueFilter,
+    onlyModified,
+    setOnlyModified,
+    page,
+    setPage,
+    pageSize,
+    setPageSize,
+    selectedRowIds,
+    setSelectedRowIds,
+    refreshRows,
+    resetFilters,
+    hasActiveFilters
   } = usePositionDraftRows(draft?.id);
   const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
@@ -407,21 +433,25 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       return;
     }
     if (summary.revision !== expectedRevision) return;
-    setDraft((current) => current && current.id === summary.id && current.revision === expectedRevision ? {
-      ...current,
-      status: summary.status,
-      row_count: summary.row_count,
-      modified_count: summary.modified_count,
-      diff: summary.diff,
-      issues: summary.issues,
-      error_count: summary.error_count,
-      warning_count: summary.warning_count,
-      valid: summary.valid,
-      updated_by: summary.updated_by,
-      updated_at: summary.updated_at,
-      active_version_id: summary.active_version_id,
-      active_version_name: summary.active_version_name
-    } : current);
+    setDraft((current) =>
+      current && current.id === summary.id && current.revision === expectedRevision
+        ? {
+            ...current,
+            status: summary.status,
+            row_count: summary.row_count,
+            modified_count: summary.modified_count,
+            diff: summary.diff,
+            issues: summary.issues,
+            error_count: summary.error_count,
+            warning_count: summary.warning_count,
+            valid: summary.valid,
+            updated_by: summary.updated_by,
+            updated_at: summary.updated_at,
+            active_version_id: summary.active_version_id,
+            active_version_name: summary.active_version_name
+          }
+        : current
+    );
   };
 
   const refreshMetadata = async (expectedRevision: number) => {
@@ -468,11 +498,15 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const acceptRevision = (revision: number) => {
     revisionRef.current = revision;
-    setDraft((current) => current ? {
-      ...current,
-      revision,
-      updated_at: new Date().toISOString()
-    } : current);
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            revision,
+            updated_at: new Date().toISOString()
+          }
+        : current
+    );
     setSelectedRowIds([]);
     refreshRows();
     void refreshMetadata(revision);
@@ -574,10 +608,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       : `/api/input-drafts/${draft.id}/rows`;
     await runRevisionMutation(
       "save",
-      () => api<RevisionResponse>(path, {
-        method: editingRow ? "PUT" : "POST",
-        body: JSON.stringify({ revision: revisionRef.current, ...values })
-      }),
+      () =>
+        api<RevisionResponse>(path, {
+          method: editingRow ? "PUT" : "POST",
+          body: JSON.stringify({ revision: revisionRef.current, ...values })
+        }),
       "记录已保存",
       () => {
         setDrawerDirty(false);
@@ -592,10 +627,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return;
     await runRevisionMutation(
       "copy",
-      () => api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows`, {
-        method: "POST",
-        body: JSON.stringify({ revision: revisionRef.current, ...rowValues(row) })
-      }),
+      () =>
+        api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows`, {
+          method: "POST",
+          body: JSON.stringify({ revision: revisionRef.current, ...rowValues(row) })
+        }),
       "记录已复制到服务器草稿"
     );
   };
@@ -604,10 +640,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return false;
     return runRevisionMutation(
       "delete",
-      () => api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/${row.id}`, {
-        method: "DELETE",
-        body: JSON.stringify({ revision: revisionRef.current })
-      }),
+      () =>
+        api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/${row.id}`, {
+          method: "DELETE",
+          body: JSON.stringify({ revision: revisionRef.current })
+        }),
       "记录已从服务器草稿删除",
       () => setDeleteConfirmRowId(null)
     );
@@ -617,10 +654,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft || selectedRowIds.length === 0) return false;
     return runRevisionMutation(
       "bulk-delete",
-      () => api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/bulk-delete`, {
-        method: "POST",
-        body: JSON.stringify({ revision: revisionRef.current, row_ids: selectedRowIds })
-      }),
+      () =>
+        api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/bulk-delete`, {
+          method: "POST",
+          body: JSON.stringify({ revision: revisionRef.current, row_ids: selectedRowIds })
+        }),
       `已删除 ${selectedRowIds.length} 条草稿记录`,
       () => setBulkDeleteConfirmOpen(false)
     );
@@ -699,7 +737,9 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setBusyAction("validate");
     setActionError(null);
     try {
-      const validation = await api<PositionDraftValidation>(`/api/input-drafts/${draft.id}/validate`, { method: "POST" });
+      const validation = await api<PositionDraftValidation>(`/api/input-drafts/${draft.id}/validate`, {
+        method: "POST"
+      });
       if (validation.revision !== revisionRef.current) {
         invalidateLocalState("草稿已由其他管理员修改，请刷新后重试");
         return;
@@ -770,101 +810,128 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     }
   };
 
-  const rowColumns = useMemo<NonNullable<TableProps<PositionDraftRow>["columns"]>>(() => [
-    { title: "店铺-站点", dataIndex: "store_site", width: 130, ellipsis: true },
-    { title: "积加 SKU", dataIndex: "jiaji_sku", width: 120, ellipsis: true },
-    { title: "MSKU", dataIndex: "msku", width: 120, ellipsis: true, render: (value: string) => value || "—" },
-    { title: "规模定位", dataIndex: "scale_position", width: 90, ellipsis: true, render: (value: string) => value || "—" },
-    { title: "备货定位", dataIndex: "stocking_position", width: 100, ellipsis: true, render: (value: string) => value || "—" },
-    {
-      title: "修改状态",
-      dataIndex: "change_type",
-      width: 90,
-      render: (value: PositionDraftRow["change_type"]) => {
-        const definitions = {
-          unchanged: { color: "default", label: "未变化" },
-          added: { color: "green", label: "新增" },
-          modified: { color: "blue", label: "已修改" },
-          deleted: { color: "red", label: "已删除" }
-        } as const;
-        const definition = definitions[value];
-        return <Tag color={definition.color}>{definition.label}</Tag>;
-      }
-    },
-    {
-      title: "问题",
-      dataIndex: "issues",
-      width: 80,
-      render: (issues: PositionIssue[]) => issues.length === 0
-        ? <Typography.Text type="secondary">无</Typography.Text>
-        : <Tag color={issues.some((issue) => issue.severity === "error") ? "error" : "warning"}>{issues.length} 项</Tag>
-    },
-    {
-      title: "操作",
-      key: "actions",
-      width: 150,
-      render: (_, row) => (
-        <Space size={0}>
-          <Button
-            size="small"
-            type="link"
-            aria-label={rowActionLabel("编辑", row)}
-            disabled={actionsDisabled}
-            onClick={() => openEditRow(row)}
-          >
-            编辑
-          </Button>
-          <Button
-            size="small"
-            type="link"
-            aria-label={rowActionLabel("复制", row)}
-            disabled={actionsDisabled}
-            loading={busyAction === "copy"}
-            onClick={() => void copyRow(row)}
-          >
-            复制
-          </Button>
-          <Popconfirm
-            fresh
-            open={deleteConfirmRowId === row.id}
-            title={`删除 ${row.jiaji_sku}？`}
-            description="删除会立即保存到服务器草稿，发布前不会影响正式版本。"
-            okText="确认删除"
-            cancelText="取消"
-            cancelButtonProps={{ disabled: busyAction === "delete" && deleteConfirmRowId === row.id }}
-            onOpenChange={(open) => {
-              if (!open && keepDeleteConfirmOpenRef.current === row.id) {
-                keepDeleteConfirmOpenRef.current = null;
-                return;
-              }
-              if (!open && busyAction === "delete") return;
-              setDeleteConfirmRowId(open ? row.id : null);
-            }}
-            onConfirm={async () => {
-              keepDeleteConfirmOpenRef.current = null;
-              if (!await deleteRow(row)) keepDeleteConfirmOpenRef.current = row.id;
-            }}
-          >
+  const rowColumns = useMemo<NonNullable<TableProps<PositionDraftRow>["columns"]>>(
+    () => [
+      { title: "店铺-站点", dataIndex: "store_site", width: 130, ellipsis: true },
+      { title: "积加 SKU", dataIndex: "jiaji_sku", width: 120, ellipsis: true },
+      { title: "MSKU", dataIndex: "msku", width: 120, ellipsis: true, render: (value: string) => value || "—" },
+      {
+        title: "规模定位",
+        dataIndex: "scale_position",
+        width: 90,
+        ellipsis: true,
+        render: (value: string) => value || "—"
+      },
+      {
+        title: "备货定位",
+        dataIndex: "stocking_position",
+        width: 100,
+        ellipsis: true,
+        render: (value: string) => value || "—"
+      },
+      {
+        title: "修改状态",
+        dataIndex: "change_type",
+        width: 90,
+        render: (value: PositionDraftRow["change_type"]) => {
+          const definitions = {
+            unchanged: { color: "default", label: "未变化" },
+            added: { color: "green", label: "新增" },
+            modified: { color: "blue", label: "已修改" },
+            deleted: { color: "red", label: "已删除" }
+          } as const;
+          const definition = definitions[value];
+          return <Tag color={definition.color}>{definition.label}</Tag>;
+        }
+      },
+      {
+        title: "问题",
+        dataIndex: "issues",
+        width: 80,
+        render: (issues: PositionIssue[]) =>
+          issues.length === 0 ? (
+            <Typography.Text type="secondary">无</Typography.Text>
+          ) : (
+            <Tag color={issues.some((issue) => issue.severity === "error") ? "error" : "warning"}>
+              {issues.length} 项
+            </Tag>
+          )
+      },
+      {
+        title: "操作",
+        key: "actions",
+        width: 150,
+        render: (_, row) => (
+          <Space size={0}>
             <Button
               size="small"
               type="link"
-              danger
-              aria-label={rowActionLabel("删除", row)}
+              aria-label={rowActionLabel("编辑", row)}
               disabled={actionsDisabled}
-              loading={busyAction === "delete"}
+              onClick={() => openEditRow(row)}
             >
-              删除
+              编辑
             </Button>
-          </Popconfirm>
-        </Space>
-      )
-    }
-  ], [actionsDisabled, busyAction, deleteConfirmRowId]);
+            <Button
+              size="small"
+              type="link"
+              aria-label={rowActionLabel("复制", row)}
+              disabled={actionsDisabled}
+              loading={busyAction === "copy"}
+              onClick={() => void copyRow(row)}
+            >
+              复制
+            </Button>
+            <Popconfirm
+              fresh
+              open={deleteConfirmRowId === row.id}
+              title={`删除 ${row.jiaji_sku}？`}
+              description="删除会立即保存到服务器草稿，发布前不会影响正式版本。"
+              okText="确认删除"
+              cancelText="取消"
+              cancelButtonProps={{ disabled: busyAction === "delete" && deleteConfirmRowId === row.id }}
+              onOpenChange={(open) => {
+                if (!open && keepDeleteConfirmOpenRef.current === row.id) {
+                  keepDeleteConfirmOpenRef.current = null;
+                  return;
+                }
+                if (!open && busyAction === "delete") return;
+                setDeleteConfirmRowId(open ? row.id : null);
+              }}
+              onConfirm={async () => {
+                keepDeleteConfirmOpenRef.current = null;
+                if (!(await deleteRow(row))) keepDeleteConfirmOpenRef.current = row.id;
+              }}
+            >
+              <Button
+                size="small"
+                type="link"
+                danger
+                aria-label={rowActionLabel("删除", row)}
+                disabled={actionsDisabled}
+                loading={busyAction === "delete"}
+              >
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        )
+      }
+    ],
+    [actionsDisabled, busyAction, deleteConfirmRowId]
+  );
 
   if (entryLoading && !draft) {
     return (
       <div>
-        <Button autoFocus aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
+        <Button
+          autoFocus
+          aria-label="返回基础资料"
+          className="back-link"
+          type="link"
+          icon={<ArrowLeftOutlined />}
+          onClick={onBack}
+        >
           返回基础资料
         </Button>
         <div style={{ minHeight: 360, display: "grid", placeItems: "center" }}>
@@ -877,7 +944,14 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   if (entryError && !draft) {
     return (
       <div>
-        <Button autoFocus aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} onClick={onBack}>
+        <Button
+          autoFocus
+          aria-label="返回基础资料"
+          className="back-link"
+          type="link"
+          icon={<ArrowLeftOutlined />}
+          onClick={onBack}
+        >
           返回基础资料
         </Button>
         <Card>
@@ -886,7 +960,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             showIcon
             title="无法打开库位草稿"
             description={entryError}
-            action={<Button icon={<ReloadOutlined />} onClick={() => void loadDraft()}>重新尝试</Button>}
+            action={
+              <Button icon={<ReloadOutlined />} onClick={() => void loadDraft()}>
+                重新尝试
+              </Button>
+            }
           />
         </Card>
       </div>
@@ -896,22 +974,37 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   if (!draft) return null;
 
   const diff = draft.diff ?? EMPTY_DIFF;
-  const publishBlocked = !publishValidation
-    || publishValidation.error_count > 0
-    || (publishValidation.warning_count > 0 && !warningsConfirmed)
-    || !publishName.trim();
+  const publishBlocked =
+    !publishValidation ||
+    publishValidation.error_count > 0 ||
+    (publishValidation.warning_count > 0 && !warningsConfirmed) ||
+    !publishName.trim();
   return (
     <div className="position-maintenance">
       <div className="position-workspace-heading">
         <div className="position-workspace-title">
-          <Button autoFocus aria-label="返回基础资料" className="back-link" type="link" icon={<ArrowLeftOutlined />} disabled={busyAction !== null} onClick={requestBack}>
+          <Button
+            autoFocus
+            aria-label="返回基础资料"
+            className="back-link"
+            type="link"
+            icon={<ArrowLeftOutlined />}
+            disabled={busyAction !== null}
+            onClick={requestBack}
+          >
             返回基础资料
           </Button>
-          <Typography.Title level={2} style={{ margin: 0 }}>MSKU 定位维护</Typography.Title>
-          <Typography.Text type="secondary">基于 {draft.base_version_name}；修改自动保存到草稿，发布后生效。</Typography.Text>
+          <Typography.Title level={2} style={{ margin: 0 }}>
+            MSKU 定位维护
+          </Typography.Title>
+          <Typography.Text type="secondary">
+            基于 {draft.base_version_name}；修改自动保存到草稿，发布后生效。
+          </Typography.Text>
         </div>
         <Space wrap className="position-workspace-actions">
-          <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void downloadDraft()}>下载草稿</Button>
+          <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void downloadDraft()}>
+            下载草稿
+          </Button>
           <Upload accept=".xls,.xlsx" showUploadList={false} disabled={actionsDisabled} customRequest={previewImport}>
             <Button
               aria-label="Excel 整表替换"
@@ -941,12 +1034,19 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             }}
             onConfirm={async () => {
               keepDiscardConfirmOpenRef.current = false;
-              if (!await discardDraft()) keepDiscardConfirmOpenRef.current = true;
+              if (!(await discardDraft())) keepDiscardConfirmOpenRef.current = true;
             }}
           >
-            <Button danger disabled={discardDisabled} loading={busyAction === "discard"}>放弃草稿</Button>
+            <Button danger disabled={discardDisabled} loading={busyAction === "discard"}>
+              放弃草稿
+            </Button>
           </Popconfirm>
-          <Button type="primary" disabled={actionsDisabled} loading={busyAction === "validate"} onClick={() => void openPublish()}>
+          <Button
+            type="primary"
+            disabled={actionsDisabled}
+            loading={busyAction === "validate"}
+            onClick={() => void openPublish()}
+          >
             发布新版本
           </Button>
         </Space>
@@ -957,13 +1057,13 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         type="success"
         showIcon
         title="草稿已自动保存"
-        description={(
+        description={
           <Space wrap separator={<span aria-hidden="true">·</span>}>
             <span>修订号 {draft.revision}</span>
             <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>
             <span>最后编辑人：用户 #{draft.updated_by}</span>
           </Space>
-        )}
+        }
       />
 
       {baseVersionChanged && (
@@ -983,11 +1083,40 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
           showIcon
           title="草稿已在其他位置更新"
           description={conflictMessage}
-          action={<Button aria-label="刷新草稿" icon={<ReloadOutlined />} loading={entryLoading} onClick={() => void loadDraft()}>刷新草稿</Button>}
+          action={
+            <Button
+              aria-label="刷新草稿"
+              icon={<ReloadOutlined />}
+              loading={entryLoading}
+              onClick={() => void loadDraft()}
+            >
+              刷新草稿
+            </Button>
+          }
         />
       )}
-      {actionError && <Alert className="inline-alert" type="error" showIcon closable title="操作失败" description={actionError} onClose={() => setActionError(null)} />}
-      {importError && <Alert className="inline-alert" type="error" showIcon closable title="Excel 替换未完成" description={importError} onClose={() => setImportError(null)} />}
+      {actionError && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          closable
+          title="操作失败"
+          description={actionError}
+          onClose={() => setActionError(null)}
+        />
+      )}
+      {importError && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          closable
+          title="Excel 替换未完成"
+          description={importError}
+          onClose={() => setImportError(null)}
+        />
+      )}
 
       <section className="position-summary-strip" aria-label="草稿摘要">
         <div className="position-summary-metric">
@@ -1018,8 +1147,22 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
       <Card
         className="position-records-card"
-        title={<span>草稿记录 <small>共 {rowsTotal} 条</small></span>}
-        extra={<Button aria-label="新增记录" type="primary" icon={<PlusOutlined />} disabled={actionsDisabled} onClick={openNewRow}>新增记录</Button>}
+        title={
+          <span>
+            草稿记录 <small>共 {rowsTotal} 条</small>
+          </span>
+        }
+        extra={
+          <Button
+            aria-label="新增记录"
+            type="primary"
+            icon={<PlusOutlined />}
+            disabled={actionsDisabled}
+            onClick={openNewRow}
+          >
+            新增记录
+          </Button>
+        }
       >
         <div className="table-toolbar position-filter-toolbar">
           <div className="position-filter-field position-filter-search">
@@ -1030,7 +1173,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
               allowClear
               value={search}
               placeholder="站点、SKU、MSKU 或定位"
-              onChange={(event) => { setPage(1); setSearch(event.target.value); }}
+              onChange={(event) => {
+                setPage(1);
+                setSearch(event.target.value);
+              }}
             />
           </div>
           <div className="position-filter-field">
@@ -1041,7 +1187,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
               allowClear
               value={site}
               placeholder="精确筛选"
-              onChange={(event) => { setPage(1); setSite(event.target.value); }}
+              onChange={(event) => {
+                setPage(1);
+                setSite(event.target.value);
+              }}
             />
           </div>
           <div className="position-filter-field">
@@ -1052,7 +1201,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
               allowClear
               value={scale}
               placeholder="精确筛选"
-              onChange={(event) => { setPage(1); setScale(event.target.value); }}
+              onChange={(event) => {
+                setPage(1);
+                setScale(event.target.value);
+              }}
             />
           </div>
           <div className="position-filter-field">
@@ -1061,18 +1213,32 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
               id="position-issue-filter"
               aria-label="问题筛选"
               value={issueFilter}
-              options={[{ value: "all", label: "全部问题" }, { value: "errors", label: "仅错误" }]}
-              onChange={(value) => { setPage(1); setIssueFilter(value); }}
+              options={[
+                { value: "all", label: "全部问题" },
+                { value: "errors", label: "仅错误" }
+              ]}
+              onChange={(value) => {
+                setPage(1);
+                setIssueFilter(value);
+              }}
             />
           </div>
           <div className="position-filter-field position-filter-scope">
             <span>范围</span>
-            <Checkbox checked={onlyModified} onChange={(event) => { setPage(1); setOnlyModified(event.target.checked); }}>
+            <Checkbox
+              checked={onlyModified}
+              onChange={(event) => {
+                setPage(1);
+                setOnlyModified(event.target.checked);
+              }}
+            >
               仅看已修改
             </Checkbox>
           </div>
           {hasActiveFilters && (
-            <Button aria-label="重置筛选" icon={<ReloadOutlined />} onClick={resetFilters}>重置</Button>
+            <Button aria-label="重置筛选" icon={<ReloadOutlined />} onClick={resetFilters}>
+              重置
+            </Button>
           )}
         </div>
         <div className="position-selection-bar">
@@ -1097,10 +1263,14 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             }}
             onConfirm={async () => {
               keepBulkDeleteConfirmOpenRef.current = false;
-              if (!await bulkDelete()) keepBulkDeleteConfirmOpenRef.current = true;
+              if (!(await bulkDelete())) keepBulkDeleteConfirmOpenRef.current = true;
             }}
           >
-            <Button danger disabled={selectedRowIds.length === 0 || actionsDisabled} loading={busyAction === "bulk-delete"}>
+            <Button
+              danger
+              disabled={selectedRowIds.length === 0 || actionsDisabled}
+              loading={busyAction === "bulk-delete"}
+            >
               批量删除（{selectedRowIds.length}）
             </Button>
           </Popconfirm>
@@ -1113,7 +1283,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             showIcon
             title="无法读取草稿记录"
             description={rowsError}
-            action={<Button size="small" onClick={refreshRows}>重新加载</Button>}
+            action={
+              <Button size="small" onClick={refreshRows}>
+                重新加载
+              </Button>
+            }
           />
         )}
         <Table<PositionDraftRow>
