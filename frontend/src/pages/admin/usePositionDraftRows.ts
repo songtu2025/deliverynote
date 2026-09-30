@@ -52,7 +52,9 @@ export function usePositionDraftRows(draftId?: number) {
       .finally(() => {
         if (active) setRowsLoading(false);
       });
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [
     debouncedScale,
     debouncedSearch,
