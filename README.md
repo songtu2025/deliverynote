@@ -313,9 +313,18 @@ Windows PowerShell 使用 `.venv\Scripts\Activate.ps1` 激活虚拟环境。
 ```bash
 cd frontend
 npm ci
+npm run format:check
+npm run typecheck
+npm run test:quality
 npm run test
 npm run build
 ```
+
+上述命令适用于 Windows PowerShell 和 Linux/CI。`npm ci` 负责安装依赖，其余检查命令不会安装依赖；格式检查不会改写文件，独立类型检查不会生成文件。
+
+`format:check` 检查相对 `HEAD` 的前端已暂存、未暂存及未跟踪文件；提交后复查某个范围使用 `npm run format:check -- --base <起始提交>`。CI 使用 PR 的目标分支提交或本次推送前的提交作为起点，检查范围内所有提交的最终变更。锁文件和非前端文件不参与格式检查。
+
+`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题会返回非零状态。当前采用增量门禁，不批量格式化历史源码。TypeScript 保留现有 7.0.2；ESLint 尚未配置，待 TypeScript 检查插件的官方兼容性确认后再接入，因此这里不是完整的 Seekway 前端质量门禁。
 
 部署配置：
 
@@ -324,7 +333,7 @@ docker compose config
 git diff --check
 ```
 
-CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、后端测试、前端测试与构建、依赖检查和 Compose 配置校验。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
+CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、后端测试、前端增量格式检查、独立类型检查、质量门禁测试、前端测试与构建、依赖检查和 Compose 配置校验。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
 
 也可以显式运行统一迁移命令：
 

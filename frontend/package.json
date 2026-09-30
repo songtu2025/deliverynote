@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "format:check": "node scripts/check-format.mjs",
+    "format:check:all": "node scripts/check-format.mjs --all",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit --composite false -p tsconfig.node.json",
+    "test:quality": "node --test scripts/tests/*.mjs",
     "build": "tsc -b && vite build",
     "test": "vitest run --maxWorkers=1 --fileParallelism=false"
   },
@@ -21,6 +25,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^29.1.1",
+    "prettier": "3.9.9",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10"

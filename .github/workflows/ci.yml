@@ -52,7 +52,7 @@ jobs:
         run: python -m pip check
 
   frontend:
-    name: 前端测试与构建
+    name: 前端增量格式、类型检查与测试构建
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,6 +61,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
@@ -68,6 +69,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: 安装依赖
         run: npm ci
+      - name: 增量格式检查
+        env:
+          FORMAT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: npm run format:check -- --base "$FORMAT_BASE"
+      - name: 独立类型检查
+        run: npm run typecheck
+      - name: 质量门禁测试
+        run: npm run test:quality
       - name: 前端测试
         run: npm run test
       - name: 生产构建
