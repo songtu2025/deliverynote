@@ -2,14 +2,7 @@ import { Alert, AutoComplete, Button, Drawer, Form, Input } from "antd";
 import type { FormInstance } from "antd";
 
 import type { PositionDraftRow } from "../../types";
-
-export interface PositionRowValues {
-  store_site: string;
-  jiaji_sku: string;
-  msku: string;
-  scale_position: string;
-  stocking_position: string;
-}
+import type { PositionRowValues } from "./positionDraftApi";
 
 const SCALE_OPTIONS = ["短尾", "中尾", "长尾"].map((value) => ({ value }));
 

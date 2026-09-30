@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { api } from "../../api";
-import type { PositionDraftRow, PositionDraftRowsPage } from "../../types";
+import type { PositionDraftRow } from "../../types";
 import { useDebouncedValue } from "../../useDebouncedValue";
+import { listRows } from "./positionDraftApi";
 
 export function usePositionDraftRows(draftId?: number) {
   const [rows, setRows] = useState<PositionDraftRow[]>([]);
@@ -25,18 +25,17 @@ export function usePositionDraftRows(draftId?: number) {
   useEffect(() => {
     if (draftId === undefined) return;
     let active = true;
-    const params = new URLSearchParams({
-      offset: String((page - 1) * pageSize),
-      limit: String(pageSize)
-    });
-    if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
-    if (debouncedSite.trim()) params.set("site", debouncedSite.trim());
-    if (debouncedScale.trim()) params.set("scale_position", debouncedScale.trim());
-    if (issueFilter === "errors") params.set("only_errors", "true");
-    if (onlyModified) params.set("only_modified", "true");
     setRowsLoading(true);
     setRowsError(null);
-    void api<PositionDraftRowsPage>(`/api/input-drafts/${draftId}/rows?${params.toString()}`)
+    void listRows(draftId, {
+      offset: (page - 1) * pageSize,
+      limit: pageSize,
+      search: debouncedSearch,
+      site: debouncedSite,
+      scale_position: debouncedScale,
+      only_errors: issueFilter === "errors",
+      only_modified: onlyModified
+    })
       .then((result) => {
         if (!active) return;
         setRows(result.rows);

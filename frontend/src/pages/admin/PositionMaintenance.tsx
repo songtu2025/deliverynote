@@ -19,11 +19,12 @@ import {
 import { ArrowLeftOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { TableProps, UploadProps } from "antd";
 
-import { ApiError, api, download } from "../../api";
+import { ApiError } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { RowEditorDrawer } from "./RowEditorDrawer";
-import type { PositionRowValues } from "./RowEditorDrawer";
+import * as positionDraftApi from "./positionDraftApi";
+import type { PositionRevisionResponse, PositionRowValues } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
 import { DiffTags } from "./PositionFeedback";
@@ -41,15 +42,6 @@ interface PositionMaintenanceProps {
   activeVersion: InputVersion;
   onPublished: (version: InputVersion) => void;
   onBack: () => void;
-}
-
-interface RevisionResponse {
-  revision: number;
-}
-
-interface PublishResponse extends InputVersion {
-  draft_revision: number;
-  draft_status: PositionDraft["status"];
 }
 
 type BusyAction =
@@ -203,7 +195,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const refreshMetadata = async (expectedRevision: number) => {
     const request = ++metadataRequestRef.current;
     try {
-      const summary = await api<PositionDraft>("/api/input-drafts/position");
+      const summary = await positionDraftApi.getDraft();
       if (request === metadataRequestRef.current) mergeDraftMetadata(summary, expectedRevision);
     } catch {
       // A successful mutation already returned the authoritative revision. Metadata can be refreshed later.
@@ -215,7 +207,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setEntryLoading(true);
     setEntryError(null);
     try {
-      const nextDraft = await api<PositionDraft>("/api/input-drafts/position", { method: "POST" });
+      const nextDraft = await positionDraftApi.createOrResumeDraft();
       if (request !== entryRequestRef.current) return;
       revisionRef.current = nextDraft.revision;
       setDraft(nextDraft);
@@ -267,7 +259,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     }
   };
 
-  const runRevisionMutation = async <T extends RevisionResponse>(
+  const runRevisionMutation = async <T extends PositionRevisionResponse>(
     action: BusyAction,
     request: () => Promise<T>,
     successMessage: string,
@@ -349,16 +341,14 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     } catch {
       return;
     }
-    const path = editingRow
-      ? `/api/input-drafts/${draft.id}/rows/${editingRow.id}`
-      : `/api/input-drafts/${draft.id}/rows`;
     await runRevisionMutation(
       "save",
-      () =>
-        api<RevisionResponse>(path, {
-          method: editingRow ? "PUT" : "POST",
-          body: JSON.stringify({ revision: revisionRef.current, ...values })
-        }),
+      () => {
+        const payload = { revision: revisionRef.current, ...values };
+        return editingRow
+          ? positionDraftApi.updateRow(draft.id, editingRow.id, payload)
+          : positionDraftApi.createRow(draft.id, payload);
+      },
       "记录已保存",
       () => {
         setDrawerDirty(false);
@@ -373,11 +363,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return;
     await runRevisionMutation(
       "copy",
-      () =>
-        api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows`, {
-          method: "POST",
-          body: JSON.stringify({ revision: revisionRef.current, ...rowValues(row) })
-        }),
+      () => positionDraftApi.createRow(draft.id, { revision: revisionRef.current, ...rowValues(row) }),
       "记录已复制到服务器草稿"
     );
   };
@@ -386,11 +372,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return false;
     return runRevisionMutation(
       "delete",
-      () =>
-        api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/${row.id}`, {
-          method: "DELETE",
-          body: JSON.stringify({ revision: revisionRef.current })
-        }),
+      () => positionDraftApi.deleteRow(draft.id, row.id, revisionRef.current),
       "记录已从服务器草稿删除",
       () => setDeleteConfirmRowId(null)
     );
@@ -400,11 +382,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft || selectedRowIds.length === 0) return false;
     return runRevisionMutation(
       "bulk-delete",
-      () =>
-        api<RevisionResponse>(`/api/input-drafts/${draft.id}/rows/bulk-delete`, {
-          method: "POST",
-          body: JSON.stringify({ revision: revisionRef.current, row_ids: selectedRowIds })
-        }),
+      () => positionDraftApi.deleteRows(draft.id, revisionRef.current, selectedRowIds),
       `已删除 ${selectedRowIds.length} 条草稿记录`,
       () => setBulkDeleteConfirmOpen(false)
     );
@@ -418,14 +396,8 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setBusyAction("import-preview");
     setImportError(null);
     setActionError(null);
-    const formData = new FormData();
-    formData.append("revision", String(revisionRef.current));
-    formData.append("file", options.file as File);
     try {
-      const preview = await api<PositionImportPreview>(`/api/input-drafts/${draft.id}/import-preview`, {
-        method: "POST",
-        body: formData
-      });
+      const preview = await positionDraftApi.previewImport(draft.id, revisionRef.current, options.file as File);
       setImportPreview(preview);
       setImportFileName((options.file as File).name ?? "Excel 文件");
       options.onSuccess?.({});
@@ -445,10 +417,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setImportError(null);
     setActionError(null);
     try {
-      const result = await api<RevisionResponse>(`/api/input-drafts/${draft.id}/import-apply`, {
-        method: "POST",
-        body: JSON.stringify({ revision: revisionRef.current, token: importPreview.token })
-      });
+      const result = await positionDraftApi.applyImport(draft.id, revisionRef.current, importPreview.token);
       acceptRevision(result.revision);
       setImportPreview(null);
       message.success("Excel 已完整替换服务器草稿");
@@ -472,7 +441,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return;
     setActionError(null);
     try {
-      await download(`/api/input-drafts/${draft.id}/download`, `position-draft-r${draft.revision}.xlsx`);
+      await positionDraftApi.downloadDraft(draft.id, draft.revision);
     } catch (error) {
       setActionError(errorMessage(error, "下载草稿失败"));
     }
@@ -483,9 +452,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setBusyAction("validate");
     setActionError(null);
     try {
-      const validation = await api<PositionDraftValidation>(`/api/input-drafts/${draft.id}/validate`, {
-        method: "POST"
-      });
+      const validation = await positionDraftApi.validateDraft(draft.id);
       if (validation.revision !== revisionRef.current) {
         invalidateLocalState("草稿已由其他管理员修改，请刷新后重试");
         return;
@@ -509,13 +476,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setActionError(null);
     setPublishError(null);
     try {
-      const published = await api<PublishResponse>(`/api/input-drafts/${draft.id}/publish`, {
-        method: "POST",
-        body: JSON.stringify({
-          revision: revisionRef.current,
-          name: publishName.trim(),
-          confirm_warnings: warningsConfirmed
-        })
+      const published = await positionDraftApi.publishDraft(draft.id, {
+        revision: revisionRef.current,
+        name: publishName.trim(),
+        confirm_warnings: warningsConfirmed
       });
       revisionRef.current = published.draft_revision;
       setPublishValidation(null);
@@ -540,10 +504,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setBusyAction("discard");
     setActionError(null);
     try {
-      await api<PositionDraft>(`/api/input-drafts/${draft.id}/discard`, {
-        method: "POST",
-        body: JSON.stringify({ revision: revisionRef.current })
-      });
+      await positionDraftApi.discardDraft(draft.id, revisionRef.current);
       setDiscardConfirmOpen(false);
       message.success("服务器草稿已放弃，当前正式版本未改变");
       onBack();

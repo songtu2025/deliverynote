@@ -337,14 +337,18 @@ describe("PositionMaintenance", () => {
 
   it("edits with the current revision and uses only the returned revision for the next mutation", async () => {
     renderMaintenance();
-    await screen.findByText("SKU-A");
+    const skuCell = await screen.findByText("SKU-A");
+    const row = skuCell.closest("tr");
+    expect(row).not.toBeNull();
+    const rowControls = within(row!);
 
-    fireEvent.click(screen.getByRole("button", { name: "编辑 SEEKWAY:US / SKU-A / MSKU-A" }));
-    fireEvent.change(await screen.findByLabelText("备货定位"), { target: { value: "不备货" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+    fireEvent.click(rowControls.getByRole("button", { name: "编辑 SEEKWAY:US / SKU-A / MSKU-A" }));
+    const editor = within(await dialogByTitle("编辑库位记录：SKU-A"));
+    fireEvent.change(editor.getByLabelText("备货定位"), { target: { value: "不备货" } });
+    fireEvent.click(editor.getByRole("button", { name: "保存到草稿" }));
     expect(await screen.findByText("修订号 8")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
+    fireEvent.click(rowControls.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
     await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
     const copyBody = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
     expect(copyBody.revision).toBe(8);
