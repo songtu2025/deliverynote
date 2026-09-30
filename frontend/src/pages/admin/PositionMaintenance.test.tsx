@@ -5,24 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { download } from "../../api";
 import type { InputVersion } from "../../types";
 import { PositionMaintenance } from "./PositionMaintenance";
+import { baseDraft, deferred } from "./positionDraftTestSupport";
+import type { Deferred } from "./positionDraftTestSupport";
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
   return { ...actual, download: vi.fn() };
 });
-
-interface Deferred<T> {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
 
 const jsonResponse = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), {
@@ -38,28 +27,6 @@ const version: InputVersion = {
   active: true,
   created_by: 1,
   created_at: "2026-07-21T09:00:00"
-};
-
-const baseDraft = {
-  id: 7,
-  kind: "position",
-  base_version_id: 31,
-  base_version_name: "position-current",
-  active_version_id: 31,
-  active_version_name: "position-current",
-  status: "editing",
-  revision: 3,
-  created_by: 1,
-  updated_by: 2,
-  created_at: "2026-07-21T09:10:00",
-  updated_at: "2026-07-21T10:30:00",
-  row_count: 1,
-  modified_count: 0,
-  diff: { added: 0, modified: 0, deleted: 0, unchanged: 1 },
-  issues: [],
-  error_count: 0,
-  warning_count: 0,
-  valid: true
 };
 
 const baseRow = {
@@ -446,6 +413,25 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
     expect(await screen.findByText("修订号 11")).toBeInTheDocument();
     expect(requests("POST", "/api/input-drafts/position")).toHaveLength(2);
+  });
+
+  it("keeps a successful write usable when the following metadata refresh fails", async () => {
+    metadataRequest = deferred<Response>();
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+    const copyButton = screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" });
+    fireEvent.click(copyButton);
+    expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+    metadataRequest.resolve(jsonResponse({ detail: "演示摘要刷新失败" }, 500));
+    expect(await screen.findAllByText("记录已复制到服务器草稿")).toHaveLength(1);
+    await waitFor(() => expect(copyButton).toBeEnabled());
+    expect(screen.queryByText("草稿已在其他位置更新")).not.toBeInTheDocument();
+    expect(screen.queryByText("演示摘要刷新失败")).not.toBeInTheDocument();
+
+    fireEvent.click(copyButton);
+    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(2));
+    const nextBody = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[1][1]?.body));
+    expect(nextBody.revision).toBe(4);
   });
 
   it("keeps a non-revision row 409 local without locking the workspace", async () => {

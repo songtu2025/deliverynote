@@ -6,6 +6,7 @@ import type { UploadProps } from "antd";
 import { ApiError } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
 import { usePositionDraftRows } from "./usePositionDraftRows";
+import { usePositionDraftSession } from "./usePositionDraftSession";
 import { RowEditorDrawer } from "./RowEditorDrawer";
 import * as positionDraftApi from "./positionDraftApi";
 import type { PositionRevisionResponse, PositionRowValues } from "./positionDraftApi";
@@ -17,7 +18,6 @@ import { createPositionRowColumns } from "./positionRowColumns";
 import type {
   InputVersion,
   PositionDiff,
-  PositionDraft,
   PositionDraftRow,
   PositionDraftValidation,
   PositionImportPreview
@@ -69,17 +69,11 @@ function isRevisionConflict(error: unknown): boolean {
 
 export function PositionMaintenance({ onPublished, onBack }: PositionMaintenanceProps) {
   const { message } = AntApp.useApp();
-  const [draft, setDraft] = useState<PositionDraft | null>(null);
-  const [entryLoading, setEntryLoading] = useState(true);
-  const [entryError, setEntryError] = useState<string | null>(null);
-  const rowsState = usePositionDraftRows(draft?.id);
-  const { selectedRowIds, setSelectedRowIds, refreshRows } = rowsState;
   const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerDirty, setDrawerDirty] = useState(false);
@@ -96,20 +90,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [publishError, setPublishError] = useState<string | null>(null);
   const [warningsConfirmed, setWarningsConfirmed] = useState(false);
 
-  const entryRequestRef = useRef(0);
-  const metadataRequestRef = useRef(0);
-  const revisionRef = useRef(0);
   const keepDeleteConfirmOpenRef = useRef<number | null>(null);
   const keepBulkDeleteConfirmOpenRef = useRef(false);
   const keepDiscardConfirmOpenRef = useRef(false);
 
-  const draftUnavailable = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
-  const baseVersionChanged = Boolean(draft && draft.base_version_id !== draft.active_version_id);
-  const actionsDisabled = draftUnavailable || baseVersionChanged;
-  const discardDisabled = draftUnavailable;
-
-  const invalidateLocalState = (messageText: string) => {
-    setConflictMessage(messageText);
+  const clearLocalState = () => {
     setDrawerOpen(false);
     setDrawerDirty(false);
     setEditingRow(null);
@@ -123,90 +108,43 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setDiscardConfirmOpen(false);
   };
 
-  const mergeDraftMetadata = (summary: PositionDraft, expectedRevision: number) => {
-    if (revisionRef.current !== expectedRevision) return;
-    if (summary.revision > expectedRevision) {
-      invalidateLocalState("草稿已被其他管理员更新，请刷新后重试");
-      return;
-    }
-    if (summary.revision !== expectedRevision) return;
-    setDraft((current) =>
-      current && current.id === summary.id && current.revision === expectedRevision
-        ? {
-            ...current,
-            status: summary.status,
-            row_count: summary.row_count,
-            modified_count: summary.modified_count,
-            diff: summary.diff,
-            issues: summary.issues,
-            error_count: summary.error_count,
-            warning_count: summary.warning_count,
-            valid: summary.valid,
-            updated_by: summary.updated_by,
-            updated_at: summary.updated_at,
-            active_version_id: summary.active_version_id,
-            active_version_name: summary.active_version_name
-          }
-        : current
-    );
-  };
+  const session = usePositionDraftSession(clearLocalState);
+  const {
+    draft,
+    entryLoading,
+    entryError,
+    conflictMessage,
+    getRevision,
+    recordRevision,
+    markConflict: invalidateLocalState
+  } = session;
+  const rowsState = usePositionDraftRows(draft?.id);
+  const { selectedRowIds, setSelectedRowIds, refreshRows } = rowsState;
 
-  const refreshMetadata = async (expectedRevision: number) => {
-    const request = ++metadataRequestRef.current;
-    try {
-      const summary = await positionDraftApi.getDraft();
-      if (request === metadataRequestRef.current) mergeDraftMetadata(summary, expectedRevision);
-    } catch {
-      // A successful mutation already returned the authoritative revision. Metadata can be refreshed later.
-    }
-  };
+  const draftUnavailable = busyAction !== null || conflictMessage !== null || !draft || draft.status !== "editing";
+  const baseVersionChanged = Boolean(draft && draft.base_version_id !== draft.active_version_id);
+  const actionsDisabled = draftUnavailable || baseVersionChanged;
+  const discardDisabled = draftUnavailable;
 
   const loadDraft = async () => {
-    const request = ++entryRequestRef.current;
-    setEntryLoading(true);
-    setEntryError(null);
-    try {
-      const nextDraft = await positionDraftApi.createOrResumeDraft();
-      if (request !== entryRequestRef.current) return;
-      revisionRef.current = nextDraft.revision;
-      setDraft(nextDraft);
-      setConflictMessage(null);
-      setImportError(null);
-      setSelectedRowIds([]);
-      setDeleteConfirmRowId(null);
-      setBulkDeleteConfirmOpen(false);
-      setDiscardConfirmOpen(false);
-      refreshRows();
-    } catch (error) {
-      if (request === entryRequestRef.current) setEntryError(errorMessage(error, "无法打开库位草稿"));
-    } finally {
-      if (request === entryRequestRef.current) setEntryLoading(false);
-    }
+    if (!(await session.loadDraft())) return;
+    setImportError(null);
+    setSelectedRowIds([]);
+    setDeleteConfirmRowId(null);
+    setBulkDeleteConfirmOpen(false);
+    setDiscardConfirmOpen(false);
+    refreshRows();
   };
 
   useEffect(() => {
     void loadDraft();
-    return () => {
-      entryRequestRef.current += 1;
-      metadataRequestRef.current += 1;
-    };
-    // The position endpoint owns create-or-resume semantics; the active version is informational here.
+    // 创建或恢复由草稿接口决定，目录中的启用版本不触发重复加载。
   }, []);
 
   const acceptRevision = (revision: number) => {
-    revisionRef.current = revision;
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            revision,
-            updated_at: new Date().toISOString()
-          }
-        : current
-    );
+    session.acceptRevision(revision);
     setSelectedRowIds([]);
     refreshRows();
-    void refreshMetadata(revision);
   };
 
   const handleActionError = (error: unknown, fallback: string) => {
@@ -303,7 +241,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     await runRevisionMutation(
       "save",
       () => {
-        const payload = { revision: revisionRef.current, ...values };
+        const payload = { revision: getRevision(), ...values };
         return editingRow
           ? positionDraftApi.updateRow(draft.id, editingRow.id, payload)
           : positionDraftApi.createRow(draft.id, payload);
@@ -322,7 +260,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return;
     await runRevisionMutation(
       "copy",
-      () => positionDraftApi.createRow(draft.id, { revision: revisionRef.current, ...rowValues(row) }),
+      () => positionDraftApi.createRow(draft.id, { revision: getRevision(), ...rowValues(row) }),
       "记录已复制到服务器草稿"
     );
   };
@@ -331,7 +269,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft) return false;
     return runRevisionMutation(
       "delete",
-      () => positionDraftApi.deleteRow(draft.id, row.id, revisionRef.current),
+      () => positionDraftApi.deleteRow(draft.id, row.id, getRevision()),
       "记录已从服务器草稿删除",
       () => setDeleteConfirmRowId(null)
     );
@@ -341,7 +279,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!draft || selectedRowIds.length === 0) return false;
     return runRevisionMutation(
       "bulk-delete",
-      () => positionDraftApi.deleteRows(draft.id, revisionRef.current, selectedRowIds),
+      () => positionDraftApi.deleteRows(draft.id, getRevision(), selectedRowIds),
       `已删除 ${selectedRowIds.length} 条草稿记录`,
       () => setBulkDeleteConfirmOpen(false)
     );
@@ -370,7 +308,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setImportError(null);
     setActionError(null);
     try {
-      const preview = await positionDraftApi.previewImport(draft.id, revisionRef.current, options.file as File);
+      const preview = await positionDraftApi.previewImport(draft.id, getRevision(), options.file as File);
       setImportPreview(preview);
       setImportFileName((options.file as File).name ?? "Excel 文件");
       options.onSuccess?.({});
@@ -390,7 +328,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setImportError(null);
     setActionError(null);
     try {
-      const result = await positionDraftApi.applyImport(draft.id, revisionRef.current, importPreview.token);
+      const result = await positionDraftApi.applyImport(draft.id, getRevision(), importPreview.token);
       acceptRevision(result.revision);
       setImportPreview(null);
       message.success("Excel 已完整替换服务器草稿");
@@ -426,7 +364,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setActionError(null);
     try {
       const validation = await positionDraftApi.validateDraft(draft.id);
-      if (validation.revision !== revisionRef.current) {
+      if (validation.revision !== getRevision()) {
         invalidateLocalState("草稿已由其他管理员修改，请刷新后重试");
         return;
       }
@@ -450,11 +388,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setPublishError(null);
     try {
       const published = await positionDraftApi.publishDraft(draft.id, {
-        revision: revisionRef.current,
+        revision: getRevision(),
         name: publishName.trim(),
         confirm_warnings: warningsConfirmed
       });
-      revisionRef.current = published.draft_revision;
+      recordRevision(published.draft_revision);
       setPublishValidation(null);
       onPublished(published);
       message.success("新库位版本已发布并启用");
@@ -477,7 +415,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     setBusyAction("discard");
     setActionError(null);
     try {
-      await positionDraftApi.discardDraft(draft.id, revisionRef.current);
+      await positionDraftApi.discardDraft(draft.id, getRevision());
       setDiscardConfirmOpen(false);
       message.success("服务器草稿已放弃，当前正式版本未改变");
       onBack();
