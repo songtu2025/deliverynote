@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
   Card,
   Checkbox,
@@ -14,8 +15,7 @@ import {
   Table,
   Tag,
   Typography,
-  Upload,
-  message
+  Upload
 } from "antd";
 import { ArrowLeftOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { TableProps, UploadProps } from "antd";
@@ -99,6 +99,7 @@ function isRevisionConflict(error: unknown): boolean {
 }
 
 export function PositionMaintenance({ onPublished, onBack }: PositionMaintenanceProps) {
+  const { message } = AntApp.useApp();
   const [draft, setDraft] = useState<PositionDraft | null>(null);
   const [entryLoading, setEntryLoading] = useState(true);
   const [entryError, setEntryError] = useState<string | null>(null);

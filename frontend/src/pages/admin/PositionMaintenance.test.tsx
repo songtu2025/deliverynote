@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { message } from "antd";
+import { App as AntApp, message as staticMessage } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { download } from "../../api";
@@ -102,11 +102,13 @@ function renderMaintenance(
   }> = {}
 ) {
   return render(
-    <PositionMaintenance
-      activeVersion={version}
-      onPublished={overrides.onPublished ?? vi.fn()}
-      onBack={overrides.onBack ?? vi.fn()}
-    />
+    <AntApp>
+      <PositionMaintenance
+        activeVersion={version}
+        onPublished={overrides.onPublished ?? vi.fn()}
+        onBack={overrides.onBack ?? vi.fn()}
+      />
+    </AntApp>
   );
 }
 
@@ -152,12 +154,6 @@ describe("PositionMaintenance", () => {
     importApplyRequest = null;
     publishRequest = null;
     vi.mocked(download).mockReset();
-    vi.spyOn(message, "success").mockImplementation(() => {
-      const result = (() => undefined) as ReturnType<typeof message.success>;
-      const completed = Promise.resolve(true);
-      result.then = completed.then.bind(completed);
-      return result;
-    });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -258,6 +254,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("resumes a server draft and saves a new row with the current revision", async () => {
+    const staticSuccess = vi.spyOn(staticMessage, "success");
     renderMaintenance();
 
     expect(await screen.findByText("草稿已自动保存")).toBeInTheDocument();
@@ -274,6 +271,8 @@ describe("PositionMaintenance", () => {
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
     await waitFor(() => expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
     expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
+    expect(await screen.findAllByText("记录已保存")).toHaveLength(1);
+    expect(staticSuccess).not.toHaveBeenCalled();
   });
 
   it("presents the position draft as a labelled desktop workbench", async () => {
@@ -428,6 +427,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
 
     expect(await screen.findByText("记录当前不可复制，请修正后重试")).toBeInTheDocument();
+    expect(screen.queryByText("记录已复制到服务器草稿")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" })).toBeEnabled();
   }, 15_000);
@@ -452,6 +452,7 @@ describe("PositionMaintenance", () => {
 
     singleDeleteRequest.resolve(jsonResponse({ detail: "删除服务暂时不可用" }, 500));
     expect(await screen.findByText("删除服务暂时不可用")).toBeInTheDocument();
+    expect(screen.queryByText("记录已从服务器草稿删除")).not.toBeInTheDocument();
     expect(screen.getByText(title)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /取\s*消/ })).toBeEnabled();
 
@@ -461,6 +462,7 @@ describe("PositionMaintenance", () => {
     singleDeleteRequest.resolve(jsonResponse({ row_id: 101, revision: 9 }));
     expect(await screen.findByText("修订号 9")).toBeInTheDocument();
     await waitFor(() => expect(deleteButton).not.toHaveClass("ant-popover-open"));
+    expect(await screen.findAllByText("记录已从服务器草稿删除")).toHaveLength(1);
   }, 15_000);
 
   it("sends server filters and pagination, and a late response cannot replace newer rows", async () => {
@@ -699,8 +701,14 @@ describe("PositionMaintenance", () => {
   });
 
   it("publishes a named version and reports success to the parent", async () => {
-    const onPublished = vi.fn();
-    renderMaintenance({ onPublished });
+    const onPublished = vi.fn<(published: InputVersion) => void>(() => {
+      view.rerender(
+        <AntApp>
+          <h2>基础资料目录</h2>
+        </AntApp>
+      );
+    });
+    const view = renderMaintenance({ onPublished });
     fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
     expect(await screen.findByText("仅用于新批次；已有批次不变")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: "position-20260721" } });
@@ -708,6 +716,8 @@ describe("PositionMaintenance", () => {
 
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
     expect(onPublished.mock.calls[0][0]).toMatchObject({ id: 32, name: "position-20260721", active: true });
+    expect(screen.queryByText("MSKU 定位维护")).not.toBeInTheDocument();
+    expect(await screen.findAllByText("新库位版本已发布并启用")).toHaveLength(1);
     const body = JSON.parse(String(requests("POST", "/publish")[0][1]?.body));
     expect(body).toEqual({ revision: 3, name: "position-20260721", confirm_warnings: false });
   });
@@ -722,6 +732,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
 
     expect(await within(dialog).findByText("请更换版本名称")).toBeInTheDocument();
+    expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
     expect(within(dialog).getByLabelText("新版本名称")).toHaveValue("duplicate-name");
     expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
 
@@ -729,6 +740,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /确认发布/ }));
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
     expect(requests("POST", "/publish")).toHaveLength(2);
+    expect(await screen.findAllByText("新库位版本已发布并启用")).toHaveLength(1);
   });
 
   it("downloads the draft and keeps discard confirmation uncancellable until the server accepts it", async () => {
@@ -751,8 +763,11 @@ describe("PositionMaintenance", () => {
     expect(screen.getByText("确定放弃整个服务器草稿？")).toBeInTheDocument();
     expect(onBack).not.toHaveBeenCalled();
 
+    expect(screen.queryByText("服务器草稿已放弃，当前正式版本未改变")).not.toBeInTheDocument();
+
     discardRequest.resolve(jsonResponse({ ...draftResponse, status: "discarded", revision: 4 }));
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
+    expect(await screen.findAllByText("服务器草稿已放弃，当前正式版本未改变")).toHaveLength(1);
   });
 
   it("asks before returning only when the drawer contains unsaved form changes", async () => {
@@ -789,10 +804,12 @@ describe("PositionMaintenance", () => {
       fireEvent.click(within(drawer).getByRole("button", { name: /取\s*消/ }));
       expect(onBack).not.toHaveBeenCalled();
       expect(screen.getByText("新增库位记录")).toBeInTheDocument();
+      expect(screen.queryByText("记录已保存")).not.toBeInTheDocument();
     } finally {
       rowWriteRequest.resolve(jsonResponse({ row: { ...baseRow, id: 102 }, revision: 4 }, 201));
     }
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
+    expect(await screen.findAllByText("记录已保存")).toHaveLength(1);
   });
 
   it("cannot leave or cancel the import dialog while apply is pending", async () => {
@@ -813,12 +830,14 @@ describe("PositionMaintenance", () => {
       expect(screen.getByRole("button", { name: "放弃草稿" })).toBeDisabled();
       fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
       expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
+      expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();
     } finally {
       importApplyRequest.resolve(
         jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 })
       );
     }
     expect(await screen.findByText("修订号 6")).toBeInTheDocument();
+    expect(await screen.findAllByText("Excel 已完整替换服务器草稿")).toHaveLength(1);
   });
 
   it("cannot leave or cancel the publish dialog while publish is pending", async () => {
@@ -841,6 +860,7 @@ describe("PositionMaintenance", () => {
       fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
       expect(onBack).not.toHaveBeenCalled();
       expect(screen.getByText("发布新的MSKU定位版本")).toBeInTheDocument();
+      expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
     } finally {
       publishRequest.resolve(
         jsonResponse(
@@ -857,6 +877,7 @@ describe("PositionMaintenance", () => {
       );
     }
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
+    expect(await screen.findAllByText("新库位版本已发布并启用")).toHaveLength(1);
   }, 30_000);
 
   it("can return to the input catalog while the draft entry request is loading", () => {
