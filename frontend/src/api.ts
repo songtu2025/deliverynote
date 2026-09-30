@@ -9,10 +9,12 @@ type ApiOptions = {
 
 export class ApiError extends Error {
   status: number;
+  code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -57,15 +59,19 @@ export async function api<T>(
     let message = response.status === 429 && path === "/api/auth/login"
       ? "登录尝试过于频繁，请稍后再试"
       : `请求失败（${response.status}）`;
+    let code: string | null = null;
     try {
-      const payload = (await response.json()) as { detail?: unknown };
+      const payload = (await response.json()) as { detail?: unknown; code?: unknown };
       if (typeof payload.detail === "string") {
         message = payload.detail;
+      }
+      if (typeof payload.code === "string") {
+        code = payload.code;
       }
     } catch {
       // Keep the status-based message when the body is not JSON.
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, code);
   }
   if (path === "/api/auth/login" || path === "/api/auth/me") {
     authExpirationReported = false;

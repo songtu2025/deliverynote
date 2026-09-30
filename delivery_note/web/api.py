@@ -25,7 +25,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, delete, func, or_, select, text
@@ -100,10 +100,12 @@ from .models import (
     User,
 )
 from .position_drafts import (
+    DRAFT_REVISION_CONFLICT_CODE,
     FIELD_TO_COLUMN,
     POSITION_FRAME_CACHE_SESSION_KEY,
     ROW_FIELDS,
     DraftConflictError,
+    DuplicateInputVersionNameError,
     create_or_resume_draft,
     delete_draft_rows,
     discard_draft,
@@ -118,6 +120,16 @@ from .sync_routes import register_sync_routes
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+class CodedHTTPException(HTTPException):
+    def __init__(self, *, detail: str, code: str) -> None:
+        super().__init__(status_code=409, detail=detail)
+        self.code = code
+
+
+DRAFT_IMPORT_PREVIEW_EXPIRED_CODE = "draft_import_preview_expired"
+INPUT_VERSION_NAME_EXISTS_CODE = "input_version_name_exists"
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
@@ -1486,6 +1498,16 @@ def create_app(
     _bootstrap_builtin_inbound_template(database)
 
     app = FastAPI(title="供应链交货处理系统", version="1.0.0")
+
+    @app.exception_handler(CodedHTTPException)
+    async def coded_http_exception_handler(
+        _request: Request, error: CodedHTTPException
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": error.detail, "code": error.code},
+        )
+
     app.state.database = database
     app.state.storage_root = storage
     app.state.max_upload_bytes = configured_max_upload_bytes
@@ -1637,11 +1659,11 @@ def create_app(
             session.rollback()
             raise
 
-    def rollback_draft_conflict(session: Session, error: Exception) -> None:
+    def rollback_draft_conflict(session: Session, error: DraftConflictError) -> None:
         if session.in_transaction():
             session.rollback()
-        raise HTTPException(
-            status_code=409,
+        raise CodedHTTPException(
+            code=error.code,
             detail=str(error).strip() or "草稿已被其他管理员更新，请刷新后重试",
         ) from error
 
@@ -1658,8 +1680,8 @@ def create_app(
     def rollback_integrity_conflict(session: Session, error: Exception) -> None:
         if session.in_transaction():
             session.rollback()
-        raise HTTPException(
-            status_code=409,
+        raise CodedHTTPException(
+            code=DRAFT_REVISION_CONFLICT_CODE,
             detail="草稿写入发生并发冲突，请刷新后重试",
         ) from error
 
@@ -2898,7 +2920,10 @@ def create_app(
             remove_import_candidate(payload.token)
             if session.in_transaction():
                 session.rollback()
-            raise HTTPException(status_code=409, detail="导入预览已失效，请重新预览")
+            raise CodedHTTPException(
+                code=DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
+                detail="导入预览已失效，请重新预览",
+            )
         try:
             require_revision(draft, payload.revision)
         except DraftConflictError as error:
@@ -2909,7 +2934,10 @@ def create_app(
         if candidate is None:
             if session.in_transaction():
                 session.rollback()
-            raise HTTPException(status_code=409, detail="导入预览已失效，请重新预览")
+            raise CodedHTTPException(
+                code=DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
+                detail="导入预览已失效，请重新预览",
+            )
         candidate_path = Path(candidate["path"])
         try:
             candidate_frame = read_position_workbook(candidate_path)
@@ -3008,11 +3036,15 @@ def create_app(
             rollback_draft_conflict(session, error)
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
+        except DuplicateInputVersionNameError as error:
+            if session.in_transaction():
+                session.rollback()
+            raise CodedHTTPException(
+                code=INPUT_VERSION_NAME_EXISTS_CODE, detail=str(error)
+            ) from error
         except ValueError as error:
             if session.in_transaction():
                 session.rollback()
-            if "版本名称已存在" in str(error):
-                raise HTTPException(status_code=409, detail=str(error)) from error
             raise HTTPException(status_code=400, detail=str(error)) from error
         except OSError as error:
             if session.in_transaction():

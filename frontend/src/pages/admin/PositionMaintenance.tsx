@@ -71,10 +71,11 @@ type PendingLeave = "close" | "back" | null;
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
 const ROW_PAGE_SIZE = 20;
 const SCALE_OPTIONS = ["短尾", "中尾", "长尾"].map((value) => ({ value }));
-const REVISION_CONFLICT_DETAILS = [
-  "草稿已被其他管理员更新，请刷新后重试",
-  "草稿写入发生并发冲突，请刷新后重试"
-];
+const POSITION_ERROR_CODES = {
+  revisionConflict: "draft_revision_conflict",
+  importPreviewExpired: "draft_import_preview_expired",
+  versionNameExists: "input_version_name_exists"
+} as const;
 const POSITION_TABLE_COMPONENTS: NonNullable<TableProps<PositionDraftRow>["components"]> = {
   table: (props) => <table {...props} aria-label="库位草稿记录" />
 };
@@ -102,14 +103,12 @@ function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
 }
 
-function hasApiDetail(error: unknown, detail: string): boolean {
-  return error instanceof ApiError && error.status === 409 && error.message.includes(detail);
+function hasApiCode(error: unknown, code: string): boolean {
+  return error instanceof ApiError && error.status === 409 && error.code === code;
 }
 
 function isRevisionConflict(error: unknown): boolean {
-  return error instanceof ApiError
-    && error.status === 409
-    && REVISION_CONFLICT_DETAILS.some((detail) => error.message.includes(detail));
+  return hasApiCode(error, POSITION_ERROR_CODES.revisionConflict);
 }
 
 function issueRows(issue: PositionIssue): string {
@@ -729,7 +728,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       if (isRevisionConflict(error)) {
         invalidateLocalState(messageText);
       } else {
-        if (hasApiDetail(error, "导入预览已失效，请重新预览")) {
+        if (hasApiCode(error, POSITION_ERROR_CODES.importPreviewExpired)) {
           setImportPreview(null);
           setImportFileName("");
         }
@@ -795,7 +794,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       const messageText = errorMessage(error, "发布失败");
       if (isRevisionConflict(error)) {
         invalidateLocalState(messageText);
-      } else if (hasApiDetail(error, "版本名称已存在")) {
+      } else if (hasApiCode(error, POSITION_ERROR_CODES.versionNameExists)) {
         setPublishNameError(messageText);
       } else {
         setPublishError(messageText);

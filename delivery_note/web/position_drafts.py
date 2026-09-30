@@ -40,9 +40,22 @@ IDENTITY_FIELDS = ROW_FIELDS[:3]
 _PENDING_PUBLISH_KEY = "position_draft_pending_publish"
 POSITION_FRAME_CACHE_SESSION_KEY = "position_frame_cache"
 BASE_VERSION_CHANGED_DETAIL = "当前启用的库位版本已变化，请放弃当前草稿后重新开始"
+DRAFT_REVISION_CONFLICT_CODE = "draft_revision_conflict"
+DRAFT_BASE_VERSION_CHANGED_CODE = "draft_base_version_changed"
 
 
 class DraftConflictError(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str = DRAFT_REVISION_CONFLICT_CODE,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class DuplicateInputVersionNameError(ValueError):
     pass
 
 
@@ -520,7 +533,7 @@ def publish_draft(
         )
         is not None
     ):
-        raise ValueError("版本名称已存在")
+        raise DuplicateInputVersionNameError("版本名称已存在")
 
     path = Path(storage_path)
     resolved_path = path.resolve()
@@ -553,7 +566,10 @@ def publish_draft(
             current.id for current in position_versions if current.active
         ]
         if active_version_ids != [draft.base_version_id]:
-            raise DraftConflictError(BASE_VERSION_CHANGED_DETAIL)
+            raise DraftConflictError(
+                BASE_VERSION_CHANGED_DETAIL,
+                code=DRAFT_BASE_VERSION_CHANGED_CODE,
+            )
         for current in position_versions:
             current.active = False
         session.flush()

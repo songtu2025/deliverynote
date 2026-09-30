@@ -180,7 +180,7 @@ describe("PositionMaintenance", () => {
         }
         if (conflictNextRowWrite) {
           conflictNextRowWrite = false;
-          return jsonResponse({ detail: "草稿已被其他管理员更新，请刷新后重试" }, 409);
+          return jsonResponse({ detail: "草稿状态已更新", code: "draft_revision_conflict" }, 409);
         }
         return jsonResponse({ row: { ...baseRow, id: 102, change_type: "added" }, revision: 4 }, 201);
       }
@@ -210,7 +210,7 @@ describe("PositionMaintenance", () => {
       }
       if (url.endsWith("/api/input-drafts/7/import-apply") && method === "POST") {
         if (importApplyRequest) return importApplyRequest.promise;
-        if (expireImportApply) return jsonResponse({ detail: "导入预览已失效，请重新预览" }, 409);
+        if (expireImportApply) return jsonResponse({ detail: "请重新上传表格预览", code: "draft_import_preview_expired" }, 409);
         return jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 });
       }
       if (url.endsWith("/api/input-drafts/7/validate") && method === "POST") {
@@ -220,7 +220,7 @@ describe("PositionMaintenance", () => {
         if (publishRequest) return publishRequest.promise;
         if (duplicatePublishNameOnce) {
           duplicatePublishNameOnce = false;
-          return jsonResponse({ detail: "版本名称已存在" }, 409);
+          return jsonResponse({ detail: "请更换版本名称", code: "input_version_name_exists" }, 409);
         }
         return jsonResponse({
           ...version,
@@ -579,7 +579,7 @@ describe("PositionMaintenance", () => {
     const dialog = await dialogByTitle("Excel 整表替换预览");
     fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
 
-    expect(await screen.findByText("导入预览已失效，请重新预览")).toBeInTheDocument();
+    expect(await screen.findByText("请重新上传表格预览")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
@@ -668,7 +668,7 @@ describe("PositionMaintenance", () => {
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "duplicate-name" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
 
-    expect(await within(dialog).findByText("版本名称已存在")).toBeInTheDocument();
+    expect(await within(dialog).findByText("请更换版本名称")).toBeInTheDocument();
     expect(within(dialog).getByLabelText("新版本名称")).toHaveValue("duplicate-name");
     expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
 

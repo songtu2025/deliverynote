@@ -1881,6 +1881,7 @@ class PositionDraftApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(rejected.json()["code"], "draft_base_version_changed")
         self.assertEqual(
             rejected.json()["detail"],
             "当前启用的库位版本已变化，请放弃当前草稿后重新开始",
@@ -2191,6 +2192,7 @@ class PositionDraftApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["code"], "draft_revision_conflict")
         self.assertIn("刷新", stale.json()["detail"])
         self.assertEqual(self.list_rows(draft["id"])["total"], 2)
 
@@ -2343,6 +2345,7 @@ class PositionDraftApiTests(unittest.TestCase):
             json={"revision": changed.json()["revision"], "token": token},
         )
         self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["code"], "draft_import_preview_expired")
         self.assertEqual(self.list_rows(draft["id"])["total"], 2)
 
     def test_import_token_is_bound_to_admin_and_wrong_admin_cannot_consume_it(self):
@@ -2538,6 +2541,7 @@ class PositionDraftApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(duplicate.status_code, 409, duplicate.text)
+        self.assertEqual(duplicate.json()["code"], "input_version_name_exists")
 
     def test_publish_validation_and_generation_errors_return_400(self):
         draft = self.create_draft()
@@ -2723,6 +2727,7 @@ class PositionDraftApiTests(unittest.TestCase):
         finally:
             event.remove(Session, "after_rollback", record_rollback)
         self.assertEqual(conflict.status_code, 409, conflict.text)
+        self.assertEqual(conflict.json()["code"], "draft_revision_conflict")
         self.assertEqual(len(rollbacks), 1)
 
 

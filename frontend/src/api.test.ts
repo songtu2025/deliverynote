@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, download } from "./api";
+import { ApiError, api, download } from "./api";
 
 describe("browser API authentication", () => {
   beforeEach(() => {
@@ -50,5 +50,19 @@ describe("browser API authentication", () => {
 
     await expect(api("/api/auth/login", { method: "POST" }))
       .rejects.toThrow("登录尝试过于频繁，请稍后再试");
+  });
+
+  it("retains a machine-readable error code alongside the display message", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ detail: "提示文案可调整", code: "draft_revision_conflict" }),
+      { status: 409, headers: { "Content-Type": "application/json" } }
+    )));
+
+    await expect(api("/api/input-drafts/7/rows", { method: "POST" }))
+      .rejects.toMatchObject({
+        status: 409,
+        message: "提示文案可调整",
+        code: "draft_revision_conflict"
+      } satisfies Partial<ApiError>);
   });
 });
