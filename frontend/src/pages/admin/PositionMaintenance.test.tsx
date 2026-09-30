@@ -299,6 +299,31 @@ describe("PositionMaintenance", () => {
     expect(within(drawer).queryByText(/optional/i)).not.toBeInTheDocument();
   });
 
+  it("shows authoritative draft totals instead of deriving them from the current page", async () => {
+    draftResponse = {
+      ...baseDraft,
+      row_count: 6000,
+      modified_count: 320,
+      error_count: 3,
+      warning_count: 5,
+      valid: false,
+      diff: { added: 10, modified: 310, deleted: 20, unchanged: 5680 }
+    };
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+
+    const summary = within(screen.getByRole("region", { name: "草稿摘要" }));
+    for (const value of ["6000", "320", "3", "5"]) {
+      expect(summary.getByText(value, { exact: true })).toBeInTheDocument();
+    }
+    expect(summary.getByText("发布前必须修正")).toBeInTheDocument();
+    expect(summary.getByText("发布前需要确认")).toBeInTheDocument();
+    expect(summary.getByText("新增 10")).toBeInTheDocument();
+    expect(summary.getByText("修改 310")).toBeInTheDocument();
+    expect(summary.getByText("删除 20")).toBeInTheDocument();
+    expect(summary.getByText("未变化 5680")).toBeInTheDocument();
+  });
+
   it("shows the real draft base and blocks edits when the active version changed", async () => {
     draftResponse = {
       ...baseDraft,

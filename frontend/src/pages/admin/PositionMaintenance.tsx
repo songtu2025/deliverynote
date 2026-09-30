@@ -1,23 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Card,
-  Checkbox,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Spin,
-  Table,
-  Typography,
-  Upload
-} from "antd";
-import { ArrowLeftOutlined, DownloadOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
-import type { TableProps, UploadProps } from "antd";
+import { Alert, App as AntApp, Button, Card, Form, Modal, Popconfirm, Space, Spin, Typography, Upload } from "antd";
+import { ArrowLeftOutlined, DownloadOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
+import type { UploadProps } from "antd";
 
 import { ApiError } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
@@ -27,7 +11,8 @@ import * as positionDraftApi from "./positionDraftApi";
 import type { PositionRevisionResponse, PositionRowValues } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
-import { DiffTags } from "./PositionFeedback";
+import { DraftSummary } from "./PositionFeedback";
+import { PositionDraftRecords } from "./PositionDraftRecords";
 import { createPositionRowColumns } from "./positionRowColumns";
 import type {
   InputVersion,
@@ -54,9 +39,6 @@ const POSITION_ERROR_CODES = {
   importPreviewExpired: "draft_import_preview_expired",
   versionNameExists: "input_version_name_exists"
 } as const;
-const POSITION_TABLE_COMPONENTS: NonNullable<TableProps<PositionDraftRow>["components"]> = {
-  table: (props) => <table {...props} aria-label="库位草稿记录" />
-};
 
 function defaultVersionName(): string {
   const parts = beijingDateTimeParts();
@@ -90,31 +72,8 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const [draft, setDraft] = useState<PositionDraft | null>(null);
   const [entryLoading, setEntryLoading] = useState(true);
   const [entryError, setEntryError] = useState<string | null>(null);
-  const {
-    rows,
-    rowsTotal,
-    rowsLoading,
-    rowsError,
-    search,
-    setSearch,
-    site,
-    setSite,
-    scale,
-    setScale,
-    issueFilter,
-    setIssueFilter,
-    onlyModified,
-    setOnlyModified,
-    page,
-    setPage,
-    pageSize,
-    setPageSize,
-    selectedRowIds,
-    setSelectedRowIds,
-    refreshRows,
-    resetFilters,
-    hasActiveFilters
-  } = usePositionDraftRows(draft?.id);
+  const rowsState = usePositionDraftRows(draft?.id);
+  const { selectedRowIds, setSelectedRowIds, refreshRows } = rowsState;
   const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
@@ -386,6 +345,20 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       `已删除 ${selectedRowIds.length} 条草稿记录`,
       () => setBulkDeleteConfirmOpen(false)
     );
+  };
+
+  const handleBulkDeleteOpenChange = (open: boolean) => {
+    if (!open && keepBulkDeleteConfirmOpenRef.current) {
+      keepBulkDeleteConfirmOpenRef.current = false;
+      return;
+    }
+    if (!open && busyAction === "bulk-delete") return;
+    setBulkDeleteConfirmOpen(open);
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    keepBulkDeleteConfirmOpenRef.current = false;
+    if (!(await bulkDelete())) keepBulkDeleteConfirmOpenRef.current = true;
   };
 
   const previewImport: NonNullable<UploadProps["customRequest"]> = async (options) => {
@@ -739,207 +712,18 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         />
       )}
 
-      <section className="position-summary-strip" aria-label="草稿摘要">
-        <div className="position-summary-metric">
-          <span>草稿记录</span>
-          <strong>{draft.row_count}</strong>
-          <small>服务器草稿</small>
-        </div>
-        <div className="position-summary-metric">
-          <span>已变更</span>
-          <strong>{draft.modified_count}</strong>
-          <small>待发布记录</small>
-        </div>
-        <div className={`position-summary-metric${draft.error_count > 0 ? " is-error" : ""}`}>
-          <span>错误</span>
-          <strong>{draft.error_count}</strong>
-          <small>{draft.error_count > 0 ? "发布前必须修正" : "无阻断项"}</small>
-        </div>
-        <div className={`position-summary-metric${draft.warning_count > 0 ? " is-warning" : ""}`}>
-          <span>警告</span>
-          <strong>{draft.warning_count}</strong>
-          <small>{draft.warning_count > 0 ? "发布前需要确认" : "无需确认"}</small>
-        </div>
-        <div className="position-summary-diff">
-          <span>相对正式版</span>
-          <DiffTags diff={diff} />
-        </div>
-      </section>
+      <DraftSummary draft={draft} diff={diff} />
 
-      <Card
-        className="position-records-card"
-        title={
-          <span>
-            草稿记录 <small>共 {rowsTotal} 条</small>
-          </span>
-        }
-        extra={
-          <Button
-            aria-label="新增记录"
-            type="primary"
-            icon={<PlusOutlined />}
-            disabled={actionsDisabled}
-            onClick={openNewRow}
-          >
-            新增记录
-          </Button>
-        }
-      >
-        <div className="table-toolbar position-filter-toolbar">
-          <div className="position-filter-field position-filter-search">
-            <label htmlFor="position-search">搜索</label>
-            <Input.Search
-              id="position-search"
-              aria-label="搜索草稿"
-              allowClear
-              value={search}
-              placeholder="站点、SKU、MSKU 或定位"
-              onChange={(event) => {
-                setPage(1);
-                setSearch(event.target.value);
-              }}
-            />
-          </div>
-          <div className="position-filter-field">
-            <label htmlFor="position-site-filter">站点</label>
-            <Input
-              id="position-site-filter"
-              aria-label="站点筛选"
-              allowClear
-              value={site}
-              placeholder="精确筛选"
-              onChange={(event) => {
-                setPage(1);
-                setSite(event.target.value);
-              }}
-            />
-          </div>
-          <div className="position-filter-field">
-            <label htmlFor="position-scale-filter">规模定位</label>
-            <Input
-              id="position-scale-filter"
-              aria-label="规模定位筛选"
-              allowClear
-              value={scale}
-              placeholder="精确筛选"
-              onChange={(event) => {
-                setPage(1);
-                setScale(event.target.value);
-              }}
-            />
-          </div>
-          <div className="position-filter-field">
-            <label htmlFor="position-issue-filter">问题</label>
-            <Select
-              id="position-issue-filter"
-              aria-label="问题筛选"
-              value={issueFilter}
-              options={[
-                { value: "all", label: "全部问题" },
-                { value: "errors", label: "仅错误" }
-              ]}
-              onChange={(value) => {
-                setPage(1);
-                setIssueFilter(value);
-              }}
-            />
-          </div>
-          <div className="position-filter-field position-filter-scope">
-            <span>范围</span>
-            <Checkbox
-              checked={onlyModified}
-              onChange={(event) => {
-                setPage(1);
-                setOnlyModified(event.target.checked);
-              }}
-            >
-              仅看已修改
-            </Checkbox>
-          </div>
-          {hasActiveFilters && (
-            <Button aria-label="重置筛选" icon={<ReloadOutlined />} onClick={resetFilters}>
-              重置
-            </Button>
-          )}
-        </div>
-        <div className="position-selection-bar">
-          <Typography.Text type="secondary">已选择 {selectedRowIds.length} 条</Typography.Text>
-          <Popconfirm
-            fresh
-            open={bulkDeleteConfirmOpen}
-            title={`删除选中的 ${selectedRowIds.length} 条记录？`}
-            description="删除会立即保存到服务器草稿，发布前不影响正式版本。"
-            okText="确认删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            cancelButtonProps={{ disabled: busyAction === "bulk-delete" }}
-            disabled={selectedRowIds.length === 0 || actionsDisabled}
-            onOpenChange={(open) => {
-              if (!open && keepBulkDeleteConfirmOpenRef.current) {
-                keepBulkDeleteConfirmOpenRef.current = false;
-                return;
-              }
-              if (!open && busyAction === "bulk-delete") return;
-              setBulkDeleteConfirmOpen(open);
-            }}
-            onConfirm={async () => {
-              keepBulkDeleteConfirmOpenRef.current = false;
-              if (!(await bulkDelete())) keepBulkDeleteConfirmOpenRef.current = true;
-            }}
-          >
-            <Button
-              danger
-              disabled={selectedRowIds.length === 0 || actionsDisabled}
-              loading={busyAction === "bulk-delete"}
-            >
-              批量删除（{selectedRowIds.length}）
-            </Button>
-          </Popconfirm>
-        </div>
-
-        {rowsError && (
-          <Alert
-            className="inline-alert"
-            type="error"
-            showIcon
-            title="无法读取草稿记录"
-            description={rowsError}
-            action={
-              <Button size="small" onClick={refreshRows}>
-                重新加载
-              </Button>
-            }
-          />
-        )}
-        <Table<PositionDraftRow>
-          rowKey="id"
-          size="small"
-          loading={rowsLoading}
-          columns={rowColumns}
-          dataSource={rows}
-          components={POSITION_TABLE_COMPONENTS}
-          rowSelection={{
-            selectedRowKeys: selectedRowIds,
-            preserveSelectedRowKeys: false,
-            getCheckboxProps: () => ({ disabled: actionsDisabled }),
-            onChange: (keys) => setSelectedRowIds(keys.map(Number))
-          }}
-          scroll={{ x: 1020 }}
-          locale={{ emptyText: rowsError ? "读取失败" : "草稿中没有符合条件的记录" }}
-          pagination={{
-            current: page,
-            pageSize,
-            total: rowsTotal,
-            showSizeChanger: true,
-            pageSizeOptions: [20, 50, 100],
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (nextPage, nextPageSize) => {
-              setPage(nextPageSize !== pageSize ? 1 : nextPage);
-              setPageSize(nextPageSize);
-            }
-          }}
-        />
-      </Card>
+      <PositionDraftRecords
+        rowsState={rowsState}
+        columns={rowColumns}
+        disabled={actionsDisabled}
+        bulkDeleting={busyAction === "bulk-delete"}
+        bulkDeleteConfirmOpen={bulkDeleteConfirmOpen}
+        onNewRow={openNewRow}
+        onBulkDeleteOpenChange={handleBulkDeleteOpenChange}
+        onBulkDeleteConfirm={handleBulkDeleteConfirm}
+      />
 
       <RowEditorDrawer
         open={drawerOpen}
