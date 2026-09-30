@@ -13,7 +13,6 @@ import {
   Space,
   Spin,
   Table,
-  Tag,
   Typography,
   Upload
 } from "antd";
@@ -28,14 +27,14 @@ import type { PositionRowValues } from "./RowEditorDrawer";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
 import { DiffTags } from "./PositionFeedback";
+import { createPositionRowColumns } from "./positionRowColumns";
 import type {
   InputVersion,
   PositionDiff,
   PositionDraft,
   PositionDraftRow,
   PositionDraftValidation,
-  PositionImportPreview,
-  PositionIssue
+  PositionImportPreview
 } from "../../types";
 
 interface PositionMaintenanceProps {
@@ -80,10 +79,6 @@ function rowValues(row: PositionDraftRow): PositionRowValues {
     scale_position: row.scale_position,
     stocking_position: row.stocking_position
   };
-}
-
-function rowActionLabel(action: string, row: PositionDraftRow): string {
-  return `${action} ${row.store_site} / ${row.jiaji_sku} / ${row.msku || "无 MSKU"}`;
 }
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -561,114 +556,28 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     }
   };
 
-  const rowColumns = useMemo<NonNullable<TableProps<PositionDraftRow>["columns"]>>(
-    () => [
-      { title: "店铺-站点", dataIndex: "store_site", width: 130, ellipsis: true },
-      { title: "积加 SKU", dataIndex: "jiaji_sku", width: 120, ellipsis: true },
-      { title: "MSKU", dataIndex: "msku", width: 120, ellipsis: true, render: (value: string) => value || "—" },
-      {
-        title: "规模定位",
-        dataIndex: "scale_position",
-        width: 90,
-        ellipsis: true,
-        render: (value: string) => value || "—"
-      },
-      {
-        title: "备货定位",
-        dataIndex: "stocking_position",
-        width: 100,
-        ellipsis: true,
-        render: (value: string) => value || "—"
-      },
-      {
-        title: "修改状态",
-        dataIndex: "change_type",
-        width: 90,
-        render: (value: PositionDraftRow["change_type"]) => {
-          const definitions = {
-            unchanged: { color: "default", label: "未变化" },
-            added: { color: "green", label: "新增" },
-            modified: { color: "blue", label: "已修改" },
-            deleted: { color: "red", label: "已删除" }
-          } as const;
-          const definition = definitions[value];
-          return <Tag color={definition.color}>{definition.label}</Tag>;
+  const rowColumns = useMemo(
+    () =>
+      createPositionRowColumns({
+        disabled: actionsDisabled,
+        copying: busyAction === "copy",
+        deleting: busyAction === "delete",
+        deleteConfirmRowId,
+        onEdit: openEditRow,
+        onCopy: copyRow,
+        onDeleteOpenChange: (row, open) => {
+          if (!open && keepDeleteConfirmOpenRef.current === row.id) {
+            keepDeleteConfirmOpenRef.current = null;
+            return;
+          }
+          if (!open && busyAction === "delete") return;
+          setDeleteConfirmRowId(open ? row.id : null);
+        },
+        onDeleteConfirm: async (row) => {
+          keepDeleteConfirmOpenRef.current = null;
+          if (!(await deleteRow(row))) keepDeleteConfirmOpenRef.current = row.id;
         }
-      },
-      {
-        title: "问题",
-        dataIndex: "issues",
-        width: 80,
-        render: (issues: PositionIssue[]) =>
-          issues.length === 0 ? (
-            <Typography.Text type="secondary">无</Typography.Text>
-          ) : (
-            <Tag color={issues.some((issue) => issue.severity === "error") ? "error" : "warning"}>
-              {issues.length} 项
-            </Tag>
-          )
-      },
-      {
-        title: "操作",
-        key: "actions",
-        width: 150,
-        render: (_, row) => (
-          <Space size={0}>
-            <Button
-              size="small"
-              type="link"
-              aria-label={rowActionLabel("编辑", row)}
-              disabled={actionsDisabled}
-              onClick={() => openEditRow(row)}
-            >
-              编辑
-            </Button>
-            <Button
-              size="small"
-              type="link"
-              aria-label={rowActionLabel("复制", row)}
-              disabled={actionsDisabled}
-              loading={busyAction === "copy"}
-              onClick={() => void copyRow(row)}
-            >
-              复制
-            </Button>
-            <Popconfirm
-              fresh
-              open={deleteConfirmRowId === row.id}
-              title={`删除 ${row.jiaji_sku}？`}
-              description="删除会立即保存到服务器草稿，发布前不会影响正式版本。"
-              okText="确认删除"
-              cancelText="取消"
-              cancelButtonProps={{ disabled: busyAction === "delete" && deleteConfirmRowId === row.id }}
-              onOpenChange={(open) => {
-                if (!open && keepDeleteConfirmOpenRef.current === row.id) {
-                  keepDeleteConfirmOpenRef.current = null;
-                  return;
-                }
-                if (!open && busyAction === "delete") return;
-                setDeleteConfirmRowId(open ? row.id : null);
-              }}
-              onConfirm={async () => {
-                keepDeleteConfirmOpenRef.current = null;
-                if (!(await deleteRow(row))) keepDeleteConfirmOpenRef.current = row.id;
-              }}
-            >
-              <Button
-                size="small"
-                type="link"
-                danger
-                aria-label={rowActionLabel("删除", row)}
-                disabled={actionsDisabled}
-                loading={busyAction === "delete"}
-              >
-                删除
-              </Button>
-            </Popconfirm>
-          </Space>
-        )
-      }
-    ],
+      }),
     [actionsDisabled, busyAction, deleteConfirmRowId]
   );
 
