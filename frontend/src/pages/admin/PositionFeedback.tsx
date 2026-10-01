@@ -1,5 +1,6 @@
 import { Alert, Button, Space, Tag, Typography } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
+import type { ReactNode } from "react";
 
 import { formatBeijingDateTime } from "../../dateTime";
 import type { PositionDiff, PositionDraft, PositionIssue } from "../../types";
@@ -148,17 +149,28 @@ export function DraftSummary({
   );
 }
 
-export function IssueList({ issues }: { issues: PositionIssue[] }) {
+export function IssueList({
+  issues,
+  className,
+  children,
+  describeRows = issueRows
+}: {
+  issues: PositionIssue[];
+  className?: string;
+  children?: ReactNode;
+  describeRows?: (issue: PositionIssue) => string | undefined;
+}) {
   if (issues.length === 0) return <Typography.Text type="secondary">没有发现问题</Typography.Text>;
   return (
-    <Space orientation="vertical" size={8} style={{ width: "100%" }}>
+    <Space orientation="vertical" size={8} style={{ width: "100%" }} className={className}>
+      {children}
       {issues.map((issue, index) => (
         <Alert
           key={`${issue.code}-${index}-${issue.row_numbers.join("-")}`}
           type={issue.severity}
           showIcon
           title={issue.message}
-          description={issueRows(issue)}
+          description={describeRows(issue)}
         />
       ))}
     </Space>

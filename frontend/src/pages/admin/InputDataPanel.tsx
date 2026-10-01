@@ -10,6 +10,7 @@ import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
 import { InputVersionHistoryPanel } from "./InputVersionHistoryPanel";
 import { InputVersionPreviewPanel } from "./InputVersionPreviewPanel";
+import { InputVersionQualityPanel } from "./InputVersionQualityPanel";
 
 interface InputDataPanelProps {
   versions: InputVersion[];
@@ -206,43 +207,11 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     })();
   };
 
-  const inspectionReady = Boolean(activeVersion && activeInspection);
   const errors = summary ? issueCount(summary.issues, "error") : 0;
   const warnings = summary ? issueCount(summary.issues, "warning") : 0;
   const readyKindCount = MAINTAINABLE_INPUT_KIND_DEFINITIONS.filter((definition) =>
     versions.some((version) => version.kind === definition.value && version.active)
   ).length;
-  const renderQuality = () => {
-    if (!activeVersion) {
-      return <Typography.Text type="secondary">启用资料后显示检查结果。</Typography.Text>;
-    }
-    if (!inspectionReady || !summary) {
-      return <Typography.Text type="secondary">等待检查结果。</Typography.Text>;
-    }
-    if (selectedKind !== "position" && selectedKind !== "supplier") {
-      return <Alert type="info" showIcon title="文件结构已通过校验，当前未执行内容质量诊断" />;
-    }
-    if (summary.issues.length === 0) {
-      return <Alert type="success" showIcon title="未发现资料质量问题" />;
-    }
-    return (
-      <Space orientation="vertical" size={8} className="input-data-quality-list">
-        <Space wrap size={[6, 6]}>
-          <Tag color={errors > 0 ? "error" : "default"}>{errors} 个错误</Tag>
-          <Tag color={warnings > 0 ? "warning" : "default"}>{warnings} 个警告</Tag>
-        </Space>
-        {summary.issues.map((issue) => (
-          <Alert
-            key={`${issue.code}-${issue.row_numbers.join("-")}`}
-            type={issue.severity}
-            showIcon
-            title={issue.message}
-            description={issue.row_numbers.length > 0 ? `涉及 Excel 行：${issue.row_numbers.join("、")}` : undefined}
-          />
-        ))}
-      </Space>
-    );
-  };
 
   return (
     <div className="input-data-panel">
@@ -447,7 +416,13 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
                         <Typography.Title level={5}>质量检查</Typography.Title>
                       </div>
                     </div>
-                    {renderQuality()}
+                    <InputVersionQualityPanel
+                      kind={selectedKind}
+                      hasActiveVersion={Boolean(activeVersion)}
+                      summary={summary}
+                      errors={errors}
+                      warnings={warnings}
+                    />
                   </section>
                 )
               }

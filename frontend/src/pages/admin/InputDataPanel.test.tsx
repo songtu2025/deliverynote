@@ -486,15 +486,61 @@ describe("InputDataPanel", () => {
       <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
     expect(await screen.findByText("商品文件无法解析")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /质量检查/ }));
+    expect(screen.getByText("等待检查结果。")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/7/inspection"))).toHaveLength(1);
+    fireEvent.click(screen.getByRole("tab", { name: /数据预览/ }));
     failInspection = false;
     fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
     expect(await screen.findByText("PRODUCT-SKU")).toBeInTheDocument();
     expect(screen.queryByText("商品文件无法解析")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /质量检查/ }));
+    expect(screen.getByText("文件结构已通过校验，当前未执行内容质量诊断")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /数据预览/ }));
     expect(screen.getByText("PRODUCT-SKU")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/7/inspection"))).toHaveLength(2);
   }, 30_000);
+
+  it("keeps quality row counts, tab totals and cached results consistent when switching kinds", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      const response = await originalFetch(input, init);
+      if (!String(input).endsWith("/3/inspection")) return response;
+      const inspection = await response.json();
+      inspection.summary.issues = [
+        { severity: "error", code: "missing", message: "合成缺失", row_numbers: [2, 3] },
+        { severity: "error", code: "conflict", message: "合成冲突", row_numbers: [2] },
+        { severity: "warning", code: "global", message: "合成全表提醒", row_numbers: [] }
+      ];
+      return jsonResponse(inspection);
+    });
+    render(
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
+    );
+    fireEvent.click(getCatalogButton("MSKU定位"));
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "质量检查 4" }));
+    const quality = within(screen.getByRole("region", { name: "质量检查" }));
+    expect(quality.getByText("3 个错误")).toBeInTheDocument();
+    expect(quality.getByText("1 个警告")).toBeInTheDocument();
+    expect(quality.getByText("涉及 Excel 行：2、3")).toBeInTheDocument();
+    expect(quality.getByText("涉及 Excel 行：2")).toBeInTheDocument();
+    expect(quality.queryByText("全表")).not.toBeInTheDocument();
+    fireEvent.click(getCatalogButton("商品信息"));
+    expect(await screen.findByText("PRODUCT-SKU")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "质量检查 0" }));
+    expect(screen.getByText("文件结构已通过校验，当前未执行内容质量诊断")).toBeInTheDocument();
+    expect(screen.queryByText("合成冲突")).not.toBeInTheDocument();
+    fireEvent.click(getCatalogButton("MSKU定位"));
+    fireEvent.click(screen.getByRole("tab", { name: "质量检查 4" }));
+    expect(screen.getByText("3 个错误")).toBeInTheDocument();
+    for (const id of [7, 3]) {
+      expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith(`/${id}/inspection`))).toHaveLength(
+        1
+      );
+    }
+  });
 
   it("shows supplier alias format, metrics, preview, and quality result", async () => {
     const versionsWithSupplier = versions.map((version) => (version.id === 5 ? { ...version, active: true } : version));
