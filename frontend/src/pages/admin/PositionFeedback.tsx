@@ -1,9 +1,103 @@
-import { Alert, Space, Tag, Typography } from "antd";
+import { Alert, Button, Space, Tag, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 
+import { formatBeijingDateTime } from "../../dateTime";
 import type { PositionDiff, PositionDraft, PositionIssue } from "../../types";
 
 function issueRows(issue: PositionIssue): string {
   return issue.row_numbers.length > 0 ? `第 ${issue.row_numbers.join("、")} 行` : "全表";
+}
+
+interface PositionDraftStatusProps {
+  draft: PositionDraft;
+  baseVersionChanged: boolean;
+  conflictMessage: string | null;
+  refreshing: boolean;
+  actionError: string | null;
+  importError: string | null;
+  onRefresh: () => Promise<void>;
+  onClearActionError: () => void;
+  onClearImportError: () => void;
+}
+
+export function PositionDraftStatus({
+  draft,
+  baseVersionChanged,
+  conflictMessage,
+  refreshing,
+  actionError,
+  importError,
+  onRefresh,
+  onClearActionError,
+  onClearImportError
+}: PositionDraftStatusProps) {
+  return (
+    <>
+      <Alert
+        className="inline-alert position-save-status"
+        type="success"
+        showIcon
+        title="草稿已自动保存"
+        description={
+          <Space wrap separator={<span aria-hidden="true">·</span>}>
+            <span>修订号 {draft.revision}</span>
+            <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>
+            <span>最后编辑人：用户 #{draft.updated_by}</span>
+          </Space>
+        }
+      />
+      {baseVersionChanged && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          title="草稿基线已过期"
+          description={`正式版本已变为 ${draft.active_version_name ?? "无启用版本"}。请放弃当前草稿后重新维护。`}
+        />
+      )}
+      {conflictMessage && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          title="草稿已在其他位置更新"
+          description={conflictMessage}
+          action={
+            <Button
+              aria-label="刷新草稿"
+              icon={<ReloadOutlined />}
+              loading={refreshing}
+              onClick={() => void onRefresh()}
+            >
+              刷新草稿
+            </Button>
+          }
+        />
+      )}
+      {actionError && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          closable
+          title="操作失败"
+          description={actionError}
+          onClose={onClearActionError}
+        />
+      )}
+      {importError && (
+        <Alert
+          className="inline-alert"
+          type="error"
+          showIcon
+          closable
+          title="Excel 替换未完成"
+          description={importError}
+          onClose={onClearImportError}
+        />
+      )}
+    </>
+  );
 }
 
 export function DiffTags({ diff }: { diff: PositionDiff }) {

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App as AntApp, Button, Card, Modal, Popconfirm, Space, Spin, Typography, Upload } from "antd";
-import { ArrowLeftOutlined, DownloadOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
+import { App as AntApp, Modal, Typography } from "antd";
 import type { UploadProps } from "antd";
 
-import { formatBeijingDateTime } from "../../dateTime";
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { usePositionDraftSession } from "./usePositionDraftSession";
 import { usePositionRowEditor } from "./usePositionRowEditor";
@@ -15,7 +13,9 @@ import * as positionDraftApi from "./positionDraftApi";
 import { errorMessage, isRevisionConflict } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
-import { DraftSummary } from "./PositionFeedback";
+import { DraftSummary, PositionDraftStatus } from "./PositionFeedback";
+import { PositionDraftEntry } from "./PositionDraftEntry";
+import { PositionMaintenanceHeader } from "./PositionMaintenanceHeader";
 import { PositionDraftRecords } from "./PositionDraftRecords";
 import { createPositionRowColumns } from "./positionRowColumns";
 import type { InputVersion, PositionDiff } from "../../types";
@@ -218,6 +218,20 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     }
   };
 
+  const handleDiscardOpenChange = (open: boolean) => {
+    if (!open && keepDiscardConfirmOpenRef.current) {
+      keepDiscardConfirmOpenRef.current = false;
+      return;
+    }
+    if (!open && busyAction === "discard") return;
+    setDiscardConfirmOpen(open);
+  };
+
+  const handleDiscardConfirm = async () => {
+    keepDiscardConfirmOpenRef.current = false;
+    if (!(await discardDraft())) keepDiscardConfirmOpenRef.current = true;
+  };
+
   const rowColumns = useMemo(
     () =>
       createPositionRowColumns({
@@ -246,199 +260,43 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     [actionsDisabled, busyAction, deleteConfirmRowId]
   );
 
-  if (entryLoading && !draft) {
-    return (
-      <div>
-        <Button
-          autoFocus
-          aria-label="返回基础资料"
-          className="back-link"
-          type="link"
-          icon={<ArrowLeftOutlined />}
-          onClick={onBack}
-        >
-          返回基础资料
-        </Button>
-        <div style={{ minHeight: 360, display: "grid", placeItems: "center" }}>
-          <Spin size="large" description="正在创建或恢复服务器草稿" />
-        </div>
-      </div>
-    );
+  if (!draft) {
+    return <PositionDraftEntry loading={entryLoading} error={entryError} onBack={onBack} onRetry={loadDraft} />;
   }
-
-  if (entryError && !draft) {
-    return (
-      <div>
-        <Button
-          autoFocus
-          aria-label="返回基础资料"
-          className="back-link"
-          type="link"
-          icon={<ArrowLeftOutlined />}
-          onClick={onBack}
-        >
-          返回基础资料
-        </Button>
-        <Card>
-          <Alert
-            type="error"
-            showIcon
-            title="无法打开库位草稿"
-            description={entryError}
-            action={
-              <Button icon={<ReloadOutlined />} onClick={() => void loadDraft()}>
-                重新尝试
-              </Button>
-            }
-          />
-        </Card>
-      </div>
-    );
-  }
-
-  if (!draft) return null;
 
   const diff = draft.diff ?? EMPTY_DIFF;
   return (
     <div className="position-maintenance">
-      <div className="position-workspace-heading">
-        <div className="position-workspace-title">
-          <Button
-            autoFocus
-            aria-label="返回基础资料"
-            className="back-link"
-            type="link"
-            icon={<ArrowLeftOutlined />}
-            disabled={busyAction !== null}
-            onClick={editor.requestBack}
-          >
-            返回基础资料
-          </Button>
-          <Typography.Title level={2} style={{ margin: 0 }}>
-            MSKU 定位维护
-          </Typography.Title>
-          <Typography.Text type="secondary">
-            基于 {draft.base_version_name}；修改自动保存到草稿，发布后生效。
-          </Typography.Text>
-        </div>
-        <Space wrap className="position-workspace-actions">
-          <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void downloadDraft()}>
-            下载草稿
-          </Button>
-          <Upload accept=".xls,.xlsx" showUploadList={false} disabled={actionsDisabled} customRequest={previewImport}>
-            <Button
-              ref={importButtonRef}
-              aria-label="Excel 整表替换"
-              icon={<UploadOutlined />}
-              disabled={actionsDisabled}
-              loading={busyAction === "import-preview"}
-            >
-              Excel 整表替换
-            </Button>
-          </Upload>
-          <Popconfirm
-            fresh
-            open={discardConfirmOpen}
-            title="确定放弃整个服务器草稿？"
-            description="草稿中的所有修改都会丢失，当前正式版本保持不变。"
-            okText="确认放弃"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            cancelButtonProps={{ disabled: busyAction === "discard" }}
-            onOpenChange={(open) => {
-              if (!open && keepDiscardConfirmOpenRef.current) {
-                keepDiscardConfirmOpenRef.current = false;
-                return;
-              }
-              if (!open && busyAction === "discard") return;
-              setDiscardConfirmOpen(open);
-            }}
-            onConfirm={async () => {
-              keepDiscardConfirmOpenRef.current = false;
-              if (!(await discardDraft())) keepDiscardConfirmOpenRef.current = true;
-            }}
-          >
-            <Button danger disabled={discardDisabled} loading={busyAction === "discard"}>
-              放弃草稿
-            </Button>
-          </Popconfirm>
-          <Button
-            type="primary"
-            disabled={actionsDisabled}
-            loading={busyAction === "validate"}
-            ref={publishButtonRef}
-            onClick={() => void publishFlow.open()}
-          >
-            发布新版本
-          </Button>
-        </Space>
-      </div>
-
-      <Alert
-        className="inline-alert position-save-status"
-        type="success"
-        showIcon
-        title="草稿已自动保存"
-        description={
-          <Space wrap separator={<span aria-hidden="true">·</span>}>
-            <span>修订号 {draft.revision}</span>
-            <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>
-            <span>最后编辑人：用户 #{draft.updated_by}</span>
-          </Space>
-        }
+      <PositionMaintenanceHeader
+        baseVersionName={draft.base_version_name}
+        busy={busyAction !== null}
+        actionsDisabled={actionsDisabled}
+        importing={busyAction === "import-preview"}
+        validating={busyAction === "validate"}
+        discarding={busyAction === "discard"}
+        discardDisabled={discardDisabled}
+        discardConfirmOpen={discardConfirmOpen}
+        importButtonRef={importButtonRef}
+        publishButtonRef={publishButtonRef}
+        onBack={editor.requestBack}
+        onDownload={downloadDraft}
+        onImport={previewImport}
+        onDiscardOpenChange={handleDiscardOpenChange}
+        onDiscardConfirm={handleDiscardConfirm}
+        onPublish={() => void publishFlow.open()}
       />
 
-      {baseVersionChanged && (
-        <Alert
-          className="inline-alert"
-          type="error"
-          showIcon
-          title="草稿基线已过期"
-          description={`正式版本已变为 ${draft.active_version_name ?? "无启用版本"}。请放弃当前草稿后重新维护。`}
-        />
-      )}
-
-      {conflictMessage && (
-        <Alert
-          className="inline-alert"
-          type="error"
-          showIcon
-          title="草稿已在其他位置更新"
-          description={conflictMessage}
-          action={
-            <Button
-              aria-label="刷新草稿"
-              icon={<ReloadOutlined />}
-              loading={entryLoading}
-              onClick={() => void loadDraft()}
-            >
-              刷新草稿
-            </Button>
-          }
-        />
-      )}
-      {actionError && (
-        <Alert
-          className="inline-alert"
-          type="error"
-          showIcon
-          closable
-          title="操作失败"
-          description={actionError}
-          onClose={() => setActionError(null)}
-        />
-      )}
-      {importFlow.error && (
-        <Alert
-          className="inline-alert"
-          type="error"
-          showIcon
-          closable
-          title="Excel 替换未完成"
-          description={importFlow.error}
-          onClose={importFlow.clearError}
-        />
-      )}
+      <PositionDraftStatus
+        draft={draft}
+        baseVersionChanged={baseVersionChanged}
+        conflictMessage={conflictMessage}
+        refreshing={entryLoading}
+        actionError={actionError}
+        importError={importFlow.error}
+        onRefresh={loadDraft}
+        onClearActionError={() => setActionError(null)}
+        onClearImportError={importFlow.clearError}
+      />
 
       <DraftSummary draft={draft} diff={diff} />
 
