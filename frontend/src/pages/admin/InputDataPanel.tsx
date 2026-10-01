@@ -1,28 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Drawer,
-  Form,
-  Input,
-  Space,
-  Spin,
-  Table,
-  Tabs,
-  Tag,
-  Typography,
-  Upload
-} from "antd";
+import { Alert, App as AntApp, Button, Drawer, Form, Input, Space, Tabs, Tag, Typography, Upload } from "antd";
 import { CheckCircleFilled, DownloadOutlined, InboxOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
-import type { TableProps, UploadFile, UploadProps } from "antd";
+import type { UploadFile, UploadProps } from "antd";
 
 import { api, download } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
-import type { InputVersion, InputVersionInspection, InputVersionPreviewValue, PositionIssue } from "../../types";
+import type { InputVersion, InputVersionInspection, PositionIssue } from "../../types";
 import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
 import { InputVersionHistoryPanel } from "./InputVersionHistoryPanel";
+import { InputVersionPreviewPanel } from "./InputVersionPreviewPanel";
 
 interface InputDataPanelProps {
   versions: InputVersion[];
@@ -42,7 +29,6 @@ interface KindError {
   message: string;
 }
 
-type PreviewRow = Record<string, InputVersionPreviewValue>;
 type WorkspaceTab = "preview" | "history" | "quality";
 
 const MAINTAINABLE_INPUT_KIND_DEFINITIONS = INPUT_KIND_DEFINITIONS.filter(
@@ -54,11 +40,6 @@ function issueCount(issues: PositionIssue[], severity: PositionIssue["severity"]
     (total, issue) => total + (issue.severity === severity ? Math.max(1, issue.row_numbers.length) : 0),
     0
   );
-}
-
-function formatPreviewValue(value: InputVersionPreviewValue): string | number {
-  if (typeof value === "boolean") return value ? "是" : "否";
-  return value ?? "—";
 }
 
 export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPositionDraft }: InputDataPanelProps) {
@@ -92,12 +73,6 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
   const preview = activeInspection?.preview ?? null;
   const mutationBusy = mutation !== null;
   const uploading = mutation?.action === "upload";
-  const previewTableComponents = useMemo<NonNullable<TableProps<PreviewRow>["components"]>>(
-    () => ({
-      table: (props) => <table {...props} aria-label={`${selectedDefinition.label}数据预览`} />
-    }),
-    [selectedDefinition.label]
-  );
 
   useEffect(() => {
     setPendingFiles([]);
@@ -157,38 +132,6 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
       cancelled = true;
     };
   }, [activeVersion?.id, inspectionAttempt, loading]);
-
-  const previewColumns = useMemo<NonNullable<TableProps<PreviewRow>["columns"]>>(
-    () => [
-      {
-        title: "Excel 行",
-        dataIndex: "__excelRow",
-        key: "__excelRow",
-        width: 84,
-        fixed: "left",
-        render: (value: InputVersionPreviewValue) => formatPreviewValue(value)
-      },
-      ...(preview?.columns ?? []).map((column) => ({
-        title: column,
-        dataIndex: column,
-        key: column,
-        ellipsis: true,
-        width: Math.max(140, Math.min(240, column.length * 18 + 48)),
-        render: (value: InputVersionPreviewValue) => formatPreviewValue(value)
-      }))
-    ],
-    [preview]
-  );
-
-  const previewRows = useMemo(
-    () =>
-      (preview?.rows ?? []).map((row, index) => ({
-        ...row,
-        __excelRow: (preview?.offset ?? 0) + index + 2,
-        __previewKey: String((preview?.offset ?? 0) + index)
-      })),
-    [preview]
-  );
 
   const selectUploadFile: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
     setPendingFiles(fileList.slice(-1));
@@ -269,95 +212,6 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
   const readyKindCount = MAINTAINABLE_INPUT_KIND_DEFINITIONS.filter((definition) =>
     versions.some((version) => version.kind === definition.value && version.active)
   ).length;
-  const renderCurrentData = () => {
-    if (loading) {
-      return (
-        <div className="input-data-loading">
-          <Spin description="读取资料状态" />
-        </div>
-      );
-    }
-    if (!activeVersion) {
-      return (
-        <Alert
-          type="warning"
-          showIcon
-          title={`${selectedDefinition.label}尚无启用版本`}
-          description="上传并启用通过校验的 Excel 文件。"
-        />
-      );
-    }
-    if (inspectionLoading || (!inspectionReady && !inspectionError)) {
-      return (
-        <div className="input-data-loading">
-          <Spin description="读取摘要与预览" />
-        </div>
-      );
-    }
-    if (inspectionError?.versionId === activeVersion.id) {
-      return (
-        <Alert
-          type="error"
-          showIcon
-          title="无法读取当前版本内容"
-          description={inspectionError.message}
-          action={
-            <Button size="small" onClick={() => setInspectionAttempt((value) => value + 1)}>
-              重新加载
-            </Button>
-          }
-        />
-      );
-    }
-    if (!inspectionReady || !summary || !preview) return null;
-
-    const metricItems =
-      selectedKind === "position"
-        ? [
-            `${summary.metrics.sites ?? 0} 个站点`,
-            `${summary.metrics.skus ?? 0} 个积加 SKU`,
-            `${summary.metrics.mskus ?? 0} 个 MSKU`
-          ]
-        : selectedKind === "supplier"
-          ? [
-              `${summary.metrics.aliases ?? 0} 个别名`,
-              `${summary.metrics.suppliers_with_aliases ?? 0} 个供应商已配置别名`
-            ]
-          : [];
-
-    return (
-      <>
-        <div className="input-data-preview-heading">
-          <div>
-            <Typography.Title level={5}>数据预览</Typography.Title>
-            <Typography.Text type="secondary">预览不会修改原文件。</Typography.Text>
-          </div>
-          <Typography.Text className="input-data-preview-summary" type="secondary">
-            <span>
-              当前展示前 {preview.rows.length} 行，共 {preview.total} 行 · {summary.columns.length} 个字段
-            </span>
-            {metricItems.map((item) => (
-              <span className="input-data-preview-metric" key={item}>
-                {item}
-              </span>
-            ))}
-          </Typography.Text>
-        </div>
-        <Table<PreviewRow>
-          className="input-data-preview-table"
-          rowKey="__previewKey"
-          size="small"
-          columns={previewColumns}
-          dataSource={previewRows}
-          components={previewTableComponents}
-          pagination={false}
-          scroll={{ x: "max-content" }}
-          locale={{ emptyText: "当前版本没有可预览的数据" }}
-        />
-      </>
-    );
-  };
-
   const renderQuality = () => {
     if (!activeVersion) {
       return <Typography.Text type="secondary">启用资料后显示检查结果。</Typography.Text>;
@@ -547,7 +401,16 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
                 ),
                 children: (
                   <section aria-label="数据预览" className="input-data-tab-panel">
-                    {renderCurrentData()}
+                    <InputVersionPreviewPanel
+                      kind={selectedKind}
+                      label={selectedDefinition.label}
+                      activeVersion={activeVersion}
+                      inspection={activeInspection}
+                      loading={loading}
+                      inspectionLoading={inspectionLoading}
+                      inspectionError={inspectionError}
+                      onRetry={() => setInspectionAttempt((value) => value + 1)}
+                    />
                   </section>
                 )
               },

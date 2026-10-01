@@ -1,5 +1,6 @@
-import { fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp, ConfigProvider, message as staticMessage } from "antd";
+import { StrictMode } from "react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -432,6 +433,68 @@ describe("InputDataPanel", () => {
       ).toHaveLength(1);
     }
   });
+
+  it.each([false, true])(
+    "deduplicates pending inspection and ignores late results for another kind with failure=%s",
+    async (failed) => {
+      const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+      const productResponse = await originalFetch("/api/input-versions/7/inspection");
+      const response = createDeferred<Response>();
+      vi.mocked(fetch).mockImplementation((input, init) =>
+        String(input).endsWith("/api/input-versions/7/inspection") ? response.promise : originalFetch(input, init)
+      );
+      render(
+        <StrictMode>
+          <InputDataPanel
+            versions={versions}
+            loading={false}
+            onVersionsChanged={vi.fn()}
+            onOpenPositionDraft={vi.fn()}
+          />
+        </StrictMode>
+      );
+      expect(await screen.findByText("读取摘要与预览")).toBeInTheDocument();
+      fireEvent.click(getCatalogButton("MSKU定位"));
+      expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+      fireEvent.click(getCatalogButton("商品信息"));
+      expect(await screen.findByText("读取摘要与预览")).toBeInTheDocument();
+      fireEvent.click(getCatalogButton("MSKU定位"));
+      expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+      await act(async () => {
+        response.resolve(failed ? jsonResponse({ detail: "合成晚返回失败" }, 400) : productResponse);
+        await response.promise;
+      });
+      expect(screen.getByText("SKU-A")).toBeInTheDocument();
+      expect(screen.queryByText("PRODUCT-SKU")).not.toBeInTheDocument();
+      expect(screen.queryByText("合成晚返回失败")).not.toBeInTheDocument();
+      if (!failed) {
+        fireEvent.click(getCatalogButton("商品信息"));
+        expect(await screen.findByText("PRODUCT-SKU")).toBeInTheDocument();
+      }
+      for (const id of [7, 3]) {
+        expect(
+          vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith(`/${id}/inspection`))
+        ).toHaveLength(1);
+      }
+    },
+    30_000
+  );
+
+  it("retries a failed inspection once and reuses the successful result across tabs", async () => {
+    failInspection = true;
+    render(
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
+    );
+    expect(await screen.findByText("商品文件无法解析")).toBeInTheDocument();
+    failInspection = false;
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(await screen.findByText("PRODUCT-SKU")).toBeInTheDocument();
+    expect(screen.queryByText("商品文件无法解析")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /数据预览/ }));
+    expect(screen.getByText("PRODUCT-SKU")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/7/inspection"))).toHaveLength(2);
+  }, 30_000);
 
   it("shows supplier alias format, metrics, preview, and quality result", async () => {
     const versionsWithSupplier = versions.map((version) => (version.id === 5 ? { ...version, active: true } : version));
