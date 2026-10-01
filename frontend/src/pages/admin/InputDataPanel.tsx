@@ -668,6 +668,11 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
 
       <Drawer
         rootClassName="input-data-maintenance-drawer"
+        classNames={{ header: "input-data-maintenance-header", body: "input-data-maintenance-body" }}
+        styles={{
+          header: { borderColor: "#e2e9e7", background: "#f7f9f8" },
+          body: { padding: "22px 24px" }
+        }}
         title={activeVersion ? `更新${selectedDefinition.label}` : `上传${selectedDefinition.label}`}
         size={520}
         open={maintenanceOpen}
@@ -706,11 +711,19 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
               type="info"
               showIcon
               title="供应商别名为可选列"
+              styles={{ root: { borderRadius: 8 } }}
               description="一个单元格内的多个别名请用 | 分隔。启用供应商之间名称或别名相同、互为子串时，上传会被拒绝并提示 Excel 行号。"
             />
           )}
           {uploadError?.kind === selectedKind && (
-            <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError.message} />
+            <Alert
+              className="inline-alert"
+              type="error"
+              showIcon
+              title="上传失败"
+              description={uploadError.message}
+              styles={{ root: { borderRadius: 8 } }}
+            />
           )}
           <Form form={uploadForm} layout="vertical" clearOnDestroy>
             <Form.Item label="新版本名称" name="name" rules={[{ required: true, message: "请输入版本名称" }]}>

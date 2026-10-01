@@ -3005,26 +3005,6 @@ input {
 .position-records-card .ant-table-tbody .ant-btn-link {
   padding-inline: 6px;
 }
-.position-row-field-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 18px;
-}
-.position-row-form {
-  container: position-editor / inline-size;
-}
-@container position-editor (max-width: 480px) {
-  .position-row-field-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-.position-row-field-grid .ant-form-item {
-  min-width: 0;
-}
-.position-row-field-grid .ant-form-item-extra {
-  min-height: 38px;
-}
-
 .position-maintenance .ant-alert,
 .input-data-layout .ant-alert,
 .admin-panel-card .ant-alert {
@@ -3034,19 +3014,6 @@ input {
 .position-maintenance .ant-descriptions-bordered,
 .input-data-layout .ant-descriptions-bordered {
   overflow: hidden;
-  border-radius: 8px;
-}
-
-body:has(.admin-maintenance-pc) .ant-drawer .ant-drawer-header,
-body:has(.admin-maintenance-pc) .ant-drawer .ant-drawer-footer {
-  border-color: #e2e9e7;
-  background: #f7f9f8;
-}
-
-body:has(.admin-maintenance-pc) .ant-drawer .ant-drawer-body {
-  padding: 22px 24px;
-}
-body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
   border-radius: 8px;
 }
 

@@ -26,6 +26,12 @@ describe("PositionMaintenance record mutations", () => {
     expect(screen.getByText("修订号 3")).toBeInTheDocument();
     expect(screen.getByText("新增 0")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+    const drawer = await dialogByTitle("新增库位记录");
+    expect(drawer.querySelector(".position-row-drawer-header")).toBeInTheDocument();
+    expect(drawer.querySelector(".position-row-drawer-body")).toBeInTheDocument();
+    expect(drawer.querySelector(".position-row-drawer-footer")).toBeInTheDocument();
+    expect(drawer.querySelectorAll(".position-row-field")).toHaveLength(5);
+    expect(drawer.querySelectorAll(".position-row-field-help")).toHaveLength(5);
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
     expect(await screen.findByText("请输入店铺-站点")).toBeInTheDocument();
     expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(0);

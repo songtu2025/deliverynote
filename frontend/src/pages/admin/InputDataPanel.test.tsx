@@ -277,7 +277,12 @@ describe("InputDataPanel", () => {
     expect(screen.getByRole("table", { name: "商品信息版本记录" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
-    expect(screen.getByRole("dialog", { name: "更新商品信息" })).toBeInTheDocument();
+    const drawer = screen.getByRole("dialog", { name: "更新商品信息" });
+    expect(drawer.querySelector(".input-data-maintenance-header")).toHaveStyle({
+      borderColor: "#e2e9e7",
+      background: "#f7f9f8"
+    });
+    expect(drawer.querySelector(".input-data-maintenance-body")).toHaveStyle({ padding: "22px 24px" });
     expect(screen.getByLabelText("新版本名称")).toBeInTheDocument();
   });
 
@@ -429,6 +434,7 @@ describe("InputDataPanel", () => {
     expect(screen.getByText("未发现资料质量问题")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
     expect(screen.getByText("供应商别名为可选列")).toBeInTheDocument();
+    expect(screen.getByText("供应商别名为可选列").closest('[role="alert"]')).toHaveStyle({ borderRadius: "8px" });
     expect(screen.getByText(/名称或别名相同、互为子串/)).toBeInTheDocument();
   });
 

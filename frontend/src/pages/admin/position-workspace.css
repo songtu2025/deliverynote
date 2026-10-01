@@ -1,4 +1,4 @@
-/* 库位主页面的业务布局集中在此；共享主题与浮层样式仍由原样式入口维护。 */
+/* 库位页面及编辑抽屉的业务布局集中在此，共享主题仍由原样式入口维护。 */
 .position-maintenance .position-workspace-heading {
   position: sticky;
   top: 64px;
@@ -127,6 +127,41 @@
   gap: 12px;
   min-height: 32px;
   margin: -2px 0 10px;
+}
+
+.position-row-drawer .position-row-drawer-header,
+.position-row-drawer .position-row-drawer-footer {
+  border-color: #e2e9e7;
+  background: #f7f9f8;
+}
+
+.position-row-drawer .position-row-drawer-body {
+  padding: 22px 24px;
+}
+
+.position-row-drawer .position-row-form {
+  container: position-editor / inline-size;
+}
+
+.position-row-drawer .position-row-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+}
+
+.position-row-drawer .position-row-field {
+  min-width: 0;
+}
+
+.position-row-drawer .position-row-field-help {
+  display: block;
+  min-height: 38px;
+}
+
+@container position-editor (max-width: 480px) {
+  .position-row-drawer .position-row-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @container admin-workspace (max-width: 900px) {
