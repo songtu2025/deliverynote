@@ -108,6 +108,7 @@ let failUpload = false;
 let failActivation = false;
 let emptyProductPreview = false;
 let pendingUpload: Deferred<Response> | null = null;
+let pendingActivation: Deferred<Response> | null = null;
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -137,6 +138,7 @@ describe("InputDataPanel", () => {
     failActivation = false;
     emptyProductPreview = false;
     pendingUpload = null;
+    pendingActivation = null;
     vi.mocked(download).mockReset();
     vi.spyOn(staticMessage, "success");
     vi.spyOn(staticMessage, "error");
@@ -235,6 +237,7 @@ describe("InputDataPanel", () => {
         }
         if (url.endsWith("/api/input-versions/8/activate") && method === "POST") {
           if (failActivation) return jsonResponse({ detail: "合成版本启用失败" }, 400);
+          if (pendingActivation) return pendingActivation.promise;
           return jsonResponse({ ...versions[7], active: true });
         }
         throw new Error(`Unexpected request: ${method} ${url}`);
@@ -593,10 +596,13 @@ describe("InputDataPanel", () => {
     expect(staticMessage.success).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])(
-    "preserves history activation feedback with failure=%s",
-    async (failed) => {
+  it.each(["success", "failure", "pending"])(
+    "preserves history activation feedback and locking with outcome=%s",
+    async (outcome) => {
+      const failed = outcome === "failure";
       failActivation = failed;
+      const response = outcome === "pending" ? createDeferred<Response>() : null;
+      pendingActivation = response;
       const onVersionsChanged = vi.fn();
       render(
         <InputDataPanel
@@ -612,6 +618,16 @@ describe("InputDataPanel", () => {
       fireEvent.click(activateButton);
       expect(onVersionsChanged).not.toHaveBeenCalled();
       fireEvent.click(await screen.findByRole("button", { name: "确认启用" }));
+
+      if (response) {
+        await waitFor(() => expect(activateButton).toBeDisabled());
+        expect(activateButton).toHaveAttribute("aria-busy", "true");
+        expect(getCatalogButton("供应商资料")).toBeDisabled();
+        expect(onVersionsChanged).not.toHaveBeenCalled();
+        fireEvent.click(activateButton);
+        expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+        response.resolve(jsonResponse({ ...versions[7], active: true }));
+      }
 
       const successText = "product-old 已启用，将用于新批次";
       if (failed) {
@@ -637,6 +653,7 @@ describe("InputDataPanel", () => {
           )
       ).toHaveLength(1);
       await waitFor(() => expect(activateButton).toBeEnabled());
+      expect(getCatalogButton("供应商资料")).toBeEnabled();
     },
     30_000
   );
