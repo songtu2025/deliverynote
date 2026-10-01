@@ -14,7 +14,8 @@ export function PublishDialog({
   onNameChange,
   onWarningsChange,
   onPublish,
-  onCancel
+  onCancel,
+  onClosed
 }: {
   validation: PositionDraftValidation | null;
   versionName: string;
@@ -27,6 +28,7 @@ export function PublishDialog({
   onWarningsChange: (checked: boolean) => void;
   onPublish: () => void;
   onCancel: () => void;
+  onClosed: () => void;
 }) {
   return (
     <Modal
@@ -41,6 +43,8 @@ export function PublishDialog({
       closable={!publishing}
       keyboard={!publishing}
       mask={{ closable: !publishing }}
+      focusable={{ focusTriggerAfterClose: false }}
+      afterClose={onClosed}
       onOk={onPublish}
       onCancel={() => {
         if (!publishing) onCancel();
@@ -54,6 +58,7 @@ export function PublishDialog({
               <Input
                 aria-label="新版本名称"
                 value={versionName}
+                disabled={publishing}
                 maxLength={200}
                 onChange={(event) => onNameChange(event.target.value)}
               />
@@ -69,7 +74,11 @@ export function PublishDialog({
           )}
           <IssueList issues={validation.issues} />
           {validation.warning_count > 0 && (
-            <Checkbox checked={warningsConfirmed} onChange={(event) => onWarningsChange(event.target.checked)}>
+            <Checkbox
+              disabled={publishing}
+              checked={warningsConfirmed}
+              onChange={(event) => onWarningsChange(event.target.checked)}
+            >
               我已检查并确认发布这些警告
             </Checkbox>
           )}

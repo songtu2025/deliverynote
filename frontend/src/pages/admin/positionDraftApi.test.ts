@@ -165,7 +165,7 @@ describe("position draft API contracts", () => {
     { call: () => positionDraftApi.createRow(7, { revision, ...rowValues }), code: "draft_revision_conflict" },
     { call: () => positionDraftApi.applyImport(7, revision, "expired"), code: "draft_import_preview_expired" },
     { call: () => positionDraftApi.publishDraft(7, publishPayload), code: "input_version_name_exists" },
-    { call: () => positionDraftApi.discardDraft(7, revision), code: "draft_base_version_changed" },
+    { call: () => positionDraftApi.publishDraft(7, publishPayload), code: "draft_base_version_changed" },
     { call: () => positionDraftApi.createRow(7, { revision, ...rowValues }), code: null }
   ])("retains the 409 error code $code", async ({ call, code }) => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ detail: "演示失败信息", code }, 409));
@@ -183,13 +183,18 @@ describe("position draft API contracts", () => {
     { status: 409, code: "draft_revision_conflict", conflict: true },
     { status: 409, code: "draft_import_preview_expired", conflict: false },
     { status: 409, code: "input_version_name_exists", conflict: false },
+    { status: 409, code: "draft_base_version_changed", conflict: false },
     { status: 409, code: null, conflict: false },
-    { status: 500, code: "draft_revision_conflict", conflict: false }
+    { status: 500, code: "draft_revision_conflict", conflict: false },
+    { status: 500, code: "draft_base_version_changed", conflict: false }
   ])(
     "classifies status $status and code $code without treating every 409 as a revision conflict",
     ({ status, code, conflict }) => {
       const failure = new ApiError(status, "演示失败信息", code);
       expect(positionDraftApi.isRevisionConflict(failure)).toBe(conflict);
+      expect(positionDraftApi.hasApiCode(failure, positionDraftApi.POSITION_ERROR_CODES.baseVersionChanged)).toBe(
+        status === 409 && code === "draft_base_version_changed"
+      );
       expect(positionDraftApi.hasApiCode(failure, positionDraftApi.POSITION_ERROR_CODES.importPreviewExpired)).toBe(
         status === 409 && code === "draft_import_preview_expired"
       );

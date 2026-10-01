@@ -3,21 +3,22 @@ import { Alert, App as AntApp, Button, Card, Modal, Popconfirm, Space, Spin, Typ
 import { ArrowLeftOutlined, DownloadOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { UploadProps } from "antd";
 
-import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
+import { formatBeijingDateTime } from "../../dateTime";
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { usePositionDraftSession } from "./usePositionDraftSession";
 import { rowValues, usePositionRowEditor } from "./usePositionRowEditor";
 import { usePositionImport } from "./usePositionImport";
+import { usePositionPublish } from "./usePositionPublish";
 import { RowEditorDrawer } from "./RowEditorDrawer";
 import * as positionDraftApi from "./positionDraftApi";
 import type { PositionRevisionResponse } from "./positionDraftApi";
-import { errorMessage, hasApiCode, isRevisionConflict, POSITION_ERROR_CODES } from "./positionDraftApi";
+import { errorMessage, isRevisionConflict } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
 import { DraftSummary } from "./PositionFeedback";
 import { PositionDraftRecords } from "./PositionDraftRecords";
 import { createPositionRowColumns } from "./positionRowColumns";
-import type { InputVersion, PositionDiff, PositionDraftRow, PositionDraftValidation } from "../../types";
+import type { InputVersion, PositionDiff, PositionDraftRow } from "../../types";
 
 interface PositionMaintenanceProps {
   activeVersion: InputVersion;
@@ -30,11 +31,6 @@ type BusyAction =
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
 
-function defaultVersionName(): string {
-  const parts = beijingDateTimeParts();
-  return `position-${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}`;
-}
-
 export function PositionMaintenance({ onPublished, onBack }: PositionMaintenanceProps) {
   const { message } = AntApp.useApp();
   const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
@@ -45,23 +41,16 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const editor = usePositionRowEditor(busyAction !== null, onBack);
 
-  const [publishValidation, setPublishValidation] = useState<PositionDraftValidation | null>(null);
-  const [publishName, setPublishName] = useState("");
-  const [publishNameError, setPublishNameError] = useState<string | null>(null);
-  const [publishError, setPublishError] = useState<string | null>(null);
-  const [warningsConfirmed, setWarningsConfirmed] = useState(false);
-
   const keepDeleteConfirmOpenRef = useRef<number | null>(null);
   const keepBulkDeleteConfirmOpenRef = useRef(false);
   const keepDiscardConfirmOpenRef = useRef(false);
   const importButtonRef = useRef<HTMLButtonElement>(null);
+  const publishButtonRef = useRef<HTMLButtonElement>(null);
 
   const clearLocalState = () => {
     editor.reset();
     importFlow.reset();
-    setPublishValidation(null);
-    setPublishNameError(null);
-    setPublishError(null);
+    publishFlow.reset();
     setDeleteConfirmRowId(null);
     setBulkDeleteConfirmOpen(false);
     setDiscardConfirmOpen(false);
@@ -88,6 +77,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const loadDraft = async () => {
     if (!(await session.loadDraft())) return;
     importFlow.reset();
+    publishFlow.reset();
     setSelectedRowIds([]);
     setDeleteConfirmRowId(null);
     setBulkDeleteConfirmOpen(false);
@@ -123,6 +113,33 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const restoreImportFocus = () => {
     if (!actionsDisabled) importButtonRef.current?.focus();
+  };
+
+  const publishFlow = usePositionPublish({
+    draftId: draft?.id,
+    disabled: actionsDisabled,
+    getRevision,
+    onBusyChange: (action) => {
+      setBusyAction(action);
+      if (action !== null) setActionError(null);
+    },
+    onValidationError: setActionError,
+    onPublished: (published) => {
+      recordRevision(published.draft_revision);
+      onPublished(published);
+      message.success("新库位版本已发布并启用");
+    },
+    onConflict: (messageText, kind) => {
+      if (kind === "revision") invalidateLocalState(messageText);
+      else {
+        setActionError(messageText);
+        void loadDraft();
+      }
+    }
+  });
+
+  const restorePublishFocus = () => {
+    if (!actionsDisabled) publishButtonRef.current?.focus();
   };
 
   const handleActionError = (error: unknown, fallback: string) => {
@@ -232,58 +249,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     }
   };
 
-  const openPublish = async () => {
-    if (!draft || actionsDisabled) return;
-    setBusyAction("validate");
-    setActionError(null);
-    try {
-      const validation = await positionDraftApi.validateDraft(draft.id);
-      if (validation.revision !== getRevision()) {
-        invalidateLocalState("草稿已由其他管理员修改，请刷新后重试");
-        return;
-      }
-      setPublishValidation(validation);
-      setPublishName(defaultVersionName());
-      setPublishNameError(null);
-      setPublishError(null);
-      setWarningsConfirmed(false);
-    } catch (error) {
-      handleActionError(error, "发布前校验失败");
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const publishDraft = async () => {
-    if (!draft || !publishValidation || !publishName.trim()) return;
-    if (publishValidation.error_count > 0 || (publishValidation.warning_count > 0 && !warningsConfirmed)) return;
-    setBusyAction("publish");
-    setActionError(null);
-    setPublishError(null);
-    try {
-      const published = await positionDraftApi.publishDraft(draft.id, {
-        revision: getRevision(),
-        name: publishName.trim(),
-        confirm_warnings: warningsConfirmed
-      });
-      recordRevision(published.draft_revision);
-      setPublishValidation(null);
-      onPublished(published);
-      message.success("新库位版本已发布并启用");
-    } catch (error) {
-      const messageText = errorMessage(error, "发布失败");
-      if (isRevisionConflict(error)) {
-        invalidateLocalState(messageText);
-      } else if (hasApiCode(error, POSITION_ERROR_CODES.versionNameExists)) {
-        setPublishNameError(messageText);
-      } else {
-        setPublishError(messageText);
-      }
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
   const discardDraft = async () => {
     if (!draft || discardDisabled) return false;
     setBusyAction("discard");
@@ -380,11 +345,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   if (!draft) return null;
 
   const diff = draft.diff ?? EMPTY_DIFF;
-  const publishBlocked =
-    !publishValidation ||
-    publishValidation.error_count > 0 ||
-    (publishValidation.warning_count > 0 && !warningsConfirmed) ||
-    !publishName.trim();
   return (
     <div className="position-maintenance">
       <div className="position-workspace-heading">
@@ -452,7 +412,8 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
             type="primary"
             disabled={actionsDisabled}
             loading={busyAction === "validate"}
-            onClick={() => void openPublish()}
+            ref={publishButtonRef}
+            onClick={() => void publishFlow.open()}
           >
             发布新版本
           </Button>
@@ -578,25 +539,21 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       />
 
       <PublishDialog
-        validation={publishValidation}
-        versionName={publishName}
-        nameError={publishNameError}
-        publishError={publishError}
-        warningsConfirmed={warningsConfirmed}
+        validation={publishFlow.validation}
+        versionName={publishFlow.name}
+        nameError={publishFlow.nameError}
+        publishError={publishFlow.error}
+        warningsConfirmed={publishFlow.warningsConfirmed}
         publishing={busyAction === "publish"}
-        blocked={publishBlocked}
-        onNameChange={(value) => {
-          setPublishName(value);
-          setPublishNameError(null);
-        }}
-        onWarningsChange={setWarningsConfirmed}
-        onPublish={() => void publishDraft()}
+        blocked={publishFlow.blocked}
+        onNameChange={publishFlow.changeName}
+        onWarningsChange={publishFlow.confirmWarnings}
+        onPublish={() => void publishFlow.publish()}
         onCancel={() => {
-          if (busyAction !== null) return;
-          setPublishValidation(null);
-          setPublishNameError(null);
-          setPublishError(null);
+          publishFlow.cancel();
+          restorePublishFocus();
         }}
+        onClosed={restorePublishFocus}
       />
     </div>
   );

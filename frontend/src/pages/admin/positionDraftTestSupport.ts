@@ -1,4 +1,10 @@
-import type { PositionDraft, PositionDraftRow, PositionImportPreview } from "../../types";
+import type {
+  InputVersion,
+  PositionDraft,
+  PositionDraftRow,
+  PositionDraftValidation,
+  PositionImportPreview
+} from "../../types";
 
 export interface Deferred<T> {
   promise: Promise<T>;
@@ -28,6 +34,26 @@ export const baseDraft: PositionDraft = {
   updated_at: "2026-07-21T10:30:00",
   row_count: 1,
   modified_count: 0,
+  diff: { added: 0, modified: 0, deleted: 0, unchanged: 1 },
+  issues: [],
+  error_count: 0,
+  warning_count: 0,
+  valid: true
+};
+
+export const basePositionVersion: InputVersion = {
+  id: 31,
+  kind: "position",
+  name: "position-current",
+  original_name: "position-current.xlsx",
+  active: true,
+  created_by: 1,
+  created_at: "2026-07-21T09:00:00"
+};
+
+export const baseValidation: PositionDraftValidation = {
+  draft_id: baseDraft.id,
+  revision: baseDraft.revision,
   diff: { added: 0, modified: 0, deleted: 0, unchanged: 1 },
   issues: [],
   error_count: 0,

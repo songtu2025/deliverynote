@@ -11,6 +11,7 @@ import type {
 
 export const POSITION_ERROR_CODES = {
   revisionConflict: "draft_revision_conflict",
+  baseVersionChanged: "draft_base_version_changed",
   importPreviewExpired: "draft_import_preview_expired",
   versionNameExists: "input_version_name_exists"
 } as const;

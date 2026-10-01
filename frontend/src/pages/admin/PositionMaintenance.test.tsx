@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { download } from "../../api";
 import type { InputVersion } from "../../types";
 import { PositionMaintenance } from "./PositionMaintenance";
-import { baseDraft, baseImportPreview, baseRow, deferred } from "./positionDraftTestSupport";
+import {
+  baseDraft,
+  baseImportPreview,
+  basePositionVersion as version,
+  baseRow,
+  baseValidation,
+  deferred
+} from "./positionDraftTestSupport";
 import type { Deferred } from "./positionDraftTestSupport";
 
 vi.mock("../../api", async (importOriginal) => {
@@ -18,16 +25,6 @@ const jsonResponse = (payload: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" }
   });
-
-const version: InputVersion = {
-  id: 31,
-  kind: "position",
-  name: "position-current",
-  original_name: "position-current.xlsx",
-  active: true,
-  created_by: 1,
-  created_at: "2026-07-21T09:00:00"
-};
 
 let draftResponse = { ...baseDraft };
 let rowsResponse: { rows: Array<Record<string, unknown>>; total: number; offset: number; limit: number };
@@ -48,6 +45,7 @@ let discardRequest: Deferred<Response> | null = null;
 let importApplyRequest: Deferred<Response> | null = null;
 let importRequestHandler: ((stage: "preview" | "apply") => Response) | null = null;
 let publishRequest: Deferred<Response> | null = null;
+let publishRequestHandler: ((stage: "validate" | "publish") => Response | Promise<Response>) | null = null;
 
 function renderMaintenance(
   overrides: Partial<{
@@ -97,19 +95,18 @@ async function startImport(name = "replacement.xlsx") {
   return { ...view, dialog: await dialogByTitle("Excel 整表替换预览") };
 }
 
+async function startPublish() {
+  const onPublished = vi.fn();
+  renderMaintenance({ onPublished });
+  fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
+  return { onPublished, dialog: await dialogByTitle("发布新的MSKU定位版本") };
+}
+
 describe("PositionMaintenance", () => {
   beforeEach(() => {
     draftResponse = { ...baseDraft };
     rowsResponse = { rows: [{ ...baseRow }], total: 1, offset: 0, limit: 20 };
-    validationResponse = {
-      draft_id: 7,
-      revision: 3,
-      diff: { added: 0, modified: 0, deleted: 0, unchanged: 1 },
-      issues: [],
-      error_count: 0,
-      warning_count: 0,
-      valid: true
-    };
+    validationResponse = { ...baseValidation };
     failEntry = false;
     entryRequest = null;
     metadataRequest = null;
@@ -125,6 +122,7 @@ describe("PositionMaintenance", () => {
     discardRequest = null;
     importApplyRequest = null;
     importRequestHandler = null;
+    publishRequestHandler = null;
     publishRequest = null;
     vi.mocked(download).mockReset();
     vi.stubGlobal(
@@ -183,9 +181,11 @@ describe("PositionMaintenance", () => {
           return jsonResponse({ diff: baseImportPreview.diff, revision: 6 });
         }
         if (url.endsWith("/api/input-drafts/7/validate") && method === "POST") {
+          if (publishRequestHandler) return publishRequestHandler("validate");
           return jsonResponse(validationResponse);
         }
         if (url.endsWith("/api/input-drafts/7/publish") && method === "POST") {
+          if (publishRequestHandler) return publishRequestHandler("publish");
           if (publishRequest) return publishRequest.promise;
           if (duplicatePublishNameOnce) {
             duplicatePublishNameOnce = false;
@@ -798,10 +798,7 @@ describe("PositionMaintenance", () => {
 
   it("keeps a duplicate publish name editable and retries in the same dialog", async () => {
     duplicatePublishNameOnce = true;
-    const onPublished = vi.fn();
-    renderMaintenance({ onPublished });
-    fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
-    const dialog = await dialogByTitle("发布新的MSKU定位版本");
+    const { onPublished, dialog } = await startPublish();
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "duplicate-name" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
 
@@ -815,6 +812,68 @@ describe("PositionMaintenance", () => {
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
     expect(requests("POST", "/publish")).toHaveLength(2);
     expect(await screen.findAllByText("新库位版本已发布并启用")).toHaveLength(1);
+  });
+
+  it("refreshes metadata after a publish base-version conflict and still allows discarding", async () => {
+    publishRequestHandler = (stage) => {
+      if (stage === "validate") return jsonResponse(validationResponse);
+      draftResponse = { ...baseDraft, active_version_id: 42, active_version_name: "position-newer" };
+      return jsonResponse(
+        { detail: "当前启用的库位版本已变化，请放弃当前草稿后重新开始", code: "draft_base_version_changed" },
+        409
+      );
+    };
+    const { onPublished, dialog } = await startPublish();
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
+    await screen.findByText("草稿基线已过期");
+    expect(screen.getByRole("button", { name: "放弃草稿" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /发布新版本$/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
+    expect(onPublished).not.toHaveBeenCalled();
+    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave-active"));
+    // jsdom 没有 AnimationEvent，动画库监听的是带前缀的结束事件。
+    fireEvent(dialog, new Event("webkitAnimationEnd", { bubbles: true }));
+    await waitFor(() => expect(dialog).not.toBeVisible());
+  }, 30_000);
+
+  it.each([500, 409])("preserves publish input on an ordinary failure %i and retries", async (status) => {
+    let failed = false;
+    publishRequestHandler = (stage) => {
+      if (stage === "validate") return jsonResponse(validationResponse);
+      if (!failed) {
+        failed = true;
+        return jsonResponse({ detail: "发布服务暂时不可用" }, status);
+      }
+      return jsonResponse({ ...version, id: 32, draft_revision: 4, draft_status: "published" }, 201);
+    };
+    const { onPublished, dialog } = await startPublish();
+    fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "keep-publish-name" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
+    expect(await within(dialog).findByText("发布服务暂时不可用")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("新版本名称")).toHaveValue("keep-publish-name");
+    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
+    expect(onPublished).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: /确认发布$/ })).toBeEnabled());
+    fireEvent.click(within(dialog).getByRole("button", { name: /确认发布$/ }));
+    await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
+    expect(requests("POST", "/publish")).toHaveLength(2);
+  });
+
+  it("clears warning confirmation on cancellation and restores the publish button focus", async () => {
+    validationResponse = { ...validationResponse, warning_count: 1 };
+    renderMaintenance();
+    const trigger = await screen.findByRole("button", { name: "发布新版本" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await dialogByTitle("发布新的MSKU定位版本");
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "我已检查并确认发布这些警告" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "继续修改草稿" }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(requests("POST", "/publish")).toHaveLength(0);
+    fireEvent.click(trigger);
+    const reopened = await dialogByTitle("发布新的MSKU定位版本");
+    expect(within(reopened).getByRole("checkbox", { name: "我已检查并确认发布这些警告" })).not.toBeChecked();
+    expect(within(reopened).getByRole("button", { name: "确认发布" })).toBeDisabled();
   });
 
   it("downloads the draft and keeps discard confirmation uncancellable until the server accepts it", async () => {
@@ -950,6 +1009,7 @@ describe("PositionMaintenance", () => {
     const dialog = await dialogByTitle("发布新的MSKU定位版本");
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "position-busy" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /确认发布/ }));
     await waitFor(() => expect(requests("POST", "/publish")).toHaveLength(1));
 
     try {
@@ -957,6 +1017,7 @@ describe("PositionMaintenance", () => {
       expect(within(dialog).getByRole("button", { name: "继续修改草稿" })).toBeDisabled();
       expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "放弃草稿" })).toBeDisabled();
+      expect(within(dialog).getByLabelText("新版本名称")).toBeDisabled();
       fireEvent.click(within(dialog).getByRole("button", { name: "继续修改草稿" }));
       fireEvent.click(screen.getByRole("button", { name: "返回基础资料" }));
       expect(onBack).not.toHaveBeenCalled();
