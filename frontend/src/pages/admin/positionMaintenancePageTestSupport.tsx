@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { expect, vi } from "vitest";
 
@@ -28,4 +28,17 @@ export async function dialogByTitle(title: string): Promise<HTMLElement> {
   const dialog = heading.closest('[role="dialog"]');
   expect(dialog).not.toBeNull();
   return dialog as HTMLElement;
+}
+
+export function fillNewRow() {
+  fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
+  fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
+}
+
+export async function startRowSave() {
+  renderMaintenance();
+  await screen.findByText("SKU-A");
+  fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+  fillNewRow();
+  fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
 }
