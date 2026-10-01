@@ -8,18 +8,21 @@ export function ImportPreviewDialog({
   fileName,
   applying,
   onApply,
-  onCancel
+  onCancel,
+  onClosed
 }: {
   preview: PositionImportPreview | null;
   fileName: string;
   applying: boolean;
   onApply: () => void;
   onCancel: () => void;
+  onClosed: () => void;
 }) {
   return (
     <Modal
       title="Excel 整表替换预览"
       open={preview !== null}
+      focusable={{ focusTriggerAfterClose: false }}
       okText="应用整表替换"
       cancelText="取消"
       okButtonProps={{ danger: true }}
@@ -29,6 +32,7 @@ export function ImportPreviewDialog({
       keyboard={!applying}
       mask={{ closable: !applying }}
       onOk={onApply}
+      afterClose={onClosed}
       onCancel={() => {
         if (!applying) onCancel();
       }}

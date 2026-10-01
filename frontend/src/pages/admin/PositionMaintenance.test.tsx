@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { download } from "../../api";
 import type { InputVersion } from "../../types";
 import { PositionMaintenance } from "./PositionMaintenance";
-import { baseDraft, baseRow, deferred } from "./positionDraftTestSupport";
+import { baseDraft, baseImportPreview, baseRow, deferred } from "./positionDraftTestSupport";
 import type { Deferred } from "./positionDraftTestSupport";
 
 vi.mock("../../api", async (importOriginal) => {
@@ -46,6 +46,7 @@ let singleDeleteRequest: Deferred<Response> | null = null;
 let bulkDeleteRequest: Deferred<Response> | null = null;
 let discardRequest: Deferred<Response> | null = null;
 let importApplyRequest: Deferred<Response> | null = null;
+let importRequestHandler: ((stage: "preview" | "apply") => Response) | null = null;
 let publishRequest: Deferred<Response> | null = null;
 
 function renderMaintenance(
@@ -83,6 +84,19 @@ async function dialogByTitle(title: string): Promise<HTMLElement> {
   return dialog as HTMLElement;
 }
 
+function uploadImport(container: HTMLElement, name = "replacement.xlsx") {
+  fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
+    target: { files: [new File(["excel"], name)] }
+  });
+}
+
+async function startImport(name = "replacement.xlsx") {
+  const view = renderMaintenance();
+  await screen.findByText("SKU-A");
+  uploadImport(view.container, name);
+  return { ...view, dialog: await dialogByTitle("Excel 整表替换预览") };
+}
+
 describe("PositionMaintenance", () => {
   beforeEach(() => {
     draftResponse = { ...baseDraft };
@@ -110,6 +124,7 @@ describe("PositionMaintenance", () => {
     bulkDeleteRequest = null;
     discardRequest = null;
     importApplyRequest = null;
+    importRequestHandler = null;
     publishRequest = null;
     vi.mocked(download).mockReset();
     vi.stubGlobal(
@@ -158,23 +173,14 @@ describe("PositionMaintenance", () => {
           return jsonResponse({ deleted_ids: [101], revision: 5 });
         }
         if (url.endsWith("/api/input-drafts/7/import-preview") && method === "POST") {
-          return jsonResponse({
-            token: "preview-token",
-            draft_id: 7,
-            revision: 3,
-            row_count: 2,
-            diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 },
-            issues: [{ severity: "warning", code: "row_count_changed", message: "数据量变化较大", row_numbers: [] }],
-            error_count: 0,
-            warning_count: 1,
-            valid: true
-          });
+          return importRequestHandler?.("preview") ?? jsonResponse(baseImportPreview);
         }
         if (url.endsWith("/api/input-drafts/7/import-apply") && method === "POST") {
           if (importApplyRequest) return importApplyRequest.promise;
+          if (importRequestHandler) return importRequestHandler("apply");
           if (expireImportApply)
             return jsonResponse({ detail: "请重新上传表格预览", code: "draft_import_preview_expired" }, 409);
-          return jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 });
+          return jsonResponse({ diff: baseImportPreview.diff, revision: 6 });
         }
         if (url.endsWith("/api/input-drafts/7/validate") && method === "POST") {
           return jsonResponse(validationResponse);
@@ -609,11 +615,13 @@ describe("PositionMaintenance", () => {
     await screen.findByText("SKU-A");
     const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(fileInput).not.toBeNull();
-    fireEvent.change(fileInput!, {
-      target: { files: [new File(["excel"], "replacement.xlsx", { type: "application/vnd.ms-excel" })] }
-    });
+    uploadImport(container);
 
     await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(1));
+    const previewBody = requests("POST", "/import-preview")[0][1]?.body as FormData;
+    expect(previewBody.get("revision")).toBe("3");
+    expect((previewBody.get("file") as File).name).toBe("replacement.xlsx");
+    expect(requests("POST", "/import-apply")).toHaveLength(0);
     expect(screen.queryByText("Excel 替换未完成")).not.toBeInTheDocument();
     const previewDialog = await dialogByTitle("Excel 整表替换预览");
     expect(within(previewDialog).getByText("新增 2")).toBeInTheDocument();
@@ -629,17 +637,15 @@ describe("PositionMaintenance", () => {
       token: "preview-token"
     });
     expect(await screen.findByText("修订号 6")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^复制 / }));
+    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+    expect(JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body)).revision).toBe(6);
   });
 
   it("recovers from an expired import token without applying the candidate", async () => {
     expireImportApply = true;
-    const { container } = renderMaintenance();
-    await screen.findByText("SKU-A");
-    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
-      target: { files: [new File(["excel"], "expired.xlsx")] }
-    });
+    const { container, dialog } = await startImport("expired.xlsx");
     await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(1));
-    const dialog = await dialogByTitle("Excel 整表替换预览");
     fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
 
     expect(await screen.findByText("请重新上传表格预览")).toBeInTheDocument();
@@ -647,11 +653,71 @@ describe("PositionMaintenance", () => {
     expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
 
-    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
-      target: { files: [new File(["excel-2"], "retry.xlsx")] }
-    });
+    uploadImport(container, "retry.xlsx");
     await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(2));
   });
+
+  it("cancels import without writing and opens only the next file preview", async () => {
+    const { container, dialog } = await startImport("cancelled.xlsx");
+    fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Excel 整表替换" })).toHaveFocus());
+    expect(requests("POST", "/import-apply")).toHaveLength(0);
+    uploadImport(container, "next.xlsx");
+    expect(await screen.findByText("即将用 next.xlsx 的 2 行完整替换当前草稿")).toBeInTheDocument();
+    expect(screen.queryByText(/即将用 cancelled.xlsx/)).not.toBeInTheDocument();
+    expect(screen.getByText("修订号 3")).toBeInTheDocument();
+  });
+
+  it("keeps failed apply local and requires reupload if its token was consumed", async () => {
+    let failed = false;
+    importRequestHandler = (stage) => {
+      if (stage === "preview") return jsonResponse(baseImportPreview);
+      if (!failed) {
+        failed = true;
+        return jsonResponse({ detail: "替换暂时失败" }, 500);
+      }
+      return jsonResponse({ detail: "令牌已消费，请重新预览", code: "draft_import_preview_expired" }, 409);
+    };
+    const { dialog } = await startImport();
+    fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
+    expect(await screen.findByText("替换暂时失败")).toBeInTheDocument();
+    expect(screen.getByText("修订号 3")).toBeInTheDocument();
+    expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
+    const retry = within(dialog).getByRole("button", { name: /应用整表替换/ });
+    await waitFor(() => expect(retry).not.toHaveClass("ant-btn-loading"));
+    fireEvent.click(retry);
+    expect(await screen.findByText("令牌已消费，请重新预览")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument());
+    expect(requests("POST", "/import-apply")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
+  });
+
+  it.each(["preview", "apply"] as const)(
+    "locks the workspace for %s revision conflict and refreshes it",
+    async (stage) => {
+      importRequestHandler = (currentStage) =>
+        currentStage === stage
+          ? jsonResponse({ detail: "导入修订号冲突", code: "draft_revision_conflict" }, 409)
+          : jsonResponse(baseImportPreview);
+      const { container } = renderMaintenance();
+      await screen.findByText("SKU-A");
+      uploadImport(container);
+      if (stage === "apply") {
+        const dialog = await dialogByTitle("Excel 整表替换预览");
+        fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
+      }
+      expect(await screen.findByText("导入修订号冲突")).toBeInTheDocument();
+      expect(screen.queryByText("Excel 替换未完成")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeDisabled();
+      expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
+      draftResponse = { ...baseDraft, revision: 9 };
+      fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
+      expect(await screen.findByText("修订号 9")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
+    }
+  );
 
   it("blocks publish when validation returns errors", async () => {
     validationResponse = {
@@ -855,13 +921,9 @@ describe("PositionMaintenance", () => {
 
   it("cannot leave or cancel the import dialog while apply is pending", async () => {
     importApplyRequest = deferred<Response>();
-    const { container } = renderMaintenance();
-    await screen.findByText("SKU-A");
-    fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
-      target: { files: [new File(["excel"], "replacement.xlsx")] }
-    });
-    const dialog = await dialogByTitle("Excel 整表替换预览");
+    const { dialog } = await startImport();
     fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /应用整表替换/ }));
     await waitFor(() => expect(requests("POST", "/import-apply")).toHaveLength(1));
 
     try {
@@ -873,9 +935,7 @@ describe("PositionMaintenance", () => {
       expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
       expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();
     } finally {
-      importApplyRequest.resolve(
-        jsonResponse({ diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 }, revision: 6 })
-      );
+      importApplyRequest.resolve(jsonResponse({ diff: baseImportPreview.diff, revision: 6 }));
     }
     expect(await screen.findByText("修订号 6")).toBeInTheDocument();
     expect(await screen.findAllByText("Excel 已完整替换服务器草稿")).toHaveLength(1);

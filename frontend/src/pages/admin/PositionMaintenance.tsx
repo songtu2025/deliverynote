@@ -3,26 +3,21 @@ import { Alert, App as AntApp, Button, Card, Modal, Popconfirm, Space, Spin, Typ
 import { ArrowLeftOutlined, DownloadOutlined, ReloadOutlined, UploadOutlined } from "@ant-design/icons";
 import type { UploadProps } from "antd";
 
-import { ApiError } from "../../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../../dateTime";
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { usePositionDraftSession } from "./usePositionDraftSession";
 import { rowValues, usePositionRowEditor } from "./usePositionRowEditor";
+import { usePositionImport } from "./usePositionImport";
 import { RowEditorDrawer } from "./RowEditorDrawer";
 import * as positionDraftApi from "./positionDraftApi";
 import type { PositionRevisionResponse } from "./positionDraftApi";
+import { errorMessage, hasApiCode, isRevisionConflict, POSITION_ERROR_CODES } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
 import { DraftSummary } from "./PositionFeedback";
 import { PositionDraftRecords } from "./PositionDraftRecords";
 import { createPositionRowColumns } from "./positionRowColumns";
-import type {
-  InputVersion,
-  PositionDiff,
-  PositionDraftRow,
-  PositionDraftValidation,
-  PositionImportPreview
-} from "../../types";
+import type { InputVersion, PositionDiff, PositionDraftRow, PositionDraftValidation } from "../../types";
 
 interface PositionMaintenanceProps {
   activeVersion: InputVersion;
@@ -34,27 +29,10 @@ type BusyAction =
   "save" | "copy" | "delete" | "bulk-delete" | "import-preview" | "import-apply" | "validate" | "publish" | "discard";
 
 const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged: 0 };
-const POSITION_ERROR_CODES = {
-  revisionConflict: "draft_revision_conflict",
-  importPreviewExpired: "draft_import_preview_expired",
-  versionNameExists: "input_version_name_exists"
-} as const;
 
 function defaultVersionName(): string {
   const parts = beijingDateTimeParts();
   return `position-${parts.year}${parts.month}${parts.day}-${parts.hour}${parts.minute}`;
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
-function hasApiCode(error: unknown, code: string): boolean {
-  return error instanceof ApiError && error.status === 409 && error.code === code;
-}
-
-function isRevisionConflict(error: unknown): boolean {
-  return hasApiCode(error, POSITION_ERROR_CODES.revisionConflict);
 }
 
 export function PositionMaintenance({ onPublished, onBack }: PositionMaintenanceProps) {
@@ -67,9 +45,6 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const editor = usePositionRowEditor(busyAction !== null, onBack);
 
-  const [importPreview, setImportPreview] = useState<PositionImportPreview | null>(null);
-  const [importFileName, setImportFileName] = useState("");
-  const [importError, setImportError] = useState<string | null>(null);
   const [publishValidation, setPublishValidation] = useState<PositionDraftValidation | null>(null);
   const [publishName, setPublishName] = useState("");
   const [publishNameError, setPublishNameError] = useState<string | null>(null);
@@ -79,10 +54,11 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   const keepDeleteConfirmOpenRef = useRef<number | null>(null);
   const keepBulkDeleteConfirmOpenRef = useRef(false);
   const keepDiscardConfirmOpenRef = useRef(false);
+  const importButtonRef = useRef<HTMLButtonElement>(null);
 
   const clearLocalState = () => {
     editor.reset();
-    setImportPreview(null);
+    importFlow.reset();
     setPublishValidation(null);
     setPublishNameError(null);
     setPublishError(null);
@@ -111,7 +87,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const loadDraft = async () => {
     if (!(await session.loadDraft())) return;
-    setImportError(null);
+    importFlow.reset();
     setSelectedRowIds([]);
     setDeleteConfirmRowId(null);
     setBulkDeleteConfirmOpen(false);
@@ -128,6 +104,25 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     session.acceptRevision(revision);
     setSelectedRowIds([]);
     refreshRows();
+  };
+
+  const importFlow = usePositionImport({
+    draftId: draft?.id,
+    disabled: actionsDisabled,
+    getRevision,
+    onBusyChange: (action) => {
+      setBusyAction(action);
+      if (action !== null) setActionError(null);
+    },
+    onApplied: (revision) => {
+      acceptRevision(revision);
+      message.success("Excel 已完整替换服务器草稿");
+    },
+    onConflict: invalidateLocalState
+  });
+
+  const restoreImportFocus = () => {
+    if (!actionsDisabled) importButtonRef.current?.focus();
   };
 
   const handleActionError = (error: unknown, fallback: string) => {
@@ -222,52 +217,9 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   };
 
   const previewImport: NonNullable<UploadProps["customRequest"]> = async (options) => {
-    if (!draft || actionsDisabled) {
-      options.onError?.(new Error("草稿当前不可修改"));
-      return;
-    }
-    setBusyAction("import-preview");
-    setImportError(null);
-    setActionError(null);
-    try {
-      const preview = await positionDraftApi.previewImport(draft.id, getRevision(), options.file as File);
-      setImportPreview(preview);
-      setImportFileName((options.file as File).name ?? "Excel 文件");
-      options.onSuccess?.({});
-    } catch (error) {
-      const messageText = errorMessage(error, "Excel 预览失败");
-      if (isRevisionConflict(error)) invalidateLocalState(messageText);
-      else setImportError(messageText);
-      options.onError?.(error instanceof Error ? error : new Error(messageText));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const applyImport = async () => {
-    if (!draft || !importPreview || actionsDisabled) return;
-    setBusyAction("import-apply");
-    setImportError(null);
-    setActionError(null);
-    try {
-      const result = await positionDraftApi.applyImport(draft.id, getRevision(), importPreview.token);
-      acceptRevision(result.revision);
-      setImportPreview(null);
-      message.success("Excel 已完整替换服务器草稿");
-    } catch (error) {
-      const messageText = errorMessage(error, "应用 Excel 替换失败");
-      if (isRevisionConflict(error)) {
-        invalidateLocalState(messageText);
-      } else {
-        if (hasApiCode(error, POSITION_ERROR_CODES.importPreviewExpired)) {
-          setImportPreview(null);
-          setImportFileName("");
-        }
-        setImportError(messageText);
-      }
-    } finally {
-      setBusyAction(null);
-    }
+    const failure = await importFlow.previewFile(options.file as File);
+    if (failure) options.onError?.(failure);
+    else options.onSuccess?.({});
   };
 
   const downloadDraft = async () => {
@@ -461,6 +413,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
           </Button>
           <Upload accept=".xls,.xlsx" showUploadList={false} disabled={actionsDisabled} customRequest={previewImport}>
             <Button
+              ref={importButtonRef}
               aria-label="Excel 整表替换"
               icon={<UploadOutlined />}
               disabled={actionsDisabled}
@@ -560,15 +513,15 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
           onClose={() => setActionError(null)}
         />
       )}
-      {importError && (
+      {importFlow.error && (
         <Alert
           className="inline-alert"
           type="error"
           showIcon
           closable
           title="Excel 替换未完成"
-          description={importError}
-          onClose={() => setImportError(null)}
+          description={importFlow.error}
+          onClose={importFlow.clearError}
         />
       )}
 
@@ -613,13 +566,15 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
       </Modal>
 
       <ImportPreviewDialog
-        preview={importPreview}
-        fileName={importFileName}
+        preview={importFlow.preview}
+        fileName={importFlow.fileName}
         applying={busyAction === "import-apply"}
-        onApply={() => void applyImport()}
+        onApply={() => void importFlow.apply()}
         onCancel={() => {
-          if (busyAction === null) setImportPreview(null);
+          importFlow.cancel();
+          restoreImportFocus();
         }}
+        onClosed={restoreImportFocus}
       />
 
       <PublishDialog

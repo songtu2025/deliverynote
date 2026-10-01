@@ -1,4 +1,4 @@
-import { api, download } from "../../api";
+import { ApiError, api, download } from "../../api";
 import type {
   InputVersion,
   PositionDiff,
@@ -8,6 +8,24 @@ import type {
   PositionDraftValidation,
   PositionImportPreview
 } from "../../types";
+
+export const POSITION_ERROR_CODES = {
+  revisionConflict: "draft_revision_conflict",
+  importPreviewExpired: "draft_import_preview_expired",
+  versionNameExists: "input_version_name_exists"
+} as const;
+
+export function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+export function hasApiCode(error: unknown, code: string): boolean {
+  return error instanceof ApiError && error.status === 409 && error.code === code;
+}
+
+export function isRevisionConflict(error: unknown): boolean {
+  return hasApiCode(error, POSITION_ERROR_CODES.revisionConflict);
+}
 
 export type PositionRowValues = Pick<
   PositionDraftRow,

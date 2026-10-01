@@ -1,4 +1,4 @@
-import type { PositionDraft, PositionDraftRow } from "../../types";
+import type { PositionDraft, PositionDraftRow, PositionImportPreview } from "../../types";
 
 export interface Deferred<T> {
   promise: Promise<T>;
@@ -47,4 +47,16 @@ export const baseRow: PositionDraftRow = {
   change_type: "unchanged",
   deleted: false,
   issues: []
+};
+
+export const baseImportPreview: PositionImportPreview = {
+  token: "preview-token",
+  draft_id: 7,
+  revision: 3,
+  row_count: 2,
+  diff: { added: 2, modified: 1, deleted: 1, unchanged: 4 },
+  issues: [{ severity: "warning", code: "row_count_changed", message: "数据量变化较大", row_numbers: [] }],
+  error_count: 0,
+  warning_count: 1,
+  valid: true
 };

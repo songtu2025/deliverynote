@@ -179,6 +179,23 @@ describe("position draft API contracts", () => {
     await expect(positionDraftApi.getDraft()).rejects.toMatchObject({ status, message: "演示失败信息", code: null });
   });
 
+  it.each([
+    { status: 409, code: "draft_revision_conflict", conflict: true },
+    { status: 409, code: "draft_import_preview_expired", conflict: false },
+    { status: 409, code: "input_version_name_exists", conflict: false },
+    { status: 409, code: null, conflict: false },
+    { status: 500, code: "draft_revision_conflict", conflict: false }
+  ])(
+    "classifies status $status and code $code without treating every 409 as a revision conflict",
+    ({ status, code, conflict }) => {
+      const failure = new ApiError(status, "演示失败信息", code);
+      expect(positionDraftApi.isRevisionConflict(failure)).toBe(conflict);
+      expect(positionDraftApi.hasApiCode(failure, positionDraftApi.POSITION_ERROR_CODES.importPreviewExpired)).toBe(
+        status === 409 && code === "draft_import_preview_expired"
+      );
+    }
+  );
+
   it("lets the shared request layer handle an expired session", async () => {
     await api("/api/auth/me");
     const onExpired = vi.fn();
