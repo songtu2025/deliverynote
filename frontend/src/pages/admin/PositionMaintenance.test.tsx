@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp, message as staticMessage } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -431,6 +431,21 @@ describe("PositionMaintenance", () => {
     await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(2));
     const nextBody = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[1][1]?.body));
     expect(nextBody.revision).toBe(4);
+  });
+
+  it("ignores a late copy result after leaving the maintenance page", async () => {
+    const response = deferred<Response>();
+    rowWriteRequest = response;
+    const view = renderMaintenance();
+    fireEvent.click(await screen.findByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
+    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+    view.unmount();
+    await act(async () => {
+      response.resolve(jsonResponse({ row: baseRow, revision: 4 }, 201));
+    });
+    expect(requests("GET", "/api/input-drafts/position")).toHaveLength(0);
+    expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(1);
+    expect(screen.queryByText("记录已复制到服务器草稿")).not.toBeInTheDocument();
   });
 
   it("keeps a non-revision row 409 local without locking the workspace", async () => {
