@@ -1,0 +1,187 @@
+/* 库位主页面的业务布局集中在此；共享主题与浮层样式仍由原样式入口维护。 */
+.position-maintenance .position-workspace-heading {
+  position: sticky;
+  top: 64px;
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 18px;
+  margin-bottom: 16px !important;
+  border: 1px solid #d8e2df;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 8px 22px rgba(28, 54, 49, 0.07);
+}
+
+.position-maintenance .position-workspace-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.position-maintenance .position-workspace-title h2 {
+  max-width: 720px;
+  margin: 0 !important;
+}
+
+.position-maintenance .position-workspace-description {
+  display: block;
+  max-width: 720px;
+  margin-top: 3px;
+}
+
+.position-maintenance .position-workspace-actions {
+  flex: 0 1 auto;
+  max-width: 100%;
+  justify-content: flex-end;
+}
+
+.position-maintenance .position-summary-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 0.72fr)) minmax(300px, 1.55fr);
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--dn-border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 64, 54, 0.035);
+}
+
+.position-maintenance .position-summary-metric,
+.position-maintenance .position-summary-diff {
+  display: flex;
+  min-width: 0;
+  min-height: 92px;
+  flex-direction: column;
+  justify-content: center;
+  padding: 14px 18px;
+  border-left: 1px solid var(--dn-border);
+}
+
+.position-maintenance .position-summary-metric:first-child {
+  border-left: 0;
+}
+
+.position-maintenance .position-summary-metric span,
+.position-maintenance .position-summary-diff > span {
+  margin-bottom: 5px;
+  color: #53605d;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.position-maintenance .position-summary-metric strong {
+  color: var(--dn-primary);
+  font-size: 26px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.position-maintenance .position-summary-metric small {
+  margin-top: 4px;
+  color: #75817d;
+}
+
+.position-maintenance .position-summary-metric.is-error strong {
+  color: var(--dn-danger);
+}
+
+.position-maintenance .position-summary-metric.is-warning strong {
+  color: var(--dn-warning);
+}
+
+.position-maintenance .position-summary-diff {
+  gap: 5px;
+}
+
+.position-maintenance .position-filter-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(130px, 0.72fr)) minmax(120px, 0.62fr) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2e9e7;
+  border-radius: 8px;
+  background: var(--dn-surface-muted);
+}
+
+.position-maintenance .position-filter-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.position-maintenance .position-filter-field label,
+.position-maintenance .position-filter-field > span {
+  color: #53605d;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.position-maintenance .position-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-height: 32px;
+  margin: -2px 0 10px;
+}
+
+@container admin-workspace (max-width: 900px) {
+  .position-maintenance .position-workspace-heading {
+    position: static;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .position-maintenance .position-workspace-actions {
+    justify-content: flex-start;
+  }
+
+  .position-maintenance .position-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .position-maintenance .position-summary-diff {
+    grid-column: 1 / -1;
+  }
+
+  .position-maintenance .position-summary-metric,
+  .position-maintenance .position-summary-diff {
+    border-top: 1px solid var(--dn-border);
+  }
+
+  .position-maintenance .position-summary-metric:nth-child(-n + 2) {
+    border-top: 0;
+  }
+
+  .position-maintenance .position-summary-metric:nth-child(odd),
+  .position-maintenance .position-summary-diff {
+    border-left: 0;
+  }
+
+  .position-maintenance .position-filter-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .position-maintenance .position-filter-search {
+    grid-column: 1 / -1;
+  }
+}
+
+@container admin-workspace (max-width: 480px) {
+  .position-maintenance .position-summary-strip,
+  .position-maintenance .position-filter-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .position-maintenance .position-summary-metric:nth-child(2) {
+    border-top: 1px solid var(--dn-border);
+  }
+
+  .position-maintenance .position-summary-metric {
+    border-left: 0;
+  }
+}

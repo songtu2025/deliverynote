@@ -60,7 +60,9 @@ export function PositionMaintenanceHeader({
         <Typography.Title level={2} style={{ margin: 0 }}>
           MSKU 定位维护
         </Typography.Title>
-        <Typography.Text type="secondary">基于 {baseVersionName}；修改自动保存到草稿，发布后生效。</Typography.Text>
+        <Typography.Text className="position-workspace-description" type="secondary">
+          基于 {baseVersionName}；修改自动保存到草稿，发布后生效。
+        </Typography.Text>
       </div>
       <Space wrap className="position-workspace-actions">
         <Button aria-label="下载草稿" icon={<DownloadOutlined />} onClick={() => void onDownload()}>

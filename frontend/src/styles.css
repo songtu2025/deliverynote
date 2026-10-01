@@ -2967,103 +2967,13 @@ input {
 
 .audit-log-panel .ant-table-cell,
 .user-management-panel .ant-table-cell,
-.position-table .ant-table-cell,
 .position-maintenance .ant-table-cell {
   white-space: nowrap;
-}
-
-.position-toolbar,
-.position-workspace-heading {
-  position: sticky;
-  top: 64px;
-  z-index: 5;
-  padding: 16px 18px;
-  margin-bottom: 16px !important;
-  border: 1px solid #d8e2df;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 8px 22px rgba(28, 54, 49, 0.07);
-}
-
-.position-workspace-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-}
-
-.position-workspace-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.position-workspace-title h2 {
-  margin: 0 !important;
-}
-.position-workspace-title > .ant-typography {
-  display: block;
-  max-width: 720px;
-  margin-top: 3px;
-}
-.position-workspace-actions {
-  flex: 0 1 auto;
-  max-width: 100%;
-  justify-content: flex-end;
 }
 
 .position-save-status .ant-alert-description {
   color: #40514c;
   font-size: 13px;
-}
-
-.position-summary-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 0.72fr)) minmax(300px, 1.55fr);
-  margin-bottom: 16px;
-  overflow: hidden;
-  border: 1px solid #d8e2df;
-  border-radius: 10px;
-  background: #fff;
-}
-
-.position-summary-metric,
-.position-summary-diff {
-  display: flex;
-  min-width: 0;
-  min-height: 92px;
-  flex-direction: column;
-  justify-content: center;
-  padding: 14px 18px;
-  border-left: 1px solid #e5ebe9;
-}
-
-.position-summary-metric:first-child {
-  border-left: 0;
-}
-.position-summary-metric span,
-.position-summary-diff > span {
-  margin-bottom: 5px;
-  color: #53605d;
-  font-size: 12px;
-  font-weight: 650;
-}
-.position-summary-metric strong {
-  color: #174f43;
-  font-size: 26px;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-.position-summary-metric small {
-  margin-top: 4px;
-  color: #75817d;
-}
-.position-summary-metric.is-error strong {
-  color: #b42318;
-}
-.position-summary-metric.is-warning strong {
-  color: #a35f08;
-}
-.position-summary-diff {
-  gap: 5px;
 }
 
 .position-records-card > .ant-card-head {
@@ -3080,29 +2990,6 @@ input {
   border-color: #d8e2df;
 }
 
-.position-maintenance .position-filter-toolbar {
-  display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(130px, 0.72fr)) minmax(120px, 0.62fr) auto;
-  align-items: end;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #e2e9e7;
-  border-radius: 8px;
-  background: #f7f9f8;
-}
-
-.position-filter-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6px;
-}
-.position-filter-field label,
-.position-filter-field > span {
-  color: #53605d;
-  font-size: 12px;
-  font-weight: 650;
-}
 .position-filter-field .ant-input-affix-wrapper,
 .position-filter-field .ant-select {
   width: 100%;
@@ -3110,15 +2997,6 @@ input {
 .position-filter-scope .ant-checkbox-wrapper {
   min-height: 32px;
   align-items: center;
-}
-
-.position-selection-bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  min-height: 32px;
-  margin: -2px 0 10px;
 }
 
 .position-records-card .ant-table-cell {
@@ -3283,8 +3161,7 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
 .readiness-strip,
 .input-data-workspace,
 .input-data-status-header,
-.input-data-kind-switcher,
-.position-summary-strip {
+.input-data-kind-switcher {
   border-color: var(--dn-border);
   box-shadow: 0 1px 2px rgba(20, 64, 54, 0.035);
 }
@@ -3366,14 +3243,11 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
 }
 .readiness-item,
 .summary-metric,
-.summary-equation,
-.position-summary-metric,
-.position-summary-diff {
+.summary-equation {
   border-left-color: var(--dn-border);
 }
 .summary-metric.import strong,
-.summary-equation strong,
-.position-summary-metric strong {
+.summary-equation strong {
   color: var(--dn-primary);
 }
 .summary-metric.pending strong,
@@ -3425,7 +3299,6 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
 .overreceipt-impact-preview,
 .admin-panel-intro,
 .audit-log-toolbar,
-.position-maintenance .position-filter-toolbar,
 .input-data-workspace-tabs > .ant-tabs-nav {
   background: var(--dn-surface-muted);
 }
@@ -3486,12 +3359,10 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
   background: #fff6f7;
 }
 .ant-alert-error .ant-alert-message,
-.audit-action-error,
-.position-summary-metric.is-error strong {
+.audit-action-error {
   color: var(--dn-danger);
 }
-.ant-alert-warning .ant-alert-message,
-.position-summary-metric.is-warning strong {
+.ant-alert-warning .ant-alert-message {
   color: var(--dn-warning);
 }
 .ant-tag {
@@ -3710,36 +3581,9 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
 }
 
 @container admin-workspace (max-width: 900px) {
-  .position-workspace-heading {
-    position: static;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .position-workspace-actions {
-    justify-content: flex-start;
-  }
-  .position-summary-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .position-summary-diff {
-    grid-column: 1 / -1;
-  }
-  .position-summary-metric,
-  .position-summary-diff {
-    border-top: 1px solid var(--dn-border);
-  }
-  .position-summary-metric:nth-child(-n + 2) {
-    border-top: 0;
-  }
-  .position-summary-metric:nth-child(odd),
-  .position-summary-diff {
-    border-left: 0;
-  }
-  .position-maintenance .position-filter-toolbar,
   .audit-log-toolbar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .position-filter-search,
   .audit-search-field {
     grid-column: 1 / -1;
   }
@@ -3776,18 +3620,10 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
 }
 
 @container admin-workspace (max-width: 480px) {
-  .position-summary-strip,
-  .position-maintenance .position-filter-toolbar,
   .input-data-kind-list,
   .audit-log-toolbar,
   .integration-config-credentials {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .position-summary-metric:nth-child(2) {
-    border-top: 1px solid var(--dn-border);
-  }
-  .position-summary-metric {
-    border-left: 0;
   }
   .input-data-status-time {
     padding-left: 0;
