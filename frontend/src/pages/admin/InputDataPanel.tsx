@@ -15,23 +15,12 @@ import {
   Upload,
   message
 } from "antd";
-import {
-  CheckCircleFilled,
-  DownloadOutlined,
-  InboxOutlined,
-  ToolOutlined,
-  UploadOutlined
-} from "@ant-design/icons";
+import { CheckCircleFilled, DownloadOutlined, InboxOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
 import type { TableProps, UploadFile, UploadProps } from "antd";
 
 import { api, download } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
-import type {
-  InputVersion,
-  InputVersionInspection,
-  InputVersionPreviewValue,
-  PositionIssue
-} from "../../types";
+import type { InputVersion, InputVersionInspection, InputVersionPreviewValue, PositionIssue } from "../../types";
 import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
 
@@ -72,19 +61,10 @@ function formatPreviewValue(value: InputVersionPreviewValue): string | number {
   return value ?? "—";
 }
 
-export function InputDataPanel({
-  versions,
-  loading,
-  onVersionsChanged,
-  onOpenPositionDraft
-}: InputDataPanelProps) {
+export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPositionDraft }: InputDataPanelProps) {
   const [selectedKind, setSelectedKind] = useState<InputKind>("product");
-  const [inspections, setInspections] = useState(
-    () => new Map<number, InputVersionInspection>()
-  );
-  const inspectionRequests = useRef(
-    new Map<number, Promise<InputVersionInspection>>()
-  );
+  const [inspections, setInspections] = useState(() => new Map<number, InputVersionInspection>());
+  const inspectionRequests = useRef(new Map<number, Promise<InputVersionInspection>>());
   const [inspectionLoading, setInspectionLoading] = useState(false);
   const [inspectionError, setInspectionError] = useState<{ versionId: number; message: string } | null>(null);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
@@ -99,15 +79,14 @@ export function InputDataPanel({
 
   const selectedDefinition = INPUT_KIND_BY_VALUE[selectedKind];
   const selectedVersions = useMemo(
-    () => versions
-      .filter((version) => version.kind === selectedKind)
-      .sort((left, right) => right.created_at.localeCompare(left.created_at)),
+    () =>
+      versions
+        .filter((version) => version.kind === selectedKind)
+        .sort((left, right) => right.created_at.localeCompare(left.created_at)),
     [selectedKind, versions]
   );
   const activeVersion = selectedVersions.find((version) => version.active) ?? null;
-  const activeInspection = activeVersion
-    ? inspections.get(activeVersion.id) ?? null
-    : null;
+  const activeInspection = activeVersion ? (inspections.get(activeVersion.id) ?? null) : null;
   const summary = activeInspection?.summary ?? null;
   const preview = activeInspection?.preview ?? null;
   const mutationBusy = mutation !== null;
@@ -148,9 +127,7 @@ export function InputDataPanel({
 
     let request = inspectionRequests.current.get(versionId);
     if (!request) {
-      request = api<InputVersionInspection>(
-        `/api/input-versions/${versionId}/inspection`
-      ).then(
+      request = api<InputVersionInspection>(`/api/input-versions/${versionId}/inspection`).then(
         (inspection) => {
           setInspections((current) => {
             const next = new Map(current);
@@ -169,15 +146,17 @@ export function InputDataPanel({
     }
 
     setInspectionLoading(true);
-    void request.catch((error: unknown) => {
-      if (cancelled) return;
-      setInspectionError({
-        versionId,
-        message: error instanceof Error ? error.message : "读取当前版本失败"
+    void request
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setInspectionError({
+          versionId,
+          message: error instanceof Error ? error.message : "读取当前版本失败"
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setInspectionLoading(false);
       });
-    }).finally(() => {
-      if (!cancelled) setInspectionLoading(false);
-    });
 
     return () => {
       cancelled = true;
@@ -207,11 +186,12 @@ export function InputDataPanel({
   );
 
   const previewRows = useMemo(
-    () => (preview?.rows ?? []).map((row, index) => ({
-      ...row,
-      __excelRow: (preview?.offset ?? 0) + index + 2,
-      __previewKey: String((preview?.offset ?? 0) + index)
-    })),
+    () =>
+      (preview?.rows ?? []).map((row, index) => ({
+        ...row,
+        __excelRow: (preview?.offset ?? 0) + index + 2,
+        __previewKey: String((preview?.offset ?? 0) + index)
+      })),
     [preview]
   );
 
@@ -296,7 +276,11 @@ export function InputDataPanel({
   ).length;
   const renderCurrentData = () => {
     if (loading) {
-      return <div className="input-data-loading"><Spin description="读取资料状态" /></div>;
+      return (
+        <div className="input-data-loading">
+          <Spin description="读取资料状态" />
+        </div>
+      );
     }
     if (!activeVersion) {
       return (
@@ -309,7 +293,11 @@ export function InputDataPanel({
       );
     }
     if (inspectionLoading || (!inspectionReady && !inspectionError)) {
-      return <div className="input-data-loading"><Spin description="读取摘要与预览" /></div>;
+      return (
+        <div className="input-data-loading">
+          <Spin description="读取摘要与预览" />
+        </div>
+      );
     }
     if (inspectionError?.versionId === activeVersion.id) {
       return (
@@ -318,24 +306,29 @@ export function InputDataPanel({
           showIcon
           title="无法读取当前版本内容"
           description={inspectionError.message}
-          action={<Button size="small" onClick={() => setInspectionAttempt((value) => value + 1)}>重新加载</Button>}
+          action={
+            <Button size="small" onClick={() => setInspectionAttempt((value) => value + 1)}>
+              重新加载
+            </Button>
+          }
         />
       );
     }
     if (!inspectionReady || !summary || !preview) return null;
 
-    const metricItems = selectedKind === "position"
-      ? [
-          `${summary.metrics.sites ?? 0} 个站点`,
-          `${summary.metrics.skus ?? 0} 个积加 SKU`,
-          `${summary.metrics.mskus ?? 0} 个 MSKU`
-        ]
-      : selectedKind === "supplier"
+    const metricItems =
+      selectedKind === "position"
         ? [
-            `${summary.metrics.aliases ?? 0} 个别名`,
-            `${summary.metrics.suppliers_with_aliases ?? 0} 个供应商已配置别名`
+            `${summary.metrics.sites ?? 0} 个站点`,
+            `${summary.metrics.skus ?? 0} 个积加 SKU`,
+            `${summary.metrics.mskus ?? 0} 个 MSKU`
           ]
-        : [];
+        : selectedKind === "supplier"
+          ? [
+              `${summary.metrics.aliases ?? 0} 个别名`,
+              `${summary.metrics.suppliers_with_aliases ?? 0} 个供应商已配置别名`
+            ]
+          : [];
 
     return (
       <>
@@ -345,9 +338,13 @@ export function InputDataPanel({
             <Typography.Text type="secondary">预览不会修改原文件。</Typography.Text>
           </div>
           <Typography.Text className="input-data-preview-summary" type="secondary">
-            <span>当前展示前 {preview.rows.length} 行，共 {preview.total} 行 · {summary.columns.length} 个字段</span>
+            <span>
+              当前展示前 {preview.rows.length} 行，共 {preview.total} 行 · {summary.columns.length} 个字段
+            </span>
             {metricItems.map((item) => (
-              <span className="input-data-preview-metric" key={item}>{item}</span>
+              <span className="input-data-preview-metric" key={item}>
+                {item}
+              </span>
             ))}
           </Typography.Text>
         </div>
@@ -415,7 +412,7 @@ export function InputDataPanel({
         components={historyTableComponents}
         pagination={selectedVersions.length > 8 ? { pageSize: 8, showSizeChanger: false } : false}
         scroll={{ x: 720 }}
-        rowClassName={(version) => version.active ? "input-data-active-version-row" : ""}
+        rowClassName={(version) => (version.active ? "input-data-active-version-row" : "")}
         locale={{ emptyText: `暂无${selectedDefinition.label}版本` }}
         columns={[
           {
@@ -446,29 +443,30 @@ export function InputDataPanel({
             title: "状态",
             dataIndex: "active",
             width: 120,
-            render: (active: boolean) => active ? <Tag color="success">当前启用</Tag> : <Tag>历史版本</Tag>
+            render: (active: boolean) => (active ? <Tag color="success">当前启用</Tag> : <Tag>历史版本</Tag>)
           },
           {
             title: "操作",
             width: 100,
-            render: (_, version) => version.active || (selectedKind === "position" && activeVersion) ? null : (
-              <Popconfirm
-                title={`启用 ${version.name}？`}
-                description="仅用于新批次；已有批次不变。"
-                okText="确认启用"
-                cancelText="取消"
-                onConfirm={() => activateVersion(version)}
-              >
-                <Button
-                  type="link"
-                  aria-busy={mutation?.action === "activate" && mutation.versionId === version.id}
-                  disabled={mutationBusy}
-                  loading={mutation?.action === "activate" && mutation.versionId === version.id}
+            render: (_, version) =>
+              version.active || (selectedKind === "position" && activeVersion) ? null : (
+                <Popconfirm
+                  title={`启用 ${version.name}？`}
+                  description="仅用于新批次；已有批次不变。"
+                  okText="确认启用"
+                  cancelText="取消"
+                  onConfirm={() => activateVersion(version)}
                 >
-                  启用
-                </Button>
-              </Popconfirm>
-            )
+                  <Button
+                    type="link"
+                    aria-busy={mutation?.action === "activate" && mutation.versionId === version.id}
+                    disabled={mutationBusy}
+                    loading={mutation?.action === "activate" && mutation.versionId === version.id}
+                  >
+                    启用
+                  </Button>
+                </Popconfirm>
+              )
           }
         ]}
       />
@@ -486,25 +484,27 @@ export function InputDataPanel({
         </div>
         <div className="input-data-kind-list">
           {MAINTAINABLE_INPUT_KIND_DEFINITIONS.map((definition) => {
-            const current = versions.find((version) =>
-              version.kind === definition.value && version.active
-            );
+            const current = versions.find((version) => version.kind === definition.value && version.active);
             const selected = definition.value === selectedKind;
             return (
               <Button
                 key={definition.value}
                 className={`input-data-kind-button${selected ? " is-selected" : ""}`}
-                aria-label={current
-                  ? `${definition.label}，已就绪，当前版本 ${current.name}`
-                  : `${definition.label}，未启用，等待上传`}
+                aria-label={
+                  current
+                    ? `${definition.label}，已就绪，当前版本 ${current.name}`
+                    : `${definition.label}，未启用，等待上传`
+                }
                 aria-pressed={selected}
                 disabled={mutationBusy}
                 onClick={() => setSelectedKind(definition.value)}
               >
                 <span>{definition.label}</span>
-                {current
-                  ? <CheckCircleFilled aria-label="已就绪" />
-                  : <span className="input-data-kind-pending">未启用</span>}
+                {current ? (
+                  <CheckCircleFilled aria-label="已就绪" />
+                ) : (
+                  <span className="input-data-kind-pending">未启用</span>
+                )}
               </Button>
             );
           })}
@@ -527,10 +527,7 @@ export function InputDataPanel({
                 <>
                   <span className="input-data-status-version">
                     <strong>版本 {activeVersion.name}</strong>
-                    <Typography.Text
-                      type="secondary"
-                      ellipsis={{ tooltip: activeVersion.original_name }}
-                    >
+                    <Typography.Text type="secondary" ellipsis={{ tooltip: activeVersion.original_name }}>
                       {activeVersion.original_name}
                     </Typography.Text>
                   </span>
@@ -595,13 +592,17 @@ export function InputDataPanel({
               <div className="input-data-required-fields">
                 <Typography.Text type="secondary">必填字段</Typography.Text>
                 <Space wrap size={[6, 6]}>
-                  {selectedDefinition.requiredFields.map((field) => <Tag key={field}>{field}</Tag>)}
+                  {selectedDefinition.requiredFields.map((field) => (
+                    <Tag key={field}>{field}</Tag>
+                  ))}
                 </Space>
                 {selectedDefinition.optionalFields && (
                   <>
                     <Typography.Text type="secondary">可选字段</Typography.Text>
                     <Space wrap size={[6, 6]}>
-                      {selectedDefinition.optionalFields.map((field) => <Tag key={field}>{field}</Tag>)}
+                      {selectedDefinition.optionalFields.map((field) => (
+                        <Tag key={field}>{field}</Tag>
+                      ))}
                     </Space>
                   </>
                 )}
@@ -623,7 +624,9 @@ export function InputDataPanel({
               {
                 key: "preview",
                 label: (
-                  <span>数据预览 <span className="input-data-tab-count">{preview?.total ?? 0}</span></span>
+                  <span>
+                    数据预览 <span className="input-data-tab-count">{preview?.total ?? 0}</span>
+                  </span>
                 ),
                 children: (
                   <section aria-label="数据预览" className="input-data-tab-panel">
@@ -634,14 +637,18 @@ export function InputDataPanel({
               {
                 key: "history",
                 label: (
-                  <span>版本记录 <span className="input-data-tab-count">{selectedVersions.length}</span></span>
+                  <span>
+                    版本记录 <span className="input-data-tab-count">{selectedVersions.length}</span>
+                  </span>
                 ),
                 children: renderHistory()
               },
               {
                 key: "quality",
                 label: (
-                  <span>质量检查 <span className="input-data-tab-count">{errors + warnings}</span></span>
+                  <span>
+                    质量检查 <span className="input-data-tab-count">{errors + warnings}</span>
+                  </span>
                 ),
                 children: (
                   <section aria-label="质量检查" className="input-data-tab-panel input-data-quality-panel">
@@ -666,16 +673,24 @@ export function InputDataPanel({
         open={maintenanceOpen}
         getContainer={false}
         destroyOnHidden
-        motion={import.meta.env.MODE === "test" ? {
-          motionAppear: false,
-          motionEnter: false,
-          motionLeave: false
-        } : undefined}
-        maskMotion={import.meta.env.MODE === "test" ? {
-          motionAppear: false,
-          motionEnter: false,
-          motionLeave: false
-        } : undefined}
+        motion={
+          import.meta.env.MODE === "test"
+            ? {
+                motionAppear: false,
+                motionEnter: false,
+                motionLeave: false
+              }
+            : undefined
+        }
+        maskMotion={
+          import.meta.env.MODE === "test"
+            ? {
+                motionAppear: false,
+                motionEnter: false,
+                motionLeave: false
+              }
+            : undefined
+        }
         closable={!mutationBusy}
         maskClosable={!mutationBusy}
         keyboard={!mutationBusy}
@@ -684,12 +699,8 @@ export function InputDataPanel({
         }}
       >
         <div className="input-data-maintenance-form">
-          <Typography.Title level={5}>
-            {activeVersion ? "上传替换当前版本" : "上传首个版本"}
-          </Typography.Title>
-          <Typography.Paragraph type="secondary">
-            选择文件并确认版本名称；校验通过后立即启用。
-          </Typography.Paragraph>
+          <Typography.Title level={5}>{activeVersion ? "上传替换当前版本" : "上传首个版本"}</Typography.Title>
+          <Typography.Paragraph type="secondary">选择文件并确认版本名称；校验通过后立即启用。</Typography.Paragraph>
           {selectedKind === "supplier" && (
             <Alert
               type="info"
@@ -702,11 +713,7 @@ export function InputDataPanel({
             <Alert className="inline-alert" type="error" showIcon title="上传失败" description={uploadError.message} />
           )}
           <Form form={uploadForm} layout="vertical" clearOnDestroy>
-            <Form.Item
-              label="新版本名称"
-              name="name"
-              rules={[{ required: true, message: "请输入版本名称" }]}
-            >
+            <Form.Item label="新版本名称" name="name" rules={[{ required: true, message: "请输入版本名称" }]}>
               <Input disabled={mutationBusy} placeholder={`例如：${selectedKind}-20260721`} />
             </Form.Item>
             <Upload.Dragger
@@ -719,7 +726,9 @@ export function InputDataPanel({
               fileList={pendingFiles}
               onChange={selectUploadFile}
             >
-              <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined />
+              </p>
               <p className="ant-upload-text">拖放 Excel 到这里，或点击选择</p>
               <p className="ant-upload-hint">支持 .xls、.xlsx；选择后不会立即生效</p>
             </Upload.Dragger>

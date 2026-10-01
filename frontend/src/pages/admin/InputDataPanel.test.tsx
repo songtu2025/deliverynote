@@ -85,10 +85,11 @@ const versions: InputVersion[] = [
   }
 ];
 
-const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
-  status,
-  headers: { "Content-Type": "application/json" }
-});
+const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 
 let failInspection = false;
 let failUpload = false;
@@ -111,9 +112,10 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const getCatalogButton = (label: string) => screen.getByRole("button", {
-  name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
-});
+const getCatalogButton = (label: string) =>
+  screen.getByRole("button", {
+    name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
+  });
 
 describe("InputDataPanel", () => {
   beforeEach(() => {
@@ -122,93 +124,105 @@ describe("InputDataPanel", () => {
     emptyProductPreview = false;
     pendingUpload = null;
     vi.mocked(download).mockReset();
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
 
-      if (url.endsWith("/api/input-versions/7/inspection")) {
-        if (failInspection) return jsonResponse({ detail: "商品文件无法解析" }, 400);
-        return jsonResponse({
-          summary: {
-            kind: "product",
-            row_count: 1,
-            columns: ["SKU", "店铺/站点", "已锁定", "需复核"],
-            metrics: {},
-            issues: []
-          },
-          preview: {
-            kind: "product",
-            columns: ["SKU", "店铺/站点", "已锁定", "需复核"],
-            rows: emptyProductPreview ? [] : [{ SKU: "PRODUCT-SKU", "店铺/站点": "SEEKWAY:US", 已锁定: true, 需复核: false }],
-            total: emptyProductPreview ? 0 : 1,
-            offset: 0,
-            limit: 20
-          }
-        });
-      }
-      if (url.endsWith("/api/input-versions/5/inspection")) {
-        return jsonResponse({
-          summary: {
-            kind: "supplier",
-            row_count: 1,
-            columns: ["供应商编号", "供应商名称", "状态", "供应商别名"],
-            metrics: { aliases: 2, suppliers_with_aliases: 1 },
-            issues: []
-          },
-          preview: {
-            kind: "supplier",
-            columns: ["供应商编号", "供应商名称", "状态", "供应商别名"],
-            rows: [{
-              供应商编号: "SUPPLIER-GYS",
-              供应商名称: "RUIZY",
-              状态: "启用",
-              供应商别名: "瑞智雅|RIVBOS"
-            }],
-            total: 1,
-            offset: 0,
-            limit: 20
-          }
-        });
-      }
-      if (url.endsWith("/api/input-versions/3/inspection")) {
-        return jsonResponse({
-          summary: {
-            kind: "position",
-            row_count: 1,
-            columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位"],
-            metrics: { sites: 1, skus: 1, mskus: 1 },
-            issues: [{
-              severity: "warning",
-              code: "empty_stocking",
-              message: "备货定位不能为空",
-              row_numbers: [2, 3]
-            }]
-          },
-          preview: {
-            kind: "position",
-            columns: ["店铺-站点", "积加SKU", "MSKU"],
-            rows: [{ "店铺-站点": "SEEKWAY:US", "积加SKU": "SKU-A", MSKU: "MSKU-A" }],
-            total: 1,
-            offset: 0,
-            limit: 20
-          }
-        });
-      }
-      if (url.endsWith("/api/input-versions/product") && method === "POST") {
-        if (failUpload) return jsonResponse({ detail: "输入版本校验失败：缺少 SKU" }, 400);
-        if (pendingUpload) return pendingUpload.promise;
-        return jsonResponse({ ...versions[6], id: 9, name: "product-replacement" }, 201);
-      }
-      if (url.endsWith("/api/input-versions/supplier") && method === "POST") {
-        return jsonResponse({
-          detail: "输入版本校验失败：Excel 行 2, 3：供应商名称或别名会造成匹配歧义"
-        }, 400);
-      }
-      if (url.endsWith("/api/input-versions/2/activate") && method === "POST") {
-        return jsonResponse({ ...versions[1], active: true });
-      }
-      throw new Error(`Unexpected request: ${method} ${url}`);
-    }));
+        if (url.endsWith("/api/input-versions/7/inspection")) {
+          if (failInspection) return jsonResponse({ detail: "商品文件无法解析" }, 400);
+          return jsonResponse({
+            summary: {
+              kind: "product",
+              row_count: 1,
+              columns: ["SKU", "店铺/站点", "已锁定", "需复核"],
+              metrics: {},
+              issues: []
+            },
+            preview: {
+              kind: "product",
+              columns: ["SKU", "店铺/站点", "已锁定", "需复核"],
+              rows: emptyProductPreview
+                ? []
+                : [{ SKU: "PRODUCT-SKU", "店铺/站点": "SEEKWAY:US", 已锁定: true, 需复核: false }],
+              total: emptyProductPreview ? 0 : 1,
+              offset: 0,
+              limit: 20
+            }
+          });
+        }
+        if (url.endsWith("/api/input-versions/5/inspection")) {
+          return jsonResponse({
+            summary: {
+              kind: "supplier",
+              row_count: 1,
+              columns: ["供应商编号", "供应商名称", "状态", "供应商别名"],
+              metrics: { aliases: 2, suppliers_with_aliases: 1 },
+              issues: []
+            },
+            preview: {
+              kind: "supplier",
+              columns: ["供应商编号", "供应商名称", "状态", "供应商别名"],
+              rows: [
+                {
+                  供应商编号: "SUPPLIER-GYS",
+                  供应商名称: "RUIZY",
+                  状态: "启用",
+                  供应商别名: "瑞智雅|RIVBOS"
+                }
+              ],
+              total: 1,
+              offset: 0,
+              limit: 20
+            }
+          });
+        }
+        if (url.endsWith("/api/input-versions/3/inspection")) {
+          return jsonResponse({
+            summary: {
+              kind: "position",
+              row_count: 1,
+              columns: ["店铺-站点", "积加SKU", "MSKU", "规模定位", "备货定位"],
+              metrics: { sites: 1, skus: 1, mskus: 1 },
+              issues: [
+                {
+                  severity: "warning",
+                  code: "empty_stocking",
+                  message: "备货定位不能为空",
+                  row_numbers: [2, 3]
+                }
+              ]
+            },
+            preview: {
+              kind: "position",
+              columns: ["店铺-站点", "积加SKU", "MSKU"],
+              rows: [{ "店铺-站点": "SEEKWAY:US", 积加SKU: "SKU-A", MSKU: "MSKU-A" }],
+              total: 1,
+              offset: 0,
+              limit: 20
+            }
+          });
+        }
+        if (url.endsWith("/api/input-versions/product") && method === "POST") {
+          if (failUpload) return jsonResponse({ detail: "输入版本校验失败：缺少 SKU" }, 400);
+          if (pendingUpload) return pendingUpload.promise;
+          return jsonResponse({ ...versions[6], id: 9, name: "product-replacement" }, 201);
+        }
+        if (url.endsWith("/api/input-versions/supplier") && method === "POST") {
+          return jsonResponse(
+            {
+              detail: "输入版本校验失败：Excel 行 2, 3：供应商名称或别名会造成匹配歧义"
+            },
+            400
+          );
+        }
+        if (url.endsWith("/api/input-versions/2/activate") && method === "POST") {
+          return jsonResponse({ ...versions[1], active: true });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      })
+    );
   });
 
   afterEach(() => {
@@ -242,12 +256,7 @@ describe("InputDataPanel", () => {
 
   it("keeps maintainable input kinds in one horizontal switcher above the workspace", async () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     expect(await screen.findByText("PRODUCT-SKU")).toBeInTheDocument();
@@ -274,21 +283,16 @@ describe("InputDataPanel", () => {
 
   it("keeps purchase data entirely out of administrator maintenance", async () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     expect(await screen.findByRole("heading", { name: "商品信息" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^采购需求/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "采购需求" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "积加采购数据同步" })).not.toBeInTheDocument();
-    expect(vi.mocked(fetch).mock.calls.some(([input]) =>
-      String(input).endsWith("/api/input-versions/1/inspection")
-    )).toBe(false);
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/api/input-versions/1/inspection"))
+    ).toBe(false);
   });
 
   it("routes position replacements and history activation through web maintenance", async () => {
@@ -307,19 +311,16 @@ describe("InputDataPanel", () => {
     expect(screen.queryByRole("button", { name: "更新资料" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
-    expect(within(screen.getByText("position-old").closest("tr")!).queryByRole("button", { name: "启用" })).not.toBeInTheDocument();
+    expect(
+      within(screen.getByText("position-old").closest("tr")!).queryByRole("button", { name: "启用" })
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
     expect(onOpenPositionDraft).toHaveBeenCalledOnce();
   });
 
   it("explains the real impact of all five maintainable input kinds", () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     const expectations = [
@@ -339,12 +340,7 @@ describe("InputDataPanel", () => {
 
   it("keeps the reference explanation compact and resets it for a new type", () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     expect(screen.queryByText(/锁仓标识用于解决同一 SKU、站点的歧义/)).not.toBeInTheDocument();
@@ -361,12 +357,7 @@ describe("InputDataPanel", () => {
 
   it("requests inspection data only for the selected active versions", async () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     expect(await screen.findByText("PRODUCT-SKU")).toBeInTheDocument();
@@ -385,9 +376,7 @@ describe("InputDataPanel", () => {
 
   it("reuses loaded product, supplier, and position inspections", async () => {
     const versionsWithSupplier = versions.map((version) =>
-      version.id === 5
-        ? { ...version, name: "supplier-current", active: true }
-        : version
+      version.id === 5 ? { ...version, name: "supplier-current", active: true } : version
     );
     render(
       <InputDataPanel
@@ -410,16 +399,16 @@ describe("InputDataPanel", () => {
     expect(screen.getByText("SUPPLIER-GYS")).toBeInTheDocument();
 
     for (const versionId of [7, 5, 3]) {
-      expect(vi.mocked(fetch).mock.calls.filter(([input]) =>
-        String(input).endsWith(`/api/input-versions/${versionId}/inspection`)
-      )).toHaveLength(1);
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.filter(([input]) => String(input).endsWith(`/api/input-versions/${versionId}/inspection`))
+      ).toHaveLength(1);
     }
   });
 
   it("shows supplier alias format, metrics, preview, and quality result", async () => {
-    const versionsWithSupplier = versions.map((version) =>
-      version.id === 5 ? { ...version, active: true } : version
-    );
+    const versionsWithSupplier = versions.map((version) => (version.id === 5 ? { ...version, active: true } : version));
     render(
       <InputDataPanel
         versions={versionsWithSupplier}
@@ -444,9 +433,7 @@ describe("InputDataPanel", () => {
   });
 
   it("shows supplier alias conflict rows returned by upload validation", async () => {
-    const versionsWithSupplier = versions.map((version) =>
-      version.id === 5 ? { ...version, active: true } : version
-    );
+    const versionsWithSupplier = versions.map((version) => (version.id === 5 ? { ...version, active: true } : version));
     render(
       <InputDataPanel
         versions={versionsWithSupplier}
@@ -474,12 +461,7 @@ describe("InputDataPanel", () => {
 
   it("renders boolean preview values explicitly", async () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     expect(await screen.findByText("是")).toBeInTheDocument();
@@ -488,12 +470,7 @@ describe("InputDataPanel", () => {
 
   it("exposes the selected catalog item, readiness, and current version to assistive technology", () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     const productButton = getCatalogButton("商品信息");
@@ -510,12 +487,7 @@ describe("InputDataPanel", () => {
 
   it("keeps the current data status concise and moves repeated details out of the header", () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     const status = screen.getByRole("region", { name: "商品信息资料状态" });
@@ -532,12 +504,7 @@ describe("InputDataPanel", () => {
   it("shows no-active and empty-preview states without requesting inactive versions", async () => {
     emptyProductPreview = true;
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     expect(await screen.findByText("当前版本没有可预览的数据")).toBeInTheDocument();
@@ -573,17 +540,23 @@ describe("InputDataPanel", () => {
     });
 
     expect(await screen.findByText("replacement.xlsx")).toBeInTheDocument();
-    expect(vi.mocked(fetch).mock.calls.some(([input, init]) =>
-      String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
-    )).toBe(false);
+    expect(
+      vi
+        .mocked(fetch)
+        .mock.calls.some(
+          ([input, init]) => String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
+        )
+    ).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
 
     await waitFor(() => {
       expect(onVersionsChanged).toHaveBeenCalledOnce();
     });
-    const uploadCall = vi.mocked(fetch).mock.calls.find(([input, init]) =>
-      String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
-    );
+    const uploadCall = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([input, init]) => String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
+      );
     expect(uploadCall).toBeDefined();
     const body = uploadCall?.[1]?.body as FormData;
     expect(body.get("name")).toBe("product-replacement");
@@ -618,23 +591,33 @@ describe("InputDataPanel", () => {
     try {
       screen.getByRole("button", { name: "校验并启用新版本" }).click();
       await waitFor(() => {
-        expect(vi.mocked(fetch).mock.calls.filter(([input, init]) =>
-          String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
-        )).toHaveLength(1);
+        expect(
+          vi
+            .mocked(fetch)
+            .mock.calls.filter(
+              ([input, init]) => String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
+            )
+        ).toHaveLength(1);
       });
       expect(getCatalogButton("供应商资料")).toBeDisabled();
       const currentFileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
       expect(currentFileInput).toBeDisabled();
       expect(screen.getByRole("button", { name: "校验并启用新版本" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "校验并启用新版本" })).toHaveAttribute("aria-busy", "true");
-      expect(within(screen.getByText("product-old").closest("tr")!).getByRole("button", { name: "启用" })).toBeDisabled();
+      expect(
+        within(screen.getByText("product-old").closest("tr")!).getByRole("button", { name: "启用" })
+      ).toBeDisabled();
 
       fireEvent.change(currentFileInput, {
         target: { files: [new File(["second"], "second.xlsx", { type: "application/vnd.ms-excel" })] }
       });
-      expect(vi.mocked(fetch).mock.calls.filter(([input, init]) =>
-        String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
-      )).toHaveLength(1);
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.filter(
+            ([input, init]) => String(input).endsWith("/api/input-versions/product") && init?.method === "POST"
+          )
+      ).toHaveLength(1);
     } finally {
       pendingUpload?.resolve(jsonResponse({ ...versions[6], id: 9, name: "product-slow" }, 201));
     }
@@ -645,12 +628,7 @@ describe("InputDataPanel", () => {
 
   it("downloads the current file from the selected-type status header", async () => {
     render(
-      <InputDataPanel
-        versions={versions}
-        loading={false}
-        onVersionsChanged={vi.fn()}
-        onOpenPositionDraft={vi.fn()}
-      />
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "下载当前文件" }));
