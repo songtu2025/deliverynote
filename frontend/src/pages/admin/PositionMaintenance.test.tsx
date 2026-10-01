@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { download } from "../../api";
@@ -188,6 +188,38 @@ describe("PositionMaintenance", () => {
     );
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
     expect(await screen.findAllByText("服务器草稿已放弃，当前正式版本未改变")).toHaveLength(1);
+  });
+
+  it("ignores a discard response after leaving the maintenance page", async () => {
+    const response = deferred<Response>();
+    environment.state.discardRequest = response;
+    const onBack = vi.fn();
+    const view = renderMaintenance({ onBack });
+    await screen.findByText("SKU-A");
+    fireEvent.click(screen.getByRole("button", { name: "放弃草稿" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认放弃" }));
+    await waitFor(() => expect(environment.requests("POST", "/discard")).toHaveLength(1));
+    view.unmount();
+
+    await act(async () => {
+      response.resolve(jsonResponse({ ...baseDraft, status: "discarded", revision: 4 }));
+    });
+    expect(onBack).not.toHaveBeenCalled();
+    expect(screen.queryByText("服务器草稿已放弃，当前正式版本未改变")).not.toBeInTheDocument();
+  });
+
+  it("renders server version names as text in the header and expired-base feedback", async () => {
+    const versionName = '<img src="qa-text" onerror="window.qaExecuted=true">';
+    environment.state.draftResponse = {
+      ...baseDraft,
+      base_version_name: versionName,
+      active_version_id: 32,
+      active_version_name: versionName
+    };
+    renderMaintenance();
+    expect(await screen.findByText(`基于 ${versionName}；修改自动保存到草稿，发布后生效。`)).toBeInTheDocument();
+    expect(screen.getByText(`正式版本已变为 ${versionName}。请放弃当前草稿后重新维护。`)).toBeInTheDocument();
+    expect(document.querySelector('img[src="qa-text"]')).toBeNull();
   });
 
   it("can return to the input catalog while the draft entry request is loading", () => {

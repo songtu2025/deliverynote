@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { App as AntApp, Modal, Typography } from "antd";
+import { App as AntApp } from "antd";
 import type { UploadProps } from "antd";
 
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { usePositionDraftSession } from "./usePositionDraftSession";
 import { usePositionRowEditor } from "./usePositionRowEditor";
 import { usePositionRowMutations } from "./usePositionRowMutations";
+import { usePositionDeleteConfirmation } from "./usePositionDeleteConfirmation";
+import { usePositionDraftActions } from "./usePositionDraftActions";
 import { usePositionImport } from "./usePositionImport";
 import { usePositionPublish } from "./usePositionPublish";
 import { RowEditorDrawer } from "./RowEditorDrawer";
-import * as positionDraftApi from "./positionDraftApi";
-import { errorMessage, isRevisionConflict } from "./positionDraftApi";
 import { ImportPreviewDialog } from "./ImportPreviewDialog";
 import { PublishDialog } from "./PublishDialog";
 import { DraftSummary, PositionDraftStatus } from "./PositionFeedback";
@@ -33,17 +33,11 @@ const EMPTY_DIFF: PositionDiff = { added: 0, modified: 0, deleted: 0, unchanged:
 
 export function PositionMaintenance({ onPublished, onBack }: PositionMaintenanceProps) {
   const { message } = AntApp.useApp();
-  const [deleteConfirmRowId, setDeleteConfirmRowId] = useState<number | null>(null);
-  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
-  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const editor = usePositionRowEditor(busyAction !== null, onBack);
 
-  const keepDeleteConfirmOpenRef = useRef<number | null>(null);
-  const keepBulkDeleteConfirmOpenRef = useRef(false);
-  const keepDiscardConfirmOpenRef = useRef(false);
   const importButtonRef = useRef<HTMLButtonElement>(null);
   const publishButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -52,9 +46,8 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     editor.reset();
     importFlow.reset();
     publishFlow.reset();
-    setDeleteConfirmRowId(null);
-    setBulkDeleteConfirmOpen(false);
-    setDiscardConfirmOpen(false);
+    deleteConfirmation.reset();
+    draftActions.reset();
   };
 
   const session = usePositionDraftSession(clearLocalState);
@@ -81,9 +74,8 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     importFlow.reset();
     publishFlow.reset();
     setSelectedRowIds([]);
-    setDeleteConfirmRowId(null);
-    setBulkDeleteConfirmOpen(false);
-    setDiscardConfirmOpen(false);
+    deleteConfirmation.reset();
+    draftActions.reset();
     refreshRows();
   };
 
@@ -98,14 +90,16 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     refreshRows();
   };
 
+  const changeBusyAction = (action: BusyAction | null) => {
+    setBusyAction(action);
+    if (action !== null) setActionError(null);
+  };
+
   const rowMutations = usePositionRowMutations({
     draftId: draft?.id,
     disabled: actionsDisabled,
     getRevision,
-    onBusyChange: (action) => {
-      setBusyAction(action);
-      if (action !== null) setActionError(null);
-    },
+    onBusyChange: changeBusyAction,
     onApplied: (revision, messageText) => {
       acceptRevision(revision);
       message.success(messageText);
@@ -118,10 +112,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     draftId: draft?.id,
     disabled: actionsDisabled,
     getRevision,
-    onBusyChange: (action) => {
-      setBusyAction(action);
-      if (action !== null) setActionError(null);
-    },
+    onBusyChange: changeBusyAction,
     onApplied: (revision) => {
       acceptRevision(revision);
       message.success("Excel 已完整替换服务器草稿");
@@ -137,10 +128,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     draftId: draft?.id,
     disabled: actionsDisabled,
     getRevision,
-    onBusyChange: (action) => {
-      setBusyAction(action);
-      if (action !== null) setActionError(null);
-    },
+    onBusyChange: changeBusyAction,
     onValidationError: setActionError,
     onPublished: (published) => {
       recordRevision(published.draft_revision);
@@ -160,76 +148,29 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     if (!actionsDisabled) publishButtonRef.current?.focus();
   };
 
-  const handleActionError = (error: unknown, fallback: string) => {
-    const messageText = errorMessage(error, fallback);
-    if (isRevisionConflict(error)) {
-      invalidateLocalState(messageText);
-    } else {
-      setActionError(messageText);
+  const deleteConfirmation = usePositionDeleteConfirmation({
+    deleting: busyAction === "delete",
+    bulkDeleting: busyAction === "bulk-delete",
+    selectedRowIds,
+    mutations: rowMutations
+  });
+  const draftActions = usePositionDraftActions({
+    draft,
+    disabled: discardDisabled,
+    getRevision,
+    onBusyChange: changeBusyAction,
+    onError: setActionError,
+    onConflict: invalidateLocalState,
+    onDiscarded: () => {
+      message.success("服务器草稿已放弃，当前正式版本未改变");
+      onBack();
     }
-  };
-
-  const handleBulkDeleteOpenChange = (open: boolean) => {
-    if (!open && keepBulkDeleteConfirmOpenRef.current) {
-      keepBulkDeleteConfirmOpenRef.current = false;
-      return;
-    }
-    if (!open && busyAction === "bulk-delete") return;
-    setBulkDeleteConfirmOpen(open);
-  };
-
-  const handleBulkDeleteConfirm = async () => {
-    keepBulkDeleteConfirmOpenRef.current = false;
-    if (await rowMutations.bulkDelete(selectedRowIds)) setBulkDeleteConfirmOpen(false);
-    else keepBulkDeleteConfirmOpenRef.current = true;
-  };
+  });
 
   const previewImport: NonNullable<UploadProps["customRequest"]> = async (options) => {
     const failure = await importFlow.previewFile(options.file as File);
     if (failure) options.onError?.(failure);
     else options.onSuccess?.({});
-  };
-
-  const downloadDraft = async () => {
-    if (!draft) return;
-    setActionError(null);
-    try {
-      await positionDraftApi.downloadDraft(draft.id, draft.revision);
-    } catch (error) {
-      setActionError(errorMessage(error, "下载草稿失败"));
-    }
-  };
-
-  const discardDraft = async () => {
-    if (!draft || discardDisabled) return false;
-    setBusyAction("discard");
-    setActionError(null);
-    try {
-      await positionDraftApi.discardDraft(draft.id, getRevision());
-      setDiscardConfirmOpen(false);
-      message.success("服务器草稿已放弃，当前正式版本未改变");
-      onBack();
-      return true;
-    } catch (error) {
-      handleActionError(error, "放弃草稿失败");
-      return false;
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleDiscardOpenChange = (open: boolean) => {
-    if (!open && keepDiscardConfirmOpenRef.current) {
-      keepDiscardConfirmOpenRef.current = false;
-      return;
-    }
-    if (!open && busyAction === "discard") return;
-    setDiscardConfirmOpen(open);
-  };
-
-  const handleDiscardConfirm = async () => {
-    keepDiscardConfirmOpenRef.current = false;
-    if (!(await discardDraft())) keepDiscardConfirmOpenRef.current = true;
   };
 
   const rowColumns = useMemo(
@@ -238,26 +179,15 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         disabled: actionsDisabled,
         copying: busyAction === "copy",
         deleting: busyAction === "delete",
-        deleteConfirmRowId,
+        deleteConfirmRowId: deleteConfirmation.rowId,
         onEdit: editor.openEditRow,
         onCopy: async (row) => {
           await rowMutations.copy(row);
         },
-        onDeleteOpenChange: (row, open) => {
-          if (!open && keepDeleteConfirmOpenRef.current === row.id) {
-            keepDeleteConfirmOpenRef.current = null;
-            return;
-          }
-          if (!open && busyAction === "delete") return;
-          setDeleteConfirmRowId(open ? row.id : null);
-        },
-        onDeleteConfirm: async (row) => {
-          keepDeleteConfirmOpenRef.current = null;
-          if (await rowMutations.deleteRow(row)) setDeleteConfirmRowId(null);
-          else keepDeleteConfirmOpenRef.current = row.id;
-        }
+        onDeleteOpenChange: deleteConfirmation.changeRowOpen,
+        onDeleteConfirm: deleteConfirmation.confirmRow
       }),
-    [actionsDisabled, busyAction, deleteConfirmRowId]
+    [actionsDisabled, busyAction, deleteConfirmation.rowId]
   );
 
   if (!draft) {
@@ -275,14 +205,14 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         validating={busyAction === "validate"}
         discarding={busyAction === "discard"}
         discardDisabled={discardDisabled}
-        discardConfirmOpen={discardConfirmOpen}
+        discardConfirmOpen={draftActions.confirmOpen}
         importButtonRef={importButtonRef}
         publishButtonRef={publishButtonRef}
         onBack={editor.requestBack}
-        onDownload={downloadDraft}
+        onDownload={draftActions.download}
         onImport={previewImport}
-        onDiscardOpenChange={handleDiscardOpenChange}
-        onDiscardConfirm={handleDiscardConfirm}
+        onDiscardOpenChange={draftActions.changeConfirmOpen}
+        onDiscardConfirm={draftActions.confirmDiscard}
         onPublish={() => void publishFlow.open()}
       />
 
@@ -305,10 +235,10 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         columns={rowColumns}
         disabled={actionsDisabled}
         bulkDeleting={busyAction === "bulk-delete"}
-        bulkDeleteConfirmOpen={bulkDeleteConfirmOpen}
+        bulkDeleteConfirmOpen={deleteConfirmation.bulkOpen}
         onNewRow={editor.openNewRow}
-        onBulkDeleteOpenChange={handleBulkDeleteOpenChange}
-        onBulkDeleteConfirm={handleBulkDeleteConfirm}
+        onBulkDeleteOpenChange={deleteConfirmation.changeBulkOpen}
+        onBulkDeleteConfirm={deleteConfirmation.confirmBulk}
       />
 
       <RowEditorDrawer
@@ -320,23 +250,9 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         onDirty={editor.markDirty}
         onClose={editor.requestClose}
         onSave={() => void editor.save(rowMutations.save)}
+        leaveConfirmation={editor}
+        busy={busyAction !== null}
       />
-
-      {/* 抽屉一起关闭时由抽屉恢复外部焦点，避免弹窗抢回已销毁的表单控件。 */}
-      <Modal
-        title="放弃未保存的表单修改？"
-        destroyOnHidden
-        focusable={{ focusTriggerAfterClose: editor.open }}
-        open={editor.pendingLeave !== null}
-        okText={editor.pendingLeave === "back" ? "放弃并返回" : "放弃修改"}
-        cancelText="继续编辑"
-        okButtonProps={{ danger: true, disabled: busyAction !== null }}
-        cancelButtonProps={{ disabled: busyAction !== null }}
-        onOk={editor.confirmLeave}
-        onCancel={editor.cancelLeave}
-      >
-        <Typography.Paragraph>右侧编辑面板中的内容尚未保存到服务器，离开后无法恢复。</Typography.Paragraph>
-      </Modal>
 
       <ImportPreviewDialog
         preview={importFlow.preview}
