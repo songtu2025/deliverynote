@@ -1,9 +1,21 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { App as AntApp, ConfigProvider, message as staticMessage } from "antd";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { download } from "../../api";
 import type { InputVersion } from "../../types";
 import { InputDataPanel } from "./InputDataPanel";
+
+function render(ui: ReactElement) {
+  return renderComponent(ui, {
+    wrapper: ({ children }) => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntApp message={{ top: 64 }}>{children}</AntApp>
+      </ConfigProvider>
+    )
+  });
+}
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
@@ -93,6 +105,7 @@ const jsonResponse = (payload: unknown, status = 200) =>
 
 let failInspection = false;
 let failUpload = false;
+let failActivation = false;
 let emptyProductPreview = false;
 let pendingUpload: Deferred<Response> | null = null;
 
@@ -121,9 +134,12 @@ describe("InputDataPanel", () => {
   beforeEach(() => {
     failInspection = false;
     failUpload = false;
+    failActivation = false;
     emptyProductPreview = false;
     pendingUpload = null;
     vi.mocked(download).mockReset();
+    vi.spyOn(staticMessage, "success");
+    vi.spyOn(staticMessage, "error");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -217,8 +233,9 @@ describe("InputDataPanel", () => {
             400
           );
         }
-        if (url.endsWith("/api/input-versions/2/activate") && method === "POST") {
-          return jsonResponse({ ...versions[1], active: true });
+        if (url.endsWith("/api/input-versions/8/activate") && method === "POST") {
+          if (failActivation) return jsonResponse({ detail: "合成版本启用失败" }, 400);
+          return jsonResponse({ ...versions[7], active: true });
         }
         throw new Error(`Unexpected request: ${method} ${url}`);
       })
@@ -227,6 +244,7 @@ describe("InputDataPanel", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("shows a type-specific position explanation, metrics, preview, and maintenance entry", async () => {
@@ -569,7 +587,59 @@ describe("InputDataPanel", () => {
     expect(body.get("activate")).toBe("true");
     expect(body.get("file")).toBeInstanceOf(File);
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    const feedback = await screen.findByText("商品信息已上传并启用，将用于新批次");
+    expect(screen.getAllByText(feedback.textContent!)).toHaveLength(1);
+    expect(feedback.closest<HTMLElement>(".ant-message")?.style.getPropertyValue("--notification-top")).toBe("64px");
+    expect(staticMessage.success).not.toHaveBeenCalled();
   });
+
+  it.each([false, true])(
+    "preserves history activation feedback with failure=%s",
+    async (failed) => {
+      failActivation = failed;
+      const onVersionsChanged = vi.fn();
+      render(
+        <InputDataPanel
+          versions={versions}
+          loading={false}
+          onVersionsChanged={onVersionsChanged}
+          onOpenPositionDraft={vi.fn()}
+        />
+      );
+      fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
+      const historyRow = screen.getByText("product-old").closest("tr")!;
+      const activateButton = within(historyRow).getByRole("button", { name: "启用" });
+      fireEvent.click(activateButton);
+      expect(onVersionsChanged).not.toHaveBeenCalled();
+      fireEvent.click(await screen.findByRole("button", { name: "确认启用" }));
+
+      const successText = "product-old 已启用，将用于新批次";
+      if (failed) {
+        expect(await screen.findByText("合成版本启用失败")).toBeInTheDocument();
+        expect(onVersionsChanged).not.toHaveBeenCalled();
+        expect(screen.queryByText(successText)).not.toBeInTheDocument();
+        expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();
+      } else {
+        const feedback = await screen.findByText(successText);
+        expect(onVersionsChanged).toHaveBeenCalledOnce();
+        expect(screen.getAllByText(successText)).toHaveLength(1);
+        expect(feedback.closest<HTMLElement>(".ant-message")?.style.getPropertyValue("--notification-top")).toBe(
+          "64px"
+        );
+      }
+      expect(staticMessage.success).not.toHaveBeenCalled();
+      expect(staticMessage.error).not.toHaveBeenCalled();
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.filter(
+            ([input, init]) => String(input).endsWith("/api/input-versions/8/activate") && init?.method === "POST"
+          )
+      ).toHaveLength(1);
+      await waitFor(() => expect(activateButton).toBeEnabled());
+    },
+    30_000
+  );
 
   it("locks type switching and duplicate upload submission while an upload is pending", async () => {
     pendingUpload = createDeferred<Response>();
@@ -585,6 +655,10 @@ describe("InputDataPanel", () => {
 
     await screen.findByText("PRODUCT-SKU");
     fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
+    const supplierButton = getCatalogButton("供应商资料");
+    const historyActivateButton = within(screen.getByText("product-old").closest("tr")!).getByRole("button", {
+      name: "启用"
+    });
     fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
     fireEvent.change(screen.getByLabelText("新版本名称"), {
       target: { value: "product-slow" }
@@ -594,8 +668,9 @@ describe("InputDataPanel", () => {
       target: { files: [new File(["first"], "first.xlsx", { type: "application/vnd.ms-excel" })] }
     });
     await screen.findByText("first.xlsx");
+    const submitButton = screen.getByRole("button", { name: "校验并启用新版本" });
     try {
-      screen.getByRole("button", { name: "校验并启用新版本" }).click();
+      submitButton.click();
       await waitFor(() => {
         expect(
           vi
@@ -605,14 +680,12 @@ describe("InputDataPanel", () => {
             )
         ).toHaveLength(1);
       });
-      expect(getCatalogButton("供应商资料")).toBeDisabled();
+      expect(supplierButton).toBeDisabled();
       const currentFileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
       expect(currentFileInput).toBeDisabled();
-      expect(screen.getByRole("button", { name: "校验并启用新版本" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "校验并启用新版本" })).toHaveAttribute("aria-busy", "true");
-      expect(
-        within(screen.getByText("product-old").closest("tr")!).getByRole("button", { name: "启用" })
-      ).toBeDisabled();
+      expect(submitButton).toBeDisabled();
+      expect(submitButton).toHaveAttribute("aria-busy", "true");
+      expect(historyActivateButton).toBeDisabled();
 
       fireEvent.change(currentFileInput, {
         target: { files: [new File(["second"], "second.xlsx", { type: "application/vnd.ms-excel" })] }
@@ -629,7 +702,7 @@ describe("InputDataPanel", () => {
     }
 
     await waitFor(() => expect(onVersionsChanged).toHaveBeenCalledOnce());
-    expect(getCatalogButton("供应商资料")).toBeEnabled();
+    expect(supplierButton).toBeEnabled();
   }, 30_000);
 
   it("downloads the current file from the selected-type status header", async () => {
@@ -672,6 +745,12 @@ describe("InputDataPanel", () => {
 
     expect(await screen.findByText("输入版本校验失败：缺少 SKU")).toBeInTheDocument();
     expect(onVersionsChanged).not.toHaveBeenCalled();
+    const feedback = await screen.findByText("上传失败，请检查页面提示");
+    expect(screen.getAllByText("上传失败，请检查页面提示")).toHaveLength(1);
+    expect(feedback.closest<HTMLElement>(".ant-message")?.style.getPropertyValue("--notification-top")).toBe("64px");
+    expect(staticMessage.error).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("新版本名称")).toHaveValue("broken-product");
+    expect(screen.getByText("broken.xlsx")).toBeInTheDocument();
 
     fireEvent.click(getCatalogButton("供应商资料"));
     expect(screen.queryByText("输入版本校验失败：缺少 SKU")).not.toBeInTheDocument();

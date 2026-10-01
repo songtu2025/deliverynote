@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
   Drawer,
   Form,
@@ -12,8 +13,7 @@ import {
   Tabs,
   Tag,
   Typography,
-  Upload,
-  message
+  Upload
 } from "antd";
 import { CheckCircleFilled, DownloadOutlined, InboxOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
 import type { TableProps, UploadFile, UploadProps } from "antd";
@@ -62,6 +62,7 @@ function formatPreviewValue(value: InputVersionPreviewValue): string | number {
 }
 
 export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPositionDraft }: InputDataPanelProps) {
+  const { message } = AntApp.useApp();
   const [selectedKind, setSelectedKind] = useState<InputKind>("product");
   const [inspections, setInspections] = useState(() => new Map<number, InputVersionInspection>());
   const inspectionRequests = useRef(new Map<number, Promise<InputVersionInspection>>());
