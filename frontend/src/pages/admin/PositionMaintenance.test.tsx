@@ -10,42 +10,17 @@ import {
   baseImportPreview,
   basePositionVersion as version,
   baseRow,
-  baseValidation,
-  deferred
+  deferred,
+  jsonResponse
 } from "./positionDraftTestSupport";
-import type { Deferred } from "./positionDraftTestSupport";
+import { createPositionMaintenanceTestEnvironment } from "./positionMaintenanceTestEnvironment";
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
   return { ...actual, download: vi.fn() };
 });
 
-const jsonResponse = (payload: unknown, status = 200) =>
-  new Response(JSON.stringify(payload), {
-    status,
-    headers: { "Content-Type": "application/json" }
-  });
-
-let draftResponse = { ...baseDraft };
-let rowsResponse: { rows: Array<Record<string, unknown>>; total: number; offset: number; limit: number };
-let validationResponse: Record<string, unknown>;
-let failEntry = false;
-let entryRequest: Deferred<Response> | null = null;
-let metadataRequest: Deferred<Response> | null = null;
-let metadataResponse: Record<string, unknown> | null = null;
-let conflictNextRowWrite = false;
-let localConflictNextRowWrite = false;
-let expireImportApply = false;
-let duplicatePublishNameOnce = false;
-let rowRequestHandler: ((url: string) => Promise<Response> | Response) | null = null;
-let rowWriteRequest: Deferred<Response> | null = null;
-let singleDeleteRequest: Deferred<Response> | null = null;
-let bulkDeleteRequest: Deferred<Response> | null = null;
-let discardRequest: Deferred<Response> | null = null;
-let importApplyRequest: Deferred<Response> | null = null;
-let importRequestHandler: ((stage: "preview" | "apply") => Response) | null = null;
-let publishRequest: Deferred<Response> | null = null;
-let publishRequestHandler: ((stage: "validate" | "publish") => Response | Promise<Response>) | null = null;
+let environment: ReturnType<typeof createPositionMaintenanceTestEnvironment>;
 
 function renderMaintenance(
   overrides: Partial<{
@@ -65,14 +40,22 @@ function renderMaintenance(
 }
 
 function requests(method: string, suffix: string) {
-  return vi
-    .mocked(fetch)
-    .mock.calls.filter(([input, init]) => String(input).includes(suffix) && (init?.method ?? "GET") === method);
+  return environment.fetch.mock.calls.filter(
+    ([input, init]) => String(input).includes(suffix) && (init?.method ?? "GET") === method
+  );
 }
 
 function fillNewRow() {
   fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
   fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
+}
+
+async function startRowSave() {
+  renderMaintenance();
+  await screen.findByText("SKU-A");
+  fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
+  fillNewRow();
+  fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
 }
 
 async function dialogByTitle(title: string): Promise<HTMLElement> {
@@ -104,117 +87,13 @@ async function startPublish() {
 
 describe("PositionMaintenance", () => {
   beforeEach(() => {
-    draftResponse = { ...baseDraft };
-    rowsResponse = { rows: [{ ...baseRow }], total: 1, offset: 0, limit: 20 };
-    validationResponse = { ...baseValidation };
-    failEntry = false;
-    entryRequest = null;
-    metadataRequest = null;
-    metadataResponse = null;
-    conflictNextRowWrite = false;
-    localConflictNextRowWrite = false;
-    expireImportApply = false;
-    duplicatePublishNameOnce = false;
-    rowRequestHandler = null;
-    rowWriteRequest = null;
-    singleDeleteRequest = null;
-    bulkDeleteRequest = null;
-    discardRequest = null;
-    importApplyRequest = null;
-    importRequestHandler = null;
-    publishRequestHandler = null;
-    publishRequest = null;
+    environment = createPositionMaintenanceTestEnvironment();
+    environment.install();
     vi.mocked(download).mockReset();
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        const method = init?.method ?? "GET";
-
-        if (url.endsWith("/api/input-drafts/position") && method === "POST") {
-          if (entryRequest) return entryRequest.promise;
-          if (failEntry) return jsonResponse({ detail: "草稿服务暂时不可用" }, 500);
-          return jsonResponse(draftResponse);
-        }
-        if (url.endsWith("/api/input-drafts/position") && method === "GET") {
-          if (metadataRequest) return metadataRequest.promise;
-          return jsonResponse(metadataResponse ?? draftResponse);
-        }
-        if (url.includes("/api/input-drafts/7/rows?") && method === "GET") {
-          if (rowRequestHandler) return rowRequestHandler(url);
-          return jsonResponse(rowsResponse);
-        }
-        if (url.endsWith("/api/input-drafts/7/rows") && method === "POST") {
-          if (rowWriteRequest) return rowWriteRequest.promise;
-          if (localConflictNextRowWrite) {
-            localConflictNextRowWrite = false;
-            return jsonResponse({ detail: "记录当前不可复制，请修正后重试" }, 409);
-          }
-          if (conflictNextRowWrite) {
-            conflictNextRowWrite = false;
-            return jsonResponse({ detail: "草稿状态已更新", code: "draft_revision_conflict" }, 409);
-          }
-          return jsonResponse({ row: { ...baseRow, id: 102, change_type: "added" }, revision: 4 }, 201);
-        }
-        if (url.endsWith("/api/input-drafts/7/rows/101") && method === "PUT") {
-          return jsonResponse({
-            row: { ...baseRow, stocking_position: "不备货", change_type: "modified" },
-            revision: 8
-          });
-        }
-        if (url.endsWith("/api/input-drafts/7/rows/101") && method === "DELETE") {
-          if (singleDeleteRequest) return singleDeleteRequest.promise;
-          return jsonResponse({ row_id: 101, revision: 9 });
-        }
-        if (url.endsWith("/api/input-drafts/7/rows/bulk-delete") && method === "POST") {
-          if (bulkDeleteRequest) return bulkDeleteRequest.promise;
-          return jsonResponse({ deleted_ids: [101], revision: 5 });
-        }
-        if (url.endsWith("/api/input-drafts/7/import-preview") && method === "POST") {
-          return importRequestHandler?.("preview") ?? jsonResponse(baseImportPreview);
-        }
-        if (url.endsWith("/api/input-drafts/7/import-apply") && method === "POST") {
-          if (importApplyRequest) return importApplyRequest.promise;
-          if (importRequestHandler) return importRequestHandler("apply");
-          if (expireImportApply)
-            return jsonResponse({ detail: "请重新上传表格预览", code: "draft_import_preview_expired" }, 409);
-          return jsonResponse({ diff: baseImportPreview.diff, revision: 6 });
-        }
-        if (url.endsWith("/api/input-drafts/7/validate") && method === "POST") {
-          if (publishRequestHandler) return publishRequestHandler("validate");
-          return jsonResponse(validationResponse);
-        }
-        if (url.endsWith("/api/input-drafts/7/publish") && method === "POST") {
-          if (publishRequestHandler) return publishRequestHandler("publish");
-          if (publishRequest) return publishRequest.promise;
-          if (duplicatePublishNameOnce) {
-            duplicatePublishNameOnce = false;
-            return jsonResponse({ detail: "请更换版本名称", code: "input_version_name_exists" }, 409);
-          }
-          return jsonResponse(
-            {
-              ...version,
-              id: 32,
-              name: "position-20260721",
-              original_name: "position-20260721.xlsx",
-              draft_revision: 4,
-              draft_status: "published"
-            },
-            201
-          );
-        }
-        if (url.endsWith("/api/input-drafts/7/discard") && method === "POST") {
-          if (discardRequest) return discardRequest.promise;
-          return jsonResponse({ ...draftResponse, status: "discarded", revision: 4 });
-        }
-        throw new Error(`Unexpected request: ${method} ${url}`);
-      })
-    );
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
+    environment.dispose();
   });
 
   it("resumes a server draft and saves a new row with the current revision", async () => {
@@ -266,7 +145,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("shows authoritative draft totals instead of deriving them from the current page", async () => {
-    draftResponse = {
+    environment.state.draftResponse = {
       ...baseDraft,
       row_count: 6000,
       modified_count: 320,
@@ -291,7 +170,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("shows the real draft base and blocks edits when the active version changed", async () => {
-    draftResponse = {
+    environment.state.draftResponse = {
       ...baseDraft,
       base_version_id: 30,
       base_version_name: "position-v1",
@@ -310,7 +189,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("uses authoritative draft metadata when the catalog prop is stale", async () => {
-    draftResponse = {
+    environment.state.draftResponse = {
       ...baseDraft,
       base_version_id: 32,
       base_version_name: "position-v2",
@@ -346,7 +225,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("merges refreshed metadata only when the summary matches the accepted r4", async () => {
-    metadataResponse = {
+    environment.state.metadataResponse = {
       ...baseDraft,
       revision: 4,
       updated_by: 9,
@@ -354,13 +233,7 @@ describe("PositionMaintenance", () => {
       modified_count: 1,
       diff: { added: 1, modified: 0, deleted: 0, unchanged: 1 }
     };
-    renderMaintenance();
-    await screen.findByText("SKU-A");
-
-    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
-    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
-    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+    await startRowSave();
 
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
     expect(await screen.findByText("新增 1")).toBeInTheDocument();
@@ -368,17 +241,11 @@ describe("PositionMaintenance", () => {
   });
 
   it("treats an r5 metadata summary as a collaboration conflict without mixing it into local r4", async () => {
-    metadataRequest = deferred<Response>();
-    renderMaintenance();
-    await screen.findByText("SKU-A");
-
-    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
-    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
-    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+    environment.state.metadataRequest = deferred<Response>();
+    await startRowSave();
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
 
-    metadataRequest.resolve(
+    environment.state.metadataRequest.resolve(
       jsonResponse({
         ...baseDraft,
         revision: 5,
@@ -398,30 +265,25 @@ describe("PositionMaintenance", () => {
   });
 
   it("invalidates local editing after a 409 and offers a server refresh", async () => {
-    conflictNextRowWrite = true;
-    renderMaintenance();
-    await screen.findByText("SKU-A");
-    fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
-    fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
-    fireEvent.change(screen.getByLabelText("积加 SKU"), { target: { value: "SKU-B" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+    environment.state.conflictNextRowWrite = true;
+    await startRowSave();
 
     expect(await screen.findByText("草稿已在其他位置更新")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
-    draftResponse = { ...baseDraft, revision: 11, updated_at: "2026-07-21T11:00:00" };
+    environment.state.draftResponse = { ...baseDraft, revision: 11, updated_at: "2026-07-21T11:00:00" };
     fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
     expect(await screen.findByText("修订号 11")).toBeInTheDocument();
     expect(requests("POST", "/api/input-drafts/position")).toHaveLength(2);
   });
 
   it("keeps a successful write usable when the following metadata refresh fails", async () => {
-    metadataRequest = deferred<Response>();
+    environment.state.metadataRequest = deferred<Response>();
     renderMaintenance();
     await screen.findByText("SKU-A");
     const copyButton = screen.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" });
     fireEvent.click(copyButton);
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
-    metadataRequest.resolve(jsonResponse({ detail: "演示摘要刷新失败" }, 500));
+    environment.state.metadataRequest.resolve(jsonResponse({ detail: "演示摘要刷新失败" }, 500));
     expect(await screen.findAllByText("记录已复制到服务器草稿")).toHaveLength(1);
     await waitFor(() => expect(copyButton).toBeEnabled());
     expect(screen.queryByText("草稿已在其他位置更新")).not.toBeInTheDocument();
@@ -435,7 +297,7 @@ describe("PositionMaintenance", () => {
 
   it("ignores a late copy result after leaving the maintenance page", async () => {
     const response = deferred<Response>();
-    rowWriteRequest = response;
+    environment.state.rowWriteRequest = response;
     const view = renderMaintenance();
     fireEvent.click(await screen.findByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
     await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
@@ -449,7 +311,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("keeps a non-revision row 409 local without locking the workspace", async () => {
-    localConflictNextRowWrite = true;
+    environment.state.localConflictNextRowWrite = true;
     renderMaintenance();
     await screen.findByText("SKU-A");
 
@@ -462,7 +324,7 @@ describe("PositionMaintenance", () => {
   }, 15_000);
 
   it("keeps a single-row delete confirmation open while pending, then restores retry after failure", async () => {
-    singleDeleteRequest = deferred<Response>();
+    environment.state.singleDeleteRequest = deferred<Response>();
     renderMaintenance();
     await screen.findByText("SKU-A");
 
@@ -479,16 +341,16 @@ describe("PositionMaintenance", () => {
     fireEvent.click(document.body);
     expect(screen.getByText(title)).toBeInTheDocument();
 
-    singleDeleteRequest.resolve(jsonResponse({ detail: "删除服务暂时不可用" }, 500));
+    environment.state.singleDeleteRequest.resolve(jsonResponse({ detail: "删除服务暂时不可用" }, 500));
     expect(await screen.findByText("删除服务暂时不可用")).toBeInTheDocument();
     expect(screen.queryByText("记录已从服务器草稿删除")).not.toBeInTheDocument();
     expect(screen.getByText(title)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /取\s*消/ })).toBeEnabled();
 
-    singleDeleteRequest = deferred<Response>();
+    environment.state.singleDeleteRequest = deferred<Response>();
     fireEvent.click(screen.getByRole("button", { name: /确认删除/ }));
     await waitFor(() => expect(requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(2));
-    singleDeleteRequest.resolve(jsonResponse({ row_id: 101, revision: 9 }));
+    environment.state.singleDeleteRequest.resolve(jsonResponse({ row_id: 101, revision: 9 }));
     expect(await screen.findByText("修订号 9")).toBeInTheDocument();
     await waitFor(() => expect(deleteButton).not.toHaveClass("ant-popover-open"));
     expect(await screen.findAllByText("记录已从服务器草稿删除")).toHaveLength(1);
@@ -496,7 +358,7 @@ describe("PositionMaintenance", () => {
 
   it("sends server filters and pagination, and a late response cannot replace newer rows", async () => {
     const slow = deferred<Response>();
-    rowRequestHandler = (url) => {
+    environment.state.rowRequestHandler = (url) => {
       if (url.includes("search=old")) return slow.promise;
       if (url.includes("search=new")) {
         return jsonResponse({
@@ -506,7 +368,7 @@ describe("PositionMaintenance", () => {
           limit: 20
         });
       }
-      return jsonResponse({ ...rowsResponse, total: 45 });
+      return jsonResponse({ ...environment.state.rowsResponse, total: 45 });
     };
     renderMaintenance();
     await screen.findByText("SKU-A");
@@ -566,12 +428,12 @@ describe("PositionMaintenance", () => {
   });
 
   it("retries a failed row read without reopening the draft", async () => {
-    rowRequestHandler = () => jsonResponse({ detail: "草稿记录暂时不可用" }, 500);
+    environment.state.rowRequestHandler = () => jsonResponse({ detail: "草稿记录暂时不可用" }, 500);
     renderMaintenance();
     expect(await screen.findByText("草稿记录暂时不可用")).toBeInTheDocument();
     expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
 
-    rowRequestHandler = () => jsonResponse(rowsResponse);
+    environment.state.rowRequestHandler = () => jsonResponse(environment.state.rowsResponse);
     fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
     expect(screen.queryByText("无法读取草稿记录")).not.toBeInTheDocument();
@@ -597,7 +459,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("keeps the bulk-delete confirmation open and uncancellable while pending", async () => {
-    bulkDeleteRequest = deferred<Response>();
+    environment.state.bulkDeleteRequest = deferred<Response>();
     renderMaintenance();
     await screen.findByText("SKU-A");
     const row = screen.getByText("SKU-A").closest("tr");
@@ -618,7 +480,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(document.body);
     expect(screen.getByText("删除选中的 1 条记录？")).toBeInTheDocument();
 
-    bulkDeleteRequest.resolve(jsonResponse({ deleted_ids: [101], revision: 5 }));
+    environment.state.bulkDeleteRequest.resolve(jsonResponse({ deleted_ids: [101], revision: 5 }));
     expect(await screen.findByText("修订号 5")).toBeInTheDocument();
     expect(screen.getByText("已选择 0 条")).toBeInTheDocument();
     await waitFor(() => expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
@@ -658,7 +520,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("recovers from an expired import token without applying the candidate", async () => {
-    expireImportApply = true;
+    environment.state.expireImportApply = true;
     const { container, dialog } = await startImport("expired.xlsx");
     await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(1));
     fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
@@ -686,7 +548,7 @@ describe("PositionMaintenance", () => {
 
   it("keeps failed apply local and requires reupload if its token was consumed", async () => {
     let failed = false;
-    importRequestHandler = (stage) => {
+    environment.state.importRequestHandler = (stage) => {
       if (stage === "preview") return jsonResponse(baseImportPreview);
       if (!failed) {
         failed = true;
@@ -712,7 +574,7 @@ describe("PositionMaintenance", () => {
   it.each(["preview", "apply"] as const)(
     "locks the workspace for %s revision conflict and refreshes it",
     async (stage) => {
-      importRequestHandler = (currentStage) =>
+      environment.state.importRequestHandler = (currentStage) =>
         currentStage === stage
           ? jsonResponse({ detail: "导入修订号冲突", code: "draft_revision_conflict" }, 409)
           : jsonResponse(baseImportPreview);
@@ -727,7 +589,7 @@ describe("PositionMaintenance", () => {
       expect(screen.queryByText("Excel 替换未完成")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeDisabled();
       expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
-      draftResponse = { ...baseDraft, revision: 9 };
+      environment.state.draftResponse = { ...baseDraft, revision: 9 };
       fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
       expect(await screen.findByText("修订号 9")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
@@ -735,8 +597,8 @@ describe("PositionMaintenance", () => {
   );
 
   it("blocks publish when validation returns errors", async () => {
-    validationResponse = {
-      ...validationResponse,
+    environment.state.validationResponse = {
+      ...environment.state.validationResponse,
       valid: false,
       error_count: 1,
       issues: [{ severity: "error", code: "empty_site", message: "店铺-站点不能为空", row_numbers: [2] }]
@@ -750,8 +612,8 @@ describe("PositionMaintenance", () => {
   });
 
   it("requires explicit warning confirmation before publish", async () => {
-    validationResponse = {
-      ...validationResponse,
+    environment.state.validationResponse = {
+      ...environment.state.validationResponse,
       warning_count: 1,
       issues: [{ severity: "warning", code: "custom_scale", message: "规模定位不是常用值", row_numbers: [2] }]
     };
@@ -765,8 +627,8 @@ describe("PositionMaintenance", () => {
   });
 
   it("keeps publish actions reachable when validation lists many issues", async () => {
-    validationResponse = {
-      ...validationResponse,
+    environment.state.validationResponse = {
+      ...environment.state.validationResponse,
       warning_count: 4,
       issues: [
         { severity: "warning", code: "custom_scale", message: "规模定位必须为短尾、中尾或长尾", row_numbers: [3] },
@@ -812,7 +674,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("keeps a duplicate publish name editable and retries in the same dialog", async () => {
-    duplicatePublishNameOnce = true;
+    environment.state.duplicatePublishNameOnce = true;
     const { onPublished, dialog } = await startPublish();
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "duplicate-name" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
@@ -830,9 +692,9 @@ describe("PositionMaintenance", () => {
   });
 
   it("refreshes metadata after a publish base-version conflict and still allows discarding", async () => {
-    publishRequestHandler = (stage) => {
-      if (stage === "validate") return jsonResponse(validationResponse);
-      draftResponse = { ...baseDraft, active_version_id: 42, active_version_name: "position-newer" };
+    environment.state.publishRequestHandler = (stage) => {
+      if (stage === "validate") return jsonResponse(environment.state.validationResponse);
+      environment.state.draftResponse = { ...baseDraft, active_version_id: 42, active_version_name: "position-newer" };
       return jsonResponse(
         { detail: "当前启用的库位版本已变化，请放弃当前草稿后重新开始", code: "draft_base_version_changed" },
         409
@@ -853,8 +715,8 @@ describe("PositionMaintenance", () => {
 
   it.each([500, 409])("preserves publish input on an ordinary failure %i and retries", async (status) => {
     let failed = false;
-    publishRequestHandler = (stage) => {
-      if (stage === "validate") return jsonResponse(validationResponse);
+    environment.state.publishRequestHandler = (stage) => {
+      if (stage === "validate") return jsonResponse(environment.state.validationResponse);
       if (!failed) {
         failed = true;
         return jsonResponse({ detail: "发布服务暂时不可用" }, status);
@@ -875,7 +737,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("clears warning confirmation on cancellation and restores the publish button focus", async () => {
-    validationResponse = { ...validationResponse, warning_count: 1 };
+    environment.state.validationResponse = { ...environment.state.validationResponse, warning_count: 1 };
     renderMaintenance();
     const trigger = await screen.findByRole("button", { name: "发布新版本" });
     trigger.focus();
@@ -892,7 +754,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("downloads the draft and keeps discard confirmation uncancellable until the server accepts it", async () => {
-    discardRequest = deferred<Response>();
+    environment.state.discardRequest = deferred<Response>();
     const onBack = vi.fn();
     renderMaintenance({ onBack });
     await screen.findByText("SKU-A");
@@ -913,7 +775,9 @@ describe("PositionMaintenance", () => {
 
     expect(screen.queryByText("服务器草稿已放弃，当前正式版本未改变")).not.toBeInTheDocument();
 
-    discardRequest.resolve(jsonResponse({ ...draftResponse, status: "discarded", revision: 4 }));
+    environment.state.discardRequest.resolve(
+      jsonResponse({ ...environment.state.draftResponse, status: "discarded", revision: 4 })
+    );
     await waitFor(() => expect(onBack).toHaveBeenCalledOnce());
     expect(await screen.findAllByText("服务器草稿已放弃，当前正式版本未改变")).toHaveLength(1);
   });
@@ -921,20 +785,16 @@ describe("PositionMaintenance", () => {
   it.each([500, 409])(
     "keeps failed form input and retries without advancing revision after %s",
     async (status) => {
-      rowWriteRequest = deferred<Response>();
-      renderMaintenance();
-      await screen.findByText("SKU-A");
-      fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
-      fillNewRow();
-      fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
+      environment.state.rowWriteRequest = deferred<Response>();
+      await startRowSave();
       await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
-      rowWriteRequest.resolve(jsonResponse({ detail: "演示记录保存失败，请重试" }, status));
+      environment.state.rowWriteRequest.resolve(jsonResponse({ detail: "演示记录保存失败，请重试" }, status));
       expect(await screen.findByText("演示记录保存失败，请重试")).toBeInTheDocument();
       expect(screen.getByLabelText("店铺-站点")).toHaveValue("SEEKWAY:UK");
       expect(screen.getByLabelText("积加 SKU")).toHaveValue("SKU-B");
       expect(screen.getByText("修订号 3")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
-      rowWriteRequest = null;
+      environment.state.rowWriteRequest = null;
       await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toBeEnabled());
       fireEvent.click(screen.getByRole("button", { name: /保存到草稿$/ }));
       expect(await screen.findByText("修订号 4")).toBeInTheDocument();
@@ -965,7 +825,7 @@ describe("PositionMaintenance", () => {
   });
 
   it("cannot leave or close the row drawer while a save request is pending", async () => {
-    rowWriteRequest = deferred<Response>();
+    environment.state.rowWriteRequest = deferred<Response>();
     const onBack = vi.fn();
     renderMaintenance({ onBack });
     await screen.findByText("SKU-A");
@@ -987,14 +847,14 @@ describe("PositionMaintenance", () => {
       expect(screen.getByText("新增库位记录")).toBeInTheDocument();
       expect(screen.queryByText("记录已保存")).not.toBeInTheDocument();
     } finally {
-      rowWriteRequest.resolve(jsonResponse({ row: { ...baseRow, id: 102 }, revision: 4 }, 201));
+      environment.state.rowWriteRequest.resolve(jsonResponse({ row: { ...baseRow, id: 102 }, revision: 4 }, 201));
     }
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
     expect(await screen.findAllByText("记录已保存")).toHaveLength(1);
   });
 
   it("cannot leave or cancel the import dialog while apply is pending", async () => {
-    importApplyRequest = deferred<Response>();
+    environment.state.importApplyRequest = deferred<Response>();
     const { dialog } = await startImport();
     fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
     fireEvent.click(within(dialog).getByRole("button", { name: /应用整表替换/ }));
@@ -1009,14 +869,14 @@ describe("PositionMaintenance", () => {
       expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
       expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();
     } finally {
-      importApplyRequest.resolve(jsonResponse({ diff: baseImportPreview.diff, revision: 6 }));
+      environment.state.importApplyRequest.resolve(jsonResponse({ diff: baseImportPreview.diff, revision: 6 }));
     }
     expect(await screen.findByText("修订号 6")).toBeInTheDocument();
     expect(await screen.findAllByText("Excel 已完整替换服务器草稿")).toHaveLength(1);
   });
 
   it("cannot leave or cancel the publish dialog while publish is pending", async () => {
-    publishRequest = deferred<Response>();
+    environment.state.publishRequest = deferred<Response>();
     const onBack = vi.fn();
     const onPublished = vi.fn();
     renderMaintenance({ onBack, onPublished });
@@ -1039,7 +899,7 @@ describe("PositionMaintenance", () => {
       expect(screen.getByText("发布新的MSKU定位版本")).toBeInTheDocument();
       expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
     } finally {
-      publishRequest.resolve(
+      environment.state.publishRequest.resolve(
         jsonResponse(
           {
             ...version,
@@ -1058,7 +918,7 @@ describe("PositionMaintenance", () => {
   }, 30_000);
 
   it("can return to the input catalog while the draft entry request is loading", () => {
-    entryRequest = deferred<Response>();
+    environment.state.entryRequest = deferred<Response>();
     const onBack = vi.fn();
     const view = renderMaintenance({ onBack });
 
@@ -1068,12 +928,12 @@ describe("PositionMaintenance", () => {
       expect(onBack).toHaveBeenCalledOnce();
     } finally {
       view.unmount();
-      entryRequest.resolve(jsonResponse(draftResponse));
+      environment.state.entryRequest.resolve(jsonResponse(environment.state.draftResponse));
     }
   });
 
   it("can return to the input catalog after the draft entry request fails", async () => {
-    failEntry = true;
+    environment.state.failEntry = true;
     const onBack = vi.fn();
     renderMaintenance({ onBack });
 
@@ -1083,26 +943,26 @@ describe("PositionMaintenance", () => {
   });
 
   it("shows loading, entry error with retry, and empty row states", async () => {
-    entryRequest = deferred<Response>();
+    environment.state.entryRequest = deferred<Response>();
     const first = renderMaintenance();
     expect(screen.getByText("正在创建或恢复服务器草稿")).toBeInTheDocument();
-    entryRequest.resolve(jsonResponse(draftResponse));
+    environment.state.entryRequest.resolve(jsonResponse(environment.state.draftResponse));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
     first.unmount();
 
-    entryRequest = null;
-    failEntry = true;
+    environment.state.entryRequest = null;
+    environment.state.failEntry = true;
     const failed = renderMaintenance();
     expect(await screen.findByText("无法打开库位草稿")).toBeInTheDocument();
     expect(screen.getByText("草稿服务暂时不可用")).toBeInTheDocument();
-    failEntry = false;
+    environment.state.failEntry = false;
     fireEvent.click(screen.getByRole("button", { name: /重新尝试/ }));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
     expect(requests("POST", "/api/input-drafts/position")).toHaveLength(3);
     failed.unmount();
 
-    entryRequest = null;
-    rowsResponse = { rows: [], total: 0, offset: 0, limit: 20 };
+    environment.state.entryRequest = null;
+    environment.state.rowsResponse = { rows: [], total: 0, offset: 0, limit: 20 };
     renderMaintenance();
     expect(await screen.findByText("草稿中没有符合条件的记录")).toBeInTheDocument();
   });

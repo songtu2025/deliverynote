@@ -19,6 +19,12 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+export const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
+
 export const baseDraft: PositionDraft = {
   id: 7,
   kind: "position",
