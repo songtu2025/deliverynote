@@ -57,6 +57,9 @@ describe("PositionMaintenance record mutations", () => {
     // 按明确标签定位单个按钮，保留原角色查询的名称与可访问性检查。
     const editButton = rowControls.getByLabelText("编辑 SEEKWAY:US / SKU-A / MSKU-A", { selector: "button" });
     const copyButton = rowControls.getByLabelText("复制 SEEKWAY:US / SKU-A / MSKU-A", { selector: "button" });
+    expect(editButton).toHaveClass("position-record-action");
+    expect(copyButton).toHaveClass("position-record-action");
+    expect(rowControls.getByLabelText("删除 SEEKWAY:US / SKU-A / MSKU-A")).toHaveClass("position-record-action");
     expect(editButton).toHaveRole("button");
     expect(editButton).toHaveAccessibleName("编辑 SEEKWAY:US / SKU-A / MSKU-A");
     expect(isInaccessible(editButton)).toBe(false);

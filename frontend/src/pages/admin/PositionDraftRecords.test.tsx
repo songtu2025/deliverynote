@@ -204,6 +204,20 @@ describe("PositionDraftRecords", () => {
     expect(screen.getByText("演示 SKU")).toBeInTheDocument();
   });
 
+  it("attaches record styles through public semantic slots", () => {
+    const { container } = render(recordsView(recordsProps()));
+    expect(container.querySelector(".position-records-header")).toHaveTextContent("草稿记录");
+    expect(container.querySelector(".position-records-count")).toHaveTextContent("共 45 条");
+    expect(container.querySelector(".position-records-table")).toContainElement(
+      screen.getByRole("table", { name: "库位草稿记录" })
+    );
+    const table = within(screen.getByRole("table", { name: "库位草稿记录" }));
+    for (const cell of [...table.getAllByRole("columnheader"), ...table.getAllByRole("cell")]) {
+      expect(cell).toHaveClass("position-records-cell");
+      expect(cell).toHaveStyle({ paddingInline: "10px" });
+    }
+  });
+
   it("renders server text without interpreting HTML", () => {
     const props = recordsProps();
     const sku = '<img src=x onerror="window.__uiInjected=true">';

@@ -59,9 +59,10 @@ export function PositionDraftRecords({
   return (
     <Card
       className="position-records-card"
+      classNames={{ header: "position-records-header" }}
       title={
         <span>
-          草稿记录 <small>共 {rowsTotal} 条</small>
+          草稿记录 <small className="position-records-count">共 {rowsTotal} 条</small>
         </span>
       }
       extra={
@@ -185,6 +186,12 @@ export function PositionDraftRecords({
       <Table<PositionDraftRow>
         rowKey="id"
         size="small"
+        classNames={{
+          root: "position-records-table",
+          header: { cell: "position-records-cell" },
+          body: { cell: "position-records-cell" }
+        }}
+        styles={{ header: { cell: { paddingInline: 10 } }, body: { cell: { paddingInline: 10 } } }}
         loading={rowsLoading}
         columns={columns}
         dataSource={rows}

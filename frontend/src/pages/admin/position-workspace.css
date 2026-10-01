@@ -129,6 +129,31 @@
   margin: -2px 0 10px;
 }
 
+.position-maintenance .position-records-header {
+  min-height: 58px;
+}
+
+.position-maintenance .position-records-count {
+  margin-left: 6px;
+  color: #75817d;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.position-maintenance .position-records-table {
+  overflow: hidden;
+  border: 1px solid #e2e9e7;
+  border-radius: 8px;
+}
+
+.position-maintenance .position-records-cell {
+  white-space: nowrap;
+}
+
+.position-maintenance .position-record-action {
+  padding-inline: 6px;
+}
+
 .position-row-drawer .position-row-drawer-header,
 .position-row-drawer .position-row-drawer-footer {
   border-color: #e2e9e7;

@@ -79,6 +79,7 @@ export function createPositionRowColumns({
       render: (_, row) => (
         <Space size={0}>
           <Button
+            className="position-record-action"
             size="small"
             type="link"
             aria-label={rowActionLabel("编辑", row)}
@@ -88,6 +89,7 @@ export function createPositionRowColumns({
             编辑
           </Button>
           <Button
+            className="position-record-action"
             size="small"
             type="link"
             aria-label={rowActionLabel("复制", row)}
@@ -109,6 +111,7 @@ export function createPositionRowColumns({
             onConfirm={() => onDeleteConfirm(row)}
           >
             <Button
+              className="position-record-action"
               size="small"
               type="link"
               danger

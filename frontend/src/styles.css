@@ -2976,16 +2976,6 @@ input {
   font-size: 13px;
 }
 
-.position-records-card > .ant-card-head {
-  min-height: 58px;
-}
-.position-records-card > .ant-card-head small {
-  margin-left: 6px;
-  color: #75817d;
-  font-size: 12px;
-  font-weight: 400;
-}
-
 .position-maintenance > .ant-card {
   border-color: #d8e2df;
 }
@@ -2999,12 +2989,6 @@ input {
   align-items: center;
 }
 
-.position-records-card .ant-table-cell {
-  padding-inline: 10px !important;
-}
-.position-records-card .ant-table-tbody .ant-btn-link {
-  padding-inline: 6px;
-}
 .position-maintenance .ant-alert,
 .input-data-layout .ant-alert,
 .admin-panel-card .ant-alert {
