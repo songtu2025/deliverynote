@@ -190,6 +190,18 @@ describe("PositionMaintenance", () => {
     expect(await screen.findAllByText("服务器草稿已放弃，当前正式版本未改变")).toHaveLength(1);
   });
 
+  it("restores focus to the discard trigger when confirmation is cancelled", async () => {
+    renderMaintenance();
+    await screen.findByText("SKU-A");
+    const trigger = screen.getByRole("button", { name: "放弃草稿" });
+    fireEvent.click(trigger);
+    const cancel = await screen.findByRole("button", { name: /取\s*消/ });
+    cancel.focus();
+    fireEvent.click(cancel);
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(environment.requests("POST", "/discard")).toHaveLength(0);
+  });
+
   it("ignores a discard response after leaving the maintenance page", async () => {
     const response = deferred<Response>();
     environment.state.discardRequest = response;

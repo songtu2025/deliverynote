@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import type { Ref } from "react";
 import { Button, Popconfirm, Space, Typography, Upload } from "antd";
 import type { UploadProps } from "antd";
@@ -40,6 +41,8 @@ export function PositionMaintenanceHeader({
   onDiscardConfirm,
   onPublish
 }: PositionMaintenanceHeaderProps) {
+  const discardButtonRef = useRef<HTMLButtonElement>(null);
+
   return (
     <div className="position-workspace-heading">
       <div className="position-workspace-title">
@@ -85,8 +88,9 @@ export function PositionMaintenanceHeader({
           cancelButtonProps={{ disabled: discarding }}
           onOpenChange={onDiscardOpenChange}
           onConfirm={onDiscardConfirm}
+          onCancel={() => discardButtonRef.current?.focus()}
         >
-          <Button danger disabled={discardDisabled} loading={discarding}>
+          <Button ref={discardButtonRef} danger disabled={discardDisabled} loading={discarding}>
             放弃草稿
           </Button>
         </Popconfirm>

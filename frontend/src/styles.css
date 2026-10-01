@@ -2042,10 +2042,12 @@ input {
   }
 }
 
-/* Administrator maintenance is a PC workspace (1280–1920px). */
-.admin-maintenance-pc {
+/* 根据内容区而非屏幕宽度调整管理员工作台，兼顾侧栏与浏览器缩放。 */
+.page-shell.admin-maintenance-pc {
+  width: 100%;
   max-width: 1600px;
   min-width: 0;
+  container: admin-workspace / inline-size;
 }
 
 .admin-maintenance-heading {
@@ -2354,6 +2356,7 @@ input {
 
 .input-data-status-copy {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .input-data-status-title {
@@ -2393,18 +2396,21 @@ input {
 .input-data-status-version {
   display: flex;
   min-width: 0;
+  max-width: 100%;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .input-data-status-version strong {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   color: #385049;
   font-size: 12px;
 }
 
 .input-data-status-version > .ant-typography {
-  max-width: 320px;
+  max-width: min(320px, 100%);
 }
 
 .input-data-status-time {
@@ -2988,6 +2994,7 @@ input {
 
 .position-workspace-title {
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .position-workspace-title h2 {
   margin: 0 !important;
@@ -2998,7 +3005,8 @@ input {
   margin-top: 3px;
 }
 .position-workspace-actions {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  max-width: 100%;
   justify-content: flex-end;
 }
 
@@ -3121,8 +3129,16 @@ input {
 }
 .position-row-field-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 18px;
+}
+.position-row-form {
+  container: position-editor / inline-size;
+}
+@container position-editor (max-width: 480px) {
+  .position-row-field-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .position-row-field-grid .ant-form-item {
   min-width: 0;
@@ -3693,17 +3709,89 @@ body:has(.admin-maintenance-pc) .ant-drawer .ant-alert {
   }
 }
 
-@media (max-width: 1279px) {
-  .admin-maintenance-pc {
-    width: 1100px;
-    min-width: 1100px;
-    max-width: none;
-    margin-inline: 0;
+@container admin-workspace (max-width: 900px) {
+  .position-workspace-heading {
+    position: static;
+    flex-direction: column;
+    gap: 16px;
   }
-
-  .admin-maintenance-pc .page-heading {
+  .position-workspace-actions {
+    justify-content: flex-start;
+  }
+  .position-summary-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .position-summary-diff {
+    grid-column: 1 / -1;
+  }
+  .position-summary-metric,
+  .position-summary-diff {
+    border-top: 1px solid var(--dn-border);
+  }
+  .position-summary-metric:nth-child(-n + 2) {
+    border-top: 0;
+  }
+  .position-summary-metric:nth-child(odd),
+  .position-summary-diff {
+    border-left: 0;
+  }
+  .position-maintenance .position-filter-toolbar,
+  .audit-log-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .position-filter-search,
+  .audit-search-field {
+    grid-column: 1 / -1;
+  }
+  .input-data-kind-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .input-data-status-header,
+  .input-data-context-grid,
+  .integration-config-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .input-data-status-actions {
     flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .input-data-status-actions .ant-btn {
+    width: auto;
+  }
+  .input-data-preview-heading,
+  .input-data-tab-heading,
+  .admin-panel-intro {
     align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .input-data-preview-summary,
+  .user-summary {
+    justify-content: flex-start;
+  }
+  .integration-config-summary {
+    border-right: 0;
+    border-bottom: 1px solid var(--dn-border);
+  }
+}
+
+@container admin-workspace (max-width: 480px) {
+  .position-summary-strip,
+  .position-maintenance .position-filter-toolbar,
+  .input-data-kind-list,
+  .audit-log-toolbar,
+  .integration-config-credentials {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .position-summary-metric:nth-child(2) {
+    border-top: 1px solid var(--dn-border);
+  }
+  .position-summary-metric {
+    border-left: 0;
+  }
+  .input-data-status-time {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 
