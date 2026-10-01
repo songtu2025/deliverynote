@@ -74,6 +74,11 @@ describe("position maintenance test environment", () => {
     expect(first.state.rowRequestHandler).toHaveBeenCalledWith(url);
     expect(first.fetch.mock.calls).toEqual([[url]]);
     expect(second.fetch.mock.calls).toEqual([["/api/input-drafts/position", { method: "POST" }]]);
+    expect(first.requests("GET", "/rows?")).toEqual([[url]]);
+    expect(first.requests("POST", "/rows?")).toEqual([]);
+    expect(first.requests("GET", "/unknown")).toEqual([]);
+    expect(second.requests("POST", "/position")).toEqual([["/api/input-drafts/position", { method: "POST" }]]);
+    expect(second.requests("GET", "/rows?")).toEqual([]);
     expect(createPositionMaintenanceTestEnvironment().fetch).not.toHaveBeenCalled();
   });
 

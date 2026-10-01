@@ -1,19 +1,12 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp, message as staticMessage } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { download } from "../../api";
 import type { InputVersion } from "../../types";
-import { PositionMaintenance } from "./PositionMaintenance";
-import {
-  baseDraft,
-  baseImportPreview,
-  basePositionVersion as version,
-  baseRow,
-  deferred,
-  jsonResponse
-} from "./positionDraftTestSupport";
+import { baseDraft, basePositionVersion as version, baseRow, deferred, jsonResponse } from "./positionDraftTestSupport";
 import { createPositionMaintenanceTestEnvironment } from "./positionMaintenanceTestEnvironment";
+import { dialogByTitle, renderMaintenance } from "./positionMaintenancePageTestSupport";
 
 vi.mock("../../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../api")>();
@@ -21,29 +14,6 @@ vi.mock("../../api", async (importOriginal) => {
 });
 
 let environment: ReturnType<typeof createPositionMaintenanceTestEnvironment>;
-
-function renderMaintenance(
-  overrides: Partial<{
-    onPublished: (published: InputVersion) => void;
-    onBack: () => void;
-  }> = {}
-) {
-  return render(
-    <AntApp>
-      <PositionMaintenance
-        activeVersion={version}
-        onPublished={overrides.onPublished ?? vi.fn()}
-        onBack={overrides.onBack ?? vi.fn()}
-      />
-    </AntApp>
-  );
-}
-
-function requests(method: string, suffix: string) {
-  return environment.fetch.mock.calls.filter(
-    ([input, init]) => String(input).includes(suffix) && (init?.method ?? "GET") === method
-  );
-}
 
 function fillNewRow() {
   fireEvent.change(screen.getByLabelText("店铺-站点"), { target: { value: "SEEKWAY:UK" } });
@@ -56,26 +26,6 @@ async function startRowSave() {
   fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
   fillNewRow();
   fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
-}
-
-async function dialogByTitle(title: string): Promise<HTMLElement> {
-  const heading = await screen.findByText(title);
-  const dialog = heading.closest('[role="dialog"]');
-  expect(dialog).not.toBeNull();
-  return dialog as HTMLElement;
-}
-
-function uploadImport(container: HTMLElement, name = "replacement.xlsx") {
-  fireEvent.change(container.querySelector<HTMLInputElement>('input[type="file"]')!, {
-    target: { files: [new File(["excel"], name)] }
-  });
-}
-
-async function startImport(name = "replacement.xlsx") {
-  const view = renderMaintenance();
-  await screen.findByText("SKU-A");
-  uploadImport(view.container, name);
-  return { ...view, dialog: await dialogByTitle("Excel 整表替换预览") };
 }
 
 async function startPublish() {
@@ -106,15 +56,15 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "新增记录" }));
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
     expect(await screen.findByText("请输入店铺-站点")).toBeInTheDocument();
-    expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(0);
+    expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(0);
     fillNewRow();
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
 
-    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
-    const body = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
+    await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+    const body = JSON.parse(String(environment.requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
     expect(body).toMatchObject({ revision: 3, store_site: "SEEKWAY:UK", jiaji_sku: "SKU-B" });
     expect(await screen.findByText("修订号 4")).toBeInTheDocument();
-    await waitFor(() => expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
+    await waitFor(() => expect(environment.requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
     expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
     expect(await screen.findAllByText("记录已保存")).toHaveLength(1);
     expect(staticSuccess).not.toHaveBeenCalled();
@@ -219,8 +169,8 @@ describe("PositionMaintenance", () => {
     expect(await screen.findByText("修订号 8")).toBeInTheDocument();
 
     fireEvent.click(rowControls.getByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
-    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
-    const copyBody = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
+    await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+    const copyBody = JSON.parse(String(environment.requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
     expect(copyBody.revision).toBe(8);
   });
 
@@ -273,7 +223,7 @@ describe("PositionMaintenance", () => {
     environment.state.draftResponse = { ...baseDraft, revision: 11, updated_at: "2026-07-21T11:00:00" };
     fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
     expect(await screen.findByText("修订号 11")).toBeInTheDocument();
-    expect(requests("POST", "/api/input-drafts/position")).toHaveLength(2);
+    expect(environment.requests("POST", "/api/input-drafts/position")).toHaveLength(2);
   });
 
   it("keeps a successful write usable when the following metadata refresh fails", async () => {
@@ -290,8 +240,8 @@ describe("PositionMaintenance", () => {
     expect(screen.queryByText("演示摘要刷新失败")).not.toBeInTheDocument();
 
     fireEvent.click(copyButton);
-    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(2));
-    const nextBody = JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[1][1]?.body));
+    await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(2));
+    const nextBody = JSON.parse(String(environment.requests("POST", "/api/input-drafts/7/rows")[1][1]?.body));
     expect(nextBody.revision).toBe(4);
   });
 
@@ -300,13 +250,13 @@ describe("PositionMaintenance", () => {
     environment.state.rowWriteRequest = response;
     const view = renderMaintenance();
     fireEvent.click(await screen.findByRole("button", { name: "复制 SEEKWAY:US / SKU-A / MSKU-A" }));
-    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+    await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
     view.unmount();
     await act(async () => {
       response.resolve(jsonResponse({ row: baseRow, revision: 4 }, 201));
     });
-    expect(requests("GET", "/api/input-drafts/position")).toHaveLength(0);
-    expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(1);
+    expect(environment.requests("GET", "/api/input-drafts/position")).toHaveLength(0);
+    expect(environment.requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(1);
     expect(screen.queryByText("记录已复制到服务器草稿")).not.toBeInTheDocument();
   });
 
@@ -334,8 +284,10 @@ describe("PositionMaintenance", () => {
     expect(await screen.findByText(title)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "确认删除" }));
 
-    await waitFor(() => expect(requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(1));
-    expect(JSON.parse(String(requests("DELETE", "/api/input-drafts/7/rows/101")[0][1]?.body))).toEqual({ revision: 3 });
+    await waitFor(() => expect(environment.requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(1));
+    expect(JSON.parse(String(environment.requests("DELETE", "/api/input-drafts/7/rows/101")[0][1]?.body))).toEqual({
+      revision: 3
+    });
     expect(screen.getByRole("button", { name: /取\s*消/ })).toBeDisabled();
     fireEvent.mouseDown(document.body);
     fireEvent.click(document.body);
@@ -349,7 +301,7 @@ describe("PositionMaintenance", () => {
 
     environment.state.singleDeleteRequest = deferred<Response>();
     fireEvent.click(screen.getByRole("button", { name: /确认删除/ }));
-    await waitFor(() => expect(requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(2));
+    await waitFor(() => expect(environment.requests("DELETE", "/api/input-drafts/7/rows/101")).toHaveLength(2));
     environment.state.singleDeleteRequest.resolve(jsonResponse({ row_id: 101, revision: 9 }));
     expect(await screen.findByText("修订号 9")).toBeInTheDocument();
     await waitFor(() => expect(deleteButton).not.toHaveClass("ant-popover-open"));
@@ -379,9 +331,9 @@ describe("PositionMaintenance", () => {
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "old" } });
     await waitFor(() => {
       expect(
-        requests("GET", "/api/input-drafts/7/rows?").some(
-          ([input]) => new URL(String(input), "http://test").searchParams.get("search") === "old"
-        )
+        environment
+          .requests("GET", "/api/input-drafts/7/rows?")
+          .some(([input]) => new URL(String(input), "http://test").searchParams.get("search") === "old")
       ).toBe(true);
     });
     fireEvent.change(screen.getByLabelText("搜索草稿"), { target: { value: "new" } });
@@ -400,7 +352,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(await screen.findByTitle("2"));
 
     await waitFor(() => {
-      const urls = requests("GET", "/api/input-drafts/7/rows?").map(([input]) => String(input));
+      const urls = environment.requests("GET", "/api/input-drafts/7/rows?").map(([input]) => String(input));
       expect(
         urls.some(
           (url) =>
@@ -416,7 +368,7 @@ describe("PositionMaintenance", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "重置筛选" }));
     await waitFor(() => {
-      const calls = requests("GET", "/api/input-drafts/7/rows?");
+      const calls = environment.requests("GET", "/api/input-drafts/7/rows?");
       const params = new URL(String(calls.at(-1)![0]), "http://test").searchParams;
       expect(Object.fromEntries(params)).toEqual({ offset: "0", limit: "20" });
     });
@@ -437,8 +389,8 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
     expect(screen.queryByText("无法读取草稿记录")).not.toBeInTheDocument();
-    expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2);
-    expect(requests("POST", "/api/input-drafts/position")).toHaveLength(1);
+    expect(environment.requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2);
+    expect(environment.requests("POST", "/api/input-drafts/position")).toHaveLength(1);
   });
 
   it("debounces rapid text filters before requesting rows", async () => {
@@ -451,7 +403,8 @@ describe("PositionMaintenance", () => {
     fireEvent.change(search, { target: { value: "sku" } });
 
     await waitFor(() => {
-      const values = requests("GET", "/api/input-drafts/7/rows?")
+      const values = environment
+        .requests("GET", "/api/input-drafts/7/rows?")
         .map(([input]) => new URL(String(input), "http://test").searchParams.get("search"))
         .filter(Boolean);
       expect(values).toEqual(["sku"]);
@@ -470,8 +423,8 @@ describe("PositionMaintenance", () => {
     expect(await screen.findByText("删除选中的 1 条记录？")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认删除" }));
 
-    await waitFor(() => expect(requests("POST", "/rows/bulk-delete")).toHaveLength(1));
-    expect(JSON.parse(String(requests("POST", "/rows/bulk-delete")[0][1]?.body))).toEqual({
+    await waitFor(() => expect(environment.requests("POST", "/rows/bulk-delete")).toHaveLength(1));
+    expect(JSON.parse(String(environment.requests("POST", "/rows/bulk-delete")[0][1]?.body))).toEqual({
       revision: 3,
       row_ids: [101]
     });
@@ -483,118 +436,9 @@ describe("PositionMaintenance", () => {
     environment.state.bulkDeleteRequest.resolve(jsonResponse({ deleted_ids: [101], revision: 5 }));
     expect(await screen.findByText("修订号 5")).toBeInTheDocument();
     expect(screen.getByText("已选择 0 条")).toBeInTheDocument();
-    await waitFor(() => expect(requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
+    await waitFor(() => expect(environment.requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2));
     await waitFor(() => expect(bulkDeleteButton).not.toHaveClass("ant-popover-open"));
   });
-
-  it("previews every Excel diff count before applying the server token", async () => {
-    const { container } = renderMaintenance();
-    await screen.findByText("SKU-A");
-    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
-    expect(fileInput).not.toBeNull();
-    uploadImport(container);
-
-    await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(1));
-    const previewBody = requests("POST", "/import-preview")[0][1]?.body as FormData;
-    expect(previewBody.get("revision")).toBe("3");
-    expect((previewBody.get("file") as File).name).toBe("replacement.xlsx");
-    expect(requests("POST", "/import-apply")).toHaveLength(0);
-    expect(screen.queryByText("Excel 替换未完成")).not.toBeInTheDocument();
-    const previewDialog = await dialogByTitle("Excel 整表替换预览");
-    expect(within(previewDialog).getByText("新增 2")).toBeInTheDocument();
-    expect(within(previewDialog).getByText("修改 1")).toBeInTheDocument();
-    expect(within(previewDialog).getByText("删除 1")).toBeInTheDocument();
-    expect(within(previewDialog).getByText("未变化 4")).toBeInTheDocument();
-    expect(within(previewDialog).getByText("数据量变化较大")).toBeInTheDocument();
-    fireEvent.click(within(previewDialog).getByRole("button", { name: "应用整表替换" }));
-
-    await waitFor(() => expect(requests("POST", "/import-apply")).toHaveLength(1));
-    expect(JSON.parse(String(requests("POST", "/import-apply")[0][1]?.body))).toEqual({
-      revision: 3,
-      token: "preview-token"
-    });
-    expect(await screen.findByText("修订号 6")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^复制 / }));
-    await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
-    expect(JSON.parse(String(requests("POST", "/api/input-drafts/7/rows")[0][1]?.body)).revision).toBe(6);
-  });
-
-  it("recovers from an expired import token without applying the candidate", async () => {
-    environment.state.expireImportApply = true;
-    const { container, dialog } = await startImport("expired.xlsx");
-    await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(1));
-    fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
-
-    expect(await screen.findByText("请重新上传表格预览")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
-
-    uploadImport(container, "retry.xlsx");
-    await waitFor(() => expect(requests("POST", "/import-preview")).toHaveLength(2));
-  });
-
-  it("cancels import without writing and opens only the next file preview", async () => {
-    const { container, dialog } = await startImport("cancelled.xlsx");
-    fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument());
-    await waitFor(() => expect(screen.getByRole("button", { name: "Excel 整表替换" })).toHaveFocus());
-    expect(requests("POST", "/import-apply")).toHaveLength(0);
-    uploadImport(container, "next.xlsx");
-    expect(await screen.findByText("即将用 next.xlsx 的 2 行完整替换当前草稿")).toBeInTheDocument();
-    expect(screen.queryByText(/即将用 cancelled.xlsx/)).not.toBeInTheDocument();
-    expect(screen.getByText("修订号 3")).toBeInTheDocument();
-  });
-
-  it("keeps failed apply local and requires reupload if its token was consumed", async () => {
-    let failed = false;
-    environment.state.importRequestHandler = (stage) => {
-      if (stage === "preview") return jsonResponse(baseImportPreview);
-      if (!failed) {
-        failed = true;
-        return jsonResponse({ detail: "替换暂时失败" }, 500);
-      }
-      return jsonResponse({ detail: "令牌已消费，请重新预览", code: "draft_import_preview_expired" }, 409);
-    };
-    const { dialog } = await startImport();
-    fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
-    expect(await screen.findByText("替换暂时失败")).toBeInTheDocument();
-    expect(screen.getByText("修订号 3")).toBeInTheDocument();
-    expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
-    const retry = within(dialog).getByRole("button", { name: /应用整表替换/ });
-    await waitFor(() => expect(retry).not.toHaveClass("ant-btn-loading"));
-    fireEvent.click(retry);
-    expect(await screen.findByText("令牌已消费，请重新预览")).toBeInTheDocument();
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument());
-    expect(requests("POST", "/import-apply")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
-  });
-
-  it.each(["preview", "apply"] as const)(
-    "locks the workspace for %s revision conflict and refreshes it",
-    async (stage) => {
-      environment.state.importRequestHandler = (currentStage) =>
-        currentStage === stage
-          ? jsonResponse({ detail: "导入修订号冲突", code: "draft_revision_conflict" }, 409)
-          : jsonResponse(baseImportPreview);
-      const { container } = renderMaintenance();
-      await screen.findByText("SKU-A");
-      uploadImport(container);
-      if (stage === "apply") {
-        const dialog = await dialogByTitle("Excel 整表替换预览");
-        fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
-      }
-      expect(await screen.findByText("导入修订号冲突")).toBeInTheDocument();
-      expect(screen.queryByText("Excel 替换未完成")).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeDisabled();
-      expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
-      environment.state.draftResponse = { ...baseDraft, revision: 9 };
-      fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
-      expect(await screen.findByText("修订号 9")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
-    }
-  );
 
   it("blocks publish when validation returns errors", async () => {
     environment.state.validationResponse = {
@@ -669,7 +513,7 @@ describe("PositionMaintenance", () => {
     expect(onPublished.mock.calls[0][0]).toMatchObject({ id: 32, name: "position-20260721", active: true });
     expect(screen.queryByText("MSKU 定位维护")).not.toBeInTheDocument();
     expect(await screen.findAllByText("新库位版本已发布并启用")).toHaveLength(1);
-    const body = JSON.parse(String(requests("POST", "/publish")[0][1]?.body));
+    const body = JSON.parse(String(environment.requests("POST", "/publish")[0][1]?.body));
     expect(body).toEqual({ revision: 3, name: "position-20260721", confirm_warnings: false });
   });
 
@@ -687,7 +531,7 @@ describe("PositionMaintenance", () => {
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "unique-name" } });
     fireEvent.click(within(dialog).getByRole("button", { name: /确认发布/ }));
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
-    expect(requests("POST", "/publish")).toHaveLength(2);
+    expect(environment.requests("POST", "/publish")).toHaveLength(2);
     expect(await screen.findAllByText("新库位版本已发布并启用")).toHaveLength(1);
   });
 
@@ -733,7 +577,7 @@ describe("PositionMaintenance", () => {
     await waitFor(() => expect(within(dialog).getByRole("button", { name: /确认发布$/ })).toBeEnabled());
     fireEvent.click(within(dialog).getByRole("button", { name: /确认发布$/ }));
     await waitFor(() => expect(onPublished).toHaveBeenCalledOnce());
-    expect(requests("POST", "/publish")).toHaveLength(2);
+    expect(environment.requests("POST", "/publish")).toHaveLength(2);
   });
 
   it("clears warning confirmation on cancellation and restores the publish button focus", async () => {
@@ -746,7 +590,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "我已检查并确认发布这些警告" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "继续修改草稿" }));
     await waitFor(() => expect(trigger).toHaveFocus());
-    expect(requests("POST", "/publish")).toHaveLength(0);
+    expect(environment.requests("POST", "/publish")).toHaveLength(0);
     fireEvent.click(trigger);
     const reopened = await dialogByTitle("发布新的MSKU定位版本");
     expect(within(reopened).getByRole("checkbox", { name: "我已检查并确认发布这些警告" })).not.toBeChecked();
@@ -766,7 +610,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "放弃草稿" }));
     expect(await screen.findByText("确定放弃整个服务器草稿？")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认放弃" }));
-    await waitFor(() => expect(requests("POST", "/discard")).toHaveLength(1));
+    await waitFor(() => expect(environment.requests("POST", "/discard")).toHaveLength(1));
     expect(screen.getByRole("button", { name: /取\s*消/ })).toBeDisabled();
     fireEvent.mouseDown(document.body);
     fireEvent.click(document.body);
@@ -787,7 +631,7 @@ describe("PositionMaintenance", () => {
     async (status) => {
       environment.state.rowWriteRequest = deferred<Response>();
       await startRowSave();
-      await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+      await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
       environment.state.rowWriteRequest.resolve(jsonResponse({ detail: "演示记录保存失败，请重试" }, status));
       expect(await screen.findByText("演示记录保存失败，请重试")).toBeInTheDocument();
       expect(screen.getByLabelText("店铺-站点")).toHaveValue("SEEKWAY:UK");
@@ -798,7 +642,7 @@ describe("PositionMaintenance", () => {
       await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toBeEnabled());
       fireEvent.click(screen.getByRole("button", { name: /保存到草稿$/ }));
       expect(await screen.findByText("修订号 4")).toBeInTheDocument();
-      const writes = requests("POST", "/api/input-drafts/7/rows");
+      const writes = environment.requests("POST", "/api/input-drafts/7/rows");
       expect(writes).toHaveLength(2);
       expect(writes.map(([, init]) => JSON.parse(String(init?.body)).revision)).toEqual([3, 3]);
       expect(screen.queryByRole("dialog", { name: "新增库位记录" })).not.toBeInTheDocument();
@@ -837,7 +681,7 @@ describe("PositionMaintenance", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存到草稿" }));
 
     try {
-      await waitFor(() => expect(requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
+      await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
       expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
       expect(within(drawer).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
       expect(within(drawer).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
@@ -853,28 +697,6 @@ describe("PositionMaintenance", () => {
     expect(await screen.findAllByText("记录已保存")).toHaveLength(1);
   });
 
-  it("cannot leave or cancel the import dialog while apply is pending", async () => {
-    environment.state.importApplyRequest = deferred<Response>();
-    const { dialog } = await startImport();
-    fireEvent.click(within(dialog).getByRole("button", { name: "应用整表替换" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: /应用整表替换/ }));
-    await waitFor(() => expect(requests("POST", "/import-apply")).toHaveLength(1));
-
-    try {
-      expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
-      expect(within(dialog).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
-      expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "放弃草稿" })).toBeDisabled();
-      fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
-      expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
-      expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();
-    } finally {
-      environment.state.importApplyRequest.resolve(jsonResponse({ diff: baseImportPreview.diff, revision: 6 }));
-    }
-    expect(await screen.findByText("修订号 6")).toBeInTheDocument();
-    expect(await screen.findAllByText("Excel 已完整替换服务器草稿")).toHaveLength(1);
-  });
-
   it("cannot leave or cancel the publish dialog while publish is pending", async () => {
     environment.state.publishRequest = deferred<Response>();
     const onBack = vi.fn();
@@ -885,7 +707,7 @@ describe("PositionMaintenance", () => {
     fireEvent.change(within(dialog).getByLabelText("新版本名称"), { target: { value: "position-busy" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "确认发布" }));
     fireEvent.click(within(dialog).getByRole("button", { name: /确认发布/ }));
-    await waitFor(() => expect(requests("POST", "/publish")).toHaveLength(1));
+    await waitFor(() => expect(environment.requests("POST", "/publish")).toHaveLength(1));
 
     try {
       expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
@@ -958,7 +780,7 @@ describe("PositionMaintenance", () => {
     environment.state.failEntry = false;
     fireEvent.click(screen.getByRole("button", { name: /重新尝试/ }));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
-    expect(requests("POST", "/api/input-drafts/position")).toHaveLength(3);
+    expect(environment.requests("POST", "/api/input-drafts/position")).toHaveLength(3);
     failed.unmount();
 
     environment.state.entryRequest = null;

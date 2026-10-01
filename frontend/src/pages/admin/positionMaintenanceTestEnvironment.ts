@@ -148,6 +148,10 @@ export function createPositionMaintenanceTestEnvironment() {
   return {
     state,
     fetch: fetchMock,
+    requests: (method: string, suffix: string) =>
+      fetchMock.mock.calls.filter(
+        ([input, init]) => String(input).includes(suffix) && (init?.method ?? "GET") === method
+      ),
     install: () => vi.stubGlobal("fetch", fetchMock),
     dispose: () => {
       vi.restoreAllMocks();
