@@ -1,7 +1,8 @@
 """库位草稿的只读分析、问题映射和响应字段。"""
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.orm import Session
 
 from ..input_inspection import (
@@ -14,6 +15,7 @@ from .caches import DraftAnalysisCache
 from .models import InputDraft, InputVersion, PositionDraftRow
 from .position_drafts import FIELD_TO_COLUMN, ROW_FIELDS, load_base_frame
 from .serializers import utc_isoformat
+from .schemas import PositionRowFilters
 
 
 def position_row_json(
@@ -167,4 +169,63 @@ def draft_json(
         "modified_count": analysis["modified_count"],
         "diff": analysis["diff"],
         **issue_summary,
+    }
+
+
+def draft_rows_page(
+    session: Session,
+    draft: InputDraft,
+    cache: DraftAnalysisCache,
+    filters: PositionRowFilters,
+) -> dict:
+    analysis = draft_analysis(session, draft, cache)
+    issues_by_row = analysis["issues_by_row"]
+    search_value = filters.search.strip().casefold()
+    site_value = filters.site.strip().casefold()
+    scale_value = filters.scale_position.strip().casefold()
+    conditions: list[ColumnElement[bool]] = [
+        PositionDraftRow.draft_id == draft.id,
+        PositionDraftRow.deleted.is_(False),
+    ]
+    if search_value:
+        conditions.append(
+            or_(
+                *(
+                    func.lower(
+                        func.coalesce(getattr(PositionDraftRow, field), "")
+                    ).contains(search_value, autoescape=True)
+                    for field in ROW_FIELDS
+                )
+            )
+        )
+    if site_value:
+        conditions.append(
+            func.lower(func.trim(PositionDraftRow.store_site)) == site_value
+        )
+    if scale_value:
+        conditions.append(
+            func.lower(func.trim(PositionDraftRow.scale_position)) == scale_value
+        )
+    if filters.only_modified:
+        conditions.append(PositionDraftRow.change_type != "unchanged")
+    if filters.only_errors:
+        conditions.append(PositionDraftRow.id.in_(analysis["error_row_ids"]))
+
+    total = session.scalar(
+        select(func.count()).select_from(PositionDraftRow).where(*conditions)
+    )
+    page = list(
+        session.scalars(
+            select(PositionDraftRow)
+            .where(*conditions)
+            .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
+            .offset(filters.offset)
+            .limit(filters.limit)
+        )
+    )
+    return {
+        "rows": [position_row_json(row, issues_by_row.get(row.id)) for row in page],
+        "total": total or 0,
+        "offset": filters.offset,
+        "limit": filters.limit,
     }

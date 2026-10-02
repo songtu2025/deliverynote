@@ -1,5 +1,9 @@
 """Web 请求参数及字段校验。"""
 
+from dataclasses import dataclass
+from typing import Annotated
+
+from fastapi import Query
 from pydantic import BaseModel, Field
 
 
@@ -80,3 +84,16 @@ class GerpgoConfigPayload(BaseModel):
     base_url: str = Field(min_length=1, max_length=500)
     app_id: str = Field(default="", max_length=200)
     app_key: str = Field(default="", max_length=500)
+
+
+@dataclass
+class PositionRowFilters:
+    """库位草稿行的分页与筛选条件。"""
+
+    offset: Annotated[int, Query(ge=0)] = 0
+    limit: Annotated[int, Query(ge=1, le=200)] = 50
+    search: str = ""
+    site: str = ""
+    scale_position: str = ""
+    only_errors: bool = False
+    only_modified: bool = False
