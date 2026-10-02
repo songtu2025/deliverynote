@@ -4,10 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchDetail from "./BatchDetail";
 
-const jsonResponse = (payload: unknown) => new Response(JSON.stringify(payload), {
-  status: 200,
-  headers: { "Content-Type": "application/json" }
-});
+const jsonResponse = (payload: unknown) =>
+  new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
 
 describe("BatchDetail", () => {
   let batchPayload: Record<string, any>;
@@ -16,15 +17,16 @@ describe("BatchDetail", () => {
   const exceptionPage = (url: string) => {
     const params = new URL(url, "http://localhost").searchParams;
     const scope = params.get("review_scope");
-    const rows = exceptionPayload.filter((item) => (
-      (scope !== "resolved" || item.status === "resolved")
-      && (scope !== "unfinished" || item.status !== "resolved")
-      && (!params.get("reason") || item.reason === params.get("reason"))
-      && (!params.get("site") || item.full_site === params.get("site"))
-      && (!params.get("scale_position") || item.scale_position === params.get("scale_position"))
-      && (!params.get("stocking_position") || item.stocking_position === params.get("stocking_position"))
-      && String(item.sku).includes(params.get("search") ?? "")
-    ));
+    const rows = exceptionPayload.filter(
+      (item) =>
+        (scope !== "resolved" || item.status === "resolved") &&
+        (scope !== "unfinished" || item.status !== "resolved") &&
+        (!params.get("reason") || item.reason === params.get("reason")) &&
+        (!params.get("site") || item.full_site === params.get("site")) &&
+        (!params.get("scale_position") || item.scale_position === params.get("scale_position")) &&
+        (!params.get("stocking_position") || item.stocking_position === params.get("stocking_position")) &&
+        String(item.sku).includes(params.get("search") ?? "")
+    );
     const offset = Number(params.get("offset") ?? 0);
     const limit = Number(params.get("limit") ?? 10);
     const unfinished = exceptionPayload.filter((item) => item.status !== "resolved");
@@ -33,12 +35,16 @@ describe("BatchDetail", () => {
       total: rows.length,
       stats: {
         unfinished_count: unfinished.length,
-        unfinished_quantity: unfinished.reduce((sum, item) => sum + (
-          item.parts.length
-            ? item.parts.filter((part: { resolved: boolean }) => !part.resolved)
-              .reduce((partSum: number, part: { quantity: number }) => partSum + part.quantity, 0)
-            : item.manual_quantity
-        ), 0),
+        unfinished_quantity: unfinished.reduce(
+          (sum, item) =>
+            sum +
+            (item.parts.length
+              ? item.parts
+                  .filter((part: { resolved: boolean }) => !part.resolved)
+                  .reduce((partSum: number, part: { quantity: number }) => partSum + part.quantity, 0)
+              : item.manual_quantity),
+          0
+        ),
         resolved_count: exceptionPayload.length - unfinished.length,
         total_count: exceptionPayload.length
       }
@@ -52,12 +58,13 @@ describe("BatchDetail", () => {
     stocking: [...new Set(exceptionPayload.map((item) => item.stocking_position).filter(Boolean))]
   });
 
-  const pagedExceptions = () => Array.from({ length: 12 }, (_, index) => ({
-    ...exceptionPayload[0],
-    id: 100 + index,
-    sku: `SKU-${index + 1}`,
-    manual_quantity: 1
-  }));
+  const pagedExceptions = () =>
+    Array.from({ length: 12 }, (_, index) => ({
+      ...exceptionPayload[0],
+      id: 100 + index,
+      sku: `SKU-${index + 1}`,
+      manual_quantity: 1
+    }));
 
   beforeEach(() => {
     const version = (id: number, kind: string) => ({
@@ -216,62 +223,56 @@ describe("BatchDetail", () => {
         parts: []
       }
     ];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith("/api/batches/7/exceptions/filters")) return jsonResponse(exceptionFilters());
-      if (url.includes("/api/batches/7/exceptions?")) return jsonResponse(exceptionPage(url));
-      if (url.endsWith("/api/input-versions")) {
-        return jsonResponse([{ ...version(9, "supplier"), name: "supplier-v2" }]);
-      }
-      if (
-        url.endsWith("/api/batches/7/refresh-supplier-version")
-        && init?.method === "POST"
-      ) {
-        batchPayload = {
-          ...batchPayload,
-          version_ids: { ...batchPayload.version_ids, supplier: 9 },
-          versions: {
-            ...batchPayload.versions,
-            supplier: { ...version(9, "supplier"), name: "supplier-v2" }
-          }
-        };
-        return jsonResponse(batchPayload);
-      }
-      if (url.endsWith("/api/batches/7")) return jsonResponse(batchPayload);
-      const splitMatch = url.match(/\/api\/exceptions\/(\d+)\/split$/);
-      if (splitMatch && init?.method === "PUT") {
-        const exceptionId = Number(splitMatch[1]);
-        const parts = JSON.parse(String(init.body)).parts as Array<{ resolved: boolean }>;
-        const resolvedCount = parts.filter((part) => part.resolved).length;
-        const updated = {
-          ...exceptionPayload.find((item) => item.id === exceptionId)!,
-          parts,
-          status: resolvedCount === parts.length
-            ? "resolved"
-            : resolvedCount
-              ? "partial"
-              : "pending"
-        };
-        exceptionPayload = exceptionPayload.map((item) => item.id === exceptionId ? updated : item);
-        return jsonResponse(updated);
-      }
-      const selfOperatedSiteMatch = url.match(
-        /\/api\/exceptions\/(\d+)\/self-operated-site$/
-      );
-      if (selfOperatedSiteMatch && init?.method === "PUT") {
-        return jsonResponse({ id: 99, kind: "compute", status: "queued" });
-      }
-      if (url.endsWith("/api/batches/7/download-merged")) {
-        return new Response("merged", { status: 200 });
-      }
-      if (url.endsWith("/api/batches/7/download")) {
-        return new Response("zip", { status: 200 });
-      }
-      if (url.endsWith("/api/batches/7/files/order") && init?.method === "PUT") {
-        return jsonResponse(batchPayload);
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/batches/7/exceptions/filters")) return jsonResponse(exceptionFilters());
+        if (url.includes("/api/batches/7/exceptions?")) return jsonResponse(exceptionPage(url));
+        if (url.endsWith("/api/input-versions")) {
+          return jsonResponse([{ ...version(9, "supplier"), name: "supplier-v2" }]);
+        }
+        if (url.endsWith("/api/batches/7/refresh-supplier-version") && init?.method === "POST") {
+          batchPayload = {
+            ...batchPayload,
+            version_ids: { ...batchPayload.version_ids, supplier: 9 },
+            versions: {
+              ...batchPayload.versions,
+              supplier: { ...version(9, "supplier"), name: "supplier-v2" }
+            }
+          };
+          return jsonResponse(batchPayload);
+        }
+        if (url.endsWith("/api/batches/7")) return jsonResponse(batchPayload);
+        const splitMatch = url.match(/\/api\/exceptions\/(\d+)\/split$/);
+        if (splitMatch && init?.method === "PUT") {
+          const exceptionId = Number(splitMatch[1]);
+          const parts = JSON.parse(String(init.body)).parts as Array<{ resolved: boolean }>;
+          const resolvedCount = parts.filter((part) => part.resolved).length;
+          const updated = {
+            ...exceptionPayload.find((item) => item.id === exceptionId)!,
+            parts,
+            status: resolvedCount === parts.length ? "resolved" : resolvedCount ? "partial" : "pending"
+          };
+          exceptionPayload = exceptionPayload.map((item) => (item.id === exceptionId ? updated : item));
+          return jsonResponse(updated);
+        }
+        const selfOperatedSiteMatch = url.match(/\/api\/exceptions\/(\d+)\/self-operated-site$/);
+        if (selfOperatedSiteMatch && init?.method === "PUT") {
+          return jsonResponse({ id: 99, kind: "compute", status: "queued" });
+        }
+        if (url.endsWith("/api/batches/7/download-merged")) {
+          return new Response("merged", { status: 200 });
+        }
+        if (url.endsWith("/api/batches/7/download")) {
+          return new Response("zip", { status: 200 });
+        }
+        if (url.endsWith("/api/batches/7/files/order") && init?.method === "PUT") {
+          return jsonResponse(batchPayload);
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      })
+    );
   });
 
   afterEach(() => {
@@ -292,8 +293,7 @@ describe("BatchDetail", () => {
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
-    expect(container.querySelector(".exception-review-card .ant-table-content"))
-      .toHaveStyle({ overflowX: "auto" });
+    expect(container.querySelector(".exception-review-card .ant-table-content")).toHaveStyle({ overflowX: "auto" });
     fireEvent.click(screen.getByRole("button", { name: "收起锁定版本" }));
     expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
@@ -321,47 +321,51 @@ describe("BatchDetail", () => {
     const delayedExceptions = new Promise<Response>((resolve) => {
       finishExceptions = resolve;
     });
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/api/batches/7/exceptions?")) return delayedExceptions;
-      if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
-      if (url.endsWith("/api/batches/7")) {
-        return Promise.resolve(jsonResponse(batchPayload));
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/batches/7/exceptions?")) return delayedExceptions;
+        if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
+        if (url.endsWith("/api/batches/7")) {
+          return Promise.resolve(jsonResponse(batchPayload));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      })
+    );
 
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
     expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
 
-    finishExceptions(jsonResponse(exceptionPage("/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished")));
+    finishExceptions(
+      jsonResponse(exceptionPage("/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished"))
+    );
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
   });
 
   it("lets an admin draft adopt the current supplier version", async () => {
     batchPayload.status = "draft";
-    render(
-      <BatchDetail
-        batchId={7}
-        canRefreshSupplierVersion
-        onBack={vi.fn()}
-      />
-    );
+    render(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
 
     const refreshButton = await screen.findByRole("button", {
       name: "采用当前供应商资料"
     });
     fireEvent.click(refreshButton);
 
-    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input, init]) =>
-      String(input).endsWith("/api/batches/7/refresh-supplier-version")
-      && init?.method === "POST"
-    )).toBe(true));
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.some(
+            ([input, init]) =>
+              String(input).endsWith("/api/batches/7/refresh-supplier-version") && init?.method === "POST"
+          )
+      ).toBe(true)
+    );
     await screen.findByText("supplier-v2");
-    expect(screen.queryByRole("button", { name: "采用当前供应商资料" }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
   });
 
   it("does not show supplier refresh outside an admin draft", async () => {
@@ -369,20 +373,17 @@ describe("BatchDetail", () => {
     const { rerender } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     await screen.findByText("批次锁定版本");
-    expect(screen.queryByRole("button", { name: "采用当前供应商资料" }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
 
     batchPayload.status = "failed";
-    rerender(
-      <BatchDetail
-        batchId={7}
-        canRefreshSupplierVersion
-        onBack={vi.fn()}
-      />
+    rerender(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", {
+          name: "采用当前供应商资料"
+        })
+      ).not.toBeInTheDocument()
     );
-    await waitFor(() => expect(screen.queryByRole("button", {
-      name: "采用当前供应商资料"
-    })).not.toBeInTheDocument());
   });
 
   it("shows exception loading during a silent job refresh", async () => {
@@ -398,43 +399,42 @@ describe("BatchDetail", () => {
         status: "running"
       }
     };
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith("/api/jobs/88")) {
-        return Promise.resolve(jsonResponse({
-          id: 88,
-          kind: "compute",
-          status: "succeeded"
-        }));
-      }
-      if (url.includes("/api/batches/7/exceptions?")) {
-        exceptionRequests += 1;
-        return exceptionRequests === 1
-          ? Promise.resolve(jsonResponse(exceptionPage(url)))
-          : delayedRefresh;
-      }
-      if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
-      if (url.endsWith("/api/batches/7")) {
-        return Promise.resolve(jsonResponse(batchPayload));
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/jobs/88")) {
+          return Promise.resolve(
+            jsonResponse({
+              id: 88,
+              kind: "compute",
+              status: "succeeded"
+            })
+          );
+        }
+        if (url.includes("/api/batches/7/exceptions?")) {
+          exceptionRequests += 1;
+          return exceptionRequests === 1 ? Promise.resolve(jsonResponse(exceptionPage(url))) : delayedRefresh;
+        }
+        if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
+        if (url.endsWith("/api/batches/7")) {
+          return Promise.resolve(jsonResponse(batchPayload));
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      })
+    );
 
     const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
     await waitFor(() => expect(exceptionRequests).toBe(2));
     await waitFor(() => {
-      expect(
-        container.querySelector(".exception-review-card.ant-card-loading")
-      ).toBeInTheDocument();
+      expect(container.querySelector(".exception-review-card.ant-card-loading")).toBeInTheDocument();
     });
 
     finishRefresh(jsonResponse(exceptionPage("/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished")));
     await waitFor(() => {
-      expect(
-        container.querySelector(".exception-review-card.ant-card-loading")
-      ).not.toBeInTheDocument();
+      expect(container.querySelector(".exception-review-card.ant-card-loading")).not.toBeInTheDocument();
     });
   });
 
@@ -500,8 +500,9 @@ describe("BatchDetail", () => {
     });
 
     await waitFor(() => {
-      const urls = vi.mocked(fetch).mock.calls
-        .map(([input]) => String(input))
+      const urls = vi
+        .mocked(fetch)
+        .mock.calls.map(([input]) => String(input))
         .filter((url) => url.includes("/exceptions?") && url.includes("search=SKU-1"));
       expect(urls.length).toBeGreaterThan(0);
       expect(new URL(urls.at(-1)!, "http://localhost").searchParams.get("offset")).toBe("0");
@@ -551,10 +552,7 @@ describe("BatchDetail", () => {
     fireEvent.click(saveAndNext);
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/exceptions/30/split",
-        expect.objectContaining({ method: "PUT" })
-      );
+      expect(fetch).toHaveBeenCalledWith("/api/exceptions/30/split", expect.objectContaining({ method: "PUT" }));
     });
     drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByText("审校处理 · SKU-B")).toBeInTheDocument();
@@ -591,14 +589,8 @@ describe("BatchDetail", () => {
     fireEvent.click(zipButton);
 
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/batches/7/download-merged",
-        expect.any(Object)
-      );
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/batches/7/download",
-        expect.any(Object)
-      );
+      expect(fetch).toHaveBeenCalledWith("/api/batches/7/download-merged", expect.any(Object));
+      expect(fetch).toHaveBeenCalledWith("/api/batches/7/download", expect.any(Object));
     });
   }, 30_000);
 
@@ -608,11 +600,14 @@ describe("BatchDetail", () => {
     batchPayload.files = [{ ...batchPayload.files[0], download_ready: true }];
     const error = vi.spyOn(message, "error").mockImplementation(() => ({}) as never);
     const originalFetch = fetch;
-    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => (
-      String(input).endsWith("/api/batch-files/10/download")
-        ? Promise.resolve(new Response("unavailable", { status: 503 }))
-        : originalFetch(input, init)
-    )));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith("/api/batch-files/10/download")
+          ? Promise.resolve(new Response("unavailable", { status: 503 }))
+          : originalFetch(input, init)
+      )
+    );
 
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /下载处理结果/ }));
@@ -785,9 +780,7 @@ describe("BatchDetail", () => {
 
     expect(await screen.findByText("2 份质检单 + 1 份待入库数据")).toBeInTheDocument();
     expect(screen.getByText("序号越小，越先扣减待入库余额和超收额度")).toBeInTheDocument();
-    const uploadInput = container.querySelector<HTMLInputElement>(
-      '.batch-primary-actions input[type="file"]'
-    );
+    const uploadInput = container.querySelector<HTMLInputElement>('.batch-primary-actions input[type="file"]');
     expect(uploadInput).toHaveAttribute("multiple");
     fireEvent.click(screen.getByRole("button", { name: "下移 KuangBiao-A交货单.xlsx" }));
 

@@ -41,14 +41,7 @@ import {
 
 import { api, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
-import type {
-  Batch,
-  BatchFile,
-  DeliveryException,
-  InputVersion,
-  Job,
-  SplitPart
-} from "../types";
+import type { Batch, BatchFile, DeliveryException, InputVersion, Job, SplitPart } from "../types";
 import { StatusTag } from "./BatchesPage";
 import { useExceptionReview } from "./useExceptionReview";
 
@@ -91,12 +84,14 @@ function ExceptionReason({ reason }: { reason: string }) {
 }
 
 function candidateSites(fullSite: string): string[] {
-  return Array.from(new Set(
-    fullSite
-      .split("、")
-      .map((site) => site.trim())
-      .filter(Boolean)
-  ));
+  return Array.from(
+    new Set(
+      fullSite
+        .split("、")
+        .map((site) => site.trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function EvidenceMetric({ label, value }: { label: string; value: number }) {
@@ -142,7 +137,9 @@ function ExceptionEvidence({
         <strong className="exception-evidence-label">候选站点</strong>
         <div className="exception-evidence-sites">
           {candidateSites(exception.full_site).map((site) => (
-            <span className="exception-evidence-site" key={site}>{site}</span>
+            <span className="exception-evidence-site" key={site}>
+              {site}
+            </span>
           ))}
         </div>
       </div>
@@ -150,11 +147,10 @@ function ExceptionEvidence({
   }
 
   if (exception.reason_code === "overreceipt_limit_exceeded") {
-    const hasExactBreakdown = (
-      exception.purchase_allocated_quantity !== null
-      && exception.overreceipt_allocated_quantity !== null
-      && exception.overreceipt_remaining_quantity !== null
-    );
+    const hasExactBreakdown =
+      exception.purchase_allocated_quantity !== null &&
+      exception.overreceipt_allocated_quantity !== null &&
+      exception.overreceipt_remaining_quantity !== null;
     if (!hasExactBreakdown) {
       return (
         <div className="exception-evidence-cell">
@@ -247,9 +243,11 @@ function ReasonGuidance({
           showIcon
           type={hasOverreceiptRule ? "warning" : "info"}
           title={hasOverreceiptRule ? "未命中本批次超收规则" : "本批次未启用超收规则"}
-          description={hasOverreceiptRule
-            ? "请核对该 SKU 的规模定位、规则额度和允许超收仓库；未命中的数量继续保留为待处理。"
-            : "本批次按正常采购未交量分配，超出部分继续保留为待处理。"}
+          description={
+            hasOverreceiptRule
+              ? "请核对该 SKU 的规模定位、规则额度和允许超收仓库；未命中的数量继续保留为待处理。"
+              : "本批次按正常采购未交量分配，超出部分继续保留为待处理。"
+          }
         />
       </section>
     );
@@ -262,20 +260,21 @@ function ReasonGuidance({
           showIcon
           type="warning"
           title="选择候选站点"
-          description={selfOperated
-            ? "请在下方候选项中选择正确的完整站点。保存后系统会按所选站点重新计算整个批次。"
-            : "请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"}
+          description={
+            selfOperated
+              ? "请在下方候选项中选择正确的完整站点。保存后系统会按所选站点重新计算整个批次。"
+              : "请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
+          }
         />
       </div>
     );
   }
 
   if (exception.reason_code === "overreceipt_limit_exceeded") {
-    const hasExactBreakdown = (
-      exception.purchase_allocated_quantity !== null
-      && exception.overreceipt_allocated_quantity !== null
-      && exception.overreceipt_remaining_quantity !== null
-    );
+    const hasExactBreakdown =
+      exception.purchase_allocated_quantity !== null &&
+      exception.overreceipt_allocated_quantity !== null &&
+      exception.overreceipt_remaining_quantity !== null;
     return (
       <section className="review-guidance" aria-label="原因指导">
         <strong className="review-guidance-title">超收额度使用情况</strong>
@@ -288,9 +287,11 @@ function ReasonGuidance({
           showIcon
           type="warning"
           title={hasExactBreakdown ? "本批次共享超收额度已用尽" : "历史批次暂无额度明细"}
-          description={hasExactBreakdown
-            ? "超收额度按供应商 + SKU + 站点在本批次内共享，前序文件可能已使用部分额度；超过剩余额度的数量继续保留为待处理。"
-            : "该记录生成时尚未保存正常采购与超收额度的分配构成，页面不会用规则上限倒推。"}
+          description={
+            hasExactBreakdown
+              ? "超收额度按供应商 + SKU + 站点在本批次内共享，前序文件可能已使用部分额度；超过剩余额度的数量继续保留为待处理。"
+              : "该记录生成时尚未保存正常采购与超收额度的分配构成，页面不会用规则上限倒推。"
+          }
         />
       </section>
     );
@@ -367,14 +368,10 @@ export default function BatchDetail({
       const versionsRequest = canRefreshSupplierVersion
         ? api<InputVersion[]>("/api/input-versions").then((versions) => {
             if (request !== loadRequestRef.current) return;
-            setActiveSupplierVersion(
-              versions.find((version) => version.kind === "supplier" && version.active) ?? null
-            );
+            setActiveSupplierVersion(versions.find((version) => version.kind === "supplier" && version.active) ?? null);
           })
         : Promise.resolve();
-      const [, loadedPage] = await Promise.all([
-        batchRequest, exceptionsRequest, versionsRequest
-      ]);
+      const [, loadedPage] = await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
       return request === loadRequestRef.current ? loadedPage : null;
     } catch (error) {
       if (request === loadRequestRef.current) {
@@ -391,7 +388,17 @@ export default function BatchDetail({
 
   useEffect(() => {
     void load();
-  }, [batchId, canRefreshSupplierVersion, reviewPage, reviewScope, debouncedQuery, siteFilter, scaleFilter, stockingFilter, reasonFilter]);
+  }, [
+    batchId,
+    canRefreshSupplierVersion,
+    reviewPage,
+    reviewScope,
+    debouncedQuery,
+    siteFilter,
+    scaleFilter,
+    stockingFilter,
+    reasonFilter
+  ]);
 
   const activeJob = useMemo(() => {
     const jobs = batch?.jobs;
@@ -460,18 +467,19 @@ export default function BatchDetail({
     };
   }, [activeJob?.id, activeJob?.status]);
 
-  const totals = useMemo(() => batch?.summary ?? {
-    delivery_total: 0,
-    import_total: 0,
-    manual_total: 0,
-    conserved: true
-  }, [batch]);
+  const totals = useMemo(
+    () =>
+      batch?.summary ?? {
+        delivery_total: 0,
+        import_total: 0,
+        manual_total: 0,
+        conserved: true
+      },
+    [batch]
+  );
 
   const files = batch?.files ?? [];
-  const fileById = useMemo(
-    () => Object.fromEntries(files.map((file) => [file.id, file])),
-    [files]
-  );
+  const fileById = useMemo(() => Object.fromEntries(files.map((file) => [file.id, file])), [files]);
   const reasonOptions = filterOptions(exceptionFilters.reasons);
   const siteOptions = filterOptions(exceptionFilters.sites);
   const scaleOptions = filterOptions(exceptionFilters.scales);
@@ -540,57 +548,48 @@ export default function BatchDetail({
     });
   };
 
-  const preflight = () => runAction("preflight", async () => {
-    await api<Batch>(`/api/batches/${batchId}/preflight`, { method: "POST" });
-    await load(true);
-    message.success("所有基础资料和交货文件均已通过预检");
-  });
+  const preflight = () =>
+    runAction("preflight", async () => {
+      await api<Batch>(`/api/batches/${batchId}/preflight`, { method: "POST" });
+      await load(true);
+      message.success("所有基础资料和交货文件均已通过预检");
+    });
 
-  const refreshSupplierVersion = () => runAction("refresh-supplier-version", async () => {
-    const updated = await api<Batch>(
-      `/api/batches/${batchId}/refresh-supplier-version`,
-      { method: "POST" }
-    );
-    setBatch(updated);
-    await load(true);
-    message.success("批次已采用当前供应商资料");
-  });
+  const refreshSupplierVersion = () =>
+    runAction("refresh-supplier-version", async () => {
+      const updated = await api<Batch>(`/api/batches/${batchId}/refresh-supplier-version`, { method: "POST" });
+      setBatch(updated);
+      await load(true);
+      message.success("批次已采用当前供应商资料");
+    });
 
-  const compute = () => runAction("compute", async () => {
-    await api<Job>(`/api/batches/${batchId}/compute`, { method: "POST" });
-    await load(true);
-    message.info("计算任务已提交，可以离开页面，返回后状态会自动恢复");
-  });
+  const compute = () =>
+    runAction("compute", async () => {
+      await api<Job>(`/api/batches/${batchId}/compute`, { method: "POST" });
+      await load(true);
+      message.info("计算任务已提交，可以离开页面，返回后状态会自动恢复");
+    });
 
-  const startExport = () => runAction("export", async () => {
-    await api<Job>(`/api/batches/${batchId}/export`, { method: "POST" });
-    await load(true);
-    message.info("正在生成导出文件");
-  });
+  const startExport = () =>
+    runAction("export", async () => {
+      await api<Job>(`/api/batches/${batchId}/export`, { method: "POST" });
+      await load(true);
+      message.info("正在生成导出文件");
+    });
 
-  const downloadResult = (path: string, filename: string) => (
-    runAction("download", () => download(path, filename))
-  );
+  const downloadResult = (path: string, filename: string) => runAction("download", () => download(path, filename));
 
   const openSplit = (record: DeliveryException) => {
     setSplitTarget(record);
   };
 
-  const currentReviewIndex = splitTarget
-    ? exceptions.findIndex((item) => item.id === splitTarget.id)
-    : -1;
-  const previousReviewTarget = currentReviewIndex > 0
-    ? exceptions[currentReviewIndex - 1]
-    : undefined;
-  const nextReviewTarget = currentReviewIndex >= 0
-    ? exceptions[currentReviewIndex + 1]
-    : undefined;
+  const currentReviewIndex = splitTarget ? exceptions.findIndex((item) => item.id === splitTarget.id) : -1;
+  const previousReviewTarget = currentReviewIndex > 0 ? exceptions[currentReviewIndex - 1] : undefined;
+  const nextReviewTarget = currentReviewIndex >= 0 ? exceptions[currentReviewIndex + 1] : undefined;
   const canReviewPrevious = Boolean(previousReviewTarget || reviewPage > 1);
   const canReviewNext = Boolean(nextReviewTarget || reviewPage * 10 < exceptionTotal);
   const navigateReview = (direction: "previous" | "next") => {
-    const withinPage = direction === "previous"
-      ? previousReviewTarget
-      : nextReviewTarget;
+    const withinPage = direction === "previous" ? previousReviewTarget : nextReviewTarget;
     if (withinPage) {
       openSplit(withinPage);
       return;
@@ -602,20 +601,17 @@ export default function BatchDetail({
 
   const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
   const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
-  const splitCandidateSites = splitTarget?.reason_code === "ambiguous_product_site"
-    ? candidateSites(splitTarget.full_site)
-    : [];
+  const splitCandidateSites =
+    splitTarget?.reason_code === "ambiguous_product_site" ? candidateSites(splitTarget.full_site) : [];
   const selfOperated = batch?.workflow === "self_operated_inbound";
-  const selfOperatedSiteSelection = Boolean(
-    selfOperated && splitTarget?.allowed_actions.includes("resolve_site")
-  );
+  const selfOperatedSiteSelection = Boolean(selfOperated && splitTarget?.allowed_actions.includes("resolve_site"));
   const selectedSelfOperatedSite = String(splitParts[0]?.site ?? "").trim();
   const selfOperatedSiteValid = splitCandidateSites.includes(selectedSelfOperatedSite);
   const splitValid = Boolean(
-    splitTarget
-    && splitParts.length
-    && splitRemaining === 0
-    && splitParts.every((part) => Number(part?.quantity ?? 0) > 0)
+    splitTarget &&
+    splitParts.length &&
+    splitRemaining === 0 &&
+    splitParts.every((part) => Number(part?.quantity ?? 0) > 0)
   );
 
   const saveSplit = async (advance: boolean) => {
@@ -642,9 +638,11 @@ export default function BatchDetail({
         setSplitTarget(null);
         splitForm.resetFields();
       }
-      message.success(advance && (next || (refreshed && reviewPage * 10 < refreshed.total))
-        ? "当前记录已保存，已打开下一条未完成记录"
-        : "处理结果已保存，批次数量保持守恒");
+      message.success(
+        advance && (next || (refreshed && reviewPage * 10 < refreshed.total))
+          ? "当前记录已保存，已打开下一条未完成记录"
+          : "处理结果已保存，批次数量保持守恒"
+      );
     });
   };
 
@@ -669,10 +667,10 @@ export default function BatchDetail({
 
   const canEditFiles = ["draft", "preflight_ready", "failed"].includes(batch.status);
   const canAdoptCurrentSupplier = Boolean(
-    canRefreshSupplierVersion
-    && batch.status === "draft"
-    && activeSupplierVersion
-    && activeSupplierVersion.id !== batch.version_ids.supplier
+    canRefreshSupplierVersion &&
+    batch.status === "draft" &&
+    activeSupplierVersion &&
+    activeSupplierVersion.id !== batch.version_ids.supplier
   );
   const computed = batch.status === "succeeded" || batch.download_ready;
   const exportJob = batch.jobs?.export;
@@ -680,25 +678,25 @@ export default function BatchDetail({
   const needsReview = computed && totals.manual_total > 0;
   const hasMultipleFiles = files.length > 1;
   const mergedDownloadReady = hasMultipleFiles && batch.merged_download_ready;
-  const needsMergedGeneration = (
-    batch.download_ready
-    && hasMultipleFiles
-    && !mergedDownloadReady
-  );
+  const needsMergedGeneration = batch.download_ready && hasMultipleFiles && !mergedDownloadReady;
   const currentStep = computed
-    ? needsReview ? 3 : 4
-      : batch.status === "queued" || batch.status === "running"
-        ? 2
-        : batch.status === "preflight_ready"
-          ? 1
-          : 0;
+    ? needsReview
+      ? 3
+      : 4
+    : batch.status === "queued" || batch.status === "running"
+      ? 2
+      : batch.status === "preflight_ready"
+        ? 1
+        : 0;
 
   const workflowItems = [
     {
       title: "准备文件",
       content: selfOperated
         ? `${files.length} 份质检单 + ${batch.inbound_file?.uploaded ? 1 : 0} 份待入库数据`
-        : files.length ? `${files.length} 个文件` : "等待上传"
+        : files.length
+          ? `${files.length} 个文件`
+          : "等待上传"
     },
     { title: "预检", content: currentStep > 1 || batch.status === "preflight_ready" ? "检查通过" : "检查格式与供应商" },
     { title: "计算结果", content: computed ? "计算完成" : activeJob?.kind === "compute" ? "后台处理中" : "等待计算" },
@@ -722,7 +720,9 @@ export default function BatchDetail({
             <Typography.Title level={2}>{batch.name}</Typography.Title>
             <StatusTag status={batch.status} />
           </div>
-          <Typography.Text type="secondary">批次 #{batch.id} · 更新于 {formatBeijingDateTime(batch.updated_at)}</Typography.Text>
+          <Typography.Text type="secondary">
+            批次 #{batch.id} · 更新于 {formatBeijingDateTime(batch.updated_at)}
+          </Typography.Text>
         </div>
         <Space wrap className="batch-primary-actions">
           {canEditFiles && (
@@ -759,19 +759,25 @@ export default function BatchDetail({
               {batch.status === "failed" ? "重新计算" : "启动计算"}
             </Button>
           )}
-          {activeJob && <span className="job-indicator"><Spin size="small" /> {activeJob.kind === "compute" ? "正在计算" : "正在导出"}</span>}
+          {activeJob && (
+            <span className="job-indicator">
+              <Spin size="small" /> {activeJob.kind === "compute" ? "正在计算" : "正在导出"}
+            </span>
+          )}
         </Space>
       </div>
 
       <div className="workflow-surface">
-        <Steps current={currentStep} status={batch.status === "failed" ? "error" : "process"} responsive={false} items={workflowItems} />
+        <Steps
+          current={currentStep}
+          status={batch.status === "failed" ? "error" : "process"}
+          responsive={false}
+          items={workflowItems}
+        />
       </div>
 
       {computed && (
-        <section
-          className="stage-actions"
-          aria-labelledby="current-stage-title"
-        >
+        <section className="stage-actions" aria-labelledby="current-stage-title">
           <div className="stage-actions-copy">
             <strong id="current-stage-title">{needsReview ? `待处理 ${totals.manual_total} 件` : "结果可下载"}</strong>
             <span>{needsReview ? "处理完成后生成最终结果。" : "可生成或下载结果文件。"}</span>
@@ -789,19 +795,20 @@ export default function BatchDetail({
                     <Button
                       type={needsReview ? "default" : "primary"}
                       icon={<DownloadOutlined />}
-                      onClick={() => void downloadResult(
-                        `/api/batches/${batch.id}/download-merged`,
-                        `${batch.name}_${selfOperated ? "合并积加入库" : "合并处理"}.xlsx`
-                      )}
+                      onClick={() =>
+                        void downloadResult(
+                          `/api/batches/${batch.id}/download-merged`,
+                          `${batch.name}_${selfOperated ? "合并积加入库" : "合并处理"}.xlsx`
+                        )
+                      }
                     >
                       下载合并结果
                     </Button>
                     <Button
                       icon={<DownloadOutlined />}
-                      onClick={() => void downloadResult(
-                        `/api/batches/${batch.id}/download`,
-                        `${batch.name}_分文件.zip`
-                      )}
+                      onClick={() =>
+                        void downloadResult(`/api/batches/${batch.id}/download`, `${batch.name}_分文件.zip`)
+                      }
                     >
                       下载分文件 ZIP
                     </Button>
@@ -811,10 +818,12 @@ export default function BatchDetail({
                     <Button
                       type={needsReview ? "default" : "primary"}
                       icon={<DownloadOutlined />}
-                      onClick={() => void downloadResult(
-                        `/api/batch-files/${files[0].id}/download`,
-                        `${files[0].original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
-                      )}
+                      onClick={() =>
+                        void downloadResult(
+                          `/api/batch-files/${files[0].id}/download`,
+                          `${files[0].original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
+                        )
+                      }
                     >
                       下载处理结果
                     </Button>
@@ -827,11 +836,7 @@ export default function BatchDetail({
                   loading={action === "export" || activeJob?.kind === "export"}
                   onClick={() => void startExport()}
                 >
-                  {exportJob?.status === "stale"
-                    ? "重新生成导出"
-                    : needsMergedGeneration
-                      ? "生成合并结果"
-                      : "生成导出"}
+                  {exportJob?.status === "stale" ? "重新生成导出" : needsMergedGeneration ? "生成合并结果" : "生成导出"}
                 </Button>
               )}
             </div>
@@ -840,44 +845,53 @@ export default function BatchDetail({
       )}
 
       {batch.error_message && (
-        <Alert
-          type="error"
-          showIcon
-          title="任务执行失败"
-          description={batch.error_message}
-          className="section-card"
-        />
+        <Alert type="error" showIcon title="任务执行失败" description={batch.error_message} className="section-card" />
       )}
 
       <div className={`summary-strip ${computed ? "" : "summary-pending"}`}>
-        <div className="summary-metric"><span>{selfOperated ? "质检合格总量" : "交货总量"}</span><strong>{computed ? totals.delivery_total : "—"}</strong></div>
-        <div className="summary-metric import"><span>{selfOperated ? "可入库" : "可导入"}</span><strong>{computed ? totals.import_total : "—"}</strong></div>
-        <div className="summary-metric pending"><span>待处理</span><strong>{computed ? totals.manual_total : "—"}</strong></div>
+        <div className="summary-metric">
+          <span>{selfOperated ? "质检合格总量" : "交货总量"}</span>
+          <strong>{computed ? totals.delivery_total : "—"}</strong>
+        </div>
+        <div className="summary-metric import">
+          <span>{selfOperated ? "可入库" : "可导入"}</span>
+          <strong>{computed ? totals.import_total : "—"}</strong>
+        </div>
+        <div className="summary-metric pending">
+          <span>待处理</span>
+          <strong>{computed ? totals.manual_total : "—"}</strong>
+        </div>
         <div className="summary-equation">
           <span>数量守恒</span>
           {computed ? (
             <strong className={totals.conserved ? "conservation-ok" : "conservation-bad"}>
               {totals.delivery_total} = {totals.import_total} + {totals.manual_total}
             </strong>
-          ) : <strong>尚未计算</strong>}
+          ) : (
+            <strong>尚未计算</strong>
+          )}
         </div>
       </div>
 
       <Card
         title={selfOperated ? "本批次业务文件" : "来源文件与处理顺序"}
         className="section-card file-order-card"
-        extra={<span className="order-hint">{selfOperated
-          ? "序号越小，越先扣减待入库余额和超收额度"
-          : "序号越小，越先扣减采购余额"}</span>}
+        extra={
+          <span className="order-hint">
+            {selfOperated ? "序号越小，越先扣减待入库余额和超收额度" : "序号越小，越先扣减采购余额"}
+          </span>
+        }
       >
         {selfOperated && (
           <Alert
             className="inline-alert"
             type={batch.inbound_file?.uploaded ? "success" : "warning"}
             showIcon
-            title={batch.inbound_file?.uploaded
-              ? `自营仓入库单：${batch.inbound_file.original_name}`
-              : "尚未上传自营仓入库单"}
+            title={
+              batch.inbound_file?.uploaded
+                ? `自营仓入库单：${batch.inbound_file.original_name}`
+                : "尚未上传自营仓入库单"
+            }
             description="提供交货单、PO、SKU、站点和应收货数据；每个批次一份。"
           />
         )}
@@ -886,9 +900,11 @@ export default function BatchDetail({
             className="inline-alert"
             type="info"
             showIcon
-            title={selfOperated
-              ? "调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
-              : "调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"}
+            title={
+              selfOperated
+                ? "调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
+                : "调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
+            }
           />
         )}
         <Table<BatchFile>
@@ -897,7 +913,11 @@ export default function BatchDetail({
           dataSource={files}
           pagination={false}
           scroll={{ x: 900 }}
-          locale={{ emptyText: <Empty description={selfOperated ? "请先上传一份或多份质检交货单" : "请先上传一个或多个交货 Excel"} /> }}
+          locale={{
+            emptyText: (
+              <Empty description={selfOperated ? "请先上传一份或多份质检交货单" : "请先上传一个或多个交货 Excel"} />
+            )
+          }}
           columns={[
             {
               title: "顺序",
@@ -916,62 +936,97 @@ export default function BatchDetail({
               title: "交货",
               dataIndex: "delivery_total",
               width: 90,
-              render: (value: number) => computed ? value : "—"
+              render: (value: number) => (computed ? value : "—")
             },
             {
               title: "可导入",
               dataIndex: "import_total",
               width: 90,
-              render: (value: number) => computed ? <span className="import-value">{value}</span> : "—"
+              render: (value: number) => (computed ? <span className="import-value">{value}</span> : "—")
             },
             {
               title: "待处理",
               dataIndex: "manual_total",
               width: 100,
-              render: (value: number) => computed ? <span className={value ? "pending-value" : ""}>{value}</span> : "—"
+              render: (value: number) =>
+                computed ? <span className={value ? "pending-value" : ""}>{value}</span> : "—"
             },
-            ...(showFileActions ? [{
-              title: "操作",
-              width: canEditFiles ? 250 : 170,
-              fixed: "right" as const,
-              render: (_: unknown, file: BatchFile, index: number) => (
-                <Space>
-                  {canEditFiles && (
-                    <>
-                      <Tooltip title={selfOperated ? "上移，提前扣减待入库余额" : "上移，提前扣减采购余额"}>
-                        <Button aria-label={`上移 ${file.original_name}`} size="small" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => void move(file.id, -1)} />
-                      </Tooltip>
-                      <Tooltip title={selfOperated ? "下移，延后扣减待入库余额" : "下移，延后扣减采购余额"}>
-                        <Button aria-label={`下移 ${file.original_name}`} size="small" icon={<ArrowDownOutlined />} disabled={index === files.length - 1} onClick={() => void move(file.id, 1)} />
-                      </Tooltip>
-                      <Popconfirm title="删除此交货文件？" description="其余文件会自动重新编号。" onConfirm={() => void removeFile(file)}>
-                        <Tooltip title="删除错传文件">
-                          <Button aria-label={`删除 ${file.original_name}`} danger size="small" icon={<DeleteOutlined />} />
-                        </Tooltip>
-                      </Popconfirm>
-                    </>
-                  )}
-                  {file.download_ready && (
-                    <Button
-                      aria-label="下载单文件结果"
-                      size="small"
-                      icon={<DownloadOutlined />}
-                      onClick={() => void downloadResult(`/api/batch-files/${file.id}/download`, `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`)}
-                    >
-                      下载单文件结果
-                    </Button>
-                  )}
-                </Space>
-              )
-            }] : [])
+            ...(showFileActions
+              ? [
+                  {
+                    title: "操作",
+                    width: canEditFiles ? 250 : 170,
+                    fixed: "right" as const,
+                    render: (_: unknown, file: BatchFile, index: number) => (
+                      <Space>
+                        {canEditFiles && (
+                          <>
+                            <Tooltip title={selfOperated ? "上移，提前扣减待入库余额" : "上移，提前扣减采购余额"}>
+                              <Button
+                                aria-label={`上移 ${file.original_name}`}
+                                size="small"
+                                icon={<ArrowUpOutlined />}
+                                disabled={index === 0}
+                                onClick={() => void move(file.id, -1)}
+                              />
+                            </Tooltip>
+                            <Tooltip title={selfOperated ? "下移，延后扣减待入库余额" : "下移，延后扣减采购余额"}>
+                              <Button
+                                aria-label={`下移 ${file.original_name}`}
+                                size="small"
+                                icon={<ArrowDownOutlined />}
+                                disabled={index === files.length - 1}
+                                onClick={() => void move(file.id, 1)}
+                              />
+                            </Tooltip>
+                            <Popconfirm
+                              title="删除此交货文件？"
+                              description="其余文件会自动重新编号。"
+                              onConfirm={() => void removeFile(file)}
+                            >
+                              <Tooltip title="删除错传文件">
+                                <Button
+                                  aria-label={`删除 ${file.original_name}`}
+                                  danger
+                                  size="small"
+                                  icon={<DeleteOutlined />}
+                                />
+                              </Tooltip>
+                            </Popconfirm>
+                          </>
+                        )}
+                        {file.download_ready && (
+                          <Button
+                            aria-label="下载单文件结果"
+                            size="small"
+                            icon={<DownloadOutlined />}
+                            onClick={() =>
+                              void downloadResult(
+                                `/api/batch-files/${file.id}/download`,
+                                `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
+                              )
+                            }
+                          >
+                            下载单文件结果
+                          </Button>
+                        )}
+                      </Space>
+                    )
+                  }
+                ]
+              : [])
           ]}
         />
       </Card>
 
       <Card
-        title={<span className="locked-data-title"><LockOutlined /> 批次锁定版本</span>}
+        title={
+          <span className="locked-data-title">
+            <LockOutlined /> 批次锁定版本
+          </span>
+        }
         className={`section-card compact-card locked-data-card ${lockedDataOpen ? "" : "is-collapsed"}`}
-        extra={(
+        extra={
           <Space size="small">
             {canAdoptCurrentSupplier && (
               <Button
@@ -991,7 +1046,7 @@ export default function BatchDetail({
               {lockedDataOpen ? "收起锁定版本" : "查看锁定版本"}
             </Button>
           </Space>
-        )}
+        }
       >
         {lockedDataOpen && (
           <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 6 }}>
@@ -1007,15 +1062,20 @@ export default function BatchDetail({
                     <strong>{batch.self_operated_overreceipt_rule.name}</strong>
                     <small>每个供应商 + SKU + 站点共享 +{batch.self_operated_overreceipt_rule.allowance}</small>
                   </span>
-                ) : "未启用（不自动超收）"
+                ) : (
+                  "未启用（不自动超收）"
+                )
               ) : batch.overreceipt_rule ? (
                 <span className="locked-overreceipt-rule">
                   <strong>{batch.overreceipt_rule.name}</strong>
                   <small>
-                    短尾 +{batch.overreceipt_rule.short_tail_limit} / 中尾 +{batch.overreceipt_rule.medium_tail_limit} / 长尾 +{batch.overreceipt_rule.long_tail_limit}
+                    短尾 +{batch.overreceipt_rule.short_tail_limit} / 中尾 +{batch.overreceipt_rule.medium_tail_limit} /
+                    长尾 +{batch.overreceipt_rule.long_tail_limit}
                   </small>
                 </span>
-              ) : "未启用（不自动超收）"}
+              ) : (
+                "未启用（不自动超收）"
+              )}
             </Descriptions.Item>
           </Descriptions>
         )}
@@ -1023,242 +1083,283 @@ export default function BatchDetail({
 
       {computed && (
         <div ref={reviewSection} tabIndex={-1} className="review-section-anchor">
-        <Card
-          title={`待处理审校（共 ${reviewStats.totalCount} 条）`}
-          extra={<span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
-          className="section-card exception-review-card"
-          loading={exceptionsLoading}
-        >
-          <section className="review-overview" aria-label="审校概览">
-            <div className="review-overview-copy">
-              <strong>审校进度</strong>
-              <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
+          <Card
+            title={`待处理审校（共 ${reviewStats.totalCount} 条）`}
+            extra={<span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
+            className="section-card exception-review-card"
+            loading={exceptionsLoading}
+          >
+            <section className="review-overview" aria-label="审校概览">
+              <div className="review-overview-copy">
+                <strong>审校进度</strong>
+                <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
+              </div>
+              <div className="review-scope-options">
+                <button
+                  type="button"
+                  className="review-scope-card"
+                  aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
+                  aria-pressed={reviewScope === "unfinished"}
+                  onClick={() => {
+                    changeScope("unfinished");
+                    setSplitTarget(null);
+                  }}
+                >
+                  <span>未完成</span>
+                  <strong>{reviewStats.unfinishedCount} 条</strong>
+                  <small>待处理 {reviewStats.unfinishedQuantity} 件</small>
+                </button>
+                <button
+                  type="button"
+                  className="review-scope-card"
+                  aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
+                  aria-pressed={reviewScope === "resolved"}
+                  onClick={() => {
+                    changeScope("resolved");
+                    setSplitTarget(null);
+                  }}
+                >
+                  <span>已处理</span>
+                  <strong>{reviewStats.resolvedCount} 条</strong>
+                  <small>查看已完成记录</small>
+                </button>
+                <button
+                  type="button"
+                  className="review-scope-card"
+                  aria-label={`全部 ${reviewStats.totalCount} 条`}
+                  aria-pressed={reviewScope === "all"}
+                  onClick={() => {
+                    changeScope("all");
+                    setSplitTarget(null);
+                  }}
+                >
+                  <span>全部</span>
+                  <strong>{reviewStats.totalCount} 条</strong>
+                  <small>查看完整审校队列</small>
+                </button>
+              </div>
+            </section>
+            <div className="table-toolbar exception-toolbar">
+              <div className="exception-filter-field exception-search-field">
+                <label htmlFor="exception-search">搜索</label>
+                <Input
+                  id="exception-search"
+                  aria-label="搜索待处理记录"
+                  allowClear
+                  prefix={<SearchOutlined />}
+                  placeholder="搜索来源、SKU、站点或目的仓"
+                  value={query}
+                  onChange={(event) => {
+                    changeQuery(event.target.value);
+                    setSplitTarget(null);
+                  }}
+                />
+              </div>
+              <div className="exception-filter-field">
+                <label htmlFor="exception-site-filter">站点</label>
+                <Select
+                  id="exception-site-filter"
+                  aria-label="站点筛选"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="全部站点"
+                  options={siteOptions}
+                  value={siteFilter}
+                  onChange={(value) => {
+                    changeFilter("site", value);
+                    setSplitTarget(null);
+                  }}
+                />
+              </div>
+              <div className="exception-filter-field">
+                <label htmlFor="exception-scale-filter">规模定位</label>
+                <Select
+                  id="exception-scale-filter"
+                  aria-label="规模定位筛选"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="全部规模定位"
+                  options={scaleOptions}
+                  value={scaleFilter}
+                  onChange={(value) => {
+                    changeFilter("scale", value);
+                    setSplitTarget(null);
+                  }}
+                />
+              </div>
+              <div className="exception-filter-field">
+                <label htmlFor="exception-stocking-filter">备货定位</label>
+                <Select
+                  id="exception-stocking-filter"
+                  aria-label="备货定位筛选"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="全部备货定位"
+                  options={stockingOptions}
+                  value={stockingFilter}
+                  onChange={(value) => {
+                    changeFilter("stocking", value);
+                    setSplitTarget(null);
+                  }}
+                />
+              </div>
+              <div className="exception-filter-field">
+                <label htmlFor="exception-reason-filter">原因</label>
+                <Select
+                  id="exception-reason-filter"
+                  aria-label="原因筛选"
+                  allowClear
+                  placeholder="全部原因"
+                  options={reasonOptions}
+                  value={reasonFilter}
+                  onChange={(value) => {
+                    changeFilter("reason", value);
+                    setSplitTarget(null);
+                  }}
+                />
+              </div>
             </div>
-            <div className="review-scope-options">
-              <button
-                type="button"
-                className="review-scope-card"
-                aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
-                aria-pressed={reviewScope === "unfinished"}
-                onClick={() => { changeScope("unfinished"); setSplitTarget(null); }}
-              >
-                <span>未完成</span>
-                <strong>{reviewStats.unfinishedCount} 条</strong>
-                <small>待处理 {reviewStats.unfinishedQuantity} 件</small>
-              </button>
-              <button
-                type="button"
-                className="review-scope-card"
-                aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
-                aria-pressed={reviewScope === "resolved"}
-                onClick={() => { changeScope("resolved"); setSplitTarget(null); }}
-              >
-                <span>已处理</span>
-                <strong>{reviewStats.resolvedCount} 条</strong>
-                <small>查看已完成记录</small>
-              </button>
-              <button
-                type="button"
-                className="review-scope-card"
-                aria-label={`全部 ${reviewStats.totalCount} 条`}
-                aria-pressed={reviewScope === "all"}
-                onClick={() => { changeScope("all"); setSplitTarget(null); }}
-              >
-                <span>全部</span>
-                <strong>{reviewStats.totalCount} 条</strong>
-                <small>查看完整审校队列</small>
-              </button>
-            </div>
-          </section>
-          <div className="table-toolbar exception-toolbar">
-            <div className="exception-filter-field exception-search-field">
-              <label htmlFor="exception-search">搜索</label>
-              <Input
-                id="exception-search"
-                aria-label="搜索待处理记录"
-                allowClear
-                prefix={<SearchOutlined />}
-                placeholder="搜索来源、SKU、站点或目的仓"
-                value={query}
-                onChange={(event) => { changeQuery(event.target.value); setSplitTarget(null); }}
-              />
-            </div>
-            <div className="exception-filter-field">
-              <label htmlFor="exception-site-filter">站点</label>
-              <Select
-                id="exception-site-filter"
-                aria-label="站点筛选"
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                placeholder="全部站点"
-                options={siteOptions}
-                value={siteFilter}
-                onChange={(value) => { changeFilter("site", value); setSplitTarget(null); }}
-              />
-            </div>
-            <div className="exception-filter-field">
-              <label htmlFor="exception-scale-filter">规模定位</label>
-              <Select
-                id="exception-scale-filter"
-                aria-label="规模定位筛选"
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                placeholder="全部规模定位"
-                options={scaleOptions}
-                value={scaleFilter}
-                onChange={(value) => { changeFilter("scale", value); setSplitTarget(null); }}
-              />
-            </div>
-            <div className="exception-filter-field">
-              <label htmlFor="exception-stocking-filter">备货定位</label>
-              <Select
-                id="exception-stocking-filter"
-                aria-label="备货定位筛选"
-                allowClear
-                showSearch
-                optionFilterProp="label"
-                placeholder="全部备货定位"
-                options={stockingOptions}
-                value={stockingFilter}
-                onChange={(value) => { changeFilter("stocking", value); setSplitTarget(null); }}
-              />
-            </div>
-            <div className="exception-filter-field">
-              <label htmlFor="exception-reason-filter">原因</label>
-              <Select
-                id="exception-reason-filter"
-                aria-label="原因筛选"
-                allowClear
-                placeholder="全部原因"
-                options={reasonOptions}
-                value={reasonFilter}
-                onChange={(value) => { changeFilter("reason", value); setSplitTarget(null); }}
-              />
-            </div>
-          </div>
-          <Table<DeliveryException>
-            rowKey="id"
-            dataSource={exceptions}
-            pagination={exceptionTotal > 10 ? {
-              current: reviewPage,
-              pageSize: 10,
-              total: exceptionTotal,
-              showSizeChanger: false,
-              onChange: setReviewPage
-            } : false}
-            scroll={{ x: 1260 }}
-            locale={{ emptyText: <Empty description={
-              reviewStats.totalCount
-                ? reviewScope === "unfinished"
-                  ? "当前没有未完成记录"
-                  : "没有匹配的审校记录"
-                : "本批次没有待处理记录"
-            } /> }}
-            columns={[
-              {
-                title: "来源文件",
-                dataIndex: "batch_file_id",
-                width: 130,
-                ellipsis: true,
-                render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
-              },
-              {
-                title: "SKU",
-                dataIndex: "sku",
-                width: 130,
-                render: (value: string) => (
-                  <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
-                )
-              },
-              {
-                title: "站点",
-                dataIndex: "full_site",
-                width: 190,
-                render: (value: string) => (
-                  <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
-                )
-              },
-              { title: "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
-              {
-                title: "规模定位",
-                dataIndex: "scale_position",
-                width: 85,
-                ellipsis: true,
-                render: (value: string | number, record) => (
-                  <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
-                    <span><PositionValue value={value} /></span>
-                  </Tooltip>
-                )
-              },
-              {
-                title: "待处理量",
-                dataIndex: "manual_quantity",
-                width: 75,
-                render: (value: number) => <strong className="pending-value">{value}</strong>
-              },
-              {
-                title: "异常原因",
-                dataIndex: "reason",
-                width: 130,
-                render: (reason: string) => <ExceptionReason reason={reason} />
-              },
-              {
-                title: "审校依据",
-                width: 250,
-                render: (_, record) => (
-                  <ExceptionEvidence
-                    exception={record}
-                    hasOverreceiptRule={Boolean(
-                      selfOperated
-                        ? batch.self_operated_overreceipt_rule
-                        : batch.overreceipt_rule
-                    )}
+            <Table<DeliveryException>
+              rowKey="id"
+              dataSource={exceptions}
+              pagination={
+                exceptionTotal > 10
+                  ? {
+                      current: reviewPage,
+                      pageSize: 10,
+                      total: exceptionTotal,
+                      showSizeChanger: false,
+                      onChange: setReviewPage
+                    }
+                  : false
+              }
+              scroll={{ x: 1260 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    description={
+                      reviewStats.totalCount
+                        ? reviewScope === "unfinished"
+                          ? "当前没有未完成记录"
+                          : "没有匹配的审校记录"
+                        : "本批次没有待处理记录"
+                    }
                   />
                 )
-              },
-              {
-                title: "状态",
-                dataIndex: "status",
-                width: 70,
-                render: (value: string) => <ExceptionStatusTag status={value} />
-              },
-              {
-                title: "操作",
-                width: 100,
-                render: (_, record) => record.allowed_actions.length === 0
-                  ? <Typography.Text type="secondary">待处理</Typography.Text>
-                  : <Button type="link" onClick={() => openSplit(record)}>查看并处理</Button>
-              }
-            ]}
-          />
-        </Card>
+              }}
+              columns={[
+                {
+                  title: "来源文件",
+                  dataIndex: "batch_file_id",
+                  width: 130,
+                  ellipsis: true,
+                  render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
+                },
+                {
+                  title: "SKU",
+                  dataIndex: "sku",
+                  width: 130,
+                  render: (value: string) => (
+                    <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
+                  )
+                },
+                {
+                  title: "站点",
+                  dataIndex: "full_site",
+                  width: 190,
+                  render: (value: string) => (
+                    <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
+                  )
+                },
+                { title: "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
+                {
+                  title: "规模定位",
+                  dataIndex: "scale_position",
+                  width: 85,
+                  ellipsis: true,
+                  render: (value: string | number, record) => (
+                    <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
+                      <span>
+                        <PositionValue value={value} />
+                      </span>
+                    </Tooltip>
+                  )
+                },
+                {
+                  title: "待处理量",
+                  dataIndex: "manual_quantity",
+                  width: 75,
+                  render: (value: number) => <strong className="pending-value">{value}</strong>
+                },
+                {
+                  title: "异常原因",
+                  dataIndex: "reason",
+                  width: 130,
+                  render: (reason: string) => <ExceptionReason reason={reason} />
+                },
+                {
+                  title: "审校依据",
+                  width: 250,
+                  render: (_, record) => (
+                    <ExceptionEvidence
+                      exception={record}
+                      hasOverreceiptRule={Boolean(
+                        selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule
+                      )}
+                    />
+                  )
+                },
+                {
+                  title: "状态",
+                  dataIndex: "status",
+                  width: 70,
+                  render: (value: string) => <ExceptionStatusTag status={value} />
+                },
+                {
+                  title: "操作",
+                  width: 100,
+                  render: (_, record) =>
+                    record.allowed_actions.length === 0 ? (
+                      <Typography.Text type="secondary">待处理</Typography.Text>
+                    ) : (
+                      <Button type="link" onClick={() => openSplit(record)}>
+                        查看并处理
+                      </Button>
+                    )
+                }
+              ]}
+            />
+          </Card>
         </div>
       )}
 
       <Drawer
-        title={(
+        title={
           <div className="review-drawer-title">
             <strong>审校处理 · {splitTarget?.sku ?? ""}</strong>
             {currentReviewIndex >= 0 && (
-              <span>第 {(reviewPage - 1) * 10 + currentReviewIndex + 1} / {exceptionTotal} 条</span>
+              <span>
+                第 {(reviewPage - 1) * 10 + currentReviewIndex + 1} / {exceptionTotal} 条
+              </span>
             )}
           </div>
-        )}
+        }
         size={520}
         open={splitTarget !== null}
         onClose={() => setSplitTarget(null)}
         extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
-        footer={(
+        footer={
           <div className="drawer-footer">
             {!selfOperatedSiteSelection && exceptionTotal > 1 && (
               <div className="drawer-review-navigation">
                 <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
                   <span>
                     <Button
-                        disabled={!canReviewPrevious || reviewNavigationLocked}
-                        onClick={() => navigateReview("previous")}
+                      disabled={!canReviewPrevious || reviewNavigationLocked}
+                      onClick={() => navigateReview("previous")}
                     >
                       上一条
                     </Button>
@@ -1266,10 +1367,7 @@ export default function BatchDetail({
                 </Tooltip>
                 <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
                   <span>
-                    <Button
-                        disabled={!canReviewNext || reviewNavigationLocked}
-                        onClick={() => navigateReview("next")}
-                    >
+                    <Button disabled={!canReviewNext || reviewNavigationLocked} onClick={() => navigateReview("next")}>
                       下一条
                     </Button>
                   </span>
@@ -1277,7 +1375,9 @@ export default function BatchDetail({
               </div>
             )}
             <div className="drawer-review-actions">
-              <Button aria-label="取消" onClick={() => setSplitTarget(null)}>取消</Button>
+              <Button aria-label="取消" onClick={() => setSplitTarget(null)}>
+                取消
+              </Button>
               {selfOperatedSiteSelection ? (
                 <Tooltip title={selfOperatedSiteValid ? "" : "请选择一个候选站点"}>
                   <Button
@@ -1318,26 +1418,30 @@ export default function BatchDetail({
               )}
             </div>
           </div>
-        )}
+        }
       >
         {splitTarget && (
           <>
             <Descriptions className="split-source" size="small" column={1}>
-              <Descriptions.Item label="来源文件">{fileById[splitTarget.batch_file_id]?.original_name}</Descriptions.Item>
+              <Descriptions.Item label="来源文件">
+                {fileById[splitTarget.batch_file_id]?.original_name}
+              </Descriptions.Item>
               <Descriptions.Item label="站点">{splitTarget.full_site || "—"}</Descriptions.Item>
               <Descriptions.Item label="目的仓">{splitTarget.destination || "—"}</Descriptions.Item>
-              <Descriptions.Item label="规模定位"><PositionValue value={splitTarget.scale_position} /></Descriptions.Item>
-              <Descriptions.Item label="备货定位"><PositionValue value={splitTarget.stocking_position} /></Descriptions.Item>
-              <Descriptions.Item label="异常原因"><Tag color="warning">{splitTarget.reason}</Tag></Descriptions.Item>
+              <Descriptions.Item label="规模定位">
+                <PositionValue value={splitTarget.scale_position} />
+              </Descriptions.Item>
+              <Descriptions.Item label="备货定位">
+                <PositionValue value={splitTarget.stocking_position} />
+              </Descriptions.Item>
+              <Descriptions.Item label="异常原因">
+                <Tag color="warning">{splitTarget.reason}</Tag>
+              </Descriptions.Item>
             </Descriptions>
 
             <ReasonGuidance
               exception={splitTarget}
-              hasOverreceiptRule={Boolean(
-                selfOperated
-                  ? batch.self_operated_overreceipt_rule
-                  : batch.overreceipt_rule
-              )}
+              hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
               selfOperated={selfOperated}
             />
 
@@ -1350,119 +1454,133 @@ export default function BatchDetail({
                 >
                   <Radio.Group className="candidate-site-options">
                     {splitCandidateSites.map((site) => (
-                      <Radio key={site} value={site}>{site}</Radio>
+                      <Radio key={site} value={site}>
+                        {site}
+                      </Radio>
                     ))}
                   </Radio.Group>
                 </Form.Item>
               </Form>
             ) : (
               <>
-              <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
-              <div>
-                <span>原待处理</span>
-                <strong>{splitTarget.manual_quantity}</strong>
-              </div>
-              <div>
-                <span>已拆分</span>
-                <strong>{splitTotal}</strong>
-              </div>
-              <div>
-                <span>剩余</span>
-                <strong>{splitRemaining}</strong>
-              </div>
-              {splitValid && <CheckCircleFilled aria-label="数量守恒通过" />}
-            </div>
+                <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
+                  <div>
+                    <span>原待处理</span>
+                    <strong>{splitTarget.manual_quantity}</strong>
+                  </div>
+                  <div>
+                    <span>已拆分</span>
+                    <strong>{splitTotal}</strong>
+                  </div>
+                  <div>
+                    <span>剩余</span>
+                    <strong>{splitRemaining}</strong>
+                  </div>
+                  {splitValid && <CheckCircleFilled aria-label="数量守恒通过" />}
+                </div>
 
-              <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
-              <Form.List name="parts">
-                {(fields, { add, remove }) => (
-                  <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-                    {fields.map((field, index) => (
-                      <div className="split-part" key={field.key}>
-                        <div className="split-part-heading">
-                          <strong>拆分 {index + 1}</strong>
-                          {fields.length > 1 && (
-                            <Button danger type="link" size="small" onClick={() => remove(field.name)}>删除</Button>
-                          )}
-                        </div>
-                        <div className="split-fields-row split-primary-fields">
-                          <Form.Item
-                            name={[field.name, "quantity"]}
-                            label="数量"
-                            rules={[{ required: true, type: "number", min: 1, message: "数量必须大于 0" }]}
-                          >
-                            <InputNumber min={1} precision={0} style={{ width: 130 }} />
-                          </Form.Item>
-                          <Form.Item name={[field.name, "resolved"]} label="处理结果">
-                            <Radio.Group className="resolution-choice">
-                              <Radio.Button value={true}>可正式导入</Radio.Button>
-                              <Radio.Button value={false}>继续保留待处理</Radio.Button>
-                            </Radio.Group>
-                          </Form.Item>
-                        </div>
-                        <Form.Item
-                          name={[field.name, "destination"]}
-                          label="目的仓"
-                          rules={[{
-                            validator: (_, value) => splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
-                              ? Promise.reject(new Error("可正式导入部分必须填写目的仓"))
-                              : Promise.resolve()
-                          }]}
+                <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
+                  <Form.List name="parts">
+                    {(fields, { add, remove }) => (
+                      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
+                        {fields.map((field, index) => (
+                          <div className="split-part" key={field.key}>
+                            <div className="split-part-heading">
+                              <strong>拆分 {index + 1}</strong>
+                              {fields.length > 1 && (
+                                <Button danger type="link" size="small" onClick={() => remove(field.name)}>
+                                  删除
+                                </Button>
+                              )}
+                            </div>
+                            <div className="split-fields-row split-primary-fields">
+                              <Form.Item
+                                name={[field.name, "quantity"]}
+                                label="数量"
+                                rules={[{ required: true, type: "number", min: 1, message: "数量必须大于 0" }]}
+                              >
+                                <InputNumber min={1} precision={0} style={{ width: 130 }} />
+                              </Form.Item>
+                              <Form.Item name={[field.name, "resolved"]} label="处理结果">
+                                <Radio.Group className="resolution-choice">
+                                  <Radio.Button value={true}>可正式导入</Radio.Button>
+                                  <Radio.Button value={false}>继续保留待处理</Radio.Button>
+                                </Radio.Group>
+                              </Form.Item>
+                            </div>
+                            <Form.Item
+                              name={[field.name, "destination"]}
+                              label="目的仓"
+                              rules={[
+                                {
+                                  validator: (_, value) =>
+                                    splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
+                                      ? Promise.reject(new Error("可正式导入部分必须填写目的仓"))
+                                      : Promise.resolve()
+                                }
+                              ]}
+                            >
+                              <Input />
+                            </Form.Item>
+                            <Form.Item
+                              name={[field.name, "site"]}
+                              label="完整站点"
+                              rules={[
+                                {
+                                  validator: (_, value) =>
+                                    splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
+                                      ? Promise.reject(new Error("可正式导入部分必须填写完整站点"))
+                                      : Promise.resolve()
+                                }
+                              ]}
+                            >
+                              {splitCandidateSites.length > 1 ? (
+                                <Radio.Group className="candidate-site-options">
+                                  {splitCandidateSites.map((site) => (
+                                    <Radio key={site} value={site}>
+                                      {site}
+                                    </Radio>
+                                  ))}
+                                </Radio.Group>
+                              ) : (
+                                <Input />
+                              )}
+                            </Form.Item>
+                            <div className="split-fields-row">
+                              <Form.Item name={[field.name, "sku"]} label="SKU">
+                                <Input />
+                              </Form.Item>
+                              <Form.Item name={[field.name, "supplier_code"]} label="供应商编码">
+                                <Input placeholder="默认沿用来源文件" />
+                              </Form.Item>
+                            </div>
+                            <Form.Item name={[field.name, "delivery_note"]} label="交货备注">
+                              <Input />
+                            </Form.Item>
+                          </div>
+                        ))}
+                        <Button
+                          block
+                          type="dashed"
+                          icon={<PlusOutlined />}
+                          onClick={() =>
+                            add({
+                              quantity: splitRemaining > 0 ? splitRemaining : 1,
+                              destination: splitTarget.destination,
+                              site: splitTarget.full_site.includes("、") ? "" : splitTarget.full_site,
+                              supplier_code: "",
+                              sku: splitTarget.sku,
+                              delivery_note: splitTarget.reason,
+                              resolved: false
+                            })
+                          }
                         >
-                          <Input />
-                        </Form.Item>
-                        <Form.Item
-                          name={[field.name, "site"]}
-                          label="完整站点"
-                          rules={[{
-                            validator: (_, value) => splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
-                              ? Promise.reject(new Error("可正式导入部分必须填写完整站点"))
-                              : Promise.resolve()
-                          }]}
-                        >
-                          {splitCandidateSites.length > 1 ? (
-                            <Radio.Group className="candidate-site-options">
-                              {splitCandidateSites.map((site) => (
-                                <Radio key={site} value={site}>{site}</Radio>
-                              ))}
-                            </Radio.Group>
-                          ) : (
-                            <Input />
-                          )}
-                        </Form.Item>
-                        <div className="split-fields-row">
-                          <Form.Item name={[field.name, "sku"]} label="SKU">
-                            <Input />
-                          </Form.Item>
-                          <Form.Item name={[field.name, "supplier_code"]} label="供应商编码">
-                            <Input placeholder="默认沿用来源文件" />
-                          </Form.Item>
-                        </div>
-                        <Form.Item name={[field.name, "delivery_note"]} label="交货备注">
-                          <Input />
-                        </Form.Item>
-                      </div>
-                    ))}
-                    <Button
-                      block
-                      type="dashed"
-                      icon={<PlusOutlined />}
-                      onClick={() => add({
-                        quantity: splitRemaining > 0 ? splitRemaining : 1,
-                        destination: splitTarget.destination,
-                        site: splitTarget.full_site.includes("、") ? "" : splitTarget.full_site,
-                        supplier_code: "",
-                        sku: splitTarget.sku,
-                        delivery_note: splitTarget.reason,
-                        resolved: false
-                      })}
-                    >
-                      添加拆分{splitRemaining > 0 ? `（剩余 ${splitRemaining}）` : ""}
-                    </Button>
-                  </Space>
-                )}
-              </Form.List>
-              </Form>
+                          添加拆分{splitRemaining > 0 ? `（剩余 ${splitRemaining}）` : ""}
+                        </Button>
+                      </Space>
+                    )}
+                  </Form.List>
+                </Form>
               </>
             )}
           </>
