@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { message } from "antd";
+import { App as AntApp, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
@@ -13,16 +13,38 @@ const jsonResponse = (payload: unknown) =>
 let inboundSyncStatus: Record<string, unknown>;
 let batchRows: Array<Record<string, unknown>>;
 
-function rejectBatchList(status: number, detail: string) {
+function rejectBatchRequest(status: number, detail: string, method = "GET") {
   const initialFetch = fetch;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-      String(input).includes("/api/batches?")
-        ? Promise.resolve(new Response(JSON.stringify({ detail }), { status }))
+      (method === "GET" ? String(input).includes("/api/batches?") : init?.method === method)
+        ? status === 0
+          ? Promise.reject(new TypeError(detail))
+          : Promise.resolve(new Response(JSON.stringify({ detail }), { status }))
         : initialFetch(input, init)
     )
   );
+}
+
+async function submitBatchAction(action: "create" | "delete" | "clean") {
+  if (action === "create") {
+    fireEvent.click(await screen.findByRole("button", { name: /新建批次/ }));
+    const dialog = await screen.findByRole("dialog");
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    fireEvent.change(input!, { target: { files: [new File(["synthetic"], "合成交货.xlsx")] } });
+    const submit = within(dialog).getByRole("button", { name: "创建并上传文件" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+  } else if (action === "delete") {
+    fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" }));
+    fireEvent.click(screen.getByRole("button", { name: "删除已选（1）" }));
+    fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
+  } else {
+    fireEvent.click(await screen.findByRole("button", { name: /清理空批次/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^删\s*除$/ }));
+  }
 }
 
 function setFourteenBatches() {
@@ -224,8 +246,8 @@ describe("BatchesPage", () => {
     "leaves unauthorized %s list errors to the shared authentication handler",
     async (workflow) => {
       const errorMessage = vi.spyOn(message, "error");
-      rejectBatchList(401, "未登录");
-      render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />);
+      rejectBatchRequest(401, "未登录");
+      render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />, { wrapper: AntApp });
 
       await waitFor(() => expect(screen.getByRole("button", { name: /新建批次/ })).toBeInTheDocument());
       expect(errorMessage).not.toHaveBeenCalled();
@@ -235,11 +257,45 @@ describe("BatchesPage", () => {
 
   it.each([403, 500])("still displays batch list errors with status %i", async (status) => {
     const errorMessage = vi.spyOn(message, "error");
-    rejectBatchList(status, "批次读取测试错误");
-    render(<BatchesPage onOpen={vi.fn()} />);
+    rejectBatchRequest(status, "批次读取测试错误");
+    render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
     expect(await screen.findByText("批次读取测试错误")).toBeInTheDocument();
-    expect(errorMessage).toHaveBeenCalledWith("批次读取测试错误");
+    expect(errorMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["create", "delete", "clean"] as const)("does not repeat unauthorized %s feedback", async (action) => {
+    batchRows[0] = { ...batchRows[0], status: "draft", file_count: 0 };
+    const errorMessage = vi.spyOn(message, "error");
+    rejectBatchRequest(401, "未登录", action === "create" ? "POST" : "DELETE");
+    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />, { wrapper: AntApp });
+    await submitBatchAction(action);
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ method: action === "create" ? "POST" : "DELETE" })
+      )
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText("未登录")).not.toBeInTheDocument();
+    expect(errorMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 422, 500, 0])("keeps failed mutations visible for status %i", async (status) => {
+    const errorMessage = vi.spyOn(message, "error");
+    rejectBatchRequest(status, "合成操作错误", "DELETE");
+    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />, { wrapper: AntApp });
+    await submitBatchAction("delete");
+
+    expect(await screen.findByText("合成操作错误")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "2026-07-21 交货批次" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "删除已选（1）" })).not.toHaveClass("ant-btn-loading")
+    );
+    expect(errorMessage).not.toHaveBeenCalled();
   });
 
   it("does not render action buttons before initial data is ready", async () => {
@@ -256,7 +312,7 @@ describe("BatchesPage", () => {
       })
     );
 
-    render(<BatchesPage onOpen={vi.fn()} />);
+    render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
     expect(screen.getByLabelText("正在加载交货批次")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /新建批次/ })).not.toBeInTheDocument();
@@ -269,7 +325,7 @@ describe("BatchesPage", () => {
   });
   it("shows readiness and the next batch action", async () => {
     const onOpen = vi.fn();
-    const { container } = render(<BatchesPage onOpen={onOpen} />);
+    const { container } = render(<BatchesPage onOpen={onOpen} />, { wrapper: AntApp });
 
     const status = await screen.findByRole("region", { name: "运行状态" });
     expect(within(status).getByText("基础资料")).toBeInTheDocument();
@@ -295,7 +351,16 @@ describe("BatchesPage", () => {
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(7));
   });
 
-  it("lets admins select and permanently delete multiple non-active batches", async () => {
+  it.each([false, true])("deletes multiple batches and reports file cleanup failure: %s", async (cleanupFailed) => {
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await originalFetch(input, init);
+        if (init?.method !== "DELETE" || !cleanupFailed) return response;
+        return jsonResponse({ ...(await response.json()), file_cleanup_failed_ids: [7] });
+      })
+    );
     batchRows = [
       batchRows[0],
       {
@@ -311,7 +376,9 @@ describe("BatchesPage", () => {
         status: "running"
       }
     ];
-    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />);
+    const staticSuccess = vi.spyOn(message, "success");
+    const staticWarning = vi.spyOn(message, "warning");
+    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />, { wrapper: AntApp });
 
     await screen.findByRole("button", { name: "2026-07-21 交货批次" });
     const first = screen.getByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" });
@@ -340,11 +407,16 @@ describe("BatchesPage", () => {
       expect(screen.queryByText("第二个可删除批次")).not.toBeInTheDocument();
     });
     expect(screen.getByText("正在计算的批次")).toBeInTheDocument();
+    expect(
+      await screen.findByText(cleanupFailed ? "已删除 2 个批次，但 1 个文件目录清理失败" : "已永久删除 2 个批次")
+    ).toBeInTheDocument();
+    expect(staticSuccess).not.toHaveBeenCalled();
+    expect(staticWarning).not.toHaveBeenCalled();
   });
 
   it("loads batch pages and applies search on the server", async () => {
     setFourteenBatches();
-    render(<BatchesPage onOpen={vi.fn()} />);
+    render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
     expect(await screen.findByText("14 个批次")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "交货批次 12" })).toBeInTheDocument();
@@ -360,7 +432,7 @@ describe("BatchesPage", () => {
 
   it("keeps batch selections across server pages", async () => {
     setFourteenBatches();
-    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />);
+    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />, { wrapper: AntApp });
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 交货批次 1" }));
     fireEvent.click(screen.getByTitle("2"));
@@ -373,7 +445,7 @@ describe("BatchesPage", () => {
   });
 
   it("shows the independent self-operated inbound workspace", async () => {
-    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
 
     await screen.findByRole("heading", { name: "自营仓入库" });
     const status = await screen.findByRole("region", { name: "运行状态" });
@@ -422,7 +494,7 @@ describe("BatchesPage", () => {
       job: { ...job, status: "running", finished_at: null }
     };
 
-    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
 
     const progress = await screen.findByRole("progressbar", { name: "正在同步待入库数据" });
     expect(progress).toHaveClass("is-indeterminate");
@@ -475,7 +547,7 @@ describe("BatchesPage", () => {
       })
     );
 
-    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
@@ -522,7 +594,7 @@ describe("BatchesPage", () => {
       })
     );
 
-    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />);
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: AntApp });
 
     await screen.findByRole("heading", { name: "自营仓入库" });
     await screen.findByText("4 / 4 已就绪");
@@ -558,7 +630,7 @@ describe("BatchesPage", () => {
   });
 
   it("requires a delivery file before creating a delivery batch", async () => {
-    render(<BatchesPage onOpen={vi.fn()} />);
+    render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
     await screen.findByText("5 / 5 已就绪");
     fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));

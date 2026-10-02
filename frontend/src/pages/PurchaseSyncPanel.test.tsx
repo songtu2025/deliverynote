@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { App as AntApp, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InputVersion } from "../types";
@@ -51,6 +52,13 @@ const jsonResponse = (payload: unknown, status = 200) =>
     status,
     headers: { "Content-Type": "application/json" }
   });
+
+function renderCandidatePanel(refreshVersions = vi.fn(async () => [activeVersion, candidateVersion])) {
+  return render(
+    <PurchaseSyncPanel versions={[activeVersion, candidateVersion]} canActivate refreshVersions={refreshVersions} />,
+    { wrapper: AntApp }
+  );
+}
 
 describe("PurchaseSyncPanel", () => {
   beforeEach(() => {
@@ -107,6 +115,7 @@ describe("PurchaseSyncPanel", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -116,7 +125,8 @@ describe("PurchaseSyncPanel", () => {
         versions={[activeVersion, candidateVersion]}
         canActivate={false}
         refreshVersions={vi.fn(async () => [activeVersion, candidateVersion])}
-      />
+      />,
+      { wrapper: AntApp }
     );
 
     expect(await screen.findByText("同步完成，待启用")).toBeInTheDocument();
@@ -142,10 +152,9 @@ describe("PurchaseSyncPanel", () => {
   });
 
   it("keeps candidate activation available to administrators", async () => {
+    const staticSuccess = vi.spyOn(message, "success");
     const refreshVersions = vi.fn(async () => [{ ...candidateVersion, active: true }]);
-    render(
-      <PurchaseSyncPanel versions={[activeVersion, candidateVersion]} canActivate refreshVersions={refreshVersions} />
-    );
+    renderCandidatePanel(refreshVersions);
 
     fireEvent.click(await screen.findByRole("button", { name: "启用最新数据" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认启用" }));
@@ -154,7 +163,46 @@ describe("PurchaseSyncPanel", () => {
       expect(fetch).toHaveBeenCalledWith("/api/input-versions/8/activate", expect.objectContaining({ method: "POST" }))
     );
     expect(refreshVersions).toHaveBeenCalled();
+    expect(await screen.findByText("积加同步候选 已启用，将用于新批次")).toBeInTheDocument();
+    expect(staticSuccess).not.toHaveBeenCalled();
   });
+
+  it("shows a contextual message when synchronization starts", async () => {
+    const staticSuccess = vi.spyOn(message, "success");
+    renderCandidatePanel();
+    fireEvent.click(await screen.findByRole("button", { name: /同步采购数据/ }));
+    expect(await screen.findByText("采购数据同步已进入后台队列")).toBeInTheDocument();
+    expect(staticSuccess).not.toHaveBeenCalled();
+  });
+
+  it.each(["sync", "activate"].flatMap((action) => [403, 422, 500, 0].map((status) => [action, status] as const)))(
+    "keeps %s failures local for status %i",
+    async (action, status) => {
+      const detail = '合成同步失败 <img src=x onerror="alert(1)">';
+      const originalFetch = fetch;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+          init?.method === "POST"
+            ? status === 0
+              ? Promise.reject(new TypeError(detail))
+              : Promise.resolve(jsonResponse({ detail }, status))
+            : originalFetch(input, init)
+        )
+      );
+      renderCandidatePanel();
+      fireEvent.click(await screen.findByRole("button", { name: action === "sync" ? /同步采购数据/ : "启用最新数据" }));
+      if (action === "activate") fireEvent.click(await screen.findByRole("button", { name: "确认启用" }));
+      expect(await screen.findByText(detail)).toBeInTheDocument();
+      expect(document.querySelector('img[src="x"]')).toBeNull();
+      expect(screen.getByText("同步完成，待启用")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /同步采购数据/ })).not.toHaveClass("ant-btn-loading")
+      );
+      expect(screen.queryByText("采购数据同步已进入后台队列")).not.toBeInTheDocument();
+      expect(screen.queryByText("积加同步候选 已启用，将用于新批次")).not.toBeInTheDocument();
+    }
+  );
 
   it("polls only purchase status and refreshes versions once on completion", async () => {
     vi.useFakeTimers();
@@ -186,7 +234,7 @@ describe("PurchaseSyncPanel", () => {
       return <PurchaseSyncPanel versions={versions} canActivate refreshVersions={refreshVersions} />;
     }
 
-    render(<Harness />);
+    render(<Harness />, { wrapper: AntApp });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });

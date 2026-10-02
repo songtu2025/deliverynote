@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Drawer, Popconfirm, Space, Skeleton, Table, Tag, Typography, message } from "antd";
+import { Alert, App as AntApp, Button, Drawer, Popconfirm, Space, Skeleton, Table, Tag, Typography } from "antd";
 import { CheckCircleFilled, DownloadOutlined, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import type { TableProps } from "antd";
 
@@ -38,6 +38,7 @@ export default function PurchaseSyncPanel({
   refreshVersions,
   compact = false
 }: PurchaseSyncPanelProps) {
+  const { message } = AntApp.useApp();
   const [syncStatus, setSyncStatus] = useState<PurchaseSyncStatus | null>(null);
   const [syncError, setSyncError] = useState("");
   const [syncStarting, setSyncStarting] = useState(false);

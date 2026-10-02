@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
   Drawer,
   Empty,
@@ -14,8 +15,7 @@ import {
   Table,
   Tag,
   Typography,
-  Upload,
-  message
+  Upload
 } from "antd";
 import {
   CheckCircleFilled,
@@ -161,6 +161,7 @@ export default function BatchesPage({
   canActivatePurchaseSync?: boolean;
   canDeleteBatches?: boolean;
 }) {
+  const { message } = AntApp.useApp();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [batchTotal, setBatchTotal] = useState(0);
   const [emptyDraftCount, setEmptyDraftCount] = useState(0);
@@ -249,7 +250,7 @@ export default function BatchesPage({
         }
       }
     },
-    [page, debouncedQuery, statusFilter, workflow]
+    [page, debouncedQuery, statusFilter, workflow, message]
   );
 
   useEffect(() => {
@@ -352,7 +353,9 @@ export default function BatchesPage({
       setSourceFiles([]);
       onOpen(batch.id);
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "创建批次失败");
+      if (!(error instanceof ApiError && error.status === 401)) {
+        message.error(error instanceof Error ? error.message : "创建批次失败");
+      }
     }
   };
 
@@ -468,7 +471,9 @@ export default function BatchesPage({
       message.success(`已删除 ${result.deleted_count} 个空批次`);
       await load();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "清理空批次失败");
+      if (!(error instanceof ApiError && error.status === 401)) {
+        message.error(error instanceof Error ? error.message : "清理空批次失败");
+      }
     } finally {
       setCleaningEmpty(false);
     }
@@ -501,7 +506,9 @@ export default function BatchesPage({
         message.success(`已永久删除 ${result.deleted_count} 个批次`);
       }
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "删除批次失败");
+      if (!(error instanceof ApiError && error.status === 401)) {
+        message.error(error instanceof Error ? error.message : "删除批次失败");
+      }
     } finally {
       setDeletingBatchIds([]);
     }
