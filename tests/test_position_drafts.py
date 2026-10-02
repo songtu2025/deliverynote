@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import delivery_note.web.api as web_api_module
+import delivery_note.web.position_draft_read as draft_read_module
 import delivery_note.web.caches as cache_module
 import delivery_note.web.position_drafts as position_drafts_module
 from delivery_note.excel_io import read_position_workbook
@@ -1556,9 +1557,9 @@ class PositionDraftApiTests(unittest.TestCase):
                 wraps=position_drafts_module.read_position_workbook,
             ) as read_workbook,
             patch.object(
-                web_api_module,
+                draft_read_module,
                 "validate_position_frame",
-                wraps=web_api_module.validate_position_frame,
+                wraps=draft_read_module.validate_position_frame,
             ) as validate_frame,
         ):
             draft = self.create_draft()
@@ -2108,9 +2109,9 @@ class PositionDraftApiTests(unittest.TestCase):
             json={"revision": draft["revision"], **values},
         )
         self.assertEqual(updated.status_code, 200, updated.text)
-        original_snapshots = web_api_module._draft_row_snapshots
+        original_snapshots = draft_read_module._draft_row_snapshots
         with patch.object(
-            web_api_module,
+            draft_read_module,
             "_draft_row_snapshots",
             wraps=original_snapshots,
         ) as snapshots:

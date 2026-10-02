@@ -186,7 +186,8 @@ def load_base_frame(session: Session, draft: InputDraft) -> pd.DataFrame:
     return _version_frame(session, version)
 
 
-def _frame_from_rows(rows: list[PositionDraftRow]) -> pd.DataFrame:
+def position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
+    """将未删除的草稿行转换为统一的库位资料字段。"""
     records = [
         {FIELD_TO_COLUMN[field]: getattr(row, field) for field in ROW_FIELDS}
         for row in rows
@@ -320,7 +321,7 @@ def load_draft_frames(
     """一次加载草稿行、基础版本和当前数据。"""
 
     rows = list_draft_rows(session, draft.id)
-    return rows, load_base_frame(session, draft), _frame_from_rows(rows)
+    return rows, load_base_frame(session, draft), position_frame(rows)
 
 
 def _base_values_for_row(
@@ -427,7 +428,7 @@ def replace_draft_from_frame(
 ) -> dict[str, int]:
     require_revision(draft, expected_revision)
     candidate = frame[POSITION_SOURCE_COLUMNS].copy()
-    current = _frame_from_rows(list_draft_rows(session, draft.id))
+    current = position_frame(list_draft_rows(session, draft.id))
     base = load_base_frame(session, draft)
     diff = position_diff(current, candidate)
 
@@ -493,12 +494,12 @@ def replace_draft_from_frame(
 def draft_diff(session: Session, draft: InputDraft) -> dict[str, int]:
     return position_diff(
         load_base_frame(session, draft),
-        _frame_from_rows(list_draft_rows(session, draft.id)),
+        position_frame(list_draft_rows(session, draft.id)),
     )
 
 
 def validate_draft(session: Session, draft: InputDraft) -> list[dict]:
-    frame = _frame_from_rows(list_draft_rows(session, draft.id))
+    frame = position_frame(list_draft_rows(session, draft.id))
     return [
         *validate_position_frame(frame),
         *position_change_warnings(load_base_frame(session, draft), frame),
@@ -552,7 +553,7 @@ def publish_draft(
     try:
         write_position_workbook(
             temporary_path,
-            _frame_from_rows(list_draft_rows(session, draft.id)),
+            position_frame(list_draft_rows(session, draft.id)),
         )
         position_versions = list(
             session.scalars(

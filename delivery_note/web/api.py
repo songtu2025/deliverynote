@@ -67,7 +67,6 @@ from ..gerpgo import (
 )
 from ..pipeline import (
     IMPORT_COLUMNS,
-    POSITION_SOURCE_COLUMNS,
     POSITION_VALUE_COLUMNS,
     enrich_pending_import_rows,
 )
@@ -98,7 +97,6 @@ from .models import (
 )
 from .position_drafts import (
     DRAFT_REVISION_CONFLICT_CODE,
-    FIELD_TO_COLUMN,
     POSITION_FRAME_CACHE_SESSION_KEY,
     ROW_FIELDS,
     DraftConflictError,
@@ -107,11 +105,14 @@ from .position_drafts import (
     delete_draft_rows,
     discard_draft,
     list_draft_rows,
-    load_base_frame,
+    position_frame,
     mutate_draft_row,
     publish_draft,
     replace_draft_from_frame,
     require_revision,
+)
+from .position_draft_read import (
+    draft_analysis, draft_json, summarize_issues, position_row_json,
 )
 from .sync_routes import register_sync_routes
 from .schemas import (
@@ -250,171 +251,6 @@ def _deleted_session_cookie_header(*, secure: bool) -> str:
     response = Response()
     _delete_session_cookie(response, secure=secure)
     return response.headers["set-cookie"]
-
-
-def _position_row_json(
-    row: PositionDraftRow,
-    issues: list[dict] | None = None,
-) -> dict:
-    return {
-        "id": row.id,
-        "draft_id": row.draft_id,
-        "row_order": row.row_order,
-        "store_site": row.store_site,
-        "jiaji_sku": row.jiaji_sku,
-        "msku": row.msku,
-        "scale_position": row.scale_position,
-        "stocking_position": row.stocking_position,
-        "change_type": row.change_type,
-        "deleted": row.deleted,
-        "issues": issues or [],
-    }
-
-
-def _position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
-    records = [
-        {FIELD_TO_COLUMN[field]: getattr(row, field) for field in ROW_FIELDS}
-        for row in rows
-        if not row.deleted
-    ]
-    return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
-
-
-def _draft_row_snapshots(session: Session, draft_id: int) -> list[dict]:
-    """按稳定顺序加载分析所需标量，避免把整表 ORM 实体放入缓存。"""
-
-    columns = [
-        PositionDraftRow.id,
-        PositionDraftRow.row_order,
-        PositionDraftRow.change_type,
-        PositionDraftRow.deleted,
-        *(getattr(PositionDraftRow, field) for field in ROW_FIELDS),
-    ]
-    return [
-        dict(row)
-        for row in session.execute(
-            select(*columns)
-            .where(PositionDraftRow.draft_id == draft_id)
-            .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
-        ).mappings()
-    ]
-
-
-def _snapshot_position_frame(rows: list[dict]) -> pd.DataFrame:
-    records = [
-        {FIELD_TO_COLUMN[field]: row[field] for field in ROW_FIELDS}
-        for row in rows
-        if not row["deleted"]
-    ]
-    return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
-
-
-def _position_issue_map(
-    rows: list[dict],
-    issues: list[dict],
-) -> dict[int, list[dict]]:
-    active_rows = [row for row in rows if not row["deleted"]]
-    by_row_id: dict[int, list[dict]] = {}
-    for issue in issues:
-        for row_number in issue["row_numbers"]:
-            offset = row_number - 2
-            if 0 <= offset < len(active_rows):
-                by_row_id.setdefault(active_rows[offset]["id"], []).append(issue)
-    return by_row_id
-
-
-def _issue_summary(issues: list[dict]) -> dict:
-    error_count = sum(
-        max(1, len(issue["row_numbers"]))
-        for issue in issues
-        if issue["severity"] == "error"
-    )
-    warning_count = sum(
-        max(1, len(issue["row_numbers"]))
-        for issue in issues
-        if issue["severity"] == "warning"
-    )
-    return {
-        "issues": issues,
-        "error_count": error_count,
-        "warning_count": warning_count,
-        "valid": error_count == 0,
-    }
-
-
-def _draft_analysis(
-    session: Session,
-    draft: InputDraft,
-    cache: DraftAnalysisCache,
-) -> dict:
-    """按草稿修订复用摘要、差异和逐行问题分析。"""
-
-    def load() -> dict:
-        rows = _draft_row_snapshots(session, draft.id)
-        base_frame = load_base_frame(session, draft)
-        current_frame = _snapshot_position_frame(rows)
-        validation_issues = validate_position_frame(current_frame)
-        issues = [
-            *validation_issues,
-            *position_change_warnings(base_frame, current_frame),
-        ]
-        issues_by_row = _position_issue_map(rows, validation_issues)
-        return {
-            "row_count": sum(not row["deleted"] for row in rows),
-            "modified_count": sum(
-                row["change_type"] != "unchanged" for row in rows
-            ),
-            "diff": position_diff(base_frame, current_frame),
-            "issues": issues,
-            "issues_by_row": issues_by_row,
-            "error_row_ids": tuple(
-                row_id
-                for row_id, row_issues in issues_by_row.items()
-                if any(issue["severity"] == "error" for issue in row_issues)
-            ),
-        }
-
-    return cache.get(draft.id, draft.revision, load)
-
-
-def _draft_json(
-    session: Session,
-    draft: InputDraft,
-    analysis_cache: DraftAnalysisCache,
-) -> dict:
-    analysis = _draft_analysis(session, draft, analysis_cache)
-    base_version = session.get(InputVersion, draft.base_version_id)
-    active_version = session.scalar(
-        select(InputVersion).where(
-            InputVersion.kind == "position",
-            InputVersion.active.is_(True),
-        )
-    )
-    issue_summary = _issue_summary(analysis["issues"])
-    return {
-        "id": draft.id,
-        "kind": draft.kind,
-        "base_version_id": draft.base_version_id,
-        "base_version_name": (
-            base_version.name
-            if base_version is not None
-            else f"版本 #{draft.base_version_id}"
-        ),
-        "active_version_id": active_version.id if active_version is not None else None,
-        "active_version_name": active_version.name
-        if active_version is not None
-        else None,
-        "status": draft.status,
-        "revision": draft.revision,
-        "created_by": draft.created_by,
-        "updated_by": draft.updated_by,
-        "created_at": utc_isoformat(draft.created_at),
-        "updated_at": utc_isoformat(draft.updated_at),
-        "row_count": analysis["row_count"],
-        "modified_count": analysis["modified_count"],
-        "diff": analysis["diff"],
-        **issue_summary,
-    }
 
 
 def _split_records_by_exception(
@@ -2288,7 +2124,7 @@ def create_app(
         session.refresh(draft)
         if existing is not None:
             response.status_code = status.HTTP_200_OK
-        return _draft_json(session, draft, draft_analysis_cache)
+        return draft_json(session, draft, draft_analysis_cache)
 
     @app.get("/api/input-drafts/position")
     def get_position_draft(
@@ -2303,7 +2139,7 @@ def create_app(
         )
         if draft is None:
             raise HTTPException(status_code=404, detail="当前没有进行中的库位草稿")
-        return _draft_json(session, draft, draft_analysis_cache)
+        return draft_json(session, draft, draft_analysis_cache)
 
     @app.get("/api/input-drafts/{draft_id}/rows")
     def get_position_draft_rows(
@@ -2319,7 +2155,7 @@ def create_app(
         only_modified: bool = False,
     ):
         draft = get_draft_or_404(draft_id, session)
-        analysis = _draft_analysis(session, draft, draft_analysis_cache)
+        analysis = draft_analysis(session, draft, draft_analysis_cache)
         issues_by_row = analysis["issues_by_row"]
         search_value = search.strip().casefold()
         site_value = site.strip().casefold()
@@ -2370,7 +2206,7 @@ def create_app(
         )
         return {
             "rows": [
-                _position_row_json(row, issues_by_row.get(row.id)) for row in page
+                position_row_json(row, issues_by_row.get(row.id)) for row in page
             ],
             "total": total or 0,
             "offset": offset,
@@ -2408,7 +2244,7 @@ def create_app(
         session.refresh(draft)
         session.refresh(row)
         remove_draft_import_candidates(draft.id)
-        return {"row": _position_row_json(row), "revision": draft.revision}
+        return {"row": position_row_json(row), "revision": draft.revision}
 
     @app.put("/api/input-drafts/{draft_id}/rows/{row_id}")
     def update_position_draft_row(
@@ -2443,7 +2279,7 @@ def create_app(
         session.refresh(draft)
         session.refresh(row)
         remove_draft_import_candidates(draft.id)
-        return {"row": _position_row_json(row), "revision": draft.revision}
+        return {"row": position_row_json(row), "revision": draft.revision}
 
     @app.delete("/api/input-drafts/{draft_id}/rows/{row_id}")
     def delete_position_draft_row(
@@ -2543,7 +2379,7 @@ def create_app(
         destination = import_candidate_root / f"{draft.id}_{revision}_{token}{suffix}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
         try:
-            current_frame = _position_frame(list_draft_rows(session, draft.id))
+            current_frame = position_frame(list_draft_rows(session, draft.id))
             candidate_frame, issues, diff = await parse_uploaded_workbook(
                 _inspect_position_import,
                 destination,
@@ -2576,7 +2412,7 @@ def create_app(
             "revision": revision,
             "row_count": len(candidate_frame),
             "diff": diff,
-            **_issue_summary(issues),
+            **summarize_issues(issues),
         }
 
     @app.post("/api/input-drafts/{draft_id}/import-apply")
@@ -2663,7 +2499,7 @@ def create_app(
         try:
             write_position_workbook(
                 download_path,
-                _position_frame(list_draft_rows(session, draft.id)),
+                position_frame(list_draft_rows(session, draft.id)),
             )
         except Exception as error:
             download_path.unlink(missing_ok=True)
@@ -2684,12 +2520,12 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         draft = get_draft_or_404(draft_id, session)
-        analysis = _draft_analysis(session, draft, draft_analysis_cache)
+        analysis = draft_analysis(session, draft, draft_analysis_cache)
         return {
             "draft_id": draft.id,
             "revision": draft.revision,
             "diff": analysis["diff"],
-            **_issue_summary(analysis["issues"]),
+            **summarize_issues(analysis["issues"]),
         }
 
     @app.post(
@@ -2769,7 +2605,7 @@ def create_app(
             rollback_integrity_conflict(session, error)
         session.refresh(draft)
         remove_draft_import_candidates(draft.id)
-        return _draft_json(session, draft, draft_analysis_cache)
+        return draft_json(session, draft, draft_analysis_cache)
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
     def create_batch(
