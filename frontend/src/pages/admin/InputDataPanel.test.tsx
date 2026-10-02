@@ -782,10 +782,16 @@ describe("InputDataPanel", () => {
     await screen.findByText("PRODUCT-SKU");
     fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
     const supplierButton = getCatalogButton("供应商资料");
+    // 单独检查可见性和隐藏祖先，避免角色查询重复计算深层表格按钮的样式。
     const historyActivateButton = within(screen.getByText("product-old").closest("tr")!).getByRole("button", {
-      name: "启用"
+      name: "启用",
+      hidden: true
     });
-    fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
+    expect(historyActivateButton).toBeVisible();
+    expect(historyActivateButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    const status = within(screen.getByRole("region", { name: "商品信息资料状态" }));
+    const updateButton = status.getByRole("button", { name: "更新资料" });
+    fireEvent.click(updateButton);
     fireEvent.change(screen.getByLabelText("新版本名称"), {
       target: { value: "product-slow" }
     });

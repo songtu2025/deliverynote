@@ -57,7 +57,11 @@ describe("PositionMaintenance Excel import", () => {
       token: "preview-token"
     });
     expect(await screen.findByText("修订号 6")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^复制 / }));
+    const row = within(screen.getByText("SKU-A").closest("tr")!);
+    const copyButton = row.getByRole("button", { name: /^复制 /, hidden: true });
+    expect(copyButton).toBeVisible();
+    expect(copyButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    fireEvent.click(copyButton);
     await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
     expect(JSON.parse(String(environment.requests("POST", "/api/input-drafts/7/rows")[0][1]?.body)).revision).toBe(6);
   });
@@ -71,7 +75,10 @@ describe("PositionMaintenance Excel import", () => {
     expect(await screen.findByText("请重新上传表格预览")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "刷新草稿" })).not.toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
+    const importButton = screen.getByRole("button", { name: "Excel 整表替换", hidden: true });
+    expect(importButton).toBeVisible();
+    expect(importButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+    expect(importButton).toBeEnabled();
 
     uploadImport(container, "retry.xlsx");
     await waitFor(() => expect(environment.requests("POST", "/import-preview")).toHaveLength(2));
@@ -133,7 +140,10 @@ describe("PositionMaintenance Excel import", () => {
       expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeDisabled();
       expect(screen.queryByRole("dialog", { name: "Excel 整表替换预览" })).not.toBeInTheDocument();
       environment.state.draftResponse = { ...baseDraft, revision: 9 };
-      fireEvent.click(screen.getByRole("button", { name: "刷新草稿" }));
+      const refreshButton = screen.getByRole("button", { name: "刷新草稿", hidden: true });
+      expect(refreshButton).toBeVisible();
+      expect(refreshButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+      fireEvent.click(refreshButton);
       expect(await screen.findByText("修订号 9")).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Excel 整表替换" })).toBeEnabled();
     }
@@ -150,7 +160,10 @@ describe("PositionMaintenance Excel import", () => {
       expect(screen.getByRole("button", { name: "返回基础资料" })).toBeDisabled();
       expect(within(dialog).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
       expect(within(dialog).queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "放弃草稿" })).toBeDisabled();
+      const discardButton = screen.getByRole("button", { name: "放弃草稿", hidden: true });
+      expect(discardButton).toBeVisible();
+      expect(discardButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
+      expect(discardButton).toBeDisabled();
       fireEvent.click(within(dialog).getByRole("button", { name: /取\s*消/ }));
       expect(screen.getByText("Excel 整表替换预览")).toBeInTheDocument();
       expect(screen.queryByText("Excel 已完整替换服务器草稿")).not.toBeInTheDocument();

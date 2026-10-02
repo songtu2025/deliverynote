@@ -419,8 +419,9 @@ describe("BatchesPage", () => {
     render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
     expect(await screen.findByText("14 个批次")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "交货批次 12" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "交货批次 14" })).not.toBeInTheDocument();
+    const firstPage = within(screen.getByRole("table", { name: "交货批次列表" }));
+    expect(firstPage.getByRole("button", { name: "交货批次 12" })).toBeInTheDocument();
+    expect(firstPage.queryByText("交货批次 14", { selector: "button" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle("2"));
     expect(await screen.findByRole("button", { name: "交货批次 14" })).toBeInTheDocument();

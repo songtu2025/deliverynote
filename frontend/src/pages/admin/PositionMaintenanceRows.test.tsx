@@ -1,4 +1,4 @@
-import { act, fireEvent, isInaccessible, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { message as staticMessage } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -62,7 +62,8 @@ describe("PositionMaintenance record mutations", () => {
     expect(rowControls.getByLabelText("删除 SEEKWAY:US / SKU-A / MSKU-A")).toHaveClass("position-record-action");
     expect(editButton).toHaveRole("button");
     expect(editButton).toHaveAccessibleName("编辑 SEEKWAY:US / SKU-A / MSKU-A");
-    expect(isInaccessible(editButton)).toBe(false);
+    expect(editButton).toBeVisible();
+    expect(editButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
 
     fireEvent.click(editButton);
     const editor = within(await dialogByTitle("编辑库位记录：SKU-A"));
@@ -74,7 +75,8 @@ describe("PositionMaintenance record mutations", () => {
     expect(copyButton).toBeEnabled();
     expect(copyButton).toHaveRole("button");
     expect(copyButton).toHaveAccessibleName("复制 SEEKWAY:US / SKU-A / MSKU-A");
-    expect(isInaccessible(copyButton)).toBe(false);
+    expect(copyButton).toBeVisible();
+    expect(copyButton.closest('[hidden], [aria-hidden="true"]')).toBeNull();
     fireEvent.click(copyButton);
     await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1));
     const copyBody = JSON.parse(String(environment.requests("POST", "/api/input-drafts/7/rows")[0][1]?.body));
