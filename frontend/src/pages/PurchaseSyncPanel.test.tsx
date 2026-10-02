@@ -46,55 +46,63 @@ const succeededJob = {
   finished_at: "2026-08-25T01:03:00Z"
 };
 
-const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), {
-  status,
-  headers: { "Content-Type": "application/json" }
-});
+const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 
 describe("PurchaseSyncPanel", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      if (url.endsWith("/api/purchase-sync") && method === "GET") {
-        return jsonResponse({ configured: true, job: succeededJob });
-      }
-      if (url.endsWith("/api/purchase-sync") && method === "POST") {
-        return jsonResponse({ ...succeededJob, status: "queued" }, 201);
-      }
-      if (url.endsWith("/api/purchase-sync/9/issues")) {
-        return jsonResponse([{
-          severity: "warning",
-          message: "共享站点数据不能参与正常交货匹配",
-          po_code: "PO-1001",
-          sku: "SKU-A",
-          source_site: "共享",
-          supplier_code: "SUP-1",
-          supplier_name: "供应商 A",
-          warehouse: "水鞋-广州仓",
-          quantity: 12,
-          code: "shared_site"
-        }]);
-      }
-      if (url.endsWith("/api/purchase-sync/9/preview?limit=100")) {
-        return jsonResponse({
-          columns: ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"],
-          rows: [{
-            单据状态: "待交货",
-            供应商: "供应商 A",
-            SKU: "SKU-A",
-            平台站点: "AMAZON:SEEKWAY:US",
-            目的仓: "水鞋-广州仓",
-            未交量: 12
-          }],
-          total: 1
-        });
-      }
-      if (url.endsWith("/api/input-versions/8/activate") && method === "POST") {
-        return jsonResponse({ ...candidateVersion, active: true });
-      }
-      throw new Error(`Unexpected request: ${method} ${url}`);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/purchase-sync") && method === "GET") {
+          return jsonResponse({ configured: true, job: succeededJob });
+        }
+        if (url.endsWith("/api/purchase-sync") && method === "POST") {
+          return jsonResponse({ ...succeededJob, status: "queued" }, 201);
+        }
+        if (url.endsWith("/api/purchase-sync/9/issues")) {
+          return jsonResponse([
+            {
+              severity: "warning",
+              message: "共享站点数据不能参与正常交货匹配",
+              po_code: "PO-1001",
+              sku: "SKU-A",
+              source_site: "共享",
+              supplier_code: "SUP-1",
+              supplier_name: "供应商 A",
+              warehouse: "水鞋-广州仓",
+              quantity: 12,
+              code: "shared_site"
+            }
+          ]);
+        }
+        if (url.endsWith("/api/purchase-sync/9/preview?limit=100")) {
+          return jsonResponse({
+            columns: ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"],
+            rows: [
+              {
+                单据状态: "待交货",
+                供应商: "供应商 A",
+                SKU: "SKU-A",
+                平台站点: "AMAZON:SEEKWAY:US",
+                目的仓: "水鞋-广州仓",
+                未交量: 12
+              }
+            ],
+            total: 1
+          });
+        }
+        if (url.endsWith("/api/input-versions/8/activate") && method === "POST") {
+          return jsonResponse({ ...candidateVersion, active: true });
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      })
+    );
   });
 
   afterEach(() => {
@@ -136,20 +144,15 @@ describe("PurchaseSyncPanel", () => {
   it("keeps candidate activation available to administrators", async () => {
     const refreshVersions = vi.fn(async () => [{ ...candidateVersion, active: true }]);
     render(
-      <PurchaseSyncPanel
-        versions={[activeVersion, candidateVersion]}
-        canActivate
-        refreshVersions={refreshVersions}
-      />
+      <PurchaseSyncPanel versions={[activeVersion, candidateVersion]} canActivate refreshVersions={refreshVersions} />
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "启用最新数据" }));
     fireEvent.click(await screen.findByRole("button", { name: "确认启用" }));
 
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
-      "/api/input-versions/8/activate",
-      expect.objectContaining({ method: "POST" })
-    ));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/input-versions/8/activate", expect.objectContaining({ method: "POST" }))
+    );
     expect(refreshVersions).toHaveBeenCalled();
   });
 
@@ -157,17 +160,19 @@ describe("PurchaseSyncPanel", () => {
     vi.useFakeTimers();
     const requests: string[] = [];
     let statusRequestCount = 0;
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      requests.push(url.replace(/^.*(?=\/api\/)/, ""));
-      statusRequestCount += 1;
-      return jsonResponse({
-        configured: true,
-        job: statusRequestCount < 3
-          ? { ...succeededJob, status: "running", candidate_version_id: null }
-          : succeededJob
-      });
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requests.push(url.replace(/^.*(?=\/api\/)/, ""));
+        statusRequestCount += 1;
+        return jsonResponse({
+          configured: true,
+          job:
+            statusRequestCount < 3 ? { ...succeededJob, status: "running", candidate_version_id: null } : succeededJob
+        });
+      })
+    );
     const refreshed = vi.fn();
 
     function Harness() {
@@ -178,13 +183,7 @@ describe("PurchaseSyncPanel", () => {
         setVersions(nextVersions);
         return nextVersions;
       }, []);
-      return (
-        <PurchaseSyncPanel
-          versions={versions}
-          canActivate
-          refreshVersions={refreshVersions}
-        />
-      );
+      return <PurchaseSyncPanel versions={versions} canActivate refreshVersions={refreshVersions} />;
     }
 
     render(<Harness />);

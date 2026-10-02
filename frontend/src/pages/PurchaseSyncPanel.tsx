@@ -1,27 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  Button,
-  Drawer,
-  Popconfirm,
-  Space,
-  Skeleton,
-  Table,
-  Tag,
-  Typography,
-  message
-} from "antd";
+import { Alert, Button, Drawer, Popconfirm, Space, Skeleton, Table, Tag, Typography, message } from "antd";
 import { CheckCircleFilled, DownloadOutlined, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import type { TableProps } from "antd";
 
 import { api, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
-import type {
-  InputVersion,
-  PurchaseSyncIssue,
-  PurchaseSyncPreview,
-  PurchaseSyncStatus
-} from "../types";
+import type { InputVersion, PurchaseSyncIssue, PurchaseSyncPreview, PurchaseSyncStatus } from "../types";
 
 type SyncIssueFilter = "all" | "warning" | "error";
 type PurchasePreviewRow = PurchaseSyncPreview["rows"][number];
@@ -35,9 +19,7 @@ const previewColumns: NonNullable<TableProps<PurchasePreviewRow>["columns"]> = [
     dataIndex: "平台站点",
     width: 200,
     ellipsis: true,
-    render: (value: string | null) => (
-      value === "共享" ? <Tag color="warning">共享 · 不可自动匹配</Tag> : value || "—"
-    )
+    render: (value: string | null) => (value === "共享" ? <Tag color="warning">共享 · 不可自动匹配</Tag> : value || "—")
   },
   { title: "目的仓", dataIndex: "目的仓", width: 150, ellipsis: true },
   { title: "未交量", dataIndex: "未交量", width: 90, align: "right" }
@@ -87,10 +69,10 @@ export default function PurchaseSyncPanel({
         setSyncError("");
         const candidateId = next.job?.candidate_version_id ?? null;
         if (
-          next.job?.status === "succeeded"
-          && candidateId
-          && !versionsRef.current.some((version) => version.id === candidateId)
-          && refreshedCandidateRef.current !== candidateId
+          next.job?.status === "succeeded" &&
+          candidateId &&
+          !versionsRef.current.some((version) => version.id === candidateId) &&
+          refreshedCandidateRef.current !== candidateId
         ) {
           refreshedCandidateRef.current = candidateId;
           await refreshVersions();
@@ -114,16 +96,12 @@ export default function PurchaseSyncPanel({
 
   const syncJob = syncStatus?.job ?? null;
   const syncCandidate = syncJob?.candidate_version_id
-    ? versions.find((version) => version.id === syncJob.candidate_version_id) ?? null
+    ? (versions.find((version) => version.id === syncJob.candidate_version_id) ?? null)
     : null;
   const running = syncJob?.status === "queued" || syncJob?.status === "running";
   const configured = syncStatus?.configured ?? true;
-  const progress = syncJob?.total_orders
-    ? Math.round((syncJob.processed_orders / syncJob.total_orders) * 100)
-    : 0;
-  const filteredIssues = issues.filter((issue) => (
-    issueFilter === "all" || issue.severity === issueFilter
-  ));
+  const progress = syncJob?.total_orders ? Math.round((syncJob.processed_orders / syncJob.total_orders) * 100) : 0;
+  const filteredIssues = issues.filter((issue) => issueFilter === "all" || issue.severity === issueFilter);
   const issueColumns = useMemo<NonNullable<TableProps<PurchaseSyncIssue>["columns"]>>(
     () => [
       {
@@ -131,9 +109,7 @@ export default function PurchaseSyncPanel({
         dataIndex: "severity",
         width: 88,
         render: (severity: PurchaseSyncIssue["severity"]) => (
-          <Tag color={severity === "error" ? "error" : "warning"}>
-            {severity === "error" ? "错误" : "提醒"}
-          </Tag>
+          <Tag color={severity === "error" ? "error" : "warning"}>{severity === "error" ? "错误" : "提醒"}</Tag>
         )
       },
       { title: "问题", dataIndex: "message", width: 260 },
@@ -193,10 +169,7 @@ export default function PurchaseSyncPanel({
   const downloadIssues = async () => {
     if (!syncJob) return;
     try {
-      await download(
-        `/api/purchase-sync/${syncJob.id}/issues/download`,
-        `采购同步问题_${syncJob.id}.xlsx`
-      );
+      await download(`/api/purchase-sync/${syncJob.id}/issues/download`, `采购同步问题_${syncJob.id}.xlsx`);
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : "下载问题清单失败");
     }
@@ -209,9 +182,7 @@ export default function PurchaseSyncPanel({
     setPreviewError("");
     setPreview(null);
     try {
-      setPreview(await api<PurchaseSyncPreview>(
-        `/api/purchase-sync/${syncJob.id}/preview?limit=100`
-      ));
+      setPreview(await api<PurchaseSyncPreview>(`/api/purchase-sync/${syncJob.id}/preview?limit=100`));
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "读取候选数据失败");
     } finally {
@@ -258,11 +229,7 @@ export default function PurchaseSyncPanel({
               <Typography.Title level={5}>积加采购数据</Typography.Title>
               <Tag className="purchase-sync-scope-tag">待交货 + 交货中</Tag>
             </Space>
-            {!compact && (
-              <Typography.Text type="secondary">
-                同步未交清采购单；启用后用于新批次。
-              </Typography.Text>
-            )}
+            {!compact && <Typography.Text type="secondary">同步未交清采购单；启用后用于新批次。</Typography.Text>}
           </div>
           <Button
             type="primary"
@@ -282,7 +249,9 @@ export default function PurchaseSyncPanel({
           <div className="purchase-sync-progress" aria-label="采购同步进度">
             <div>
               <strong>{syncJob.status === "queued" ? "等待后台任务" : "正在读取采购单明细"}</strong>
-              <span>{syncJob.processed_orders}/{syncJob.total_orders || "—"} 张采购单</span>
+              <span>
+                {syncJob.processed_orders}/{syncJob.total_orders || "—"} 张采购单
+              </span>
             </div>
             <div className="purchase-sync-progress-track" aria-valuenow={progress} role="progressbar">
               <span style={{ width: `${progress}%` }} />
@@ -299,12 +268,16 @@ export default function PurchaseSyncPanel({
             showIcon
             title={`发现 ${syncJob.issue_count} 个基础资料映射问题，未生成候选版本`}
             description="核对积加站点、SKU 或目的仓后重新同步；当前启用版本不变。"
-            action={(
+            action={
               <Space size={4} wrap>
-                <Button size="small" onClick={() => void openIssues("error")}>查看异常数据</Button>
-                <Button size="small" onClick={() => void downloadIssues()}>下载问题清单</Button>
+                <Button size="small" onClick={() => void openIssues("error")}>
+                  查看异常数据
+                </Button>
+                <Button size="small" onClick={() => void downloadIssues()}>
+                  下载问题清单
+                </Button>
               </Space>
-            )}
+            }
           />
         )}
 
@@ -313,7 +286,9 @@ export default function PurchaseSyncPanel({
         )}
 
         {syncJob?.status === "succeeded" && (
-          <div className={`purchase-sync-result${syncCandidate?.active ? " is-active" : ""}${detailsOpen ? "" : " is-collapsed"}`}>
+          <div
+            className={`purchase-sync-result${syncCandidate?.active ? " is-active" : ""}${detailsOpen ? "" : " is-collapsed"}`}
+          >
             <div className="purchase-sync-result-copy">
               <CheckCircleFilled />
               <div>
@@ -327,10 +302,22 @@ export default function PurchaseSyncPanel({
             </div>
             {detailsOpen && (
               <dl className="purchase-sync-diff">
-                <div><dt>新增匹配项</dt><dd>{syncJob.diff.added_lines ?? 0}</dd></div>
-                <div><dt>余额变化项</dt><dd>{syncJob.diff.changed_lines ?? 0}</dd></div>
-                <div><dt>移除匹配项</dt><dd>{syncJob.diff.removed_lines ?? 0}</dd></div>
-                <div><dt>候选未交总量</dt><dd>{syncJob.diff.after_quantity ?? 0}</dd></div>
+                <div>
+                  <dt>新增匹配项</dt>
+                  <dd>{syncJob.diff.added_lines ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>余额变化项</dt>
+                  <dd>{syncJob.diff.changed_lines ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>移除匹配项</dt>
+                  <dd>{syncJob.diff.removed_lines ?? 0}</dd>
+                </div>
+                <div>
+                  <dt>候选未交总量</dt>
+                  <dd>{syncJob.diff.after_quantity ?? 0}</dd>
+                </div>
               </dl>
             )}
             {detailsOpen && syncJob.warning_count > 0 && (
@@ -339,12 +326,16 @@ export default function PurchaseSyncPanel({
                 showIcon
                 title={`包含 ${syncJob.warning_count} 条“共享”站点数据`}
                 description="数据保留原值，但不能参与交货匹配；启用前需业务复核。"
-                action={(
+                action={
                   <Space size={4} wrap>
-                    <Button size="small" onClick={() => void openIssues("warning")}>查看异常数据</Button>
-                    <Button size="small" onClick={() => void downloadIssues()}>下载提醒清单</Button>
+                    <Button size="small" onClick={() => void openIssues("warning")}>
+                      查看异常数据
+                    </Button>
+                    <Button size="small" onClick={() => void downloadIssues()}>
+                      下载提醒清单
+                    </Button>
                   </Space>
-                )}
+                }
               />
             )}
             <Space className="purchase-sync-actions" size={8} wrap>
@@ -365,16 +356,19 @@ export default function PurchaseSyncPanel({
                   disabled={!syncCandidate}
                   onConfirm={() => void activateCandidate()}
                 >
-                  <Button type="primary" loading={syncActivating} disabled={!syncCandidate}>启用最新数据</Button>
+                  <Button type="primary" loading={syncActivating} disabled={!syncCandidate}>
+                    启用最新数据
+                  </Button>
                 </Popconfirm>
               )}
               {!syncCandidate?.active && !canActivate && syncCandidate && (
-                <Typography.Text className="purchase-sync-permission-note" type="secondary">待管理员启用</Typography.Text>
+                <Typography.Text className="purchase-sync-permission-note" type="secondary">
+                  待管理员启用
+                </Typography.Text>
               )}
             </Space>
           </div>
         )}
-
       </section>
 
       <Drawer
@@ -412,15 +406,32 @@ export default function PurchaseSyncPanel({
         size={980}
         open={issuesOpen}
         destroyOnHidden
-        extra={<Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadIssues()}>下载完整清单</Button>}
+        extra={
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadIssues()}>
+            下载完整清单
+          </Button>
+        }
         onClose={() => setIssuesOpen(false)}
       >
         <div className="purchase-sync-issues-toolbar">
-          <Typography.Text type="secondary">共 {issues.length} 条，显示 {filteredIssues.length} 条。</Typography.Text>
+          <Typography.Text type="secondary">
+            共 {issues.length} 条，显示 {filteredIssues.length} 条。
+          </Typography.Text>
           <Space size={6} wrap>
             <Typography.Text type="secondary">筛选：</Typography.Text>
-            {([ ["warning", "共享站点提醒"], ["error", "映射错误"], ["all", "全部"] ] as Array<[SyncIssueFilter, string]>).map(([value, label]) => (
-              <Button key={value} size="small" type={issueFilter === value ? "primary" : "default"} onClick={() => setIssueFilter(value)}>
+            {(
+              [
+                ["warning", "共享站点提醒"],
+                ["error", "映射错误"],
+                ["all", "全部"]
+              ] as Array<[SyncIssueFilter, string]>
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                size="small"
+                type={issueFilter === value ? "primary" : "default"}
+                onClick={() => setIssueFilter(value)}
+              >
                 {label}
               </Button>
             ))}
@@ -431,7 +442,9 @@ export default function PurchaseSyncPanel({
         ) : (
           <Table<PurchaseSyncIssue>
             className="purchase-sync-issues-table"
-            rowKey={(issue) => `${issue.code}-${issue.po_code}-${issue.sku}-${issue.source_site}-${issue.supplier_code}`}
+            rowKey={(issue) =>
+              `${issue.code}-${issue.po_code}-${issue.sku}-${issue.source_site}-${issue.supplier_code}`
+            }
             size="small"
             loading={issuesLoading}
             columns={issueColumns}
