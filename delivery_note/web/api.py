@@ -21,7 +21,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -69,6 +69,16 @@ from .batch_views import (
     merged_export_path, merged_export_ready,
 )
 from .database import Database
+from .errors import (
+    CodedHTTPException,
+    DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
+    INPUT_VERSION_NAME_EXISTS_CODE,
+    commit_once,
+    register_exception_handlers,
+    rollback_draft_conflict,
+    rollback_integrity_conflict,
+)
+from .position_import_candidates import PositionImportCandidates
 from .overreceipt_routes import register_overreceipt_routes
 from .self_operated_rule_routes import register_self_operated_rule_routes
 from .input_version_routes import register_input_version_routes
@@ -97,7 +107,6 @@ from .models import (
     User,
 )
 from .position_drafts import (
-    DRAFT_REVISION_CONFLICT_CODE,
     ROW_FIELDS,
     DraftConflictError,
     DuplicateInputVersionNameError,
@@ -135,18 +144,6 @@ from .serializers import (
     version_json,
     job_json,
 )
-
-
-
-
-class CodedHTTPException(HTTPException):
-    def __init__(self, *, detail: str, code: str) -> None:
-        super().__init__(status_code=409, detail=detail)
-        self.code = code
-
-
-DRAFT_IMPORT_PREVIEW_EXPIRED_CODE = "draft_import_preview_expired"
-INPUT_VERSION_NAME_EXISTS_CODE = "input_version_name_exists"
 
 
 BATCH_STATUSES = {
@@ -428,18 +425,8 @@ def create_app(
         else _boolean_environment("SESSION_COOKIE_SECURE", False)
     )
     import_candidate_root = storage / "temporary" / "position-imports"
-    import_candidate_root.mkdir(parents=True, exist_ok=True)
-    startup_expiry_cutoff = datetime.now().timestamp() - configured_import_candidate_ttl
-    for stale_candidate in import_candidate_root.iterdir():
-        if (
-            stale_candidate.is_file()
-            and stale_candidate.stat().st_mtime <= startup_expiry_cutoff
-        ):
-            stale_candidate.unlink(missing_ok=True)
-    # 当前编排只运行一个接口进程，因此令牌保存在进程内。
-    # 多进程部署时，必须将该注册表迁移到共享数据库。
-    import_candidates: dict[str, dict] = {}
-    import_candidates_lock = Lock()
+    import_candidates_state = PositionImportCandidates(import_candidate_root)
+    import_candidates_state.remove_expired(configured_import_candidate_ttl)
     batch_file_upload_lock = asyncio.Lock()
     upload_parse_semaphore = asyncio.Semaphore(
         configured_max_concurrent_upload_parses
@@ -477,15 +464,8 @@ def create_app(
     bootstrap_builtin_templates(database)
 
     app = FastAPI(title="供应链交货处理系统", version="1.0.0")
+    register_exception_handlers(app)
 
-    @app.exception_handler(CodedHTTPException)
-    async def coded_http_exception_handler(
-        _request: Request, error: CodedHTTPException
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=error.status_code,
-            content={"detail": error.detail, "code": error.code},
-        )
 
     app.state.database = database
     app.state.storage_root = storage
@@ -497,7 +477,7 @@ def create_app(
     app.state.position_frame_cache = position_frame_cache
     app.state.draft_analysis_cache = draft_analysis_cache
     app.state.session_cookie_secure = configured_session_cookie_secure
-    app.state.position_import_candidates = import_candidates
+    app.state.position_import_candidates = import_candidates_state.entries
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -551,77 +531,6 @@ def create_app(
                 summary,
             ),
         )
-
-    def commit_once(session: Session) -> None:
-        try:
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-
-    def rollback_draft_conflict(session: Session, error: DraftConflictError) -> None:
-        if session.in_transaction():
-            session.rollback()
-        raise CodedHTTPException(
-            code=error.code,
-            detail=str(error).strip() or "草稿已被其他管理员更新，请刷新后重试",
-        ) from error
-
-
-    def rollback_integrity_conflict(session: Session, error: Exception) -> None:
-        if session.in_transaction():
-            session.rollback()
-        raise CodedHTTPException(
-            code=DRAFT_REVISION_CONFLICT_CODE,
-            detail="草稿写入发生并发冲突，请刷新后重试",
-        ) from error
-
-    def remove_import_candidate(token: str) -> dict | None:
-        with import_candidates_lock:
-            candidate = import_candidates.pop(token, None)
-        if candidate is not None:
-            Path(candidate["path"]).unlink(missing_ok=True)
-        return candidate
-
-    def register_import_candidate(token: str, candidate: dict) -> None:
-        with import_candidates_lock:
-            import_candidates[token] = candidate
-
-    def remove_draft_import_candidates(draft_id: int) -> None:
-        with import_candidates_lock:
-            tokens = [
-                token
-                for token, candidate in import_candidates.items()
-                if candidate["draft_id"] == draft_id
-            ]
-        for token in tokens:
-            remove_import_candidate(token)
-
-    def remove_expired_import_candidates() -> None:
-        now = datetime.utcnow()
-        with import_candidates_lock:
-            expired = [
-                (token, import_candidates.pop(token))
-                for token in list(import_candidates)
-                if import_candidates[token]["expires_at"] <= now
-            ]
-        for _token, candidate in expired:
-            Path(candidate["path"]).unlink(missing_ok=True)
-        expiry_cutoff = (
-            datetime.now().timestamp() - app.state.import_candidate_ttl_seconds
-        )
-        with import_candidates_lock:
-            registered_paths = {
-                Path(candidate["path"]).resolve()
-                for candidate in import_candidates.values()
-            }
-        for candidate_path in import_candidate_root.iterdir():
-            if (
-                candidate_path.is_file()
-                and candidate_path.resolve() not in registered_paths
-                and candidate_path.stat().st_mtime <= expiry_cutoff
-            ):
-                candidate_path.unlink(missing_ok=True)
 
 
     register_input_version_routes(
@@ -862,7 +771,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         session.refresh(draft)
         session.refresh(row)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return {"row": position_row_json(row), "revision": draft.revision}
 
     @app.put("/api/input-drafts/{draft_id}/rows/{row_id}")
@@ -897,7 +806,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(error)) from error
         session.refresh(draft)
         session.refresh(row)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return {"row": position_row_json(row), "revision": draft.revision}
 
     @app.delete("/api/input-drafts/{draft_id}/rows/{row_id}")
@@ -932,7 +841,7 @@ def create_app(
                 session.rollback()
             raise HTTPException(status_code=400, detail=str(error)) from error
         session.refresh(draft)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return {"row_id": row_id, "revision": draft.revision}
 
     @app.post("/api/input-drafts/{draft_id}/rows/bulk-delete")
@@ -971,7 +880,7 @@ def create_app(
                 session.rollback()
             raise HTTPException(status_code=400, detail=str(error)) from error
         session.refresh(draft)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return {"deleted_ids": payload.row_ids, "revision": draft.revision}
 
     @app.post("/api/input-drafts/{draft_id}/import-preview")
@@ -982,7 +891,10 @@ def create_app(
         _admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
     ):
-        await run_in_threadpool(remove_expired_import_candidates)
+        await run_in_threadpool(
+            import_candidates_state.remove_expired,
+            app.state.import_candidate_ttl_seconds,
+        )
         draft = get_draft_or_404(draft_id, session)
         try:
             require_revision(draft, revision)
@@ -1012,9 +924,9 @@ def create_app(
                 status_code=400,
                 detail=f"导入文件校验失败：{error}",
             ) from error
-        await run_in_threadpool(remove_draft_import_candidates, draft.id)
+        await run_in_threadpool(import_candidates_state.remove_draft, draft.id)
         await run_in_threadpool(
-            register_import_candidate,
+            import_candidates_state.register,
             token,
             {
                 "draft_id": draft.id,
@@ -1041,10 +953,9 @@ def create_app(
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        remove_expired_import_candidates()
+        import_candidates_state.remove_expired(app.state.import_candidate_ttl_seconds)
         draft = get_draft_or_404(draft_id, session)
-        with import_candidates_lock:
-            candidate = import_candidates.get(payload.token)
+        candidate = import_candidates_state.peek(payload.token)
         if candidate is not None and candidate["created_by"] != admin.id:
             if session.in_transaction():
                 session.rollback()
@@ -1057,7 +968,7 @@ def create_app(
             or candidate["draft_id"] != draft.id
             or candidate["revision"] != payload.revision
         ):
-            remove_import_candidate(payload.token)
+            import_candidates_state.remove(payload.token)
             if session.in_transaction():
                 session.rollback()
             raise CodedHTTPException(
@@ -1067,10 +978,9 @@ def create_app(
         try:
             require_revision(draft, payload.revision)
         except DraftConflictError as error:
-            remove_import_candidate(payload.token)
+            import_candidates_state.remove(payload.token)
             rollback_draft_conflict(session, error)
-        with import_candidates_lock:
-            candidate = import_candidates.pop(payload.token, None)
+        candidate = import_candidates_state.take(payload.token)
         if candidate is None:
             if session.in_transaction():
                 session.rollback()
@@ -1103,7 +1013,7 @@ def create_app(
         finally:
             candidate_path.unlink(missing_ok=True)
         session.refresh(draft)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return {"diff": diff, "revision": draft.revision}
 
     @app.get("/api/input-drafts/{draft_id}/download")
@@ -1195,7 +1105,7 @@ def create_app(
             ) from error
         session.refresh(version)
         session.refresh(draft)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return {
             **version_json(version),
             "draft_revision": draft.revision,
@@ -1223,7 +1133,7 @@ def create_app(
         except IntegrityError as error:
             rollback_integrity_conflict(session, error)
         session.refresh(draft)
-        remove_draft_import_candidates(draft.id)
+        import_candidates_state.remove_draft(draft.id)
         return draft_json(session, draft, draft_analysis_cache)
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
