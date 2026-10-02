@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentProps, KeyboardEvent } from "react";
 import {
   Alert,
   App as AntApp,
@@ -190,6 +191,9 @@ export default function BatchesPage({
   const [cleaningEmpty, setCleaningEmpty] = useState(false);
   const [selectedBatchIds, setSelectedBatchIds] = useState<number[]>([]);
   const [deletingBatchIds, setDeletingBatchIds] = useState<number[]>([]);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+  const bulkDeleteButtonRef = useRef<HTMLButtonElement>(null);
+  const bulkDeleteCancelRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
   const [statusFilter, setStatusFilter] = useState<string>();
@@ -259,7 +263,12 @@ export default function BatchesPage({
 
   useEffect(() => {
     setSelectedBatchIds([]);
+    setBulkDeleteConfirmOpen(false);
   }, [workflow]);
+
+  useEffect(() => {
+    if (!active || !selectedBatchIds.length) setBulkDeleteConfirmOpen(false);
+  }, [active, selectedBatchIds.length]);
 
   useEffect(() => {
     const status = syncStatus?.job?.status;
@@ -515,6 +524,22 @@ export default function BatchesPage({
   };
 
   const deleting = deletingBatchIds.length > 0;
+  const cancelBulkDelete = () => {
+    setBulkDeleteConfirmOpen(false);
+    if (active && bulkDeleteButtonRef.current?.isConnected) {
+      bulkDeleteButtonRef.current.focus({ preventScroll: true });
+    }
+  };
+  const closeBulkDeleteOnEscape = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape" || !bulkDeleteConfirmOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancelBulkDelete();
+  };
+  const bulkDeleteCancelProps: ComponentProps<typeof Button> = {
+    ref: bulkDeleteCancelRef,
+    onKeyDown: closeBulkDeleteOnEscape
+  };
   const syncJob = syncStatus?.job ?? null;
   const syncRunning = syncJob?.status === "queued" || syncJob?.status === "running";
   const syncCandidateActive = Boolean(
@@ -800,15 +825,30 @@ export default function BatchesPage({
           )}
           {canDeleteBatches && selectedBatchIds.length > 0 && (
             <Popconfirm
+              open={active && bulkDeleteConfirmOpen}
+              onOpenChange={setBulkDeleteConfirmOpen}
+              afterOpenChange={(open) => {
+                // 等浮层显示后再聚焦，避免把焦点送进隐藏或已经离开的页面。
+                if (open && bulkDeleteConfirmOpen && active && bulkDeleteButtonRef.current?.isConnected) {
+                  bulkDeleteCancelRef.current?.focus({ preventScroll: true });
+                }
+              }}
               title={`永久删除选中的 ${selectedBatchIds.length} 个批次？`}
               description="将删除批次记录、上传文件和结果文件，无法恢复。"
               okText="永久删除"
               cancelText="取消"
-              okButtonProps={{ danger: true }}
+              okButtonProps={{ danger: true, onKeyDown: closeBulkDeleteOnEscape }}
+              cancelButtonProps={bulkDeleteCancelProps}
               disabled={!selectedBatchIds.length}
-              onConfirm={() => void deleteSelectedBatches(selectedBatchIds)}
+              onCancel={cancelBulkDelete}
+              onConfirm={() => {
+                setBulkDeleteConfirmOpen(false);
+                void deleteSelectedBatches(selectedBatchIds);
+              }}
             >
               <Button
+                ref={bulkDeleteButtonRef}
+                onKeyDown={closeBulkDeleteOnEscape}
                 danger
                 size="small"
                 icon={<DeleteOutlined />}

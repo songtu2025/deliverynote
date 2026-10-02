@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { App as AntApp, message } from "antd";
+import { App as AntApp, ConfigProvider, message } from "antd";
+import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
@@ -55,6 +56,14 @@ function setFourteenBatches() {
   }));
 }
 let deleteRequests: number[][];
+
+function FocusTestApp({ children }: PropsWithChildren) {
+  return (
+    <ConfigProvider theme={{ token: { motion: false } }}>
+      <AntApp>{children}</AntApp>
+    </ConfigProvider>
+  );
+}
 
 describe("BatchesPage", () => {
   beforeEach(() => {
@@ -413,6 +422,81 @@ describe("BatchesPage", () => {
     expect(staticSuccess).not.toHaveBeenCalled();
     expect(staticWarning).not.toHaveBeenCalled();
   });
+
+  it.each(["delivery", "self_operated_inbound"] as const)(
+    "restores bulk-delete focus after cancellation and Escape for %s",
+    async (workflow) => {
+      batchRows[0].workflow = workflow;
+      render(<BatchesPage workflow={workflow} canDeleteBatches onOpen={vi.fn()} />, { wrapper: FocusTestApp });
+      fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" }));
+      const trigger = screen.getByRole("button", { name: "删除已选（1）" });
+
+      for (const dismiss of ["cancel", "escape"] as const) {
+        trigger.focus();
+        fireEvent.click(trigger);
+        const popup = within(await screen.findByRole("tooltip"));
+        const cancel = popup.getByRole("button", { name: /取\s*消/ });
+        await waitFor(() => expect(cancel).toHaveFocus());
+        if (dismiss === "cancel") fireEvent.click(cancel);
+        else fireEvent.keyDown(cancel, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+        expect(trigger).toHaveFocus();
+        expect(screen.getByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" })).toBeChecked();
+      }
+
+      fireEvent.click(trigger);
+      const popup = within(await screen.findByRole("tooltip"));
+      const confirm = popup.getByRole("button", { name: "永久删除" });
+      confirm.focus();
+      fireEvent.keyDown(confirm, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+      expect(trigger).toHaveFocus();
+      expect(deleteRequests).toEqual([]);
+    }
+  );
+
+  it.each(["delivery", "self_operated_inbound"] as const)(
+    "does not reclaim bulk-delete focus after an outside click or leaving %s",
+    async (workflow) => {
+      batchRows[0].workflow = workflow;
+      const { rerender } = render(<BatchesPage workflow={workflow} canDeleteBatches onOpen={vi.fn()} />, {
+        wrapper: FocusTestApp
+      });
+      fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" }));
+      const trigger = screen.getByRole("button", { name: "删除已选（1）" });
+      const search = screen.getByRole("textbox", { name: "搜索" });
+      fireEvent.click(trigger);
+      await screen.findByRole("tooltip");
+      fireEvent.pointerDown(search);
+      fireEvent.mouseDown(search);
+      search.focus();
+      fireEvent.click(search);
+      await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+      expect(search).toHaveFocus();
+
+      fireEvent.click(trigger);
+      await screen.findByRole("tooltip");
+      search.focus();
+      rerender(<BatchesPage workflow={workflow} active={false} canDeleteBatches onOpen={vi.fn()} />);
+      await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+      expect(search).toHaveFocus();
+      rerender(<BatchesPage workflow={workflow} canDeleteBatches onOpen={vi.fn()} />);
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+      fireEvent.click(trigger);
+      await screen.findByRole("tooltip");
+      const checkbox = screen.getByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" });
+      checkbox.focus();
+      fireEvent.click(checkbox);
+      await waitFor(() => expect(screen.queryByRole("button", { name: "删除已选（1）" })).not.toBeInTheDocument());
+      expect(trigger.isConnected).toBe(false);
+      expect(trigger).not.toHaveFocus();
+      fireEvent.click(screen.getByRole("checkbox", { name: "选择批次 2026-07-21 交货批次" }));
+      expect(screen.getByRole("button", { name: "删除已选（1）" })).toBeInTheDocument();
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+      expect(deleteRequests).toEqual([]);
+    }
+  );
 
   it("loads batch pages and applies search on the server", async () => {
     setFourteenBatches();
