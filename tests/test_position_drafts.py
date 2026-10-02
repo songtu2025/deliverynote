@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import delivery_note.web.api as web_api_module
+import delivery_note.web.caches as cache_module
 import delivery_note.web.position_drafts as position_drafts_module
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
@@ -177,7 +178,7 @@ class PositionDraftTests(unittest.TestCase):
             )
 
     def test_draft_analysis_cache_is_bounded_and_serializes_same_revision(self):
-        cache = web_api_module._DraftAnalysisCache(max_entries=2)
+        cache = cache_module.DraftAnalysisCache(max_entries=2)
         loaded_keys: list[tuple[int, int]] = []
 
         def load(key):
@@ -191,7 +192,7 @@ class PositionDraftTests(unittest.TestCase):
         cache.get(2, 1, lambda: load((2, 1)))
         self.assertEqual(loaded_keys, [(1, 1), (2, 1), (3, 1), (2, 1)])
 
-        concurrent_cache = web_api_module._DraftAnalysisCache(max_entries=2)
+        concurrent_cache = cache_module.DraftAnalysisCache(max_entries=2)
         concurrent_loads = 0
         concurrent_misses = Barrier(2)
 

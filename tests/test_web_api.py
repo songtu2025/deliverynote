@@ -24,6 +24,7 @@ from tests.asgi_client import SyncASGIClient
 
 try:
     import delivery_note.web.api as web_api_module
+    import delivery_note.web.caches as cache_module
     from delivery_note.web.api import create_app
     from delivery_note.web.models import (
         AuthSession,
@@ -731,7 +732,7 @@ class WebApiTests(unittest.TestCase):
         )
 
     def test_input_inspection_cache_is_bounded_with_bounded_pages(self):
-        cache = web_api_module._InputInspectionCache(
+        cache = cache_module.InputInspectionCache(
             max_entries=2,
             max_pages_per_version=2,
         )
@@ -775,7 +776,7 @@ class WebApiTests(unittest.TestCase):
         get_version(2)
         self.assertEqual(full_loads, [1, 2, 3, 2])
 
-        page_cache = web_api_module._InputInspectionCache(
+        page_cache = cache_module.InputInspectionCache(
             max_entries=1,
             max_pages_per_version=2,
         )
@@ -801,7 +802,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(page_loads, [10, 20, 0])
 
     def test_input_inspection_cache_single_flight_and_parallel_versions(self):
-        cache = web_api_module._InputInspectionCache(max_entries=4)
+        cache = cache_module.InputInspectionCache(max_entries=4)
         same_version_loads = 0
 
         def result(version_id):
@@ -844,7 +845,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(same_version_loads, 1)
         self.assertEqual(same_results[0], same_results[1])
 
-        parallel_cache = web_api_module._InputInspectionCache(max_entries=4)
+        parallel_cache = cache_module.InputInspectionCache(max_entries=4)
         parallel_loads = Barrier(2)
 
         def load_parallel(version_id):
@@ -870,7 +871,7 @@ class WebApiTests(unittest.TestCase):
         )
 
     def test_input_inspection_cache_retries_after_loader_failure(self):
-        cache = web_api_module._InputInspectionCache(max_entries=2)
+        cache = cache_module.InputInspectionCache(max_entries=2)
         attempts = 0
 
         def load():
@@ -888,6 +889,18 @@ class WebApiTests(unittest.TestCase):
         recovered = cache.get(1, 0, 20, load, lambda summary: {})
         self.assertEqual(attempts, 2)
         self.assertEqual(recovered["summary"]["row_count"], 0)
+
+        # 页面加载失败只重试该页，不应重新检查整个版本。
+        def broken_page(_summary):
+            raise ValueError("页面读取失败")
+
+        with self.assertRaisesRegex(ValueError, "页面读取失败"):
+            cache.get(1, 20, 20, load, broken_page)
+        page = cache.get(1, 20, 20, load, lambda summary: {"offset": 20})
+        repeated = cache.get(1, 20, 20, load, broken_page)
+        self.assertEqual(page["preview"]["offset"], 20)
+        self.assertEqual(repeated, page)
+        self.assertEqual(attempts, 2)
 
     @patch.dict(
         "os.environ",
@@ -3133,9 +3146,9 @@ class WebApiTests(unittest.TestCase):
         finally:
             event.remove(Session, "loaded_as_persistent", record_loaded)
         self.assertEqual(loaded_exceptions, [])
-        original_reader = web_api_module.read_position_workbook
+        original_reader = cache_module.read_position_workbook
         with patch.object(
-            web_api_module,
+            cache_module,
             "read_position_workbook",
             wraps=original_reader,
         ) as reader:
@@ -3486,7 +3499,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(invalid.status_code, 422)
 
     def test_position_frame_cache_evicts_least_recent_version(self):
-        cache = web_api_module._PositionFrameCache(max_entries=2)
+        cache = cache_module.PositionFrameCache(max_entries=2)
         loaded_versions = []
 
         def read_frame(path):
@@ -3495,7 +3508,7 @@ class WebApiTests(unittest.TestCase):
             return pd.DataFrame({"version_id": [version_id]})
 
         with patch.object(
-            web_api_module,
+            cache_module,
             "read_position_workbook",
             side_effect=read_frame,
         ):
@@ -3508,7 +3521,7 @@ class WebApiTests(unittest.TestCase):
         self.assertEqual(loaded_versions, [1, 2, 3, 2])
 
     def test_position_frame_cache_serializes_concurrent_misses(self):
-        cache = web_api_module._PositionFrameCache(max_entries=2)
+        cache = cache_module.PositionFrameCache(max_entries=2)
         concurrent_reads = Barrier(2)
 
         def read_frame(_path):
@@ -3519,7 +3532,7 @@ class WebApiTests(unittest.TestCase):
             return pd.DataFrame({"version_id": [1]})
 
         with patch.object(
-            web_api_module,
+            cache_module,
             "read_position_workbook",
             side_effect=read_frame,
         ) as reader:

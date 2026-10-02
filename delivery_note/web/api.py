@@ -1,6 +1,4 @@
 import asyncio
-from collections import OrderedDict
-from concurrent.futures import Future
 from datetime import datetime, timedelta, timezone
 import logging
 import os
@@ -27,7 +25,6 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
 from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
@@ -117,6 +114,38 @@ from .position_drafts import (
     require_revision,
 )
 from .sync_routes import register_sync_routes
+from .schemas import (
+    LoginPayload,
+    UserPayload,
+    UserStatusPayload,
+    PasswordResetPayload,
+    BatchPayload,
+    BatchDeletePayload,
+    FileOrderPayload,
+    DraftMutationPayload,
+    PositionRowPayload,
+    BulkDeletePayload,
+    ImportApplyPayload,
+    PublishDraftPayload,
+    OverreceiptRulePayload,
+    SelfOperatedOverreceiptRulePayload,
+    RuleVersionNamePayload,
+    GerpgoConfigPayload,
+)
+from .caches import (
+    InputInspectionCache,
+    PositionFrameCache,
+    DraftAnalysisCache,
+)
+from .serializers import (
+    utc_isoformat,
+    gerpgo_config_json,
+    user_json,
+    version_json,
+    overreceipt_rule_json,
+    self_operated_overreceipt_rule_json,
+    job_json,
+)
 
 
 LOGGER = logging.getLogger(__name__)
@@ -223,334 +252,6 @@ def _deleted_session_cookie_header(*, secure: bool) -> str:
     return response.headers["set-cookie"]
 
 
-class _InputInspectionCache:
-    """按版本缓存摘要和少量页面，并协调并发加载。"""
-
-    def __init__(self, max_entries: int, max_pages_per_version: int = 4):
-        if max_entries <= 0 or max_pages_per_version <= 0:
-            raise ValueError("输入检查缓存容量必须大于 0")
-        self._max_entries = max_entries
-        self._max_pages_per_version = max_pages_per_version
-        self._inspections: OrderedDict[int, dict] = OrderedDict()
-        self._version_loads: dict[int, Future[None]] = {}
-        self._page_loads: dict[tuple[int, int, int], Future[dict]] = {}
-        self._lock = Lock()
-
-    @staticmethod
-    def _result(entry: dict, page_key: tuple[int, int]) -> dict:
-        return {
-            "summary": entry["summary"],
-            "preview": entry["pages"][page_key],
-        }
-
-    def _store_page(
-        self,
-        entry: dict,
-        page_key: tuple[int, int],
-        preview: dict,
-    ) -> None:
-        pages = entry["pages"]
-        pages[page_key] = preview
-        pages.move_to_end(page_key)
-        if len(pages) > self._max_pages_per_version:
-            pages.popitem(last=False)
-
-    def get(
-        self,
-        version_id: int,
-        offset: int,
-        limit: int,
-        loader: Callable[[], dict],
-        page_loader: Callable[[dict], dict],
-    ) -> dict:
-        page_key = (offset, limit)
-        with self._lock:
-            entry = self._inspections.get(version_id)
-            if entry is not None:
-                self._inspections.move_to_end(version_id)
-                if page_key in entry["pages"]:
-                    entry["pages"].move_to_end(page_key)
-                    return self._result(entry, page_key)
-                load_key = (version_id, offset, limit)
-                page_future = self._page_loads.get(load_key)
-                load_page = page_future is None
-                if load_page:
-                    page_future = Future()
-                    self._page_loads[load_key] = page_future
-            else:
-                version_future = self._version_loads.get(version_id)
-                load_version = version_future is None
-                if load_version:
-                    version_future = Future()
-                    self._version_loads[version_id] = version_future
-
-        if entry is None:
-            if not load_version:
-                version_future.result()
-                return self.get(
-                    version_id,
-                    offset,
-                    limit,
-                    loader,
-                    page_loader,
-                )
-            try:
-                inspection = loader()
-                loaded_entry = {
-                    "summary": inspection["summary"],
-                    "pages": OrderedDict(),
-                }
-                self._store_page(
-                    loaded_entry,
-                    page_key,
-                    inspection["preview"],
-                )
-            except BaseException as error:
-                with self._lock:
-                    self._version_loads.pop(version_id, None)
-                version_future.set_exception(error)
-                raise
-
-            with self._lock:
-                self._inspections[version_id] = loaded_entry
-                self._inspections.move_to_end(version_id)
-                if len(self._inspections) > self._max_entries:
-                    self._inspections.popitem(last=False)
-                self._version_loads.pop(version_id, None)
-            version_future.set_result(None)
-            return self._result(loaded_entry, page_key)
-
-        if not load_page:
-            preview = page_future.result()
-            return {"summary": entry["summary"], "preview": preview}
-
-        try:
-            preview = page_loader(entry["summary"])
-        except BaseException as error:
-            with self._lock:
-                self._page_loads.pop(load_key, None)
-            page_future.set_exception(error)
-            raise
-
-        with self._lock:
-            current_entry = self._inspections.get(version_id)
-            if current_entry is entry:
-                self._store_page(entry, page_key, preview)
-            self._page_loads.pop(load_key, None)
-        page_future.set_result(preview)
-        return {"summary": entry["summary"], "preview": preview}
-
-
-class _PositionFrameCache:
-    """按最近使用顺序缓存不可变的库位资料版本。"""
-
-    def __init__(self, max_entries: int):
-        if max_entries <= 0:
-            raise ValueError("库位资料缓存容量必须大于 0")
-        self._max_entries = max_entries
-        self._frames: OrderedDict[int, pd.DataFrame] = OrderedDict()
-        self._lock = Lock()
-
-    def get(
-        self,
-        version_id: int,
-        path: Path,
-        loader: Callable[[Path], pd.DataFrame] | None = None,
-    ) -> pd.DataFrame:
-        frame_loader = loader or read_position_workbook
-        with self._lock:
-            frame = self._frames.get(version_id)
-            if frame is not None:
-                self._frames.move_to_end(version_id)
-                return frame
-
-            frame = frame_loader(path)
-            self._frames[version_id] = frame
-            if len(self._frames) > self._max_entries:
-                self._frames.popitem(last=False)
-            return frame
-
-
-class _DraftAnalysisCache:
-    """按草稿修订缓存纯数据分析结果，不保留跨会话 ORM 实体。"""
-
-    def __init__(self, max_entries: int):
-        if max_entries <= 0:
-            raise ValueError("草稿分析缓存容量必须大于 0")
-        self._max_entries = max_entries
-        self._analyses: OrderedDict[tuple[int, int], dict] = OrderedDict()
-        self._lock = Lock()
-
-    def get(
-        self,
-        draft_id: int,
-        revision: int,
-        loader: Callable[[], dict],
-    ) -> dict:
-        key = (draft_id, revision)
-        with self._lock:
-            analysis = self._analyses.get(key)
-            if analysis is not None:
-                self._analyses.move_to_end(key)
-                return analysis
-
-            analysis = loader()
-            self._analyses[key] = analysis
-            if len(self._analyses) > self._max_entries:
-                self._analyses.popitem(last=False)
-            return analysis
-
-
-def _utc_isoformat(value: datetime) -> str:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-class LoginPayload(BaseModel):
-    username: str
-    password: str
-
-
-class UserPayload(BaseModel):
-    username: str = Field(min_length=1, max_length=100)
-    password: str = Field(min_length=8, max_length=200)
-    role: str = "operator"
-
-
-class UserStatusPayload(BaseModel):
-    active: bool
-
-
-class PasswordResetPayload(BaseModel):
-    password: str = Field(min_length=8, max_length=200)
-
-
-class BatchPayload(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-
-
-class BatchDeletePayload(BaseModel):
-    batch_ids: list[int] = Field(min_length=1)
-
-
-class FileOrderPayload(BaseModel):
-    file_ids: list[int]
-
-
-class DraftMutationPayload(BaseModel):
-    revision: int = Field(ge=1)
-
-
-class PositionRowPayload(DraftMutationPayload):
-    store_site: str = Field(min_length=1)
-    jiaji_sku: str = Field(min_length=1)
-    msku: str = ""
-    scale_position: str = ""
-    stocking_position: str = ""
-
-
-class BulkDeletePayload(DraftMutationPayload):
-    row_ids: list[int] = Field(min_length=1)
-
-
-class ImportApplyPayload(DraftMutationPayload):
-    token: str = Field(min_length=1)
-
-
-class PublishDraftPayload(DraftMutationPayload):
-    name: str = Field(min_length=1, max_length=200)
-    confirm_warnings: bool = False
-
-
-class OverreceiptRulePayload(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    short_tail_limit: int = Field(ge=0)
-    medium_tail_limit: int = Field(ge=0)
-    long_tail_limit: int = Field(ge=0)
-    allowed_warehouses: list[str]
-
-
-class SelfOperatedOverreceiptRulePayload(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-    allowance: int = Field(ge=0)
-
-
-class RuleVersionNamePayload(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
-
-
-class GerpgoConfigPayload(BaseModel):
-    base_url: str = Field(min_length=1, max_length=500)
-    app_id: str = Field(default="", max_length=200)
-    app_key: str = Field(default="", max_length=500)
-
-
-def _masked_identifier(value: str) -> str:
-    if len(value) <= 4:
-        return "*" * len(value)
-    return f"{value[:2]}***{value[-2:]}"
-
-
-def _gerpgo_config_json(settings: GerpgoSettings) -> dict:
-    return {
-        "configured": True,
-        "base_url": settings.base_url,
-        "app_id_hint": _masked_identifier(settings.app_id),
-        "has_app_id": True,
-        "has_app_key": True,
-        "source": settings.source,
-    }
-
-
-def _user_json(user: User) -> dict:
-    return {
-        "id": user.id,
-        "username": user.username,
-        "role": user.role,
-        "active": user.active,
-    }
-
-
-def _version_json(version: InputVersion) -> dict:
-    return {
-        "id": version.id,
-        "kind": version.kind,
-        "name": version.name,
-        "original_name": version.original_name,
-        "active": version.active,
-        "created_by": version.created_by,
-        "created_at": _utc_isoformat(version.created_at),
-    }
-
-
-def _overreceipt_rule_json(version: OverreceiptRuleVersion) -> dict:
-    return {
-        "id": version.id,
-        "name": version.name,
-        "short_tail_limit": version.short_tail_limit,
-        "medium_tail_limit": version.medium_tail_limit,
-        "long_tail_limit": version.long_tail_limit,
-        "allowed_warehouses": version.allowed_warehouses,
-        "active": version.active,
-        "created_by": version.created_by,
-        "created_at": _utc_isoformat(version.created_at),
-    }
-
-
-def _self_operated_overreceipt_rule_json(
-    version: SelfOperatedOverreceiptRuleVersion,
-) -> dict:
-    return {
-        "id": version.id,
-        "name": version.name,
-        "allowance": version.allowance,
-        "active": version.active,
-        "created_by": version.created_by,
-        "created_at": _utc_isoformat(version.created_at),
-    }
-
-
 def _position_row_json(
     row: PositionDraftRow,
     issues: list[dict] | None = None,
@@ -644,7 +345,7 @@ def _issue_summary(issues: list[dict]) -> dict:
 def _draft_analysis(
     session: Session,
     draft: InputDraft,
-    cache: _DraftAnalysisCache,
+    cache: DraftAnalysisCache,
 ) -> dict:
     """按草稿修订复用摘要、差异和逐行问题分析。"""
 
@@ -679,7 +380,7 @@ def _draft_analysis(
 def _draft_json(
     session: Session,
     draft: InputDraft,
-    analysis_cache: _DraftAnalysisCache,
+    analysis_cache: DraftAnalysisCache,
 ) -> dict:
     analysis = _draft_analysis(session, draft, analysis_cache)
     base_version = session.get(InputVersion, draft.base_version_id)
@@ -707,8 +408,8 @@ def _draft_json(
         "revision": draft.revision,
         "created_by": draft.created_by,
         "updated_by": draft.updated_by,
-        "created_at": _utc_isoformat(draft.created_at),
-        "updated_at": _utc_isoformat(draft.updated_at),
+        "created_at": utc_isoformat(draft.created_at),
+        "updated_at": utc_isoformat(draft.updated_at),
         "row_count": analysis["row_count"],
         "modified_count": analysis["modified_count"],
         "diff": analysis["diff"],
@@ -841,12 +542,12 @@ def _batch_base_json(
             kind: getattr(batch, field) for kind, field in VERSION_FIELDS.items()
         },
         "overreceipt_rule": (
-            _overreceipt_rule_json(overreceipt_rule)
+            overreceipt_rule_json(overreceipt_rule)
             if overreceipt_rule is not None
             else None
         ),
         "self_operated_overreceipt_rule": (
-            _self_operated_overreceipt_rule_json(self_operated_rule)
+            self_operated_overreceipt_rule_json(self_operated_rule)
             if self_operated_rule is not None
             else None
         ),
@@ -863,8 +564,8 @@ def _batch_base_json(
         "merged_download_ready": _merged_export_ready(
             batch, file_count if file_count is not None else len(sources)
         ),
-        "created_at": _utc_isoformat(batch.created_at),
-        "updated_at": _utc_isoformat(batch.updated_at),
+        "created_at": utc_isoformat(batch.created_at),
+        "updated_at": utc_isoformat(batch.updated_at),
         "file_count": file_count if file_count is not None else len(sources),
         "summary": summary,
     }
@@ -955,7 +656,7 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
             for source in sources
         ]
         result["versions"] = {
-            kind: _version_json(version)
+            kind: version_json(version)
             for kind, field in VERSION_FIELDS.items()
             if (version_id := getattr(batch, field)) is not None
             if (version := session.get(InputVersion, version_id)) is not None
@@ -966,13 +667,13 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
                 self_operated.template_version_id,
             )
             if inbound_template is not None:
-                result["versions"]["inbound_template"] = _version_json(inbound_template)
+                result["versions"]["inbound_template"] = version_json(inbound_template)
             if inbound_source is not None:
-                result["versions"]["self_operated_inbound"] = _version_json(
+                result["versions"]["self_operated_inbound"] = version_json(
                     inbound_source
                 )
         result["jobs"] = {
-            job.kind: _job_json(job)
+            job.kind: job_json(job)
             for job in session.scalars(
                 select(Job).where(Job.batch_id == batch.id).order_by(Job.id)
             ).all()
@@ -984,7 +685,7 @@ def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> d
                     "sku": resolution.sku,
                     "original_site": resolution.original_site,
                     "full_site": resolution.full_site,
-                    "updated_at": _utc_isoformat(resolution.updated_at),
+                    "updated_at": utc_isoformat(resolution.updated_at),
                 }
                 for resolution in session.scalars(
                     select(SelfOperatedSiteResolution)
@@ -1093,22 +794,6 @@ def _batch_list_json(batches: list[Batch], session: Session) -> list[dict]:
     return result
 
 
-def _job_json(job: Job) -> dict:
-    return {
-        "id": job.id,
-        "batch_id": job.batch_id,
-        "kind": job.kind,
-        "status": job.status,
-        "attempts": job.attempts,
-        "error_message": job.error_message,
-        "download_ready": bool(job.output_path),
-        "created_at": _utc_isoformat(job.created_at),
-        "claimed_at": _utc_isoformat(job.claimed_at) if job.claimed_at else None,
-        "heartbeat_at": _utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None,
-        "finished_at": _utc_isoformat(job.finished_at) if job.finished_at else None,
-    }
-
-
 def _validate_input_version(kind: str, path: Path) -> None:
     if kind == "purchase":
         read_purchase_workbook(path)
@@ -1151,7 +836,7 @@ def _exception_position_values(
     exceptions: list[ExceptionRecord],
     batch: Batch,
     session: Session,
-    position_frame_cache: _PositionFrameCache,
+    position_frame_cache: PositionFrameCache,
 ) -> dict[int, dict[str, str | int | float]]:
     if not exceptions:
         return {}
@@ -1466,9 +1151,9 @@ def create_app(
     )
     overreceipt_rule_lock = Lock()
     overreceipt_warehouse_cache: dict[int, tuple[str, ...]] = {}
-    position_frame_cache = _PositionFrameCache(configured_position_frame_cache_size)
-    draft_analysis_cache = _DraftAnalysisCache(DRAFT_ANALYSIS_CACHE_SIZE)
-    input_inspection_cache = _InputInspectionCache(
+    position_frame_cache = PositionFrameCache(configured_position_frame_cache_size)
+    draft_analysis_cache = DraftAnalysisCache(DRAFT_ANALYSIS_CACHE_SIZE)
+    input_inspection_cache = InputInspectionCache(
         INPUT_INSPECTION_CACHE_SIZE,
         INPUT_INSPECTION_PAGES_PER_VERSION,
     )
@@ -1786,8 +1471,8 @@ def create_app(
         )
         return {
             "token": token,
-            "expires_at": _utc_isoformat(expires_at),
-            "user": _user_json(user),
+            "expires_at": utc_isoformat(expires_at),
+            "user": user_json(user),
         }
 
     @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -1825,7 +1510,7 @@ def create_app(
 
     @app.get("/api/auth/me")
     def me(user: Annotated[User, Depends(current_user)]):
-        return _user_json(user)
+        return user_json(user)
 
     @app.post("/api/users", status_code=status.HTTP_201_CREATED)
     def create_user(
@@ -1846,7 +1531,7 @@ def create_app(
         session.flush()
         _audit(session, admin.id, "create_user", "user", user.id)
         session.commit()
-        return _user_json(user)
+        return user_json(user)
 
     @app.get("/api/users")
     def list_users(
@@ -1854,7 +1539,7 @@ def create_app(
         session: Annotated[Session, Depends(get_session)],
     ):
         return [
-            _user_json(user) for user in session.scalars(select(User).order_by(User.id))
+            user_json(user) for user in session.scalars(select(User).order_by(User.id))
         ]
 
     @app.put("/api/users/{user_id}/status")
@@ -1881,7 +1566,7 @@ def create_app(
             {"active": payload.active},
         )
         session.commit()
-        return _user_json(user)
+        return user_json(user)
 
     @app.put(
         "/api/users/{user_id}/password",
@@ -1986,7 +1671,7 @@ def create_app(
                 status_code=409,
                 detail="输入版本发生并发冲突，请刷新后重试",
             ) from error
-        return _version_json(version)
+        return version_json(version)
 
     @app.get("/api/input-versions")
     def list_input_versions(
@@ -1998,14 +1683,14 @@ def create_app(
                 InputVersion.kind, InputVersion.created_at.desc()
             )
         ).all()
-        return [_version_json(version) for version in versions]
+        return [version_json(version) for version in versions]
 
     @app.get("/api/admin/integrations/gerpgo")
     def get_gerpgo_config(
         _admin: Annotated[User, Depends(admin_user)],
     ):
         try:
-            return _gerpgo_config_json(load_gerpgo_settings(storage))
+            return gerpgo_config_json(load_gerpgo_settings(storage))
         except GerpgoError:
             return {
                 "configured": False,
@@ -2071,7 +1756,7 @@ def create_app(
             },
         )
         session.commit()
-        return _gerpgo_config_json(settings)
+        return gerpgo_config_json(settings)
 
     register_sync_routes(
         app=app,
@@ -2079,8 +1764,8 @@ def create_app(
         get_session=get_session,
         current_user=current_user,
         audit=_audit,
-        version_json=_version_json,
-        utc_isoformat=_utc_isoformat,
+        version_json=version_json,
+        utc_isoformat=utc_isoformat,
     )
     register_batch_read_routes(
         app=app,
@@ -2145,7 +1830,7 @@ def create_app(
                 OverreceiptRuleVersion.id.desc(),
             )
         ).all()
-        return [_overreceipt_rule_json(version) for version in versions]
+        return [overreceipt_rule_json(version) for version in versions]
 
     @app.put("/api/overreceipt-rule-versions/{version_id}/name")
     def rename_overreceipt_rule(
@@ -2173,7 +1858,7 @@ def create_app(
             if target is None:
                 raise HTTPException(status_code=404, detail="超收规则版本不存在")
             if target.name == name:
-                return _overreceipt_rule_json(target)
+                return overreceipt_rule_json(target)
             if any(
                 version.id != version_id and version.name == name
                 for version in versions
@@ -2198,7 +1883,7 @@ def create_app(
                     status_code=409,
                     detail="规则版本名称已存在",
                 ) from error
-        return _overreceipt_rule_json(target)
+        return overreceipt_rule_json(target)
 
     @app.post(
         "/api/overreceipt-rule-versions",
@@ -2264,7 +1949,7 @@ def create_app(
                     status_code=409,
                     detail="超收规则发布发生并发冲突，请刷新后重试",
                 ) from error
-        return _overreceipt_rule_json(version)
+        return overreceipt_rule_json(version)
 
     @app.post("/api/overreceipt-rule-versions/{version_id}/activate")
     def activate_overreceipt_rule(
@@ -2287,7 +1972,7 @@ def create_app(
             if target is None:
                 raise HTTPException(status_code=404, detail="超收规则版本不存在")
             if target.active:
-                return _overreceipt_rule_json(target)
+                return overreceipt_rule_json(target)
             for version in versions:
                 version.active = False
             session.flush()
@@ -2307,7 +1992,7 @@ def create_app(
                     status_code=409,
                     detail="超收规则启用发生并发冲突，请刷新后重试",
                 ) from error
-        return _overreceipt_rule_json(target)
+        return overreceipt_rule_json(target)
 
     @app.get("/api/self-operated-overreceipt-rule-versions")
     def list_self_operated_overreceipt_rule_versions(
@@ -2320,7 +2005,7 @@ def create_app(
                 SelfOperatedOverreceiptRuleVersion.id.desc(),
             )
         ).all()
-        return [_self_operated_overreceipt_rule_json(version) for version in versions]
+        return [self_operated_overreceipt_rule_json(version) for version in versions]
 
     @app.put("/api/self-operated-overreceipt-rule-versions/{version_id}/name")
     def rename_self_operated_overreceipt_rule(
@@ -2351,7 +2036,7 @@ def create_app(
                     detail="自营仓超收规则版本不存在",
                 )
             if target.name == name:
-                return _self_operated_overreceipt_rule_json(target)
+                return self_operated_overreceipt_rule_json(target)
             if any(
                 version.id != version_id and version.name == name
                 for version in versions
@@ -2376,7 +2061,7 @@ def create_app(
                     status_code=409,
                     detail="规则版本名称已存在",
                 ) from error
-        return _self_operated_overreceipt_rule_json(target)
+        return self_operated_overreceipt_rule_json(target)
 
     @app.post(
         "/api/self-operated-overreceipt-rule-versions",
@@ -2427,7 +2112,7 @@ def create_app(
                     status_code=409,
                     detail="自营仓超收规则发布发生并发冲突，请重试",
                 ) from error
-        return _self_operated_overreceipt_rule_json(version)
+        return self_operated_overreceipt_rule_json(version)
 
     @app.post("/api/self-operated-overreceipt-rule-versions/{version_id}/activate")
     def activate_self_operated_overreceipt_rule(
@@ -2453,7 +2138,7 @@ def create_app(
                     detail="自营仓超收规则版本不存在",
                 )
             if target.active:
-                return _self_operated_overreceipt_rule_json(target)
+                return self_operated_overreceipt_rule_json(target)
             for version in versions:
                 version.active = False
             session.flush()
@@ -2473,7 +2158,7 @@ def create_app(
                     status_code=409,
                     detail="自营仓超收规则启用发生并发冲突，请重试",
                 ) from error
-        return _self_operated_overreceipt_rule_json(target)
+        return self_operated_overreceipt_rule_json(target)
 
     register_input_version_read_routes(
         app=app,
@@ -2529,7 +2214,7 @@ def create_app(
                 status_code=409,
                 detail="输入版本发生并发冲突，请刷新后重试",
             ) from error
-        return _version_json(version)
+        return version_json(version)
 
     @app.post(
         "/api/input-drafts/position",
@@ -3057,7 +2742,7 @@ def create_app(
         session.refresh(draft)
         remove_draft_import_candidates(draft.id)
         return {
-            **_version_json(version),
+            **version_json(version),
             "draft_revision": draft.revision,
             "draft_status": draft.status,
         }
@@ -4200,7 +3885,7 @@ def create_app(
             select(Job).where(Job.batch_id == batch.id, Job.kind == "compute")
         )
         if existing and existing.status in {"queued", "running", "succeeded"}:
-            return _job_json(existing)
+            return job_json(existing)
         if batch.status not in {"preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail="批次尚未通过预检")
         try:
@@ -4215,7 +3900,7 @@ def create_app(
             )
             if job is None:
                 raise
-        return _job_json(job)
+        return job_json(job)
 
     @app.get("/api/jobs/{job_id}")
     def get_job(
@@ -4226,7 +3911,7 @@ def create_app(
         job = session.get(Job, job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="任务不存在")
-        return _job_json(job)
+        return job_json(job)
 
     register_exception_write_routes(
         app=app,
@@ -4237,7 +3922,7 @@ def create_app(
         split_records_by_exception=_split_records_by_exception,
         exception_json=_exception_json,
         queue_job=queue_job,
-        job_json=_job_json,
+        job_json=job_json,
         audit=_audit,
     )
 
@@ -4249,7 +3934,7 @@ def create_app(
         merged_export_path=_merged_export_path,
         merged_export_ready=_merged_export_ready,
         queue_job=queue_job,
-        job_json=_job_json,
+        job_json=job_json,
     )
 
     @app.get("/api/audit-logs")
@@ -4268,7 +3953,7 @@ def create_app(
                 "entity_type": log.entity_type,
                 "entity_id": log.entity_id,
                 "details": log.details,
-                "created_at": _utc_isoformat(log.created_at),
+                "created_at": utc_isoformat(log.created_at),
             }
             for log in logs
         ]
