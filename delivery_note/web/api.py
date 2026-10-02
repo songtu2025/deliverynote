@@ -15,7 +15,6 @@ from fastapi import (
     Form,
     HTTPException,
     Request,
-    Response,
     UploadFile,
     status,
 )
@@ -68,12 +67,13 @@ from .database import Database
 from .errors import (
     CodedHTTPException,
     DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
-    INPUT_VERSION_NAME_EXISTS_CODE,
     commit_once,
     register_exception_handlers,
     rollback_draft_conflict,
     rollback_integrity_conflict,
 )
+from .position_draft_lifecycle import PositionDraftLifecycle
+from .position_draft_lifecycle_routes import register_position_draft_lifecycle_routes
 from .position_draft_row_routes import register_position_draft_row_routes
 from .position_draft_read_routes import register_position_draft_read_routes
 from .position_import_candidates import PositionImportCandidates
@@ -93,7 +93,6 @@ from .models import (
     BatchFile,
     BatchOverreceiptRule,
     ExceptionRecord,
-    InputDraft,
     InputVersion,
     Job,
     OverreceiptRuleVersion,
@@ -105,26 +104,20 @@ from .models import (
 )
 from .position_drafts import (
     DraftConflictError,
-    DuplicateInputVersionNameError,
-    create_or_resume_draft,
-    discard_draft,
     list_draft_rows,
     position_frame,
-    publish_draft,
     replace_draft_from_frame,
     require_revision,
 )
 from .position_draft_read import (
-    draft_json, summarize_issues,
+    summarize_issues,
 )
 from .sync_routes import register_sync_routes
 from .schemas import (
     BatchPayload,
     BatchDeletePayload,
     FileOrderPayload,
-    DraftMutationPayload,
     ImportApplyPayload,
-    PublishDraftPayload,
 )
 from .caches import (
     InputInspectionCache,
@@ -576,80 +569,13 @@ def create_app(
         app, dependencies, draft_analysis_cache, storage
     )
     register_position_draft_row_routes(app, dependencies, import_candidates_state)
-
-    @app.post(
-        "/api/input-drafts/position",
-        status_code=status.HTTP_201_CREATED,
+    register_position_draft_lifecycle_routes(
+        app, dependencies,
+        PositionDraftLifecycle(
+            storage, _audit, draft_analysis_cache, import_candidates_state
+        ),
     )
-    def create_position_draft(
-        response: Response,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        list(
-            session.scalars(
-                select(InputVersion.id)
-                .where(InputVersion.kind == "position")
-                .order_by(InputVersion.id)
-                .with_for_update()
-            )
-        )
-        existing = session.scalar(
-            select(InputDraft)
-            .where(
-                InputDraft.kind == "position",
-                InputDraft.status == "editing",
-            )
-            .with_for_update()
-        )
-        if existing is not None:
-            version = session.get(
-                InputVersion,
-                existing.base_version_id,
-                populate_existing=True,
-            )
-        else:
-            active_version_id = session.scalar(
-                select(InputVersion.id).where(
-                    InputVersion.kind == "position",
-                    InputVersion.active.is_(True),
-                )
-            )
-            version = (
-                session.get(
-                    InputVersion,
-                    active_version_id,
-                    populate_existing=True,
-                )
-                if active_version_id is not None
-                else None
-            )
-        if version is None:
-            raise HTTPException(status_code=404, detail="当前启用的库位版本不存在")
-        try:
-            draft = create_or_resume_draft(session, version, admin.id)
-            if existing is not None:
-                _audit(
-                    session,
-                    admin.id,
-                    "resume_input_draft",
-                    "input_draft",
-                    draft.id,
-                    {"base_version_id": draft.base_version_id},
-                )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except ValueError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        session.refresh(draft)
-        if existing is not None:
-            response.status_code = status.HTTP_200_OK
-        return draft_json(session, draft, draft_analysis_cache)
+
 
 
 
@@ -792,84 +718,7 @@ def create_app(
 
 
 
-    @app.post(
-        "/api/input-drafts/{draft_id}/publish",
-        status_code=status.HTTP_201_CREATED,
-    )
-    def publish_position_draft(
-        draft_id: int,
-        payload: PublishDraftPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        draft = get_draft_or_404(draft_id, session)
-        original_name = _safe_filename(f"{payload.name}.xlsx")
-        destination = storage / "master" / "position" / f"{uuid4().hex}_{original_name}"
-        try:
-            version = publish_draft(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-                name=payload.name,
-                storage_path=destination,
-                confirm_warnings=payload.confirm_warnings,
-                original_name=original_name,
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except DuplicateInputVersionNameError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise CodedHTTPException(
-                code=INPUT_VERSION_NAME_EXISTS_CODE, detail=str(error)
-            ) from error
-        except ValueError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        except OSError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail=f"草稿发布失败：{error}",
-            ) from error
-        session.refresh(version)
-        session.refresh(draft)
-        import_candidates_state.remove_draft(draft.id)
-        return {
-            **version_json(version),
-            "draft_revision": draft.revision,
-            "draft_status": draft.status,
-        }
 
-    @app.post("/api/input-drafts/{draft_id}/discard")
-    def discard_position_draft(
-        draft_id: int,
-        payload: DraftMutationPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        draft = get_draft_or_404(draft_id, session)
-        try:
-            discard_draft(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        session.refresh(draft)
-        import_candidates_state.remove_draft(draft.id)
-        return draft_json(session, draft, draft_analysis_cache)
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
     def create_batch(

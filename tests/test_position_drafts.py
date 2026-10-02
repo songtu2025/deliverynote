@@ -2574,7 +2574,7 @@ class PositionDraftApiTests(unittest.TestCase):
         self.assertIn("不能发布", rejected.json()["detail"])
 
         with patch(
-            "delivery_note.web.api.publish_draft",
+            "delivery_note.web.position_draft_lifecycle.publish_draft",
             side_effect=OSError("writer failed"),
             create=True,
         ):
