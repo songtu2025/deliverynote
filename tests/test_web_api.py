@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 import delivery_note.input_inspection as input_inspection_module
 import delivery_note.web.gerpgo_routes as gerpgo_routes_module
+import delivery_note.web.input_version_routes as input_version_routes_module
 from delivery_note.gerpgo import GerpgoError, load_gerpgo_settings
 from delivery_note.pipeline import IMPORT_COLUMNS
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
@@ -622,7 +623,7 @@ class WebApiTests(unittest.TestCase):
 
             try:
                 with patch.object(
-                    web_api_module,
+                    input_version_routes_module,
                     "_validate_input_version",
                     side_effect=slow_validation,
                 ):

@@ -1,7 +1,11 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from ..config import validate_supplier_frame
 from ..excel_io import (
@@ -14,6 +18,14 @@ from ..excel_io import (
 )
 from .database import Database
 from .models import InputVersion, User
+
+
+INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
+SELF_OPERATED_INPUT_KINDS = ("product", "supplier", "inbound_template")
+UPLOAD_INPUT_KINDS = (*INPUT_KINDS, "inbound_template")
+POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
+    "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
+)
 
 
 @dataclass(frozen=True)
@@ -94,3 +106,115 @@ def bootstrap_builtin_templates(database: Database) -> None:
                 )
             )
             session.commit()
+
+
+def ensure_position_bootstrap_upload_allowed(session: Session) -> None:
+    position_version_id = session.scalar(
+        select(InputVersion.id).where(InputVersion.kind == "position")
+    )
+    if position_version_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
+        )
+
+
+def validate_new_input_version(session: Session, kind: str, name: str) -> None:
+    if session.scalar(
+        select(InputVersion).where(
+            InputVersion.kind == kind,
+            InputVersion.name == name,
+        )
+    ):
+        raise HTTPException(status_code=409, detail="版本名称已存在")
+    if kind == "position":
+        ensure_position_bootstrap_upload_allowed(session)
+
+
+def register_uploaded_input_version(
+    session: Session, version: InputVersion, _audit: Callable[..., None]
+) -> None:
+    try:
+        if version.active:
+            current_versions = list(
+                session.scalars(
+                    select(InputVersion)
+                    .where(InputVersion.kind == version.kind)
+                    .order_by(InputVersion.id)
+                    .with_for_update()
+                )
+            )
+            if version.kind == "position" and current_versions:
+                raise HTTPException(
+                    status_code=409, detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL
+                )
+            for current in current_versions:
+                current.active = False
+            session.flush()
+        session.add(version)
+        session.flush()
+        _audit(
+            session,
+            version.created_by,
+            "upload_input_version",
+            "input_version",
+            version.id,
+            {"kind": version.kind},
+        )
+        session.commit()
+    except HTTPException:
+        session.rollback()
+        Path(version.storage_path).unlink(missing_ok=True)
+        raise
+    except IntegrityError as error:
+        session.rollback()
+        Path(version.storage_path).unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=409, detail="输入版本发生并发冲突，请刷新后重试"
+        ) from error
+
+
+def activate_input_version_record(
+    session: Session, version_id: int, admin_id: int, _audit: Callable[..., None]
+) -> InputVersion:
+    version = session.get(InputVersion, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail="输入版本不存在")
+    try:
+        current_versions = list(
+            session.scalars(
+                select(InputVersion)
+                .where(InputVersion.kind == version.kind)
+                .order_by(InputVersion.id)
+                .with_for_update()
+            )
+        )
+        if version.kind == "position" and any(
+            current.active and current.id != version.id for current in current_versions
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
+            )
+        for current in current_versions:
+            current.active = False
+        session.flush()
+        version.active = True
+        _audit(
+            session,
+            admin_id,
+            "activate_input_version",
+            "input_version",
+            version.id,
+        )
+        session.commit()
+    except HTTPException:
+        session.rollback()
+        raise
+    except IntegrityError as error:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="输入版本发生并发冲突，请刷新后重试",
+        ) from error
+    return version

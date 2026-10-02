@@ -71,7 +71,9 @@ from .batch_views import (
     merged_export_path, merged_export_ready,
 )
 from .database import Database
-from .input_versions import _validate_input_version, bootstrap_builtin_templates
+from .input_version_routes import register_input_version_routes
+from .input_versions import INPUT_KINDS, SELF_OPERATED_INPUT_KINDS
+from .input_versions import bootstrap_builtin_templates
 from .uploads import _safe_filename, _save_upload, _unlink_after_commit
 from .gerpgo_routes import register_gerpgo_routes
 from .exception_read_routes import register_exception_read_routes
@@ -152,9 +154,6 @@ DRAFT_IMPORT_PREVIEW_EXPIRED_CODE = "draft_import_preview_expired"
 INPUT_VERSION_NAME_EXISTS_CODE = "input_version_name_exists"
 
 
-INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
-SELF_OPERATED_INPUT_KINDS = ("product", "supplier", "inbound_template")
-UPLOAD_INPUT_KINDS = (*INPUT_KINDS, "inbound_template")
 BATCH_STATUSES = {
     "draft",
     "preflight_ready",
@@ -164,9 +163,6 @@ BATCH_STATUSES = {
     "failed",
     "expired",
 }
-POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
-    "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
-)
 INPUT_INSPECTION_CACHE_SIZE = 32
 INPUT_INSPECTION_PAGES_PER_VERSION = 4
 DRAFT_ANALYSIS_CACHE_SIZE = 32
@@ -576,15 +572,6 @@ def create_app(
             detail=str(error).strip() or "草稿已被其他管理员更新，请刷新后重试",
         ) from error
 
-    def ensure_position_bootstrap_upload_allowed(session: Session) -> None:
-        position_version_id = session.scalar(
-            select(InputVersion.id).where(InputVersion.kind == "position")
-        )
-        if position_version_id is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
-            )
 
     def rollback_integrity_conflict(session: Session, error: Exception) -> None:
         if session.in_transaction():
@@ -642,105 +629,9 @@ def create_app(
                 candidate_path.unlink(missing_ok=True)
 
 
-    @app.post(
-        "/api/input-versions/{kind}",
-        status_code=status.HTTP_201_CREATED,
+    register_input_version_routes(
+        app, dependencies, storage, parse_uploaded_workbook, _audit
     )
-    async def upload_input_version(
-        kind: str,
-        name: Annotated[str, Form()],
-        activate: Annotated[bool, Form()] = False,
-        file: UploadFile = File(...),
-        admin: User = Depends(admin_user),
-        session: Session = Depends(get_session),
-    ):
-        if kind not in UPLOAD_INPUT_KINDS:
-            raise HTTPException(status_code=404, detail="输入类型不存在")
-        original_name = _safe_filename(file.filename or "")
-        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
-            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
-        if session.scalar(
-            select(InputVersion).where(
-                InputVersion.kind == kind,
-                InputVersion.name == name,
-            )
-        ):
-            raise HTTPException(status_code=409, detail="版本名称已存在")
-        if kind == "position":
-            ensure_position_bootstrap_upload_allowed(session)
-        destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
-        await _save_upload(file, destination, app.state.max_upload_bytes)
-        try:
-            await parse_uploaded_workbook(_validate_input_version, kind, destination)
-        except Exception as error:
-            await run_in_threadpool(destination.unlink, missing_ok=True)
-            raise HTTPException(
-                status_code=400,
-                detail=f"输入版本校验失败：{error}",
-            ) from error
-        version = InputVersion(
-            kind=kind,
-            name=name,
-            original_name=original_name,
-            storage_path=str(destination),
-            active=activate,
-            created_by=admin.id,
-        )
-        try:
-            if activate:
-                current_versions = list(
-                    session.scalars(
-                        select(InputVersion)
-                        .where(InputVersion.kind == kind)
-                        .order_by(InputVersion.id)
-                        .with_for_update()
-                    )
-                )
-                if kind == "position" and current_versions:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
-                    )
-                for current in current_versions:
-                    current.active = False
-                session.flush()
-            session.add(version)
-            session.flush()
-            _audit(
-                session,
-                admin.id,
-                "upload_input_version",
-                "input_version",
-                version.id,
-                {"kind": kind},
-            )
-            session.commit()
-        except HTTPException:
-            session.rollback()
-            destination.unlink(missing_ok=True)
-            raise
-        except IntegrityError as error:
-            session.rollback()
-            destination.unlink(missing_ok=True)
-            raise HTTPException(
-                status_code=409,
-                detail="输入版本发生并发冲突，请刷新后重试",
-            ) from error
-        return version_json(version)
-
-    @app.get("/api/input-versions")
-    def list_input_versions(
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        versions = session.scalars(
-            select(InputVersion).order_by(
-                InputVersion.kind, InputVersion.created_at.desc()
-            )
-        ).all()
-        return [version_json(version) for version in versions]
-
-
 
     register_gerpgo_routes(app, dependencies, storage, _audit)
 
@@ -1153,54 +1044,6 @@ def create_app(
         inspect_version=inspect_version,
     )
 
-    @app.post("/api/input-versions/{version_id}/activate")
-    def activate_input_version(
-        version_id: int,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        version = session.get(InputVersion, version_id)
-        if version is None:
-            raise HTTPException(status_code=404, detail="输入版本不存在")
-        try:
-            current_versions = list(
-                session.scalars(
-                    select(InputVersion)
-                    .where(InputVersion.kind == version.kind)
-                    .order_by(InputVersion.id)
-                    .with_for_update()
-                )
-            )
-            if version.kind == "position" and any(
-                current.active and current.id != version.id
-                for current in current_versions
-            ):
-                raise HTTPException(
-                    status_code=409,
-                    detail=POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL,
-                )
-            for current in current_versions:
-                current.active = False
-            session.flush()
-            version.active = True
-            _audit(
-                session,
-                admin.id,
-                "activate_input_version",
-                "input_version",
-                version.id,
-            )
-            session.commit()
-        except HTTPException:
-            session.rollback()
-            raise
-        except IntegrityError as error:
-            session.rollback()
-            raise HTTPException(
-                status_code=409,
-                detail="输入版本发生并发冲突，请刷新后重试",
-            ) from error
-        return version_json(version)
 
     @app.post(
         "/api/input-drafts/position",
