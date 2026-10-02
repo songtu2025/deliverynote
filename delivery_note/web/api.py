@@ -25,9 +25,9 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import and_, case, delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -73,6 +73,11 @@ from ..pipeline import (
 from .auth import hash_password, hash_token, new_session_token, verify_password
 from .batch_export_routes import register_batch_export_routes
 from .batch_read_routes import register_batch_read_routes
+from .batch_queries import VERSION_FIELDS
+from .batch_views import (
+    batch_json, batch_list_json, file_json,
+    merged_export_path, merged_export_ready,
+)
 from .database import Database
 from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
@@ -175,13 +180,6 @@ BUILTIN_INBOUND_TEMPLATE_ORIGINAL_NAME = "积加批量入库模板.xlsx"
 BUILTIN_INBOUND_TEMPLATE_PATH = (
     Path(__file__).resolve().parents[1] / "assets" / "default_inbound_template.xlsx"
 )
-VERSION_FIELDS = {
-    "purchase": "purchase_version_id",
-    "product": "product_version_id",
-    "supplier": "supplier_version_id",
-    "position": "position_version_id",
-    "template": "template_version_id",
-}
 BATCH_STATUSES = {
     "draft",
     "preflight_ready",
@@ -290,344 +288,6 @@ def _batch_input_signature(
         if self_operated is not None
         else None,
     )
-
-
-def _exception_totals_by_source(
-    session: Session, source_ids: list[int]
-) -> dict[int, tuple[int, int]]:
-    if not source_ids:
-        return {}
-    return {
-        source_id: (resolved_total or 0, manual_total or 0)
-        for source_id, resolved_total, manual_total in session.execute(
-            select(
-                ExceptionRecord.batch_file_id,
-                func.sum(
-                    case(
-                        (SplitRecord.resolved.is_(True), SplitRecord.quantity),
-                        else_=0,
-                    )
-                ),
-                func.sum(
-                    case(
-                        (SplitRecord.id.is_(None), ExceptionRecord.manual_quantity),
-                        (SplitRecord.resolved.is_(False), SplitRecord.quantity),
-                        else_=0,
-                    )
-                ),
-            )
-            .outerjoin(SplitRecord, SplitRecord.exception_id == ExceptionRecord.id)
-            .where(ExceptionRecord.batch_file_id.in_(source_ids))
-            .group_by(ExceptionRecord.batch_file_id)
-        )
-    }
-
-
-def _file_json(
-    source: BatchFile,
-    *,
-    import_total: int | None = None,
-    manual_total: int | None = None,
-) -> dict:
-    return {
-        "id": source.id,
-        "batch_id": source.batch_id,
-        "original_name": source.original_name,
-        "file_order": source.file_order,
-        "supplier_name": source.supplier_name,
-        "supplier_code": source.supplier_code,
-        "document_note": source.document_note,
-        "delivery_total": source.delivery_total,
-        "import_total": source.import_total if import_total is None else import_total,
-        "manual_total": source.manual_total if manual_total is None else manual_total,
-        "download_ready": bool(source.result_path),
-    }
-
-
-def _merged_export_path(batch: Batch) -> Path | None:
-    if not batch.zip_path:
-        return None
-    return Path(batch.zip_path).with_name(f"batch-{batch.id}-merged.xlsx")
-
-
-def _merged_export_ready(batch: Batch, source_count: int) -> bool:
-    path = _merged_export_path(batch)
-    return source_count > 1 and path is not None and path.is_file()
-
-
-def _batch_base_json(
-    batch: Batch,
-    sources: list[BatchFile],
-    overreceipt_rule: OverreceiptRuleVersion | None,
-    self_operated: SelfOperatedBatch | None,
-    self_operated_rule: SelfOperatedOverreceiptRuleVersion | None,
-    inbound_source: InputVersion | None,
-    *,
-    file_count: int | None = None,
-    summary: dict,
-) -> dict:
-    result = {
-        "id": batch.id,
-        "name": batch.name,
-        "status": batch.status,
-        "workflow": (
-            "self_operated_inbound" if self_operated is not None else "delivery"
-        ),
-        "created_by": batch.created_by,
-        "version_ids": {
-            kind: getattr(batch, field) for kind, field in VERSION_FIELDS.items()
-        },
-        "overreceipt_rule": (
-            overreceipt_rule_json(overreceipt_rule)
-            if overreceipt_rule is not None
-            else None
-        ),
-        "self_operated_overreceipt_rule": (
-            self_operated_overreceipt_rule_json(self_operated_rule)
-            if self_operated_rule is not None
-            else None
-        ),
-        "inbound_file": (
-            {
-                "original_name": self_operated.inbound_original_name,
-                "uploaded": bool(self_operated.inbound_storage_path),
-            }
-            if self_operated is not None
-            else None
-        ),
-        "error_message": batch.error_message,
-        "download_ready": bool(batch.zip_path),
-        "merged_download_ready": _merged_export_ready(
-            batch, file_count if file_count is not None else len(sources)
-        ),
-        "created_at": utc_isoformat(batch.created_at),
-        "updated_at": utc_isoformat(batch.updated_at),
-        "file_count": file_count if file_count is not None else len(sources),
-        "summary": summary,
-    }
-    if self_operated is not None and self_operated.inbound_storage_path:
-        result["version_ids"]["self_operated_inbound"] = (
-            inbound_source.id if inbound_source is not None else None
-        )
-    return result
-
-
-def _batch_json(batch: Batch, session: Session, include_files: bool = True) -> dict:
-    sources = session.scalars(
-        select(BatchFile)
-        .where(BatchFile.batch_id == batch.id)
-        .order_by(BatchFile.file_order)
-        .options(
-            load_only(
-                BatchFile.id,
-                BatchFile.batch_id,
-                BatchFile.original_name,
-                BatchFile.file_order,
-                BatchFile.supplier_name,
-                BatchFile.supplier_code,
-                BatchFile.document_note,
-                BatchFile.delivery_total,
-                BatchFile.import_total,
-                BatchFile.manual_total,
-                BatchFile.result_path,
-            )
-        )
-    ).all()
-    exception_totals = _exception_totals_by_source(
-        session, [source.id for source in sources]
-    )
-    delivery_total = sum(source.delivery_total for source in sources)
-    import_total = sum(
-        source.import_total + exception_totals.get(source.id, (0, 0))[0]
-        for source in sources
-    )
-    manual_total = sum(
-        exception_totals.get(source.id, (0, 0))[1] for source in sources
-    )
-    overreceipt_binding = session.get(BatchOverreceiptRule, batch.id)
-    overreceipt_rule = (
-        session.get(OverreceiptRuleVersion, overreceipt_binding.rule_version_id)
-        if overreceipt_binding is not None
-        else None
-    )
-    self_operated = session.get(SelfOperatedBatch, batch.id)
-    self_operated_rule = (
-        session.get(
-            SelfOperatedOverreceiptRuleVersion,
-            self_operated.rule_version_id,
-        )
-        if self_operated is not None and self_operated.rule_version_id is not None
-        else None
-    )
-    inbound_source = None
-    if self_operated is not None and self_operated.inbound_storage_path:
-        inbound_source = session.scalar(
-            select(InputVersion).where(
-                InputVersion.kind == "self_operated_inbound",
-                InputVersion.storage_path == self_operated.inbound_storage_path,
-            )
-        )
-    result = _batch_base_json(
-        batch,
-        sources,
-        overreceipt_rule,
-        self_operated,
-        self_operated_rule,
-        inbound_source,
-        summary={
-            "delivery_total": delivery_total,
-            "import_total": import_total,
-            "manual_total": manual_total,
-            "conserved": delivery_total == import_total + manual_total,
-        },
-    )
-    if include_files:
-        result["files"] = [
-            _file_json(
-                source,
-                import_total=source.import_total
-                + exception_totals.get(source.id, (0, 0))[0],
-                manual_total=exception_totals.get(source.id, (0, 0))[1],
-            )
-            for source in sources
-        ]
-        result["versions"] = {
-            kind: version_json(version)
-            for kind, field in VERSION_FIELDS.items()
-            if (version_id := getattr(batch, field)) is not None
-            if (version := session.get(InputVersion, version_id)) is not None
-        }
-        if self_operated is not None:
-            inbound_template = session.get(
-                InputVersion,
-                self_operated.template_version_id,
-            )
-            if inbound_template is not None:
-                result["versions"]["inbound_template"] = version_json(inbound_template)
-            if inbound_source is not None:
-                result["versions"]["self_operated_inbound"] = version_json(
-                    inbound_source
-                )
-        result["jobs"] = {
-            job.kind: job_json(job)
-            for job in session.scalars(
-                select(Job).where(Job.batch_id == batch.id).order_by(Job.id)
-            ).all()
-        }
-        result["site_resolutions"] = (
-            [
-                {
-                    "id": resolution.id,
-                    "sku": resolution.sku,
-                    "original_site": resolution.original_site,
-                    "full_site": resolution.full_site,
-                    "updated_at": utc_isoformat(resolution.updated_at),
-                }
-                for resolution in session.scalars(
-                    select(SelfOperatedSiteResolution)
-                    .where(SelfOperatedSiteResolution.batch_id == batch.id)
-                    .order_by(SelfOperatedSiteResolution.id)
-                ).all()
-            ]
-            if self_operated is not None
-            else []
-        )
-    return result
-
-
-def _batch_list_json(batches: list[Batch], session: Session) -> list[dict]:
-    if not batches:
-        return []
-    batch_ids = [batch.id for batch in batches]
-    source_rows = session.execute(
-        select(
-            BatchFile.id,
-            BatchFile.batch_id,
-            BatchFile.delivery_total,
-            BatchFile.import_total,
-        ).where(BatchFile.batch_id.in_(batch_ids))
-    ).all()
-    exception_totals = _exception_totals_by_source(
-        session, [source_id for source_id, *_ in source_rows]
-    )
-    file_stats: dict[int, list[int]] = {}
-    for source_id, batch_id, delivery_total, import_total in source_rows:
-        stats = file_stats.setdefault(batch_id, [0, 0, 0, 0])
-        resolved_total, manual_total = exception_totals.get(source_id, (0, 0))
-        stats[0] += 1
-        stats[1] += delivery_total
-        stats[2] += import_total + resolved_total
-        stats[3] += manual_total
-
-    overreceipt_rules = {
-        binding.batch_id: rule
-        for binding, rule in session.execute(
-            select(BatchOverreceiptRule, OverreceiptRuleVersion)
-            .join(
-                OverreceiptRuleVersion,
-                OverreceiptRuleVersion.id == BatchOverreceiptRule.rule_version_id,
-            )
-            .where(BatchOverreceiptRule.batch_id.in_(batch_ids))
-        ).all()
-    }
-    self_operated_by_batch: dict[int, SelfOperatedBatch] = {}
-    self_operated_rules: dict[int, SelfOperatedOverreceiptRuleVersion] = {}
-    inbound_sources: dict[int, InputVersion] = {}
-    self_operated_rows = session.execute(
-        select(
-            SelfOperatedBatch,
-            SelfOperatedOverreceiptRuleVersion,
-            InputVersion,
-        )
-        .select_from(SelfOperatedBatch)
-        .outerjoin(
-            SelfOperatedOverreceiptRuleVersion,
-            SelfOperatedOverreceiptRuleVersion.id
-            == SelfOperatedBatch.rule_version_id,
-        )
-        .outerjoin(
-            InputVersion,
-            and_(
-                SelfOperatedBatch.inbound_storage_path != "",
-                InputVersion.kind == "self_operated_inbound",
-                InputVersion.storage_path == SelfOperatedBatch.inbound_storage_path,
-            ),
-        )
-        .where(SelfOperatedBatch.batch_id.in_(batch_ids))
-        .order_by(SelfOperatedBatch.batch_id, InputVersion.id)
-    ).all()
-    for self_operated, rule, inbound_source in self_operated_rows:
-        if self_operated.batch_id in self_operated_by_batch:
-            continue
-        self_operated_by_batch[self_operated.batch_id] = self_operated
-        if rule is not None:
-            self_operated_rules[self_operated.batch_id] = rule
-        if inbound_source is not None:
-            inbound_sources[self_operated.batch_id] = inbound_source
-
-    result = []
-    for batch in batches:
-        file_count, delivery_total, import_total, manual_total = file_stats.get(
-            batch.id, (0, 0, 0, 0)
-        )
-        result.append(
-            _batch_base_json(
-                batch,
-                [],
-                overreceipt_rules.get(batch.id),
-                self_operated_by_batch.get(batch.id),
-                self_operated_rules.get(batch.id),
-                inbound_sources.get(batch.id),
-                file_count=file_count,
-                summary={
-                    "delivery_total": delivery_total,
-                    "import_total": import_total,
-                    "manual_total": manual_total,
-                    "conserved": delivery_total == import_total + manual_total,
-                },
-            )
-        )
-    return result
 
 
 def _validate_input_version(kind: str, path: Path) -> None:
@@ -1607,8 +1267,8 @@ def create_app(
         app=app,
         get_session=get_session,
         current_user=current_user,
-        batch_json=_batch_json,
-        batch_list_json=_batch_list_json,
+        batch_json=batch_json,
+        batch_list_json=batch_list_json,
         get_batch_or_404=get_batch_or_404,
     )
     register_exception_read_routes(
@@ -2659,7 +2319,7 @@ def create_app(
             },
         )
         session.commit()
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.post(
         "/api/batches/with-files",
@@ -2799,7 +2459,7 @@ def create_app(
         finally:
             for temporary_path in temporary_paths:
                 await run_in_threadpool(temporary_path.unlink, missing_ok=True)
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.post(
         "/api/self-operated-batches",
@@ -2875,7 +2535,7 @@ def create_app(
                 batch.id,
             )
             session.commit()
-            return _batch_json(batch, session)
+            return batch_json(batch, session)
         if not delivery_files:
             raise HTTPException(status_code=400, detail="缺少质检交货单")
         if len(delivery_files) > app.state.max_batch_upload_files:
@@ -3072,7 +2732,7 @@ def create_app(
                 await run_in_threadpool(temporary_delivery.unlink, missing_ok=True)
             if temporary_inbound is not None:
                 await run_in_threadpool(temporary_inbound.unlink, missing_ok=True)
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.delete("/api/batches")
     def delete_batches(
@@ -3299,7 +2959,7 @@ def create_app(
             },
         )
         session.commit()
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.post("/api/self-operated-batches/{batch_id}/inbound-file")
     async def upload_self_operated_inbound_file(
@@ -3373,7 +3033,7 @@ def create_app(
             raise
         if old_path is not None and old_path != destination:
             await run_in_threadpool(_unlink_after_commit, old_path)
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.post(
         "/api/batches/{batch_id}/files",
@@ -3488,7 +3148,7 @@ def create_app(
                 status_code=409,
                 detail="文件上传发生并发冲突，请刷新后重试",
             ) from error
-        return _file_json(source)
+        return file_json(source)
 
     @app.delete("/api/batches/{batch_id}/files/{file_id}")
     def delete_batch_file(
@@ -3544,7 +3204,7 @@ def create_app(
         )
         session.commit()
         _unlink_after_commit(storage_path)
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.put("/api/batches/{batch_id}/files/order")
     def reorder_batch_files(
@@ -3579,7 +3239,7 @@ def create_app(
             {"file_ids": payload.file_ids},
         )
         session.commit()
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     @app.post("/api/batches/{batch_id}/preflight")
     def preflight_batch(
@@ -3680,7 +3340,7 @@ def create_app(
         batch.error_message = None
         _audit(session, user.id, "preflight_batch", "batch", batch.id)
         session.commit()
-        return _batch_json(batch, session)
+        return batch_json(batch, session)
 
     def queue_job(batch: Batch, kind: str, user: User, session: Session) -> Job:
         existing = session.scalar(
@@ -3767,8 +3427,8 @@ def create_app(
         get_session=get_session,
         current_user=current_user,
         get_batch_or_404=get_batch_or_404,
-        merged_export_path=_merged_export_path,
-        merged_export_ready=_merged_export_ready,
+        merged_export_path=merged_export_path,
+        merged_export_ready=merged_export_ready,
         queue_job=queue_job,
         job_json=job_json,
     )
