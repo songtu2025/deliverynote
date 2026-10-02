@@ -19,7 +19,7 @@ function qualityProps(): QualityProps {
 
 function qualityView(props: QualityProps) {
   return (
-    <ConfigProvider theme={{ token: { motion: false } }}>
+    <ConfigProvider theme={{ token: { motion: false, colorText: "#141b18" } }}>
       <InputVersionQualityPanel {...props} />
     </ConfigProvider>
   );
@@ -62,8 +62,12 @@ describe("InputVersionQualityPanel", () => {
     props.errors = severity === "error" ? 2 : 0;
     props.warnings = severity === "warning" ? 2 : 0;
     render(qualityView(props));
-    expect(screen.getByText(`${props.errors} 个错误`)).toBeInTheDocument();
-    expect(screen.getByText(`${props.warnings} 个警告`)).toBeInTheDocument();
+    const errorTag = screen.getByText(`${props.errors} 个错误`);
+    const warningTag = screen.getByText(`${props.warnings} 个警告`);
+    expect(errorTag).toBeInTheDocument();
+    expect(warningTag).toBeInTheDocument();
+    expect(severity === "error" ? errorTag : warningTag).toHaveStyle({ color: "#141b18" });
+    expect((severity === "error" ? warningTag : errorTag).style.color).toBe("");
     expect(screen.getByText("涉及 Excel 行：9、2")).toBeInTheDocument();
     expect(
       screen.getByRole("img", { name: severity === "error" ? "close-circle" : "exclamation-circle" })
@@ -86,6 +90,8 @@ describe("InputVersionQualityPanel", () => {
     ]);
     expect(screen.getByText("2 个错误")).toBeInTheDocument();
     expect(screen.getByText("1 个警告")).toBeInTheDocument();
+    expect(screen.getByText("2 个错误")).toHaveStyle({ color: "#141b18" });
+    expect(screen.getByText("1 个警告")).toHaveStyle({ color: "#141b18" });
     expect(screen.queryByText("全表")).not.toBeInTheDocument();
     expect(props.summary).toEqual(original);
   });

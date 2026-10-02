@@ -1,4 +1,4 @@
-import { Alert, Space, Tag, Typography } from "antd";
+import { Alert, Space, Tag, theme, Typography } from "antd";
 
 import type { InputVersionInspection, PositionIssue } from "../../types";
 import type { InputKind } from "./adminConstants";
@@ -23,6 +23,8 @@ export function InputVersionQualityPanel({
   errors,
   warnings
 }: InputVersionQualityPanelProps) {
+  const { token } = theme.useToken();
+
   if (!hasActiveVersion) {
     return <Typography.Text type="secondary">启用资料后显示检查结果。</Typography.Text>;
   }
@@ -38,8 +40,12 @@ export function InputVersionQualityPanel({
   return (
     <IssueList issues={summary.issues} className="input-data-quality-list" describeRows={describeExcelRows}>
       <Space wrap size={[6, 6]}>
-        <Tag color={errors > 0 ? "error" : "default"}>{errors} 个错误</Tag>
-        <Tag color={warnings > 0 ? "warning" : "default"}>{warnings} 个警告</Tag>
+        <Tag color={errors > 0 ? "error" : "default"} style={errors > 0 ? { color: token.colorText } : undefined}>
+          {errors} 个错误
+        </Tag>
+        <Tag color={warnings > 0 ? "warning" : "default"} style={warnings > 0 ? { color: token.colorText } : undefined}>
+          {warnings} 个警告
+        </Tag>
       </Space>
     </IssueList>
   );
