@@ -87,9 +87,7 @@ function readWorkspaceRoute(): WorkspaceRoute {
 
 function workspacePath(route: WorkspaceRoute): string {
   if (route.batchId !== null) {
-    return route.page === "self-operated"
-      ? `/self-operated/${route.batchId}`
-      : `/batches/${route.batchId}`;
+    return route.page === "self-operated" ? `/self-operated/${route.batchId}` : `/batches/${route.batchId}`;
   }
   if (route.page === "self-operated") return "/self-operated";
   if (route.page === "overreceipt") return "/overreceipt";
@@ -111,10 +109,14 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
   const submit = async (values: { username: string; password: string }) => {
     setSubmitting(true);
     try {
-      const result = await api<LoginResponse>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify(values)
-      }, { notifyUnauthorized: false });
+      const result = await api<LoginResponse>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify(values)
+        },
+        { notifyUnauthorized: false }
+      );
       onLogin(result.user);
     } catch (error) {
       message.error(error instanceof Error ? error.message : "登录失败");
@@ -145,12 +147,7 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           </p>
         </div>
 
-        <img
-          className="login-story-illustration"
-          src="/login-document-flow.svg"
-          alt=""
-          aria-hidden="true"
-        />
+        <img className="login-story-illustration" src="/login-document-flow.svg" alt="" aria-hidden="true" />
       </aside>
 
       <main className="login-panel">
@@ -161,23 +158,10 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
           </header>
 
           <Form className="login-form" layout="vertical" onFinish={submit} requiredMark={false}>
-            <Form.Item
-              label="用户名"
-              name="username"
-              rules={[{ required: true, message: "请输入用户名" }]}
-            >
-              <Input
-                size="large"
-                prefix={<UserOutlined />}
-                placeholder="请输入用户名"
-                autoComplete="username"
-              />
+            <Form.Item label="用户名" name="username" rules={[{ required: true, message: "请输入用户名" }]}>
+              <Input size="large" prefix={<UserOutlined />} placeholder="请输入用户名" autoComplete="username" />
             </Form.Item>
-            <Form.Item
-              label="密码"
-              name="password"
-              rules={[{ required: true, message: "请输入密码" }]}
-            >
+            <Form.Item label="密码" name="password" rules={[{ required: true, message: "请输入密码" }]}>
               <Input.Password
                 size="large"
                 prefix={<LockOutlined />}
@@ -185,14 +169,7 @@ function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
                 autoComplete="current-password"
               />
             </Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
-              size="large"
-              block
-              loading={submitting}
-              autoInsertSpace={false}
-            >
+            <Button type="primary" htmlType="submit" size="large" block loading={submitting} autoInsertSpace={false}>
               登录
             </Button>
           </Form>
@@ -271,39 +248,38 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
 
   return (
     <Layout className={`app-layout ${batchFocused ? "batch-focus-layout" : ""}`}>
-      {!batchFocused && <Layout.Sider width={236} breakpoint="lg" collapsedWidth={72} theme="light">
-        <div className="brand">
-          <span className="brand-mark">DN</span>
-          <span className="brand-name">单据处理</span>
-        </div>
-        <Menu
-          mode="inline"
-          selectedKeys={[page]}
-          items={menuItems}
-          onClick={({ key }) => {
-            navigate({
-              page: key as WorkspacePage,
-              batchId: null
-            });
-          }}
-        />
-      </Layout.Sider>}
+      {!batchFocused && (
+        <Layout.Sider width={236} breakpoint="lg" collapsedWidth={72} theme="light">
+          <div className="brand">
+            <span className="brand-mark">DN</span>
+            <span className="brand-name">单据处理</span>
+          </div>
+          <Menu
+            mode="inline"
+            selectedKeys={[page]}
+            items={menuItems}
+            onClick={({ key }) => {
+              navigate({
+                page: key as WorkspacePage,
+                batchId: null
+              });
+            }}
+          />
+        </Layout.Sider>
+      )}
       <Layout>
         <Layout.Header className="app-header">
           <div className="account-controls" role="group" aria-label="当前用户">
             <div className="account-identity">
-              <span className="account-avatar" aria-hidden="true">{userInitial}</span>
+              <span className="account-avatar" aria-hidden="true">
+                {userInitial}
+              </span>
               <span className="account-copy">
                 <strong>{user.username}</strong>
                 <small>{roleLabel}</small>
               </span>
             </div>
-            <Button
-              className="account-logout"
-              aria-label="退出登录"
-              icon={<LogoutOutlined />}
-              onClick={onLogout}
-            >
+            <Button className="account-logout" aria-label="退出登录" icon={<LogoutOutlined />} onClick={onLogout}>
               退出
             </Button>
           </div>

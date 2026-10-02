@@ -53,13 +53,10 @@ describe("App", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith("/api/auth/me")) {
-          return new Response(
-            JSON.stringify(authenticatedUser ?? { detail: "未登录" }),
-            {
-              status: authenticatedUser ? 200 : 401,
-              headers: { "Content-Type": "application/json" }
-            }
-          );
+          return new Response(JSON.stringify(authenticatedUser ?? { detail: "未登录" }), {
+            status: authenticatedUser ? 200 : 401,
+            headers: { "Content-Type": "application/json" }
+          });
         }
         if (url.endsWith("/api/auth/login")) {
           return new Response(
@@ -80,14 +77,17 @@ describe("App", () => {
           });
         }
         if (url.includes("/api/batches/7/exceptions?")) {
-          return new Response(JSON.stringify({
-            items: [],
-            total: 0,
-            stats: { unfinished_count: 0, unfinished_quantity: 0, resolved_count: 0, total_count: 0 }
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" }
-          });
+          return new Response(
+            JSON.stringify({
+              items: [],
+              total: 0,
+              stats: { unfinished_count: 0, unfinished_quantity: 0, resolved_count: 0, total_count: 0 }
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" }
+            }
+          );
         }
         if (url.endsWith("/api/batches/7")) {
           return new Response(JSON.stringify(routeBatch), {
@@ -181,13 +181,15 @@ describe("App", () => {
     expect(sessionStorage.getItem("delivery-note-token")).toBeNull();
     await waitFor(() => {
       const requestedUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
-      expect(requestedUrls).toEqual(expect.arrayContaining([
-        "/api/auth/login",
-        "/api/batches?workflow=delivery&offset=0&limit=12",
-        "/api/input-versions",
-        "/api/purchase-sync",
-        "/api/overreceipt-rule-versions"
-      ]));
+      expect(requestedUrls).toEqual(
+        expect.arrayContaining([
+          "/api/auth/login",
+          "/api/batches?workflow=delivery&offset=0&limit=12",
+          "/api/input-versions",
+          "/api/purchase-sync",
+          "/api/overreceipt-rule-versions"
+        ])
+      );
       for (const [, init] of vi.mocked(fetch).mock.calls) {
         expect(init).toEqual(expect.objectContaining({ credentials: "include" }));
         expect(new Headers(init?.headers).has("Authorization")).toBe(false);
@@ -247,10 +249,7 @@ describe("App", () => {
     await screen.findByRole("button", { name: /登\s*录/ });
     expect(localStorage.getItem("delivery-note-token")).toBeNull();
     expect(localStorage.getItem("delivery-note-user")).toBeNull();
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/auth/logout",
-      expect.objectContaining({ method: "POST" })
-    );
+    expect(fetch).toHaveBeenCalledWith("/api/auth/logout", expect.objectContaining({ method: "POST" }));
   });
 
   it("keeps the standard account header appearance in the batch workspace", async () => {
@@ -271,9 +270,7 @@ describe("App", () => {
       paddingRight: listStyle.paddingRight
     };
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "路由测试批次" })
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "路由测试批次" }));
     await screen.findByRole("heading", { name: "路由测试批次" });
     const account = screen.getByRole("group", { name: "当前用户" });
     const header = account.closest(".app-header") as HTMLElement;
@@ -325,8 +322,8 @@ describe("App", () => {
           });
         }
         if (
-          url.endsWith("/api/overreceipt-rule-versions")
-          || url.endsWith("/api/self-operated-overreceipt-rule-versions")
+          url.endsWith("/api/overreceipt-rule-versions") ||
+          url.endsWith("/api/self-operated-overreceipt-rule-versions")
         ) {
           return new Response(JSON.stringify([]), {
             status: 200,
@@ -364,18 +361,21 @@ describe("App", () => {
   });
 
   it("returns to login when a cookie session expires", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/api/auth/me")) {
-        return new Response(JSON.stringify(adminUser), {
-          status: 200,
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith("/api/auth/me")) {
+          return new Response(JSON.stringify(adminUser), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        return new Response(JSON.stringify({ detail: "未登录" }), {
+          status: 401,
           headers: { "Content-Type": "application/json" }
         });
-      }
-      return new Response(
-        JSON.stringify({ detail: "未登录" }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }));
+      })
+    );
 
     render(<App />);
 
