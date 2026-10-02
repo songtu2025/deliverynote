@@ -16,6 +16,8 @@ import pandas as pd
 from sqlalchemy import select
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from delivery_note.workers.export_rows import _consolidate_import_rows
+import delivery_note.workers.export_files as export_files_module
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from tests.asgi_client import SyncASGIClient
 import delivery_note.worker as worker_module
@@ -35,21 +37,14 @@ from delivery_note.web.models import (
     SelfOperatedSiteResolution,
 )
 
-try:
-    from delivery_note.worker import (
-        _consolidate_import_rows,
-        _fail_job,
-        _fetch_purchase_order_details,
-        _fetch_incremental_purchase_order_details,
-        build_parser,
-        recover_stale_jobs,
-        run_once,
-    )
-except ImportError:
-    _consolidate_import_rows = None
-    _fail_job = None
-    recover_stale_jobs = None
-    run_once = None
+from delivery_note.worker import (
+    _fail_job,
+    _fetch_purchase_order_details,
+    _fetch_incremental_purchase_order_details,
+    build_parser,
+    recover_stale_jobs,
+    run_once,
+)
 
 
 class WorkerExportConsolidationTests(unittest.TestCase):
@@ -158,10 +153,6 @@ class WorkerExportConsolidationTests(unittest.TestCase):
         self.assertEqual([detail[1]["balance"] for detail in fetched], [1] * 20)
 
     def test_multiple_delivery_notes_are_preserved_in_stable_order(self):
-        self.assertIsNotNone(_consolidate_import_rows, "导入行合并函数尚未实现")
-        if _consolidate_import_rows is None:
-            return
-
         rows = pd.DataFrame(
             [
                 ["仓A", "GYS-001", "SKU-A", 10, "站点A", "单据A", "原因"],
@@ -181,10 +172,6 @@ class WorkerExportConsolidationTests(unittest.TestCase):
 
 class WorkerIntegrationTests(unittest.TestCase):
     def setUp(self):
-        self.assertIsNotNone(run_once, "Worker 尚未实现")
-        self.assertIsNotNone(recover_stale_jobs, "任务恢复尚未实现")
-        if run_once is None or recover_stale_jobs is None:
-            self.skipTest("Worker 尚未实现")
         self.directory = TemporaryDirectory()
         self.root = Path(self.directory.name)
         self.database_url = f"sqlite+pysqlite:///{self.root / 'worker.db'}"
@@ -1176,7 +1163,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             batch.zip_path = str(referenced_dir / "artifact.xlsx")
             session.commit()
 
-        worker_module._cleanup_previous_export_directories(
+        export_files_module._cleanup_previous_export_directories(
             self.app.state.database,
             export_root,
             current_dir,

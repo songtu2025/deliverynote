@@ -16,10 +16,6 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pandas as pd
 from sqlalchemy import select
 
-from .application import (
-    SplitPart,
-    project_split,
-)
 from .excel_io import (
     read_position_workbook,
     read_purchase_workbook,
@@ -41,10 +37,7 @@ from .purchase_detail_cache import (
 )
 from .pipeline import (
     EXCEPTION_COLUMNS,
-    IMPORT_COLUMNS,
     BatchResult,
-    build_manual_import_rows,
-    enrich_pending_import_rows,
 )
 from .purchase_sync import (
     compare_purchase_frames,
@@ -66,16 +59,19 @@ from .web.models import (
     AuditLog,
     Batch,
     BatchFile,
-    ExceptionRecord,
     InputVersion,
     Job,
     PurchaseSyncJob,
     SelfOperatedBatch,
     SelfOperatedInboundSyncJob,
-    SplitRecord,
+)
+from .workers.export_rows import _consolidate_self_operated_rows, _prepare_export_result
+from .workers.export_inputs import _load_export_inputs
+from .workers.export_files import (
+    _cleanup_previous_export_directories,
+    _published_is_registered,
 )
 from .workers.compute_delivery import _execute_compute
-from .workers.compute_inputs import _version_paths
 from .workers.leases import (
     WORKER_QUEUES,
     LeaseKeeper,
@@ -94,279 +90,6 @@ from .workers.recovery import recover_stale_jobs as recover_stale_jobs
 PURCHASE_DETAIL_WORKERS = 8
 PURCHASE_SYNC_MODES = {"full", "shadow", "incremental"}
 LOGGER = logging.getLogger(__name__)
-
-
-def _exception_dict(exception: ExceptionRecord) -> dict:
-    return {
-        "SKU": exception.sku,
-        "原始站点": exception.original_site,
-        "完整站点": exception.full_site,
-        "目的仓": exception.destination,
-        "交货量": exception.delivery_quantity,
-        "已自动分配量": exception.allocated_quantity,
-        "人工处理量": exception.manual_quantity,
-        "异常原因": exception.reason,
-    }
-
-
-def _merge_delivery_notes(values: pd.Series) -> str:
-    """按原顺序合并有效备注，并保留带数量的详细版本。"""
-
-    notes: list[str] = []
-    for value in values:
-        if pd.isna(value):
-            continue
-        note = str(value)
-        if note.strip() and note not in notes:
-            notes.append(note)
-    detailed_notes = [
-        note
-        for note in notes
-        if not any(other.startswith(f"{note}：") for other in notes)
-    ]
-    return "；".join(detailed_notes)
-
-
-def _consolidate_import_rows(import_rows: pd.DataFrame) -> pd.DataFrame:
-    """合并业务身份相同的导入行，避免积加忽略后续记录。"""
-
-    group_columns = [
-        column for column in IMPORT_COLUMNS if column not in {"*本次交货量", "交货备注"}
-    ]
-    consolidated = import_rows.groupby(
-        group_columns,
-        as_index=False,
-        sort=False,
-        dropna=False,
-    ).agg(
-        {
-            "*本次交货量": "sum",
-            "交货备注": _merge_delivery_notes,
-        }
-    )
-    return consolidated[IMPORT_COLUMNS]
-
-
-def _consolidate_self_operated_rows(import_rows: pd.DataFrame) -> pd.DataFrame:
-    """合并指向同一入库记录的跨文件数量，避免后续记录被忽略。"""
-
-    if import_rows.empty:
-        return import_rows[INBOUND_TEMPLATE_COLUMNS]
-    group_columns = [
-        column
-        for column in INBOUND_TEMPLATE_COLUMNS
-        if column not in {"本次入库", "超收原因"}
-    ]
-    consolidated = import_rows.groupby(
-        group_columns,
-        as_index=False,
-        sort=False,
-        dropna=False,
-    ).agg(
-        {
-            "本次入库": "sum",
-            "超收原因": _merge_delivery_notes,
-        }
-    )
-    return consolidated[INBOUND_TEMPLATE_COLUMNS]
-
-
-def _load_export_inputs(database: Database, batch_id: int):
-    with database.session() as session:
-        batch = session.get(Batch, batch_id)
-        if batch is None or batch.status != "succeeded":
-            raise RuntimeError("批次尚未计算成功")
-        version_paths = _version_paths(session, batch)
-        sources = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-            .order_by(BatchFile.file_order)
-        ).all()
-        previous_export_paths = [
-            path
-            for path in [
-                batch.zip_path,
-                *(source.result_path for source in sources),
-            ]
-            if path
-        ]
-        source_ids = [source.id for source in sources]
-        exceptions = (
-            session.scalars(
-                select(ExceptionRecord)
-                .where(ExceptionRecord.batch_file_id.in_(source_ids))
-                .order_by(
-                    ExceptionRecord.batch_file_id,
-                    ExceptionRecord.id,
-                )
-            ).all()
-            if source_ids
-            else []
-        )
-        exception_ids = [exception.id for exception in exceptions]
-        parts = (
-            session.scalars(
-                select(SplitRecord)
-                .where(SplitRecord.exception_id.in_(exception_ids))
-                .order_by(SplitRecord.exception_id, SplitRecord.id)
-            ).all()
-            if exception_ids
-            else []
-        )
-        exceptions_by_source: dict[int, list[ExceptionRecord]] = {}
-        for exception in exceptions:
-            exceptions_by_source.setdefault(
-                exception.batch_file_id,
-                [],
-            ).append(exception)
-        parts_by_exception: dict[int, list[SplitRecord]] = {}
-        for part in parts:
-            parts_by_exception.setdefault(part.exception_id, []).append(part)
-        payloads = []
-        for source in sources:
-            exception_payloads = []
-            for exception in exceptions_by_source.get(source.id, []):
-                exception_payloads.append(
-                    {
-                        "row": _exception_dict(exception),
-                        "parts": [
-                            SplitPart(
-                                quantity=part.quantity,
-                                destination=part.destination,
-                                site=part.site,
-                                supplier_code=part.supplier_code,
-                                sku=part.sku,
-                                delivery_note=part.delivery_note,
-                                resolved=part.resolved,
-                            )
-                            for part in parts_by_exception.get(
-                                exception.id,
-                                [],
-                            )
-                        ],
-                    }
-                )
-            payloads.append(
-                {
-                    "id": source.id,
-                    "original_name": source.original_name,
-                    "file_order": source.file_order,
-                    "supplier_code": source.supplier_code,
-                    "document_note": source.document_note,
-                    "delivery_total": source.delivery_total,
-                    "import_rows": source.import_rows or [],
-                    "exceptions": exception_payloads,
-                }
-            )
-    return version_paths, payloads, previous_export_paths
-
-
-def _prepare_export_result(source: dict, position_rows: pd.DataFrame):
-    import_frames = [pd.DataFrame(source["import_rows"], columns=IMPORT_COLUMNS)]
-    pending_frames = []
-    exception_rows = []
-    for exception_payload in source["exceptions"]:
-        row = exception_payload["row"]
-        exception_rows.append(row)
-        exception_frame = pd.DataFrame([row], columns=EXCEPTION_COLUMNS)
-        parts = exception_payload["parts"]
-        if parts:
-            projection = project_split(
-                exception_frame.iloc[0],
-                parts,
-                supplier_code=source["supplier_code"],
-                document_note=source["document_note"],
-            )
-            import_frames.append(projection.import_rows)
-            pending_frames.append(projection.pending_rows)
-        else:
-            pending = build_manual_import_rows(
-                exception_frame,
-                source["supplier_code"],
-            )
-            pending["单据备注"] = source["document_note"]
-            pending_frames.append(pending)
-
-    import_rows = pd.concat(import_frames, ignore_index=True)
-    import_rows = _consolidate_import_rows(import_rows)
-    pending_rows = (
-        pd.concat(pending_frames, ignore_index=True)
-        if pending_frames
-        else pd.DataFrame(columns=IMPORT_COLUMNS)
-    )
-    pending_rows = enrich_pending_import_rows(pending_rows, position_rows)
-    import_total = int(import_rows["*本次交货量"].sum()) if not import_rows.empty else 0
-    pending_total = (
-        int(pending_rows["*本次交货量"].sum()) if not pending_rows.empty else 0
-    )
-    if source["delivery_total"] != import_total + pending_total:
-        raise RuntimeError("导出数量不守恒")
-    result = BatchResult(
-        import_rows=import_rows,
-        exception_rows=pd.DataFrame(exception_rows, columns=EXCEPTION_COLUMNS),
-        delivery_total=source["delivery_total"],
-        import_total=import_total,
-        manual_total=pending_total,
-    )
-    return result, import_rows, pending_rows
-
-
-def _cleanup_previous_export_directories(
-    database: Database,
-    export_root: Path,
-    current_published: Path,
-    previous_paths: list[str | Path],
-) -> None:
-    """尽力清理已失去数据库引用的上一代导出目录。"""
-    try:
-        resolved_root = export_root.resolve()
-        resolved_current = current_published.resolve()
-        candidates: set[Path] = set()
-        for previous_path in previous_paths:
-            parent = Path(previous_path).parent
-            if parent.is_symlink():
-                continue
-            candidate = parent.resolve()
-            if (
-                candidate.parent == resolved_root
-                and candidate.name.startswith("export-")
-                and candidate != resolved_current
-            ):
-                candidates.add(candidate)
-        if not candidates:
-            return
-
-        with database.session() as session:
-            registered_paths = [
-                *session.scalars(
-                    select(Batch.zip_path).where(Batch.zip_path.is_not(None))
-                ).all(),
-                *session.scalars(
-                    select(BatchFile.result_path).where(
-                        BatchFile.result_path.is_not(None)
-                    )
-                ).all(),
-                *session.scalars(
-                    select(Job.output_path).where(Job.output_path.is_not(None))
-                ).all(),
-            ]
-        registered = [Path(path).resolve() for path in registered_paths]
-    except Exception:
-        LOGGER.warning("无法确认旧导出目录引用，已跳过清理", exc_info=True)
-        return
-
-    for candidate in candidates:
-        if any(
-            output_path == candidate or candidate in output_path.parents
-            for output_path in registered
-        ):
-            continue
-        if not candidate.is_dir():
-            continue
-        try:
-            shutil.rmtree(candidate)
-        except Exception:
-            LOGGER.warning("旧导出目录清理失败：%s", candidate, exc_info=True)
 
 
 def _execute_self_operated_export(
@@ -678,24 +401,6 @@ def _execute_export(
         ):
             shutil.rmtree(published)
         raise
-
-
-def _published_is_registered(
-    database: Database,
-    job_id: int,
-    archive_path: Path,
-) -> bool:
-    try:
-        with database.session() as session:
-            job = session.get(Job, job_id)
-            return (
-                job is not None
-                and job.status == "succeeded"
-                and job.output_path == str(archive_path)
-            )
-    except Exception:
-        # 数据库状态无法确认时保留文件，避免删除已成功提交的正式结果。
-        return True
 
 
 def _fetch_purchase_order_details(
