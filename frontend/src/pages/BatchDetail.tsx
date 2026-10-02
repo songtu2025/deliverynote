@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
   Card,
   Descriptions,
@@ -19,8 +20,7 @@ import {
   Tag,
   Tooltip,
   Typography,
-  Upload,
-  message
+  Upload
 } from "antd";
 import type { UploadProps } from "antd";
 import {
@@ -35,11 +35,12 @@ import {
   LockOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  ReloadOutlined,
   SafetyCertificateOutlined,
   SearchOutlined
 } from "@ant-design/icons";
 
-import { api, download } from "../api";
+import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
 import type { Batch, BatchFile, DeliveryException, InputVersion, Job, SplitPart } from "../types";
 import { StatusTag } from "./BatchesPage";
@@ -309,9 +310,11 @@ export default function BatchDetail({
   onBack: () => void;
   canRefreshSupplierVersion?: boolean;
 }) {
+  const { message } = AntApp.useApp();
   const [batch, setBatch] = useState<Batch | null>(null);
   const [activeSupplierVersion, setActiveSupplierVersion] = useState<InputVersion | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
@@ -351,6 +354,7 @@ export default function BatchDetail({
     const request = ++loadRequestRef.current;
     if (!silent) {
       setLoading(true);
+      setLoadError(null);
     }
     setExceptionsLoading(true);
     try {
@@ -372,10 +376,16 @@ export default function BatchDetail({
           })
         : Promise.resolve();
       const [, loadedPage] = await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
+      if (request === loadRequestRef.current) setLoadError(null);
       return request === loadRequestRef.current ? loadedPage : null;
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        // 刷新遇到会话过期时终止后续成功提示，认证提示由应用统一处理。
+        if (silent) throw error;
+        return null;
+      }
       if (request === loadRequestRef.current) {
-        message.error(error instanceof Error ? error.message : "读取批次失败");
+        setLoadError(error instanceof Error ? error.message : "读取批次失败");
       }
       return null;
     } finally {
@@ -454,7 +464,7 @@ export default function BatchDetail({
         if (!cancelled) void poll();
       } catch (error) {
         pollingJob.current = null;
-        if (!cancelled) {
+        if (!cancelled && !(error instanceof ApiError && error.status === 401)) {
           message.error(error instanceof Error ? error.message : "读取任务状态失败");
         }
       }
@@ -490,7 +500,9 @@ export default function BatchDetail({
     try {
       await operation();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "操作失败");
+      if (!(error instanceof ApiError && error.status === 401)) {
+        message.error(error instanceof Error ? error.message : "操作失败");
+      }
     } finally {
       setAction(null);
     }
@@ -661,8 +673,29 @@ export default function BatchDetail({
     });
   };
 
+  const loadFailure = loadError && (
+    <Alert
+      type="error"
+      showIcon
+      title="读取批次失败"
+      description={loadError}
+      action={
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>
+          重试
+        </Button>
+      }
+    />
+  );
+
   if (!batch) {
-    return <Card loading={loading} />;
+    return (
+      <div className="page-shell">
+        <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} className="back-link">
+          返回批次列表
+        </Button>
+        {loadFailure || <Card loading={loading} />}
+      </div>
+    );
   }
 
   const canEditFiles = ["draft", "preflight_ready", "failed"].includes(batch.status);
@@ -711,6 +744,7 @@ export default function BatchDetail({
 
   return (
     <div className="page-shell batch-workbench">
+      {loadFailure}
       <div className="batch-heading">
         <div>
           <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} className="back-link">

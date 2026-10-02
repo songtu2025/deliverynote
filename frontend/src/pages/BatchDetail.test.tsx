@@ -1,8 +1,19 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { message } from "antd";
+import { fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { App as AntApp, ConfigProvider, message } from "antd";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchDetail from "./BatchDetail";
+import { api, AUTH_EXPIRED_EVENT } from "../api";
+
+const render = (ui: ReactElement) =>
+  renderComponent(ui, {
+    wrapper: ({ children }) => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <AntApp>{children}</AntApp>
+      </ConfigProvider>
+    )
+  });
 
 const jsonResponse = (payload: unknown) =>
   new Response(JSON.stringify(payload), {
@@ -227,6 +238,7 @@ describe("BatchDetail", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.endsWith("/api/auth/me")) return jsonResponse({ id: 1, username: "admin", role: "admin" });
         if (url.endsWith("/api/batches/7/exceptions/filters")) return jsonResponse(exceptionFilters());
         if (url.includes("/api/batches/7/exceptions?")) return jsonResponse(exceptionPage(url));
         if (url.endsWith("/api/input-versions")) {
@@ -278,6 +290,131 @@ describe("BatchDetail", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["server", "network"])("recovers an initial %s failure with read-only retry", async (failure) => {
+    const originalFetch = fetch;
+    let failing = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/api/batches/7") && failing) {
+          if (failure === "network") throw new Error("网络连接失败");
+          return new Response(JSON.stringify({ detail: "服务暂不可用 <&>" }), { status: 500 });
+        }
+        return originalFetch(input, init);
+      })
+    );
+    const onBack = vi.fn();
+    render(<BatchDetail batchId={7} onBack={onBack} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      failure === "network" ? "网络连接失败" : "服务暂不可用 <&>"
+    );
+    fireEvent.click(screen.getByRole("button", { name: /返回批次列表/ }));
+    expect(onBack).toHaveBeenCalledOnce();
+    failing = false;
+    fireEvent.click(screen.getByRole("button", { name: /重试/ }));
+    await screen.findByText("160 = 100 + 60");
+    expect(screen.queryByText("读取批次失败")).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
+  });
+
+  it("leaves concurrent initial unauthorized feedback to session handling", async () => {
+    await api("/api/auth/me");
+    const expired = vi.fn();
+    window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+    try {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ detail: "未登录" }), { status: 401 }))
+      );
+      render(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+      await waitFor(() => expect(expired).toHaveBeenCalledOnce());
+      expect(screen.queryByText("未登录")).not.toBeInTheDocument();
+      expect(screen.queryByText("读取批次失败")).not.toBeInTheDocument();
+      expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
+    }
+  });
+
+  it.each([403, 409, 422, 500])("shows a %s operation failure and releases its loading state", async (status) => {
+    batchPayload.status = "draft";
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/preflight"))
+          return new Response(JSON.stringify({ detail: `预检失败 ${status}` }), { status });
+        return originalFetch(input, init);
+      })
+    );
+    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const button = await screen.findByRole("button", { name: /执行预检/ });
+    fireEvent.click(button);
+    await screen.findByText(`预检失败 ${status}`);
+    expect(button).not.toHaveClass("ant-btn-loading");
+    expect(screen.queryByText("所有基础资料和交货文件均已通过预检")).not.toBeInTheDocument();
+  });
+
+  it.each(["operation", "refresh", "download", "poll", "poll-refresh"])(
+    "suppresses page feedback for unauthorized %s",
+    async (phase) => {
+      await api("/api/auth/me");
+      batchPayload.status = "draft";
+      if (phase === "download") {
+        batchPayload.status = "succeeded";
+        batchPayload.file_count = 1;
+        batchPayload.files = [batchPayload.files[0]];
+        batchPayload.files[0].download_ready = true;
+        batchPayload.download_ready = true;
+      }
+      if (phase.startsWith("poll")) batchPayload.jobs = { compute: { id: 88, kind: "compute", status: "running" } };
+      const originalFetch = fetch;
+      let refreshing = false;
+      const unauthorized = () => new Response(JSON.stringify({ detail: "未登录" }), { status: 401 });
+      const expired = vi.fn();
+      window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+      try {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input);
+            if (url.endsWith("/preflight")) {
+              refreshing = true;
+              return phase === "operation" ? unauthorized() : jsonResponse(batchPayload);
+            }
+            if (url.endsWith("/api/jobs/88")) {
+              refreshing = true;
+              return phase === "poll" ? unauthorized() : jsonResponse({ id: 88, kind: "compute", status: "succeeded" });
+            }
+            if (url.endsWith("/download")) return unauthorized();
+            if (refreshing && url.endsWith("/api/batches/7")) return unauthorized();
+            return originalFetch(input, init);
+          })
+        );
+        render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+        await screen.findByText(batchPayload.name);
+        if (phase === "operation" || phase === "refresh")
+          fireEvent.click(screen.getByRole("button", { name: /执行预检/ }));
+        if (phase === "download") fireEvent.click(screen.getAllByRole("button", { name: /下载处理结果/ })[0]);
+        await waitFor(() => expect(expired).toHaveBeenCalledOnce());
+        await waitFor(() => expect(document.querySelector(".ant-btn-loading")).not.toBeInTheDocument());
+        expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();
+      } finally {
+        window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
+      }
+    }
+  );
+
+  it("uses context feedback for successful operations instead of static messages", async () => {
+    batchPayload.status = "draft";
+    const staticSuccess = vi.spyOn(message, "success");
+    render(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "采用当前供应商资料" }));
+    await screen.findByText("批次已采用当前供应商资料");
+    expect(staticSuccess).not.toHaveBeenCalled();
   });
 
   it("shows quantity conservation and prevents an invalid split", async () => {
@@ -598,7 +735,6 @@ describe("BatchDetail", () => {
     batchPayload.download_ready = true;
     batchPayload.file_count = 1;
     batchPayload.files = [{ ...batchPayload.files[0], download_ready: true }];
-    const error = vi.spyOn(message, "error").mockImplementation(() => ({}) as never);
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
@@ -612,7 +748,7 @@ describe("BatchDetail", () => {
     render(<BatchDetail batchId={7} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /下载处理结果/ }));
 
-    await waitFor(() => expect(error).toHaveBeenCalledWith("下载失败"));
+    await screen.findByText("下载失败");
   });
 
   it("keeps only the necessary footer actions for a single review item", async () => {
