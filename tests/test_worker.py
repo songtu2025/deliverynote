@@ -19,6 +19,7 @@ from delivery_note.pipeline import IMPORT_COLUMNS
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from tests.asgi_client import SyncASGIClient
 import delivery_note.worker as worker_module
+import delivery_note.workers.compute_delivery as compute_module
 import delivery_note.workers.leases as lease_module
 import delivery_note.workers.recovery as recovery_module
 from delivery_note.web.api import create_app
@@ -1509,7 +1510,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         release_execution = Event()
         lease_lost = Event()
         original_heartbeat = worker_module._heartbeat
-        original_process = worker_module.process_delivery_batch
+        original_process = compute_module.process_delivery_batch
 
         def block_execution(*args, **kwargs):
             execution_started.set()
@@ -1532,7 +1533,7 @@ class WorkerIntegrationTests(unittest.TestCase):
                     0.01,
                 ),
                 patch.object(
-                    worker_module,
+                    compute_module,
                     "process_delivery_batch",
                     side_effect=block_execution,
                 ),

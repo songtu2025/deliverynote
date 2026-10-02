@@ -14,24 +14,16 @@ from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from .application import (
-    DeliveryRequest,
     SplitPart,
-    process_delivery_batch,
     project_split,
 )
-from .config import resolve_supplier
-from .exception_reasons import ExceptionReason, exception_reason_code
 from .excel_io import (
-    read_delivery_workbook,
     read_position_workbook,
-    read_product_workbook,
     read_purchase_workbook,
-    read_self_operated_delivery_workbook,
     read_self_operated_inbound_workbook,
-    read_supplier_workbook,
     write_delivery_workbook,
     write_self_operated_inbound_workbook,
 )
@@ -51,7 +43,6 @@ from .pipeline import (
     EXCEPTION_COLUMNS,
     IMPORT_COLUMNS,
     BatchResult,
-    OverreceiptPolicy,
     build_manual_import_rows,
     enrich_pending_import_rows,
 )
@@ -63,8 +54,6 @@ from .purchase_sync import (
 )
 from .self_operated_inbound import (
     INBOUND_TEMPLATE_COLUMNS,
-    SelfOperatedInboundRequest,
-    process_self_operated_inbound_batch,
 )
 from .self_operated_inbound_sync import (
     compare_self_operated_inbound_frames,
@@ -77,18 +66,16 @@ from .web.models import (
     AuditLog,
     Batch,
     BatchFile,
-    BatchOverreceiptRule,
     ExceptionRecord,
     InputVersion,
     Job,
-    OverreceiptRuleVersion,
     PurchaseSyncJob,
     SelfOperatedBatch,
     SelfOperatedInboundSyncJob,
-    SelfOperatedOverreceiptRuleVersion,
-    SelfOperatedSiteResolution,
     SplitRecord,
 )
+from .workers.compute_delivery import _execute_compute
+from .workers.compute_inputs import _version_paths
 from .workers.leases import (
     WORKER_QUEUES,
     LeaseKeeper,
@@ -103,434 +90,10 @@ from .workers.leases import (
 from .workers.recovery import _recover_stale_jobs, _watch_stale_jobs
 from .workers.recovery import recover_stale_jobs as recover_stale_jobs
 
-VERSION_FIELDS = {
-    "purchase": "purchase_version_id",
-    "product": "product_version_id",
-    "supplier": "supplier_version_id",
-    "position": "position_version_id",
-    "template": "template_version_id",
-}
-
 
 PURCHASE_DETAIL_WORKERS = 8
 PURCHASE_SYNC_MODES = {"full", "shadow", "incremental"}
 LOGGER = logging.getLogger(__name__)
-
-
-def _json_value(value):
-    if pd.isna(value):
-        return None
-    return value.item() if hasattr(value, "item") else value
-
-
-def _json_records(frame: pd.DataFrame) -> list[dict]:
-    return [
-        {column: _json_value(value) for column, value in record.items()}
-        for record in frame.to_dict("records")
-    ]
-
-
-def _version_paths(
-    session,
-    batch: Batch,
-    kinds: tuple[str, ...] = tuple(VERSION_FIELDS),
-) -> dict[str, Path]:
-    result = {}
-    for kind in kinds:
-        version_id = getattr(batch, VERSION_FIELDS[kind])
-        if version_id is None:
-            raise RuntimeError(f"批次缺少锁定的 {kind} 输入版本")
-        version = session.get(InputVersion, version_id)
-        if version is None:
-            raise RuntimeError(f"批次缺少锁定的 {kind} 输入版本")
-        path = Path(version.storage_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"批次输入版本文件不存在：{path}")
-        result[kind] = path
-    return result
-
-
-def _load_compute_inputs(database: Database, batch_id: int):
-    with database.session() as session:
-        batch = session.get(Batch, batch_id)
-        if batch is None:
-            raise RuntimeError("批次不存在")
-        profile = session.get(SelfOperatedBatch, batch.id)
-        version_kinds = (
-            ("product", "supplier") if profile is not None else tuple(VERSION_FIELDS)
-        )
-        version_paths = _version_paths(session, batch, version_kinds)
-        sources = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-            .order_by(BatchFile.file_order)
-        ).all()
-        if not sources:
-            raise RuntimeError("批次没有交货文件")
-        source_data = [
-            {
-                "id": source.id,
-                "path": Path(source.storage_path),
-                "original_name": source.original_name,
-                "file_order": source.file_order,
-            }
-            for source in sources
-        ]
-        overreceipt_policy = None
-        binding = session.get(BatchOverreceiptRule, batch.id)
-        if binding is not None:
-            rule = session.get(OverreceiptRuleVersion, binding.rule_version_id)
-            if rule is None:
-                raise RuntimeError("批次锁定的超收规则版本不存在")
-            overreceipt_policy = OverreceiptPolicy(
-                short_tail_limit=rule.short_tail_limit,
-                medium_tail_limit=rule.medium_tail_limit,
-                long_tail_limit=rule.long_tail_limit,
-                allowed_warehouses=frozenset(rule.allowed_warehouses or []),
-            )
-        self_operated_data = None
-        if profile is not None:
-            inbound_path = Path(profile.inbound_storage_path)
-            if not profile.inbound_storage_path or not inbound_path.is_file():
-                raise FileNotFoundError("自营仓收货入库单不存在")
-            template = session.get(InputVersion, profile.template_version_id)
-            if template is None or not Path(template.storage_path).is_file():
-                raise FileNotFoundError("批次锁定的积加入库模板不存在")
-            rule = (
-                session.get(
-                    SelfOperatedOverreceiptRuleVersion,
-                    profile.rule_version_id,
-                )
-                if profile.rule_version_id is not None
-                else None
-            )
-            resolutions = session.scalars(
-                select(SelfOperatedSiteResolution).where(
-                    SelfOperatedSiteResolution.batch_id == batch.id
-                )
-            ).all()
-            self_operated_data = {
-                "inbound_path": inbound_path,
-                "template_path": Path(template.storage_path),
-                "overreceipt_limit": rule.allowance if rule is not None else 0,
-                "site_overrides": {
-                    (resolution.sku, resolution.original_site): resolution.full_site
-                    for resolution in resolutions
-                },
-            }
-    return version_paths, source_data, overreceipt_policy, self_operated_data
-
-
-def _execute_self_operated_compute(
-    database: Database,
-    job_id: int,
-    batch_id: int,
-    claim_token: str,
-    version_paths: dict[str, Path],
-    sources: list[dict],
-    self_operated_data: dict,
-    before_finalize: Callable[[], None],
-) -> None:
-    supplier_rows = read_supplier_workbook(version_paths["supplier"])
-    product_rows = read_product_workbook(version_paths["product"])
-    inbound_rows = read_self_operated_inbound_workbook(
-        self_operated_data["inbound_path"]
-    )
-    identities = {}
-    deliveries = {}
-    requests = []
-    for source in sources:
-        _heartbeat(database, job_id, claim_token)
-        if not source["path"].is_file():
-            raise FileNotFoundError(f"交货文件不存在：{source['path']}")
-        supplier = resolve_supplier(Path(source["original_name"]), supplier_rows)
-        delivery = read_self_operated_delivery_workbook(source["path"])
-        identities[source["id"]] = supplier
-        deliveries[source["id"]] = delivery
-        requests.append(
-            SelfOperatedInboundRequest(
-                source_id=source["id"],
-                delivery_lines=delivery.delivery_lines,
-                delivery_numbers=delivery.delivery_numbers,
-                supplier_name=supplier.name,
-            )
-        )
-    batch_result = process_self_operated_inbound_batch(
-        requests,
-        product_rows,
-        inbound_rows,
-        overreceipt_limit=self_operated_data["overreceipt_limit"],
-        site_overrides=self_operated_data["site_overrides"],
-    )
-    _heartbeat(database, job_id, claim_token)
-    payloads = []
-    for item in batch_result.items:
-        source_id = int(item.source_id)
-        result = item.result
-        payloads.append(
-            {
-                "source_id": source_id,
-                "supplier": identities[source_id],
-                "delivery_numbers": deliveries[source_id].delivery_numbers,
-                "delivery_total": result.qualified_total,
-                "import_total": result.import_total,
-                "manual_total": result.pending_total,
-                "import_rows": _json_records(result.allocation_rows),
-                "pending_rows": _json_records(result.pending_rows),
-            }
-        )
-    before_finalize()
-
-    with database.session() as session:
-        job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-        batch = session.get(Batch, batch_id)
-        if (
-            job is None
-            or batch is None
-            or job.status != "running"
-            or job.claim_token != claim_token
-        ):
-            raise LostJobLeaseError("计算任务租约已失效")
-        source_ids = [payload["source_id"] for payload in payloads]
-        exception_ids = session.scalars(
-            select(ExceptionRecord.id).where(
-                ExceptionRecord.batch_file_id.in_(source_ids)
-            )
-        ).all()
-        if exception_ids:
-            session.execute(
-                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
-            )
-            session.execute(
-                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
-            )
-        for payload in payloads:
-            stored_source = session.get(BatchFile, payload["source_id"])
-            if stored_source is None or stored_source.batch_id != batch.id:
-                raise RuntimeError("批次来源文件已变化")
-            supplier = payload["supplier"]
-            stored_source.supplier_name = supplier.name
-            stored_source.supplier_code = supplier.code
-            stored_source.document_note = "、".join(payload["delivery_numbers"])
-            stored_source.delivery_total = payload["delivery_total"]
-            stored_source.import_total = payload["import_total"]
-            stored_source.manual_total = payload["manual_total"]
-            stored_source.import_rows = payload["import_rows"]
-            stored_source.result_path = None
-
-            for pending in payload["pending_rows"]:
-                normal = int(pending["正常分配数量"])
-                overreceipt = int(pending["规则内超收数量"])
-                session.add(
-                    ExceptionRecord(
-                        batch_file_id=stored_source.id,
-                        sku=str(pending["SKU"]),
-                        original_site=str(pending["原始站点"] or ""),
-                        full_site=str(pending["完整站点"] or ""),
-                        destination="",
-                        delivery_quantity=int(pending["质检合格数量"]),
-                        allocated_quantity=normal + overreceipt,
-                        purchase_allocated_quantity=normal,
-                        overreceipt_allocated_quantity=overreceipt,
-                        overreceipt_remaining_quantity=(
-                            0
-                            if pending["待处理原因"]
-                            == ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
-                            else None
-                        ),
-                        manual_quantity=int(pending["待处理数量"]),
-                        reason=str(pending["待处理原因"]),
-                        reason_code=exception_reason_code(pending["待处理原因"]),
-                        status="pending",
-                    )
-                )
-
-        batch.status = "succeeded"
-        batch.error_message = None
-        batch.zip_path = None
-        job.status = "succeeded"
-        job.finished_at = datetime.utcnow()
-        job.heartbeat_at = job.finished_at
-        job.error_message = None
-        job.claim_token = None
-        session.add(
-            AuditLog(
-                user_id=None,
-                action="worker_self_operated_compute_succeeded",
-                entity_type="batch",
-                entity_id=str(batch.id),
-                details={
-                    "qualified_total": batch_result.qualified_total,
-                    "import_total": batch_result.import_total,
-                    "pending_total": batch_result.pending_total,
-                },
-            )
-        )
-        session.commit()
-
-
-def _execute_compute(
-    database: Database,
-    job_id: int,
-    batch_id: int,
-    claim_token: str,
-    before_finalize: Callable[[], None],
-) -> None:
-    _heartbeat(database, job_id, claim_token)
-    (
-        version_paths,
-        sources,
-        overreceipt_policy,
-        self_operated_data,
-    ) = _load_compute_inputs(database, batch_id)
-    if self_operated_data is not None:
-        _execute_self_operated_compute(
-            database,
-            job_id,
-            batch_id,
-            claim_token,
-            version_paths,
-            sources,
-            self_operated_data,
-            before_finalize,
-        )
-        return
-    supplier_rows = read_supplier_workbook(version_paths["supplier"])
-    product_rows = read_product_workbook(version_paths["product"])
-    purchase_rows = read_purchase_workbook(version_paths["purchase"])
-    position_rows = (
-        read_position_workbook(version_paths["position"])
-        if overreceipt_policy is not None
-        else None
-    )
-    _heartbeat(database, job_id, claim_token)
-
-    requests = []
-    identities = {}
-    for source in sources:
-        _heartbeat(database, job_id, claim_token)
-        if not source["path"].is_file():
-            raise FileNotFoundError(f"交货文件不存在：{source['path']}")
-        supplier = resolve_supplier(Path(source["original_name"]), supplier_rows)
-        identities[source["id"]] = supplier
-        requests.append(
-            DeliveryRequest(
-                source_id=str(source["id"]),
-                delivery_rows=read_delivery_workbook(source["path"]),
-                supplier_name=supplier.name,
-                supplier_code=supplier.code,
-                source_name=source["original_name"],
-            )
-        )
-
-    batch_result = process_delivery_batch(
-        requests,
-        product_rows,
-        purchase_rows,
-        position_data=position_rows,
-        overreceipt_policy=overreceipt_policy,
-    )
-    _heartbeat(database, job_id, claim_token)
-    payloads = []
-    for item in batch_result.items:
-        source_id = int(item.source_id)
-        payloads.append(
-            {
-                "source_id": source_id,
-                "supplier": identities[source_id],
-                "file_order": item.file_order,
-                "document_note": item.document_note,
-                "delivery_total": item.result.delivery_total,
-                "import_total": item.result.import_total,
-                "manual_total": item.result.manual_total,
-                "import_rows": _json_records(item.result.import_rows),
-                "exceptions": _json_records(item.result.exception_rows),
-            }
-        )
-
-    before_finalize()
-    with database.session() as session:
-        job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-        batch = session.get(Batch, batch_id)
-        if (
-            job is None
-            or batch is None
-            or job.status != "running"
-            or job.claim_token != claim_token
-        ):
-            raise LostJobLeaseError("计算任务租约已失效")
-        source_ids = [payload["source_id"] for payload in payloads]
-        exception_ids = session.scalars(
-            select(ExceptionRecord.id).where(
-                ExceptionRecord.batch_file_id.in_(source_ids)
-            )
-        ).all()
-        if exception_ids:
-            session.execute(
-                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
-            )
-            session.execute(
-                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
-            )
-
-        for payload in payloads:
-            source = session.get(BatchFile, payload["source_id"])
-            if source is None or source.batch_id != batch.id:
-                raise RuntimeError("批次来源文件已变化")
-            source.supplier_name = payload["supplier"].name
-            source.supplier_code = payload["supplier"].code
-            source.document_note = payload["document_note"]
-            source.delivery_total = payload["delivery_total"]
-            source.import_total = payload["import_total"]
-            source.manual_total = payload["manual_total"]
-            source.import_rows = payload["import_rows"]
-            source.result_path = None
-            for exception in payload["exceptions"]:
-                session.add(
-                    ExceptionRecord(
-                        batch_file_id=source.id,
-                        sku=str(exception["SKU"]),
-                        original_site=str(exception["原始站点"] or ""),
-                        full_site=str(exception["完整站点"] or ""),
-                        destination=str(exception["目的仓"] or ""),
-                        delivery_quantity=int(exception["交货量"]),
-                        allocated_quantity=int(exception["已自动分配量"]),
-                        purchase_allocated_quantity=int(exception["正常采购分配量"]),
-                        overreceipt_allocated_quantity=int(exception["超收规则分配量"]),
-                        overreceipt_remaining_quantity=(
-                            None
-                            if pd.isna(exception["超收剩余额度"])
-                            else int(exception["超收剩余额度"])
-                        ),
-                        manual_quantity=int(exception["人工处理量"]),
-                        reason=str(exception["异常原因"]),
-                        reason_code=exception_reason_code(exception["异常原因"]),
-                        status="pending",
-                    )
-                )
-
-        batch.status = "succeeded"
-        batch.error_message = None
-        batch.zip_path = None
-        job.status = "succeeded"
-        job.finished_at = datetime.utcnow()
-        job.heartbeat_at = job.finished_at
-        job.error_message = None
-        job.claim_token = None
-        session.add(
-            AuditLog(
-                user_id=None,
-                action="worker_compute_succeeded",
-                entity_type="batch",
-                entity_id=str(batch.id),
-                details={
-                    "delivery_total": batch_result.delivery_total,
-                    "import_total": batch_result.import_total,
-                    "manual_total": batch_result.manual_total,
-                },
-            )
-        )
-        session.commit()
 
 
 def _exception_dict(exception: ExceptionRecord) -> dict:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 import logging
 from threading import Event, Thread
@@ -21,6 +22,16 @@ LOGGER = logging.getLogger("delivery_note.worker")
 
 class LostJobLeaseError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class JobContext:
+    """任务执行和最终保存共用的数据库与租约上下文。"""
+
+    database: Database
+    job_id: int
+    claim_token: str
+    before_finalize: Callable[[], None]
 
 
 class LeaseKeeper:
