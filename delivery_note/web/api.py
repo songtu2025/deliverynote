@@ -5,7 +5,6 @@ from threading import Lock
 from typing import Annotated, Callable
 from uuid import uuid4
 
-import pandas as pd
 from fastapi import (
     Depends,
     FastAPI,
@@ -22,35 +21,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from ..config import (
-    resolve_supplier,
-)
 from ..excel_io import (
     read_delivery_workbook,
-    read_position_workbook,
-    read_product_workbook,
-    read_purchase_workbook,
     read_self_operated_delivery_workbook,
     read_self_operated_inbound_workbook,
-    read_supplier_workbook,
-    validate_self_operated_template_workbook,
-    validate_template_workbook,
 )
-from ..exception_reasons import exception_reason_code
 from ..input_inspection import (
     inspect_input_version_with_preview,
     preview_input_version_page,
 )
 from ..migrations.runner import migrate_schema as run_schema_migrations
-from ..pipeline import (
-    IMPORT_COLUMNS,
-    POSITION_VALUE_COLUMNS,
-    enrich_pending_import_rows,
-)
 from .auth_routes import register_auth_routes
 from .dependencies import build_request_dependencies
 from .health_routes import register_health_routes
 from .auth import hash_password
+from .job_routes import build_job_queue, register_job_routes
 from .batch_export_routes import register_batch_export_routes
 from .batch_read_routes import register_batch_read_routes
 from .batch_maintenance import BatchMaintenance
@@ -78,6 +63,9 @@ from .input_versions import INPUT_KINDS, SELF_OPERATED_INPUT_KINDS
 from .input_versions import bootstrap_builtin_templates
 from .uploads import _safe_filename, _save_upload, _unlink_after_commit
 from .gerpgo_routes import register_gerpgo_routes
+from .exception_views import (
+    _exception_json, _exception_position_values, _split_records_by_exception,
+)
 from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
 from .input_version_read_routes import register_input_version_read_routes
@@ -88,7 +76,6 @@ from .models import (
     BatchOverreceiptRule,
     ExceptionRecord,
     InputVersion,
-    Job,
     OverreceiptRuleVersion,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
@@ -141,157 +128,16 @@ def _boolean_environment(name: str, default: bool) -> bool:
     raise ValueError(f"{name} 必须是 true 或 false")
 
 
-def _split_records_by_exception(
-    session: Session,
-    exceptions: list[ExceptionRecord],
-) -> dict[int, list[SplitRecord]]:
-    exception_ids = [exception.id for exception in exceptions]
-    if not exception_ids:
-        return {}
-    records = session.scalars(
-        select(SplitRecord)
-        .where(SplitRecord.exception_id.in_(exception_ids))
-        .order_by(SplitRecord.exception_id, SplitRecord.id)
-    ).all()
-    grouped: dict[int, list[SplitRecord]] = {}
-    for record in records:
-        grouped.setdefault(record.exception_id, []).append(record)
-    return grouped
-
-
-def _batch_input_signature(
-    batch: Batch,
-    sources: list[BatchFile],
-    self_operated: SelfOperatedBatch | None,
-) -> tuple:
-    return (
-        tuple(getattr(batch, VERSION_FIELDS[kind]) for kind in INPUT_KINDS),
-        tuple(
-            (source.id, source.storage_path, source.original_name, source.file_order)
-            for source in sources
-        ),
-        (
-            self_operated.template_version_id,
-            self_operated.rule_version_id,
-            self_operated.inbound_storage_path,
-        )
-        if self_operated is not None
-        else None,
-    )
 
 
 
 
 
 
-def _exception_position_values(
-    exceptions: list[ExceptionRecord],
-    batch: Batch,
-    session: Session,
-    position_frame_cache: PositionFrameCache,
-) -> dict[int, dict[str, str | int | float]]:
-    if not exceptions:
-        return {}
-    version = session.get(InputVersion, batch.position_version_id)
-    if version is None:
-        raise HTTPException(status_code=409, detail="批次锁定的库位资料不存在")
-    pending_rows = pd.DataFrame(
-        [
-            {
-                "*目的仓": exception.destination,
-                "*供应商编码": "",
-                "*SKU": exception.sku,
-                "*本次交货量": exception.manual_quantity,
-                "*站点": exception.full_site,
-                "单据备注": "",
-                "交货备注": exception.reason,
-            }
-            for exception in exceptions
-        ],
-        index=[exception.id for exception in exceptions],
-        columns=IMPORT_COLUMNS,
-    )
-    try:
-        position_rows = position_frame_cache.get(
-            version.id,
-            Path(version.storage_path),
-        )
-        enriched = enrich_pending_import_rows(
-            pending_rows,
-            position_rows,
-        )
-    except (OSError, ValueError) as error:
-        raise HTTPException(
-            status_code=409,
-            detail=f"批次锁定的库位资料无法读取：{error}",
-        ) from error
-
-    result: dict[int, dict[str, str | int | float]] = {}
-    for exception_id, row in enriched.iterrows():
-        values = {}
-        for column, key in zip(
-            POSITION_VALUE_COLUMNS,
-            ("scale_position", "stocking_position"),
-            strict=True,
-        ):
-            value = row[column]
-            if pd.isna(value):
-                value = ""
-            elif hasattr(value, "item"):
-                value = value.item()
-            values[key] = value
-        result[int(exception_id)] = values
-    return result
 
 
-def _exception_json(
-    exception: ExceptionRecord,
-    parts: list[SplitRecord],
-    position_values: dict[str, str | int | float] | None = None,
-    *,
-    self_operated: bool = False,
-) -> dict:
-    position_values = position_values or {}
-    reason_code = exception.reason_code or exception_reason_code(exception.reason)
-    if self_operated:
-        allowed_actions = (
-            ["resolve_site"] if reason_code == "ambiguous_product_site" else []
-        )
-    else:
-        allowed_actions = ["split"]
-    return {
-        "id": exception.id,
-        "batch_file_id": exception.batch_file_id,
-        "sku": exception.sku,
-        "original_site": exception.original_site,
-        "full_site": exception.full_site,
-        "destination": exception.destination,
-        "delivery_quantity": exception.delivery_quantity,
-        "allocated_quantity": exception.allocated_quantity,
-        "purchase_allocated_quantity": exception.purchase_allocated_quantity,
-        "overreceipt_allocated_quantity": exception.overreceipt_allocated_quantity,
-        "overreceipt_remaining_quantity": exception.overreceipt_remaining_quantity,
-        "manual_quantity": exception.manual_quantity,
-        "reason": exception.reason,
-        "reason_code": reason_code,
-        "allowed_actions": allowed_actions,
-        "status": exception.status,
-        "scale_position": position_values.get("scale_position", ""),
-        "stocking_position": position_values.get("stocking_position", ""),
-        "parts": [
-            {
-                "id": part.id,
-                "quantity": part.quantity,
-                "destination": part.destination,
-                "site": part.site,
-                "supplier_code": part.supplier_code,
-                "sku": part.sku,
-                "delivery_note": part.delivery_note,
-                "resolved": part.resolved,
-            }
-            for part in parts
-        ],
-    }
+
+
 
 
 def _audit(
@@ -1317,173 +1163,12 @@ def create_app(
         session.commit()
         return batch_json(batch, session)
 
-    @app.post("/api/batches/{batch_id}/preflight")
-    def preflight_batch(
-        batch_id: int,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        batch = get_batch_or_404(batch_id, session)
-        if batch.status not in {"draft", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可预检")
-        sources = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-            .order_by(BatchFile.file_order)
-        ).all()
-        if not sources:
-            raise HTTPException(status_code=400, detail="批次至少需要一个交货文件")
-        self_operated = session.get(SelfOperatedBatch, batch.id)
-        input_signature = _batch_input_signature(batch, sources, self_operated)
-        versions = {}
-        version_kinds = (
-            ("product", "supplier") if self_operated is not None else INPUT_KINDS
-        )
-        for kind in version_kinds:
-            version_id = getattr(batch, VERSION_FIELDS[kind])
-            if version_id is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="批次锁定的输入文件不完整",
-                )
-            version = session.get(InputVersion, version_id)
-            if version is None or not Path(version.storage_path).is_file():
-                raise HTTPException(status_code=400, detail="批次锁定的输入文件不完整")
-            versions[kind] = Path(version.storage_path)
-        if any(not Path(source.storage_path).is_file() for source in sources):
-            raise HTTPException(status_code=400, detail="批次锁定的输入文件不完整")
 
-        validation_error = None
-        try:
-            supplier_rows = read_supplier_workbook(versions["supplier"])
-            read_product_workbook(versions["product"])
-            if self_operated is not None:
-                inbound_path = Path(self_operated.inbound_storage_path)
-                if not self_operated.inbound_storage_path or not inbound_path.is_file():
-                    raise ValueError("尚未上传自营仓收货入库单")
-                template = session.get(
-                    InputVersion,
-                    self_operated.template_version_id,
-                )
-                if template is None or not Path(template.storage_path).is_file():
-                    raise ValueError("批次锁定的积加入库模板不存在")
-                read_self_operated_inbound_workbook(inbound_path)
-                validate_self_operated_template_workbook(Path(template.storage_path))
-                for source in sources:
-                    try:
-                        read_self_operated_delivery_workbook(
-                            Path(source.storage_path)
-                        )
-                        resolve_supplier(Path(source.original_name), supplier_rows)
-                    except Exception as error:
-                        raise ValueError(
-                            f"{source.original_name}：{error}"
-                        ) from error
-            else:
-                read_purchase_workbook(versions["purchase"])
-                read_position_workbook(versions["position"])
-                validate_template_workbook(versions["template"])
-                for source in sources:
-                    read_delivery_workbook(Path(source.storage_path))
-                    resolve_supplier(Path(source.original_name), supplier_rows)
-        except Exception as error:
-            validation_error = error
-        batch = get_batch_or_404(batch_id, session, for_update=True)
-        current_sources = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch_id)
-            .order_by(BatchFile.file_order)
-            .execution_options(populate_existing=True)
-        ).all()
-        current_self_operated = session.scalar(
-            select(SelfOperatedBatch)
-            .where(SelfOperatedBatch.batch_id == batch_id)
-            .execution_options(populate_existing=True)
-        )
-        if batch.status not in {"draft", "failed"} or _batch_input_signature(
-            batch, current_sources, current_self_operated
-        ) != input_signature:
-            raise HTTPException(
-                status_code=409,
-                detail="预检期间批次输入已变更，请重新执行预检",
-            )
-        if validation_error is not None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"预检失败：{validation_error}",
-            ) from validation_error
-        batch.status = "preflight_ready"
-        batch.error_message = None
-        _audit(session, user.id, "preflight_batch", "batch", batch.id)
-        session.commit()
-        return batch_json(batch, session)
 
-    def queue_job(batch: Batch, kind: str, user: User, session: Session) -> Job:
-        existing = session.scalar(
-            select(Job).where(Job.batch_id == batch.id, Job.kind == kind)
-        )
-        if existing and existing.status in {"queued", "running", "succeeded"}:
-            return existing
-        if existing is None:
-            existing = Job(batch_id=batch.id, kind=kind, status="queued")
-            session.add(existing)
-        else:
-            existing.status = "queued"
-            existing.error_message = None
-            existing.output_path = None
-            existing.claim_token = None
-            existing.claimed_at = None
-            existing.heartbeat_at = None
-            existing.finished_at = None
-        session.flush()
-        _audit(
-            session,
-            user.id,
-            f"queue_{kind}",
-            "job",
-            existing.id,
-            {"batch_id": batch.id},
-        )
-        return existing
 
-    @app.post("/api/batches/{batch_id}/compute", status_code=status.HTTP_202_ACCEPTED)
-    def start_compute(
-        batch_id: int,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        batch = get_batch_or_404(batch_id, session, for_update=True)
-        existing = session.scalar(
-            select(Job).where(Job.batch_id == batch.id, Job.kind == "compute")
-        )
-        if existing and existing.status in {"queued", "running", "succeeded"}:
-            return job_json(existing)
-        if batch.status not in {"preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="批次尚未通过预检")
-        try:
-            job = queue_job(batch, "compute", user, session)
-            batch.status = "queued"
-            batch.error_message = None
-            session.commit()
-        except IntegrityError:
-            session.rollback()
-            job = session.scalar(
-                select(Job).where(Job.batch_id == batch.id, Job.kind == "compute")
-            )
-            if job is None:
-                raise
-        return job_json(job)
 
-    @app.get("/api/jobs/{job_id}")
-    def get_job(
-        job_id: int,
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        job = session.get(Job, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="任务不存在")
-        return job_json(job)
+    queue_job = build_job_queue(_audit)
+    register_job_routes(app, dependencies, queue_job, _audit)
 
     register_exception_write_routes(
         app=app,
@@ -1509,25 +1194,5 @@ def create_app(
         job_json=job_json,
     )
 
-    @app.get("/api/audit-logs")
-    def list_audit_logs(
-        _admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        logs = session.scalars(
-            select(AuditLog).order_by(AuditLog.id.desc()).limit(200)
-        ).all()
-        return [
-            {
-                "id": log.id,
-                "user_id": log.user_id,
-                "action": log.action,
-                "entity_type": log.entity_type,
-                "entity_id": log.entity_id,
-                "details": log.details,
-                "created_at": utc_isoformat(log.created_at),
-            }
-            for log in logs
-        ]
 
     return app

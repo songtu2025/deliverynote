@@ -17,6 +17,7 @@ from sqlalchemy import delete, event, select
 from sqlalchemy.orm import Session
 
 import delivery_note.input_inspection as input_inspection_module
+import delivery_note.web.batch_preflight as batch_preflight_module
 import delivery_note.web.gerpgo_routes as gerpgo_routes_module
 import delivery_note.web.input_version_routes as input_version_routes_module
 import delivery_note.web.rule_versions as rule_versions_module
@@ -2780,7 +2781,7 @@ class WebApiTests(unittest.TestCase):
             self.assertEqual(response.status_code, 201, response.text)
             file_ids.append(response.json()["id"])
 
-        original_reader = web_api_module.read_delivery_workbook
+        original_reader = batch_preflight_module.read_delivery_workbook
         reordered = False
 
         def read_and_reorder(path):
@@ -2796,7 +2797,8 @@ class WebApiTests(unittest.TestCase):
             return original_reader(path)
 
         with patch.object(
-            web_api_module, "read_delivery_workbook", side_effect=read_and_reorder
+            batch_preflight_module, "read_delivery_workbook",
+            side_effect=read_and_reorder,
         ):
             preflight = self.client.post(
                 f"/api/batches/{batch_id}/preflight", headers=headers
@@ -2828,7 +2830,7 @@ class WebApiTests(unittest.TestCase):
                 )
             },
         ).json()
-        original_reader = web_api_module.read_delivery_workbook
+        original_reader = batch_preflight_module.read_delivery_workbook
 
         def read_and_remove(path):
             removed = self.client.delete(
@@ -2839,7 +2841,8 @@ class WebApiTests(unittest.TestCase):
             return original_reader(path)
 
         with patch.object(
-            web_api_module, "read_delivery_workbook", side_effect=read_and_remove
+            batch_preflight_module, "read_delivery_workbook",
+            side_effect=read_and_remove,
         ):
             preflight = self.client.post(
                 f"/api/batches/{batch_id}/preflight", headers=headers
@@ -2871,7 +2874,7 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertEqual(created.status_code, 201, created.text)
         batch_id = created.json()["id"]
-        original_reader = web_api_module.read_self_operated_delivery_workbook
+        original_reader = batch_preflight_module.read_self_operated_delivery_workbook
 
         def read_and_replace(path):
             result = original_reader(path)
@@ -2889,7 +2892,7 @@ class WebApiTests(unittest.TestCase):
             return result
 
         with patch.object(
-            web_api_module,
+            batch_preflight_module,
             "read_self_operated_delivery_workbook",
             side_effect=read_and_replace,
         ):
