@@ -1,7 +1,10 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .position_drafts import DRAFT_REVISION_CONFLICT_CODE, DraftConflictError
@@ -52,3 +55,19 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=error.status_code,
             content={"detail": error.detail, "code": error.code},
         )
+
+
+@contextmanager
+def commit_draft_changes(session: Session) -> Iterator[None]:
+    """统一草稿编辑的单次提交与并发冲突回滚。"""
+    try:
+        yield
+        commit_once(session)
+    except DraftConflictError as error:
+        rollback_draft_conflict(session, error)
+    except IntegrityError as error:
+        rollback_integrity_conflict(session, error)
+    except ValueError as error:
+        if session.in_transaction():
+            session.rollback()
+        raise HTTPException(status_code=400, detail=str(error)) from error

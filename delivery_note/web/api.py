@@ -74,6 +74,7 @@ from .errors import (
     rollback_draft_conflict,
     rollback_integrity_conflict,
 )
+from .position_draft_row_routes import register_position_draft_row_routes
 from .position_draft_read_routes import register_position_draft_read_routes
 from .position_import_candidates import PositionImportCandidates
 from .overreceipt_routes import register_overreceipt_routes
@@ -96,7 +97,6 @@ from .models import (
     InputVersion,
     Job,
     OverreceiptRuleVersion,
-    PositionDraftRow,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
     SelfOperatedSiteResolution,
@@ -107,17 +107,15 @@ from .position_drafts import (
     DraftConflictError,
     DuplicateInputVersionNameError,
     create_or_resume_draft,
-    delete_draft_rows,
     discard_draft,
     list_draft_rows,
     position_frame,
-    mutate_draft_row,
     publish_draft,
     replace_draft_from_frame,
     require_revision,
 )
 from .position_draft_read import (
-    draft_json, summarize_issues, position_row_json,
+    draft_json, summarize_issues,
 )
 from .sync_routes import register_sync_routes
 from .schemas import (
@@ -125,8 +123,6 @@ from .schemas import (
     BatchDeletePayload,
     FileOrderPayload,
     DraftMutationPayload,
-    PositionRowPayload,
-    BulkDeletePayload,
     ImportApplyPayload,
     PublishDraftPayload,
 )
@@ -579,6 +575,7 @@ def create_app(
     register_position_draft_read_routes(
         app, dependencies, draft_analysis_cache, storage
     )
+    register_position_draft_row_routes(app, dependencies, import_candidates_state)
 
     @app.post(
         "/api/input-drafts/position",
@@ -656,147 +653,9 @@ def create_app(
 
 
 
-    @app.post(
-        "/api/input-drafts/{draft_id}/rows",
-        status_code=status.HTTP_201_CREATED,
-    )
-    def create_position_draft_row(
-        draft_id: int,
-        payload: PositionRowPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        draft = get_draft_or_404(draft_id, session)
-        try:
-            row = mutate_draft_row(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-                payload.model_dump(exclude={"revision"}),
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except ValueError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        session.refresh(draft)
-        session.refresh(row)
-        import_candidates_state.remove_draft(draft.id)
-        return {"row": position_row_json(row), "revision": draft.revision}
 
-    @app.put("/api/input-drafts/{draft_id}/rows/{row_id}")
-    def update_position_draft_row(
-        draft_id: int,
-        row_id: int,
-        payload: PositionRowPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        draft = get_draft_or_404(draft_id, session)
-        existing_row = session.get(PositionDraftRow, row_id)
-        if existing_row is None or existing_row.draft_id != draft.id:
-            raise HTTPException(status_code=404, detail="草稿行不存在")
-        try:
-            row = mutate_draft_row(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-                payload.model_dump(exclude={"revision"}),
-                row_id=row_id,
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except ValueError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        session.refresh(draft)
-        session.refresh(row)
-        import_candidates_state.remove_draft(draft.id)
-        return {"row": position_row_json(row), "revision": draft.revision}
 
-    @app.delete("/api/input-drafts/{draft_id}/rows/{row_id}")
-    def delete_position_draft_row(
-        draft_id: int,
-        row_id: int,
-        payload: DraftMutationPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        draft = get_draft_or_404(draft_id, session)
-        existing_row = session.get(PositionDraftRow, row_id)
-        if existing_row is None or existing_row.draft_id != draft.id:
-            raise HTTPException(status_code=404, detail="草稿行不存在")
-        try:
-            mutate_draft_row(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-                {},
-                row_id=row_id,
-                delete=True,
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except ValueError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        session.refresh(draft)
-        import_candidates_state.remove_draft(draft.id)
-        return {"row_id": row_id, "revision": draft.revision}
 
-    @app.post("/api/input-drafts/{draft_id}/rows/bulk-delete")
-    def bulk_delete_position_draft_rows(
-        draft_id: int,
-        payload: BulkDeletePayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        draft = get_draft_or_404(draft_id, session)
-        if len(payload.row_ids) != len(set(payload.row_ids)):
-            raise HTTPException(status_code=400, detail="批量删除行不可重复")
-        rows = session.scalars(
-            select(PositionDraftRow).where(
-                PositionDraftRow.draft_id == draft.id,
-                PositionDraftRow.id.in_(payload.row_ids),
-            )
-        ).all()
-        if len(rows) != len(payload.row_ids):
-            raise HTTPException(status_code=404, detail="草稿行不存在")
-        try:
-            delete_draft_rows(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-                rows,
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except ValueError as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(status_code=400, detail=str(error)) from error
-        session.refresh(draft)
-        import_candidates_state.remove_draft(draft.id)
-        return {"deleted_ids": payload.row_ids, "revision": draft.revision}
 
     @app.post("/api/input-drafts/{draft_id}/import-preview")
     async def preview_position_draft_import(

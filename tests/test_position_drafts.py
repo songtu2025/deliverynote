@@ -2717,7 +2717,7 @@ class PositionDraftApiTests(unittest.TestCase):
         event.listen(Session, "after_rollback", record_rollback)
         try:
             with patch(
-                "delivery_note.web.api.mutate_draft_row",
+                "delivery_note.web.position_draft_row_routes.mutate_draft_row",
                 side_effect=IntegrityError("insert", {}, RuntimeError("duplicate")),
                 create=True,
             ):
