@@ -40,6 +40,11 @@ describe("InputVersionUploadDrawer", () => {
     vi.restoreAllMocks();
   });
 
+  it("limits the panel width to its inline container", () => {
+    const { container } = render(<DrawerView {...drawerProps()} />);
+    expect(container.querySelector(".ant-drawer-content-wrapper")).toHaveStyle({ width: "520px", maxWidth: "100%" });
+  });
+
   it.each([
     ["product", true, "更新商品信息"],
     ["supplier", true, "更新供应商资料"],

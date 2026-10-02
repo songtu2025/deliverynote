@@ -39,6 +39,7 @@ export function InputVersionUploadDrawer({
       rootClassName="input-data-maintenance-drawer"
       classNames={{ header: "input-data-maintenance-header", body: "input-data-maintenance-body" }}
       styles={{
+        wrapper: { maxWidth: "100%" },
         header: { borderColor: "#e2e9e7", background: "#f7f9f8" },
         body: { padding: "22px 24px" }
       }}
