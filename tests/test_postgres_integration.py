@@ -27,7 +27,7 @@ from delivery_note.web.models import (
     PurchaseSyncJob,
     User,
 )
-from delivery_note.worker import _claim_job
+from delivery_note.workers.leases import _claim_job
 from tests.asgi_client import SyncASGIClient
 
 

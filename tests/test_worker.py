@@ -26,6 +26,7 @@ import delivery_note.workers.export_files as export_files_module
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from tests.asgi_client import SyncASGIClient
 import delivery_note.worker as worker_module
+import delivery_note.workers.scheduler as scheduler_module
 import delivery_note.workers.compute_delivery as compute_module
 import delivery_note.workers.leases as lease_module
 import delivery_note.workers.recovery as recovery_module
@@ -42,8 +43,8 @@ from delivery_note.web.models import (
     SelfOperatedSiteResolution,
 )
 
+from delivery_note.workers.scheduler import _fail_job
 from delivery_note.worker import (
-    _fail_job,
     build_parser,
     recover_stale_jobs,
     run_once,
@@ -443,11 +444,11 @@ class WorkerIntegrationTests(unittest.TestCase):
             database.dispose()
 
     @patch(
-        "delivery_note.worker._claim_self_operated_inbound_sync_job",
+        "delivery_note.workers.scheduler._claim_self_operated_inbound_sync_job",
         return_value=None,
     )
-    @patch("delivery_note.worker._claim_purchase_sync_job")
-    @patch("delivery_note.worker._claim_job")
+    @patch("delivery_note.workers.scheduler._claim_purchase_sync_job")
+    @patch("delivery_note.workers.scheduler._claim_job")
     def test_inbound_worker_only_claims_inbound_queue(
         self,
         claim_batch,
@@ -1447,7 +1448,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         execution_started = Event()
         release_execution = Event()
         heartbeat_seen = Event()
-        original_heartbeat = worker_module._heartbeat
+        original_heartbeat = scheduler_module._heartbeat
 
         def block_execution(*_args):
             execution_started.set()
@@ -1461,12 +1462,12 @@ class WorkerIntegrationTests(unittest.TestCase):
         with (
             patch.object(lease_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.01),
             patch.object(
-                worker_module,
+                scheduler_module,
                 "_execute_compute",
                 side_effect=block_execution,
             ),
             patch.object(
-                worker_module,
+                scheduler_module,
                 "_heartbeat",
                 side_effect=observe_heartbeat,
             ) as beat,
@@ -1497,7 +1498,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         execution_started = Event()
         release_execution = Event()
         lease_lost = Event()
-        original_heartbeat = worker_module._heartbeat
+        original_heartbeat = scheduler_module._heartbeat
         original_process = compute_module.process_delivery_batch
 
         def block_execution(*args, **kwargs):
@@ -1526,7 +1527,7 @@ class WorkerIntegrationTests(unittest.TestCase):
                     side_effect=block_execution,
                 ),
                 patch.object(
-                    worker_module,
+                    scheduler_module,
                     "_heartbeat",
                     side_effect=observe_lease_loss,
                 ),
@@ -1573,8 +1574,8 @@ class WorkerIntegrationTests(unittest.TestCase):
         )
         _batch_id, job_id = self.create_batch([delivery])
         heartbeat_after_terminal = Event()
-        original_execute = worker_module._execute_compute
-        original_heartbeat = worker_module._heartbeat
+        original_execute = scheduler_module._execute_compute
+        original_heartbeat = scheduler_module._heartbeat
 
         def delay_after_finalize(*args):
             original_execute(*args)
@@ -1589,16 +1590,16 @@ class WorkerIntegrationTests(unittest.TestCase):
         with (
             patch.object(lease_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.005),
             patch.object(
-                worker_module,
+                scheduler_module,
                 "_execute_compute",
                 side_effect=delay_after_finalize,
             ),
             patch.object(
-                worker_module,
+                scheduler_module,
                 "_heartbeat",
                 side_effect=observe_heartbeat,
             ),
-            patch.object(worker_module.LOGGER, "exception") as log_failure,
+            patch.object(scheduler_module.LOGGER, "exception") as log_failure,
         ):
             completed_id = run_once(
                 self.database_url,
