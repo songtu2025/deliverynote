@@ -1,7 +1,6 @@
 import asyncio
 import os
 from pathlib import Path
-import shutil
 from threading import Lock
 from typing import Annotated, Callable
 from uuid import uuid4
@@ -54,6 +53,8 @@ from .health_routes import register_health_routes
 from .auth import hash_password
 from .batch_export_routes import register_batch_export_routes
 from .batch_read_routes import register_batch_read_routes
+from .batch_maintenance import BatchMaintenance
+from .batch_maintenance_routes import register_batch_maintenance_routes
 from .batch_queries import VERSION_FIELDS
 from .batch_views import (
     batch_json, batch_list_json, file_json,
@@ -91,14 +92,12 @@ from .models import (
     OverreceiptRuleVersion,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
-    SelfOperatedSiteResolution,
     SplitRecord,
     User,
 )
 from .sync_routes import register_sync_routes
 from .schemas import (
     BatchPayload,
-    BatchDeletePayload,
     FileOrderPayload,
 )
 from .caches import (
@@ -562,6 +561,10 @@ def create_app(
 
 
 
+
+    register_batch_maintenance_routes(
+        app, dependencies, BatchMaintenance(storage, _audit)
+    )
 
     @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
     def create_batch(
@@ -1030,232 +1033,9 @@ def create_app(
                 await run_in_threadpool(temporary_inbound.unlink, missing_ok=True)
         return batch_json(batch, session)
 
-    @app.delete("/api/batches")
-    def delete_batches(
-        payload: BatchDeletePayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        batch_ids = list(dict.fromkeys(payload.batch_ids))
-        batches = session.scalars(
-            select(Batch)
-            .where(Batch.id.in_(batch_ids))
-            .order_by(Batch.id)
-            .with_for_update()
-        ).all()
-        found_ids = {batch.id for batch in batches}
-        missing_ids = [batch_id for batch_id in batch_ids if batch_id not in found_ids]
-        if missing_ids:
-            missing_text = "、".join(str(batch_id) for batch_id in missing_ids)
-            raise HTTPException(
-                status_code=404,
-                detail=f"批次不存在：{missing_text}",
-            )
 
-        active_job_batch_ids = set(
-            session.scalars(
-                select(Job.batch_id).where(
-                    Job.batch_id.in_(batch_ids),
-                    Job.status.in_({"queued", "running"}),
-                )
-            ).all()
-        )
-        active_batches = [
-            batch
-            for batch in batches
-            if batch.status in {"queued", "running"}
-            or batch.id in active_job_batch_ids
-        ]
-        if active_batches:
-            active_text = "、".join(
-                f"{batch.id}（{batch.name}）" for batch in active_batches
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=f"以下批次存在排队或运行中的任务，不能删除：{active_text}",
-            )
 
-        sources = session.scalars(
-            select(BatchFile).where(BatchFile.batch_id.in_(batch_ids))
-        ).all()
-        source_ids = [source.id for source in sources]
-        exception_ids = (
-            session.scalars(
-                select(ExceptionRecord.id).where(
-                    ExceptionRecord.batch_file_id.in_(source_ids)
-                )
-            ).all()
-            if source_ids
-            else []
-        )
-        if exception_ids:
-            session.execute(
-                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
-            )
-            session.execute(
-                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
-            )
-        session.execute(
-            delete(SelfOperatedSiteResolution).where(
-                SelfOperatedSiteResolution.batch_id.in_(batch_ids)
-            )
-        )
-        session.execute(delete(BatchFile).where(BatchFile.batch_id.in_(batch_ids)))
-        session.execute(
-            delete(BatchOverreceiptRule).where(
-                BatchOverreceiptRule.batch_id.in_(batch_ids)
-            )
-        )
-        session.execute(delete(Job).where(Job.batch_id.in_(batch_ids)))
-        session.execute(
-            delete(SelfOperatedBatch).where(SelfOperatedBatch.batch_id.in_(batch_ids))
-        )
-        session.execute(delete(Batch).where(Batch.id.in_(batch_ids)))
-        _audit(
-            session,
-            admin.id,
-            "delete_batches",
-            "batch",
-            "bulk",
-            {
-                "batch_ids": batch_ids,
-                "batch_names": [batch.name for batch in batches],
-            },
-        )
-        session.commit()
 
-        file_cleanup_failed_ids = []
-        for batch_id in batch_ids:
-            batch_root = storage / "batches" / str(batch_id)
-            try:
-                if batch_root.exists():
-                    shutil.rmtree(batch_root)
-            except OSError:
-                file_cleanup_failed_ids.append(batch_id)
-        return {
-            "deleted_count": len(batch_ids),
-            "deleted_ids": batch_ids,
-            "file_cleanup_failed_ids": file_cleanup_failed_ids,
-        }
-
-    @app.delete("/api/batches/empty")
-    def delete_empty_delivery_batches(
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        empty_batches = session.scalars(
-            select(Batch)
-            .outerjoin(
-                SelfOperatedBatch,
-                SelfOperatedBatch.batch_id == Batch.id,
-            )
-            .where(
-                Batch.status == "draft",
-                SelfOperatedBatch.batch_id.is_(None),
-                ~select(BatchFile.id).where(BatchFile.batch_id == Batch.id).exists(),
-            )
-        ).all()
-        batch_ids = [batch.id for batch in empty_batches]
-        if not batch_ids:
-            return {"deleted_count": 0, "deleted_ids": []}
-
-        session.execute(
-            delete(BatchOverreceiptRule).where(
-                BatchOverreceiptRule.batch_id.in_(batch_ids)
-            )
-        )
-        session.execute(delete(Job).where(Job.batch_id.in_(batch_ids)))
-        session.execute(delete(Batch).where(Batch.id.in_(batch_ids)))
-        _audit(
-            session,
-            user.id,
-            "delete_empty_delivery_batches",
-            "batch",
-            "delivery_empty",
-            {"batch_ids": batch_ids},
-        )
-        session.commit()
-        return {"deleted_count": len(batch_ids), "deleted_ids": batch_ids}
-
-    @app.delete("/api/self-operated-batches/empty")
-    def delete_empty_self_operated_batches(
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        empty_batches = session.scalars(
-            select(Batch)
-            .join(SelfOperatedBatch, SelfOperatedBatch.batch_id == Batch.id)
-            .where(
-                Batch.status == "draft",
-                SelfOperatedBatch.inbound_storage_path == "",
-                ~select(BatchFile.id).where(BatchFile.batch_id == Batch.id).exists(),
-            )
-        ).all()
-        batch_ids = [batch.id for batch in empty_batches]
-        if not batch_ids:
-            return {"deleted_count": 0, "deleted_ids": []}
-
-        session.execute(
-            delete(SelfOperatedSiteResolution).where(
-                SelfOperatedSiteResolution.batch_id.in_(batch_ids)
-            )
-        )
-        session.execute(delete(Job).where(Job.batch_id.in_(batch_ids)))
-        session.execute(
-            delete(SelfOperatedBatch).where(SelfOperatedBatch.batch_id.in_(batch_ids))
-        )
-        session.execute(delete(Batch).where(Batch.id.in_(batch_ids)))
-        _audit(
-            session,
-            user.id,
-            "delete_empty_self_operated_batches",
-            "batch",
-            "self_operated_empty",
-            {"batch_ids": batch_ids},
-        )
-        session.commit()
-        return {"deleted_count": len(batch_ids), "deleted_ids": batch_ids}
-
-    @app.post("/api/batches/{batch_id}/refresh-supplier-version")
-    def refresh_batch_supplier_version(
-        batch_id: int,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        batch = session.scalar(
-            select(Batch).where(Batch.id == batch_id).with_for_update()
-        )
-        if batch is None:
-            raise HTTPException(status_code=404, detail="批次不存在")
-        if batch.status != "draft":
-            raise HTTPException(
-                status_code=409,
-                detail="仅草稿状态批次可以更新供应商资料版本",
-            )
-        active_supplier = session.scalar(
-            select(InputVersion).where(
-                InputVersion.kind == "supplier",
-                InputVersion.active.is_(True),
-            )
-        )
-        if active_supplier is None:
-            raise HTTPException(status_code=409, detail="当前没有启用的供应商资料版本")
-
-        previous_version_id = batch.supplier_version_id
-        batch.supplier_version_id = active_supplier.id
-        _audit(
-            session,
-            admin.id,
-            "refresh_batch_supplier_version",
-            "batch",
-            batch.id,
-            {
-                "previous_supplier_version_id": previous_version_id,
-                "supplier_version_id": active_supplier.id,
-            },
-        )
-        session.commit()
-        return batch_json(batch, session)
 
     @app.post("/api/self-operated-batches/{batch_id}/inbound-file")
     async def upload_self_operated_inbound_file(
