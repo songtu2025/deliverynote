@@ -29,9 +29,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from ..config import (
-    PURCHASE_STATUSES,
     resolve_supplier,
-    warehouse_sort_key,
 )
 from ..excel_io import (
     read_delivery_workbook,
@@ -71,6 +69,8 @@ from .batch_views import (
     merged_export_path, merged_export_ready,
 )
 from .database import Database
+from .overreceipt_routes import register_overreceipt_routes
+from .self_operated_rule_routes import register_self_operated_rule_routes
 from .input_version_routes import register_input_version_routes
 from .input_versions import INPUT_KINDS, SELF_OPERATED_INPUT_KINDS
 from .input_versions import bootstrap_builtin_templates
@@ -124,9 +124,6 @@ from .schemas import (
     BulkDeletePayload,
     ImportApplyPayload,
     PublishDraftPayload,
-    OverreceiptRulePayload,
-    SelfOperatedOverreceiptRulePayload,
-    RuleVersionNamePayload,
 )
 from .caches import (
     InputInspectionCache,
@@ -136,8 +133,6 @@ from .caches import (
 from .serializers import (
     utc_isoformat,
     version_json,
-    overreceipt_rule_json,
-    self_operated_overreceipt_rule_json,
     job_json,
 )
 
@@ -634,6 +629,10 @@ def create_app(
     )
 
     register_gerpgo_routes(app, dependencies, storage, _audit)
+    register_overreceipt_routes(
+        app, dependencies, overreceipt_rule_lock, _audit, overreceipt_warehouse_cache
+    )
+    register_self_operated_rule_routes(app, dependencies, overreceipt_rule_lock, _audit)
 
     register_sync_routes(
         app=app,
@@ -663,379 +662,6 @@ def create_app(
         exception_json=_exception_json,
     )
 
-    @app.get("/api/overreceipt-rule-versions/warehouses")
-    def list_overreceipt_warehouses(
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        purchase_version = session.scalar(
-            select(InputVersion).where(
-                InputVersion.kind == "purchase",
-                InputVersion.active.is_(True),
-            )
-        )
-        if purchase_version is None:
-            return []
-        cached = overreceipt_warehouse_cache.get(purchase_version.id)
-        if cached is not None:
-            return list(cached)
-        try:
-            purchases = read_purchase_workbook(Path(purchase_version.storage_path))
-        except (OSError, ValueError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail=f"启用的采购需求版本无法读取：{error}",
-            ) from error
-        active = purchases[purchases["单据状态"].isin(PURCHASE_STATUSES)]
-        warehouses = {
-            str(value).strip()
-            for value in active["目的仓"]
-            if not pd.isna(value) and str(value).strip()
-        }
-        sorted_warehouses = tuple(sorted(warehouses, key=warehouse_sort_key))
-        overreceipt_warehouse_cache[purchase_version.id] = sorted_warehouses
-        return list(sorted_warehouses)
-
-    @app.get("/api/overreceipt-rule-versions")
-    def list_overreceipt_rule_versions(
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        versions = session.scalars(
-            select(OverreceiptRuleVersion).order_by(
-                OverreceiptRuleVersion.created_at.desc(),
-                OverreceiptRuleVersion.id.desc(),
-            )
-        ).all()
-        return [overreceipt_rule_json(version) for version in versions]
-
-    @app.put("/api/overreceipt-rule-versions/{version_id}/name")
-    def rename_overreceipt_rule(
-        version_id: int,
-        payload: RuleVersionNamePayload,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        name = payload.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
-
-        with overreceipt_rule_lock:
-            versions = list(
-                session.scalars(
-                    select(OverreceiptRuleVersion)
-                    .order_by(OverreceiptRuleVersion.id)
-                    .with_for_update()
-                )
-            )
-            target = next(
-                (version for version in versions if version.id == version_id),
-                None,
-            )
-            if target is None:
-                raise HTTPException(status_code=404, detail="超收规则版本不存在")
-            if target.name == name:
-                return overreceipt_rule_json(target)
-            if any(
-                version.id != version_id and version.name == name
-                for version in versions
-            ):
-                raise HTTPException(status_code=409, detail="规则版本名称已存在")
-
-            before = target.name
-            target.name = name
-            _audit(
-                session,
-                user.id,
-                "rename_overreceipt_rule",
-                "overreceipt_rule",
-                target.id,
-                {"before": before, "after": name},
-            )
-            try:
-                session.commit()
-            except IntegrityError as error:
-                session.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="规则版本名称已存在",
-                ) from error
-        return overreceipt_rule_json(target)
-
-    @app.post(
-        "/api/overreceipt-rule-versions",
-        status_code=status.HTTP_201_CREATED,
-    )
-    def publish_overreceipt_rule(
-        payload: OverreceiptRulePayload,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        name = payload.name.strip()
-        warehouses = [warehouse.strip() for warehouse in payload.allowed_warehouses]
-        if not name:
-            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
-        if any(not warehouse for warehouse in warehouses):
-            raise HTTPException(status_code=400, detail="允许超收仓库不能为空")
-        if len(set(warehouses)) != len(warehouses):
-            raise HTTPException(status_code=400, detail="允许超收仓库不能重复")
-        warehouses = sorted(warehouses, key=warehouse_sort_key)
-
-        with overreceipt_rule_lock:
-            current_versions = list(
-                session.scalars(
-                    select(OverreceiptRuleVersion)
-                    .order_by(OverreceiptRuleVersion.id)
-                    .with_for_update()
-                )
-            )
-            if any(version.name == name for version in current_versions):
-                raise HTTPException(status_code=409, detail="规则版本名称已存在")
-            for current in current_versions:
-                current.active = False
-            session.flush()
-            version = OverreceiptRuleVersion(
-                name=name,
-                short_tail_limit=payload.short_tail_limit,
-                medium_tail_limit=payload.medium_tail_limit,
-                long_tail_limit=payload.long_tail_limit,
-                allowed_warehouses=warehouses,
-                active=True,
-                created_by=user.id,
-            )
-            session.add(version)
-            try:
-                session.flush()
-                _audit(
-                    session,
-                    user.id,
-                    "publish_overreceipt_rule",
-                    "overreceipt_rule",
-                    version.id,
-                    {
-                        "short_tail_limit": version.short_tail_limit,
-                        "medium_tail_limit": version.medium_tail_limit,
-                        "long_tail_limit": version.long_tail_limit,
-                        "allowed_warehouses": version.allowed_warehouses,
-                    },
-                )
-                session.commit()
-            except IntegrityError as error:
-                session.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="超收规则发布发生并发冲突，请刷新后重试",
-                ) from error
-        return overreceipt_rule_json(version)
-
-    @app.post("/api/overreceipt-rule-versions/{version_id}/activate")
-    def activate_overreceipt_rule(
-        version_id: int,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        with overreceipt_rule_lock:
-            versions = list(
-                session.scalars(
-                    select(OverreceiptRuleVersion)
-                    .order_by(OverreceiptRuleVersion.id)
-                    .with_for_update()
-                )
-            )
-            target = next(
-                (version for version in versions if version.id == version_id),
-                None,
-            )
-            if target is None:
-                raise HTTPException(status_code=404, detail="超收规则版本不存在")
-            if target.active:
-                return overreceipt_rule_json(target)
-            for version in versions:
-                version.active = False
-            session.flush()
-            target.active = True
-            _audit(
-                session,
-                user.id,
-                "activate_overreceipt_rule",
-                "overreceipt_rule",
-                target.id,
-            )
-            try:
-                session.commit()
-            except IntegrityError as error:
-                session.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="超收规则启用发生并发冲突，请刷新后重试",
-                ) from error
-        return overreceipt_rule_json(target)
-
-    @app.get("/api/self-operated-overreceipt-rule-versions")
-    def list_self_operated_overreceipt_rule_versions(
-        _user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        versions = session.scalars(
-            select(SelfOperatedOverreceiptRuleVersion).order_by(
-                SelfOperatedOverreceiptRuleVersion.created_at.desc(),
-                SelfOperatedOverreceiptRuleVersion.id.desc(),
-            )
-        ).all()
-        return [self_operated_overreceipt_rule_json(version) for version in versions]
-
-    @app.put("/api/self-operated-overreceipt-rule-versions/{version_id}/name")
-    def rename_self_operated_overreceipt_rule(
-        version_id: int,
-        payload: RuleVersionNamePayload,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        name = payload.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
-
-        with overreceipt_rule_lock:
-            versions = list(
-                session.scalars(
-                    select(SelfOperatedOverreceiptRuleVersion)
-                    .order_by(SelfOperatedOverreceiptRuleVersion.id)
-                    .with_for_update()
-                )
-            )
-            target = next(
-                (version for version in versions if version.id == version_id),
-                None,
-            )
-            if target is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="自营仓超收规则版本不存在",
-                )
-            if target.name == name:
-                return self_operated_overreceipt_rule_json(target)
-            if any(
-                version.id != version_id and version.name == name
-                for version in versions
-            ):
-                raise HTTPException(status_code=409, detail="规则版本名称已存在")
-
-            before = target.name
-            target.name = name
-            _audit(
-                session,
-                user.id,
-                "rename_self_operated_overreceipt_rule",
-                "self_operated_overreceipt_rule",
-                target.id,
-                {"before": before, "after": name},
-            )
-            try:
-                session.commit()
-            except IntegrityError as error:
-                session.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="规则版本名称已存在",
-                ) from error
-        return self_operated_overreceipt_rule_json(target)
-
-    @app.post(
-        "/api/self-operated-overreceipt-rule-versions",
-        status_code=status.HTTP_201_CREATED,
-    )
-    def publish_self_operated_overreceipt_rule(
-        payload: SelfOperatedOverreceiptRulePayload,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        name = payload.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="规则版本名称不能为空")
-        with overreceipt_rule_lock:
-            versions = list(
-                session.scalars(
-                    select(SelfOperatedOverreceiptRuleVersion)
-                    .order_by(SelfOperatedOverreceiptRuleVersion.id)
-                    .with_for_update()
-                )
-            )
-            if any(version.name == name for version in versions):
-                raise HTTPException(status_code=409, detail="规则版本名称已存在")
-            for version in versions:
-                version.active = False
-            session.flush()
-            version = SelfOperatedOverreceiptRuleVersion(
-                name=name,
-                allowance=payload.allowance,
-                active=True,
-                created_by=user.id,
-            )
-            session.add(version)
-            try:
-                session.flush()
-                _audit(
-                    session,
-                    user.id,
-                    "publish_self_operated_overreceipt_rule",
-                    "self_operated_overreceipt_rule",
-                    version.id,
-                    {"allowance": version.allowance},
-                )
-                session.commit()
-            except IntegrityError as error:
-                session.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="自营仓超收规则发布发生并发冲突，请重试",
-                ) from error
-        return self_operated_overreceipt_rule_json(version)
-
-    @app.post("/api/self-operated-overreceipt-rule-versions/{version_id}/activate")
-    def activate_self_operated_overreceipt_rule(
-        version_id: int,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        with overreceipt_rule_lock:
-            versions = list(
-                session.scalars(
-                    select(SelfOperatedOverreceiptRuleVersion)
-                    .order_by(SelfOperatedOverreceiptRuleVersion.id)
-                    .with_for_update()
-                )
-            )
-            target = next(
-                (version for version in versions if version.id == version_id),
-                None,
-            )
-            if target is None:
-                raise HTTPException(
-                    status_code=404,
-                    detail="自营仓超收规则版本不存在",
-                )
-            if target.active:
-                return self_operated_overreceipt_rule_json(target)
-            for version in versions:
-                version.active = False
-            session.flush()
-            target.active = True
-            _audit(
-                session,
-                user.id,
-                "activate_self_operated_overreceipt_rule",
-                "self_operated_overreceipt_rule",
-                target.id,
-            )
-            try:
-                session.commit()
-            except IntegrityError as error:
-                session.rollback()
-                raise HTTPException(
-                    status_code=409,
-                    detail="自营仓超收规则启用发生并发冲突，请重试",
-                ) from error
-        return self_operated_overreceipt_rule_json(target)
 
     register_input_version_read_routes(
         app=app,
