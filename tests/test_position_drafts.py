@@ -14,7 +14,6 @@ from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-import delivery_note.web.api as web_api_module
 import delivery_note.web.position_draft_read as draft_read_module
 import delivery_note.web.caches as cache_module
 import delivery_note.web.position_drafts as position_drafts_module
@@ -2063,18 +2062,13 @@ class PositionDraftApiTests(unittest.TestCase):
 
         event.listen(Session, "loaded_as_persistent", record_loaded)
         try:
-            with patch.object(
-                web_api_module,
-                "list_draft_rows",
-                side_effect=AssertionError("普通分页不应加载全部草稿 ORM 行"),
-            ):
-                page = self.list_rows(draft["id"], offset=10, limit=50)
-                self.assertEqual(len(loaded_row_ids), 50)
-                filtered = self.list_rows(
-                    draft["id"],
-                    search="sku-01",
-                    site="seekway:ca",
-                )
+            page = self.list_rows(draft["id"], offset=10, limit=50)
+            self.assertEqual(len(loaded_row_ids), 50)
+            filtered = self.list_rows(
+                draft["id"],
+                search="sku-01",
+                site="seekway:ca",
+            )
         finally:
             event.remove(Session, "loaded_as_persistent", record_loaded)
 

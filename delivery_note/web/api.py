@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import shutil
@@ -41,10 +40,7 @@ from ..excel_io import (
 from ..exception_reasons import exception_reason_code
 from ..input_inspection import (
     inspect_input_version_with_preview,
-    position_change_warnings,
-    position_diff,
     preview_input_version_page,
-    validate_position_frame,
 )
 from ..migrations.runner import migrate_schema as run_schema_migrations
 from ..pipeline import (
@@ -65,13 +61,10 @@ from .batch_views import (
 )
 from .database import Database
 from .errors import (
-    CodedHTTPException,
-    DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
-    commit_once,
     register_exception_handlers,
-    rollback_draft_conflict,
-    rollback_integrity_conflict,
 )
+from .position_draft_import import PositionDraftImporter
+from .position_draft_import_routes import register_position_draft_import_routes
 from .position_draft_lifecycle import PositionDraftLifecycle
 from .position_draft_lifecycle_routes import register_position_draft_lifecycle_routes
 from .position_draft_row_routes import register_position_draft_row_routes
@@ -102,22 +95,11 @@ from .models import (
     SplitRecord,
     User,
 )
-from .position_drafts import (
-    DraftConflictError,
-    list_draft_rows,
-    position_frame,
-    replace_draft_from_frame,
-    require_revision,
-)
-from .position_draft_read import (
-    summarize_issues,
-)
 from .sync_routes import register_sync_routes
 from .schemas import (
     BatchPayload,
     BatchDeletePayload,
     FileOrderPayload,
-    ImportApplyPayload,
 )
 from .caches import (
     InputInspectionCache,
@@ -201,17 +183,6 @@ def _batch_input_signature(
 
 
 
-def _inspect_position_import(
-    path: Path,
-    current_frame: pd.DataFrame,
-) -> tuple[pd.DataFrame, list, dict]:
-    """在线程池中读取并检查库位导入文件。"""
-    candidate_frame = read_position_workbook(path)
-    issues = [
-        *validate_position_frame(candidate_frame),
-        *position_change_warnings(current_frame, candidate_frame),
-    ]
-    return candidate_frame, issues, position_diff(current_frame, candidate_frame)
 
 
 def _exception_position_values(
@@ -484,7 +455,6 @@ def create_app(
     current_user = dependencies.current_user
     admin_user = dependencies.admin_user
     get_batch_or_404 = dependencies.get_batch_or_404
-    get_draft_or_404 = dependencies.get_draft_or_404
     register_health_routes(app, database)
     register_auth_routes(app, dependencies, configured_session_cookie_secure, _audit)
 
@@ -569,6 +539,10 @@ def create_app(
         app, dependencies, draft_analysis_cache, storage
     )
     register_position_draft_row_routes(app, dependencies, import_candidates_state)
+    register_position_draft_import_routes(
+        app, dependencies,
+        PositionDraftImporter(app, import_candidates_state, parse_uploaded_workbook),
+    )
     register_position_draft_lifecycle_routes(
         app, dependencies,
         PositionDraftLifecycle(
@@ -583,138 +557,7 @@ def create_app(
 
 
 
-    @app.post("/api/input-drafts/{draft_id}/import-preview")
-    async def preview_position_draft_import(
-        draft_id: int,
-        revision: Annotated[int, Form(ge=1)],
-        file: UploadFile = File(...),
-        _admin: User = Depends(admin_user),
-        session: Session = Depends(get_session),
-    ):
-        await run_in_threadpool(
-            import_candidates_state.remove_expired,
-            app.state.import_candidate_ttl_seconds,
-        )
-        draft = get_draft_or_404(draft_id, session)
-        try:
-            require_revision(draft, revision)
-        except DraftConflictError as error:
-            await file.close()
-            rollback_draft_conflict(session, error)
-        original_name = _safe_filename(file.filename or "")
-        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
-            await file.close()
-            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
-        token = uuid4().hex
-        suffix = Path(original_name).suffix.lower()
-        destination = import_candidate_root / f"{draft.id}_{revision}_{token}{suffix}"
-        await _save_upload(file, destination, app.state.max_upload_bytes)
-        try:
-            current_frame = position_frame(list_draft_rows(session, draft.id))
-            candidate_frame, issues, diff = await parse_uploaded_workbook(
-                _inspect_position_import,
-                destination,
-                current_frame,
-            )
-        except Exception as error:
-            await run_in_threadpool(destination.unlink, missing_ok=True)
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail=f"导入文件校验失败：{error}",
-            ) from error
-        await run_in_threadpool(import_candidates_state.remove_draft, draft.id)
-        await run_in_threadpool(
-            import_candidates_state.register,
-            token,
-            {
-                "draft_id": draft.id,
-                "revision": revision,
-                "path": str(destination),
-                "created_by": _admin.id,
-                "expires_at": datetime.utcnow()
-                + timedelta(seconds=app.state.import_candidate_ttl_seconds),
-            },
-        )
-        return {
-            "token": token,
-            "draft_id": draft.id,
-            "revision": revision,
-            "row_count": len(candidate_frame),
-            "diff": diff,
-            **summarize_issues(issues),
-        }
 
-    @app.post("/api/input-drafts/{draft_id}/import-apply")
-    def apply_position_draft_import(
-        draft_id: int,
-        payload: ImportApplyPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        import_candidates_state.remove_expired(app.state.import_candidate_ttl_seconds)
-        draft = get_draft_or_404(draft_id, session)
-        candidate = import_candidates_state.peek(payload.token)
-        if candidate is not None and candidate["created_by"] != admin.id:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(
-                status_code=403,
-                detail="导入预览属于其他管理员",
-            )
-        if (
-            candidate is None
-            or candidate["draft_id"] != draft.id
-            or candidate["revision"] != payload.revision
-        ):
-            import_candidates_state.remove(payload.token)
-            if session.in_transaction():
-                session.rollback()
-            raise CodedHTTPException(
-                code=DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
-                detail="导入预览已失效，请重新预览",
-            )
-        try:
-            require_revision(draft, payload.revision)
-        except DraftConflictError as error:
-            import_candidates_state.remove(payload.token)
-            rollback_draft_conflict(session, error)
-        candidate = import_candidates_state.take(payload.token)
-        if candidate is None:
-            if session.in_transaction():
-                session.rollback()
-            raise CodedHTTPException(
-                code=DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
-                detail="导入预览已失效，请重新预览",
-            )
-        candidate_path = Path(candidate["path"])
-        try:
-            candidate_frame = read_position_workbook(candidate_path)
-            diff = replace_draft_from_frame(
-                session,
-                draft,
-                payload.revision,
-                admin.id,
-                candidate_frame,
-            )
-            commit_once(session)
-        except DraftConflictError as error:
-            rollback_draft_conflict(session, error)
-        except IntegrityError as error:
-            rollback_integrity_conflict(session, error)
-        except Exception as error:
-            if session.in_transaction():
-                session.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail=f"导入草稿失败：{error}",
-            ) from error
-        finally:
-            candidate_path.unlink(missing_ok=True)
-        session.refresh(draft)
-        import_candidates_state.remove_draft(draft.id)
-        return {"diff": diff, "revision": draft.revision}
 
 
 

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Query
+from fastapi import File, Form, Query, UploadFile
 from pydantic import BaseModel, Field
 
 
@@ -97,3 +97,11 @@ class PositionRowFilters:
     scale_position: str = ""
     only_errors: bool = False
     only_modified: bool = False
+
+
+@dataclass
+class PositionImportForm:
+    """库位导入预览的原始表单字段。"""
+
+    revision: Annotated[int, Form(ge=1)]
+    file: UploadFile = File(...)

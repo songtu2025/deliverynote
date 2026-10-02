@@ -1,7 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
@@ -498,8 +498,8 @@ class WebApiTests(unittest.TestCase):
                 )
             )
             auth_session.expires_at = (
-                web_api_module.datetime.utcnow()
-                - web_api_module.timedelta(seconds=1)
+                datetime.utcnow()
+                - timedelta(seconds=1)
             )
             session.commit()
 

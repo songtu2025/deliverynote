@@ -5,6 +5,18 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from .errors import (
+    CodedHTTPException,
+    DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
+    rollback_draft_conflict,
+)
+from .models import InputDraft
+from .position_drafts import DraftConflictError, require_revision
+from .schemas import ImportApplyPayload
+
 
 @dataclass
 class PositionImportCandidates:
@@ -67,3 +79,46 @@ class PositionImportCandidates:
                 and candidate_path.stat().st_mtime <= expiry_cutoff
             ):
                 candidate_path.unlink(missing_ok=True)
+
+    def consume(
+        self,
+        session: Session,
+        draft: InputDraft,
+        payload: ImportApplyPayload,
+        user_id: int,
+    ) -> Path:
+        """核对管理员和草稿修订后，原子消费预览令牌。"""
+        candidate = self.peek(payload.token)
+        if candidate is not None and candidate["created_by"] != user_id:
+            if session.in_transaction():
+                session.rollback()
+            raise HTTPException(
+                status_code=403,
+                detail="导入预览属于其他管理员",
+            )
+        if (
+            candidate is None
+            or candidate["draft_id"] != draft.id
+            or candidate["revision"] != payload.revision
+        ):
+            self.remove(payload.token)
+            if session.in_transaction():
+                session.rollback()
+            raise CodedHTTPException(
+                code=DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
+                detail="导入预览已失效，请重新预览",
+            )
+        try:
+            require_revision(draft, payload.revision)
+        except DraftConflictError as error:
+            self.remove(payload.token)
+            rollback_draft_conflict(session, error)
+        candidate = self.take(payload.token)
+        if candidate is None:
+            if session.in_transaction():
+                session.rollback()
+            raise CodedHTTPException(
+                code=DRAFT_IMPORT_PREVIEW_EXPIRED_CODE,
+                detail="导入预览已失效，请重新预览",
+            )
+        return Path(candidate["path"])
