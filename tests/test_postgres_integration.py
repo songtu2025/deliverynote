@@ -13,7 +13,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from delivery_note.migrations.runner import migrate_schema
-import delivery_note.web.api as web_api_module
+import delivery_note.web.batch_preflight as preflight_module
 from delivery_note.web.api import create_app
 from delivery_note.web.database import Database
 from delivery_note.web.models import (
@@ -291,14 +291,16 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                     raise TimeoutError("等待文件重排超时")
 
             with (
-                patch.object(web_api_module, "read_supplier_workbook", return_value=[]),
-                patch.object(web_api_module, "read_product_workbook"),
-                patch.object(web_api_module, "read_purchase_workbook"),
-                patch.object(web_api_module, "read_position_workbook"),
-                patch.object(web_api_module, "validate_template_workbook"),
-                patch.object(web_api_module, "resolve_supplier"),
                 patch.object(
-                    web_api_module,
+                    preflight_module, "read_supplier_workbook", return_value=[]
+                ),
+                patch.object(preflight_module, "read_product_workbook"),
+                patch.object(preflight_module, "read_purchase_workbook"),
+                patch.object(preflight_module, "read_position_workbook"),
+                patch.object(preflight_module, "validate_template_workbook"),
+                patch.object(preflight_module, "resolve_supplier"),
+                patch.object(
+                    preflight_module,
                     "read_delivery_workbook",
                     side_effect=pause_delivery_read,
                 ),
