@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-import logging
 from threading import Event, Thread
 from types import TracebackType
 from typing import Any, cast

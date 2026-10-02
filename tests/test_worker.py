@@ -332,7 +332,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             "GERPGO_APP_KEY": "key",
         },
     )
-    @patch("delivery_note.worker.GerpgoClient.from_config")
+    @patch("delivery_note.workers.purchase_collection.GerpgoClient.from_config")
     def test_purchase_sync_creates_inactive_candidate(self, client_factory):
         api_client = client_factory.return_value
         api_client.list_purchase_orders.return_value = [
@@ -392,7 +392,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             "GERPGO_APP_KEY": "key",
         },
     )
-    @patch("delivery_note.worker.GerpgoClient.from_config")
+    @patch("delivery_note.workers.sync_inbound.GerpgoClient.from_config")
     def test_self_operated_inbound_sync_creates_candidate(self, client_factory):
         client_factory.return_value.list_self_operated_inbound_orders.return_value = [
             {
@@ -1508,7 +1508,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         def observe_lease_loss(*args):
             try:
                 original_heartbeat(*args)
-            except worker_module.LostJobLeaseError:
+            except lease_module.LostJobLeaseError:
                 lease_lost.set()
                 raise
 
