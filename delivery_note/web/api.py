@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import logging
 import os
 from pathlib import Path
@@ -24,8 +24,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
@@ -70,7 +69,10 @@ from ..pipeline import (
     POSITION_VALUE_COLUMNS,
     enrich_pending_import_rows,
 )
-from .auth import hash_password, hash_token, new_session_token, verify_password
+from .auth_routes import register_auth_routes
+from .dependencies import build_request_dependencies
+from .health_routes import register_health_routes
+from .auth import hash_password
 from .batch_export_routes import register_batch_export_routes
 from .batch_read_routes import register_batch_read_routes
 from .batch_queries import VERSION_FIELDS
@@ -84,7 +86,6 @@ from .exception_write_routes import register_exception_write_routes
 from .input_version_read_routes import register_input_version_read_routes
 from .models import (
     AuditLog,
-    AuthSession,
     Batch,
     BatchFile,
     BatchOverreceiptRule,
@@ -102,7 +103,6 @@ from .models import (
 )
 from .position_drafts import (
     DRAFT_REVISION_CONFLICT_CODE,
-    POSITION_FRAME_CACHE_SESSION_KEY,
     ROW_FIELDS,
     DraftConflictError,
     DuplicateInputVersionNameError,
@@ -121,10 +121,6 @@ from .position_draft_read import (
 )
 from .sync_routes import register_sync_routes
 from .schemas import (
-    LoginPayload,
-    UserPayload,
-    UserStatusPayload,
-    PasswordResetPayload,
     BatchPayload,
     BatchDeletePayload,
     FileOrderPayload,
@@ -146,7 +142,6 @@ from .caches import (
 from .serializers import (
     utc_isoformat,
     gerpgo_config_json,
-    user_json,
     version_json,
     overreceipt_rule_json,
     self_operated_overreceipt_rule_json,
@@ -189,14 +184,12 @@ BATCH_STATUSES = {
     "failed",
     "expired",
 }
-ROLES = {"admin", "operator"}
 POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
 INPUT_INSPECTION_CACHE_SIZE = 32
 INPUT_INSPECTION_PAGES_PER_VERSION = 4
 DRAFT_ANALYSIS_CACHE_SIZE = 32
-SESSION_COOKIE_NAME = "delivery_note_session"
 _TRUE_BOOLEAN_VALUES = {"1", "true", "yes", "on"}
 _FALSE_BOOLEAN_VALUES = {"0", "false", "no", "off"}
 
@@ -212,43 +205,6 @@ def _boolean_environment(name: str, default: bool) -> bool:
     if value in _FALSE_BOOLEAN_VALUES:
         return False
     raise ValueError(f"{name} 必须是 true 或 false")
-
-
-def _set_session_cookie(
-    response: Response,
-    token: str,
-    expires_at: datetime,
-    *,
-    secure: bool,
-) -> None:
-    """写入与数据库会话同期限的浏览器会话 Cookie。"""
-    response.set_cookie(
-        SESSION_COOKIE_NAME,
-        token,
-        expires=expires_at.replace(tzinfo=timezone.utc),
-        path="/",
-        secure=secure,
-        httponly=True,
-        samesite="strict",
-    )
-
-
-def _delete_session_cookie(response: Response, *, secure: bool) -> None:
-    """按登录时的属性清除浏览器会话 Cookie。"""
-    response.delete_cookie(
-        SESSION_COOKIE_NAME,
-        path="/",
-        secure=secure,
-        httponly=True,
-        samesite="strict",
-    )
-
-
-def _deleted_session_cookie_header(*, secure: bool) -> str:
-    """生成可附加到鉴权错误响应的 Cookie 清理头。"""
-    response = Response()
-    _delete_session_cookie(response, secure=secure)
-    return response.headers["set-cookie"]
 
 
 def _split_records_by_exception(
@@ -714,100 +670,21 @@ def create_app(
         allow_headers=["*"],
     )
 
-    bearer = HTTPBearer(auto_error=False)
-
-    def get_session():
-        session = database.SessionLocal()
-        session.info[POSITION_FRAME_CACHE_SESSION_KEY] = position_frame_cache
-        try:
-            yield session
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+    dependencies = build_request_dependencies(
+        database, position_frame_cache, configured_session_cookie_secure
+    )
+    get_session = dependencies.get_session
+    current_user = dependencies.current_user
+    admin_user = dependencies.admin_user
+    get_batch_or_404 = dependencies.get_batch_or_404
+    get_draft_or_404 = dependencies.get_draft_or_404
+    register_health_routes(app, database)
+    register_auth_routes(app, dependencies, configured_session_cookie_secure, _audit)
 
     async def parse_uploaded_workbook(function: Callable, *args):
         """限制进程内并发，并在线程池执行工作簿解析。"""
         async with upload_parse_semaphore:
             return await run_in_threadpool(function, *args)
-
-    def current_user(
-        request: Request,
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None,
-            Depends(bearer),
-        ],
-        session: Annotated[Session, Depends(get_session)],
-    ) -> User:
-        cookie_token = request.cookies.get(SESSION_COOKIE_NAME)
-        token = credentials.credentials if credentials is not None else cookie_token
-        using_cookie = credentials is None and cookie_token is not None
-        if token is None:
-            raise HTTPException(status_code=401, detail="未登录")
-        auth_session = session.scalar(
-            select(AuthSession).where(
-                AuthSession.token_hash == hash_token(token)
-            )
-        )
-        if auth_session is None or auth_session.expires_at <= datetime.utcnow():
-            raise HTTPException(
-                status_code=401,
-                detail="登录已失效",
-                headers=(
-                    {
-                        "Set-Cookie": _deleted_session_cookie_header(
-                            secure=configured_session_cookie_secure
-                        )
-                    }
-                    if using_cookie
-                    else None
-                ),
-            )
-        user = session.get(User, auth_session.user_id)
-        if user is None or not user.active:
-            raise HTTPException(
-                status_code=401,
-                detail="用户不可用",
-                headers=(
-                    {
-                        "Set-Cookie": _deleted_session_cookie_header(
-                            secure=configured_session_cookie_secure
-                        )
-                    }
-                    if using_cookie
-                    else None
-                ),
-            )
-        return user
-
-    def admin_user(user: Annotated[User, Depends(current_user)]) -> User:
-        if user.role != "admin":
-            raise HTTPException(status_code=403, detail="需要管理员权限")
-        return user
-
-    def get_batch_or_404(
-        batch_id: int, session: Session, *, for_update: bool = False
-    ) -> Batch:
-        batch = (
-            session.scalar(
-                select(Batch)
-                .where(Batch.id == batch_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            if for_update
-            else session.get(Batch, batch_id)
-        )
-        if batch is None:
-            raise HTTPException(status_code=404, detail="批次不存在")
-        return batch
-
-    def get_draft_or_404(draft_id: int, session: Session) -> InputDraft:
-        draft = session.get(InputDraft, draft_id)
-        if draft is None or draft.kind != "position":
-            raise HTTPException(status_code=404, detail="库位草稿不存在")
-        return draft
 
     def inspect_version(
         version: InputVersion,
@@ -913,175 +790,6 @@ def create_app(
             ):
                 candidate_path.unlink(missing_ok=True)
 
-    def readiness() -> dict:
-        try:
-            with database.session() as session:
-                session.execute(text("SELECT 1"))
-        except Exception:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="服务尚未就绪",
-            ) from None
-        return {"status": "ok"}
-
-    @app.get("/health/live")
-    def health_live() -> dict:
-        return {"status": "ok"}
-
-    @app.get("/health/ready")
-    def health_ready() -> dict:
-        return readiness()
-
-    @app.get("/health")
-    def health() -> dict:
-        return readiness()
-
-    @app.post("/api/auth/login")
-    def login(
-        payload: LoginPayload,
-        response: Response,
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        user = session.scalar(select(User).where(User.username == payload.username))
-        if (
-            user is None
-            or not user.active
-            or not verify_password(payload.password, user.password_hash)
-        ):
-            raise HTTPException(status_code=401, detail="用户名或密码错误")
-        token, token_hash, expires_at = new_session_token()
-        session.add(
-            AuthSession(
-                token_hash=token_hash,
-                user_id=user.id,
-                expires_at=expires_at,
-            )
-        )
-        _audit(session, user.id, "login", "user", user.id)
-        session.commit()
-        _set_session_cookie(
-            response,
-            token,
-            expires_at,
-            secure=configured_session_cookie_secure,
-        )
-        return {
-            "token": token,
-            "expires_at": utc_isoformat(expires_at),
-            "user": user_json(user),
-        }
-
-    @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-    def logout(
-        request: Request,
-        credentials: Annotated[
-            HTTPAuthorizationCredentials | None,
-            Depends(bearer),
-        ],
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        selected_token = (
-            credentials.credentials
-            if credentials is not None
-            else request.cookies.get(SESSION_COOKIE_NAME)
-        )
-        presented_tokens = {
-            token
-            for token in (selected_token, request.cookies.get(SESSION_COOKIE_NAME))
-            if token
-        }
-        session.execute(
-            delete(AuthSession).where(
-                AuthSession.token_hash.in_(
-                    hash_token(token) for token in presented_tokens
-                )
-            )
-        )
-        _audit(session, user.id, "logout", "user", user.id)
-        session.commit()
-        response = Response(status_code=status.HTTP_204_NO_CONTENT)
-        _delete_session_cookie(response, secure=configured_session_cookie_secure)
-        return response
-
-    @app.get("/api/auth/me")
-    def me(user: Annotated[User, Depends(current_user)]):
-        return user_json(user)
-
-    @app.post("/api/users", status_code=status.HTTP_201_CREATED)
-    def create_user(
-        payload: UserPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        if payload.role not in ROLES:
-            raise HTTPException(status_code=400, detail="角色无效")
-        if session.scalar(select(User).where(User.username == payload.username)):
-            raise HTTPException(status_code=409, detail="用户名已存在")
-        user = User(
-            username=payload.username,
-            password_hash=hash_password(payload.password),
-            role=payload.role,
-        )
-        session.add(user)
-        session.flush()
-        _audit(session, admin.id, "create_user", "user", user.id)
-        session.commit()
-        return user_json(user)
-
-    @app.get("/api/users")
-    def list_users(
-        _admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        return [
-            user_json(user) for user in session.scalars(select(User).order_by(User.id))
-        ]
-
-    @app.put("/api/users/{user_id}/status")
-    def update_user_status(
-        user_id: int,
-        payload: UserStatusPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        user = session.get(User, user_id)
-        if user is None:
-            raise HTTPException(status_code=404, detail="用户不存在")
-        if user.id == admin.id and not payload.active:
-            raise HTTPException(status_code=409, detail="不能停用当前登录账号")
-        user.active = payload.active
-        if not payload.active:
-            session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
-        _audit(
-            session,
-            admin.id,
-            "update_user_status",
-            "user",
-            user.id,
-            {"active": payload.active},
-        )
-        session.commit()
-        return user_json(user)
-
-    @app.put(
-        "/api/users/{user_id}/password",
-        status_code=status.HTTP_204_NO_CONTENT,
-    )
-    def reset_user_password(
-        user_id: int,
-        payload: PasswordResetPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        user = session.get(User, user_id)
-        if user is None:
-            raise HTTPException(status_code=404, detail="用户不存在")
-        user.password_hash = hash_password(payload.password)
-        session.execute(delete(AuthSession).where(AuthSession.user_id == user.id))
-        _audit(session, admin.id, "reset_user_password", "user", user.id)
-        session.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @app.post(
         "/api/input-versions/{kind}",

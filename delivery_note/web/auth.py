@@ -1,9 +1,10 @@
 import base64
-from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
+from datetime import datetime, timedelta, timezone
 
+from fastapi import Response
 
 _PASSWORD_N = 2**14
 _PASSWORD_R = 8
@@ -55,3 +56,43 @@ def new_session_token() -> tuple[str, str, datetime]:
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+SESSION_COOKIE_NAME = "delivery_note_session"
+
+
+def _set_session_cookie(
+    response: Response,
+    token: str,
+    expires_at: datetime,
+    *,
+    secure: bool,
+) -> None:
+    """写入与数据库会话同期限的浏览器会话 Cookie。"""
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        expires=expires_at.replace(tzinfo=timezone.utc),
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _delete_session_cookie(response: Response, *, secure: bool) -> None:
+    """按登录时的属性清除浏览器会话 Cookie。"""
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=secure,
+        httponly=True,
+        samesite="strict",
+    )
+
+
+def _deleted_session_cookie_header(*, secure: bool) -> str:
+    """生成可附加到鉴权错误响应的 Cookie 清理头。"""
+    response = Response()
+    _delete_session_cookie(response, secure=secure)
+    return response.headers["set-cookie"]
