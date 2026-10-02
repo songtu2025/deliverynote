@@ -14,7 +14,7 @@ from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 
 from .application import (
     DeliveryRequest,
@@ -89,11 +89,19 @@ from .web.models import (
     SelfOperatedSiteResolution,
     SplitRecord,
 )
-
-
-class LostJobLeaseError(RuntimeError):
-    pass
-
+from .workers.leases import (
+    WORKER_QUEUES,
+    LeaseKeeper,
+    LostJobLeaseError,
+    _claim_job,
+    _heartbeat,
+    _claim_purchase_sync_job,
+    _purchase_sync_heartbeat,
+    _claim_self_operated_inbound_sync_job,
+    _self_operated_inbound_sync_heartbeat,
+)
+from .workers.recovery import _recover_stale_jobs, _watch_stale_jobs
+from .workers.recovery import recover_stale_jobs as recover_stale_jobs
 
 VERSION_FIELDS = {
     "purchase": "purchase_version_id",
@@ -106,68 +114,7 @@ VERSION_FIELDS = {
 
 PURCHASE_DETAIL_WORKERS = 8
 PURCHASE_SYNC_MODES = {"full", "shadow", "incremental"}
-WORKER_QUEUES = ("all", "batch", "purchase-sync", "inbound-sync")
-LEASE_HEARTBEAT_INTERVAL_SECONDS = 30.0
 LOGGER = logging.getLogger(__name__)
-
-
-class _LeaseKeeper:
-    """业务调用阻塞时，使用独立会话周期续租当前任务。"""
-
-    def __init__(
-        self,
-        heartbeat: Callable[[], None],
-        queue: str,
-        job_id: int,
-        claim_token: str,
-    ) -> None:
-        self._heartbeat = heartbeat
-        self._queue = queue
-        self._job_id = job_id
-        self._claim_prefix = claim_token[:8]
-        self._stop_event = Event()
-        self._error: Exception | None = None
-        self._stopped = False
-        self._thread = Thread(
-            target=self._run,
-            name=f"delivery-note-lease-{queue}-{job_id}",
-            daemon=True,
-        )
-
-    def _run(self) -> None:
-        while not self._stop_event.wait(LEASE_HEARTBEAT_INTERVAL_SECONDS):
-            try:
-                self._heartbeat()
-            except Exception as error:
-                self._error = error
-                LOGGER.exception(
-                    "Worker 租约续期失败 queue=%s job_id=%s claim=%s",
-                    self._queue,
-                    self._job_id,
-                    self._claim_prefix,
-                )
-                return
-
-    def __enter__(self):
-        self._thread.start()
-        return self
-
-    def stop(self) -> None:
-        if not self._stopped:
-            self._stop_event.set()
-            self._thread.join()
-            self._stopped = True
-        if self._error is not None:
-            raise self._error
-
-    def __exit__(self, exception_type, _exception, _traceback) -> None:
-        if exception_type is None:
-            self.stop()
-            return
-        if not self._stopped:
-            self._stop_event.set()
-            self._thread.join()
-            self._stopped = True
 
 
 def _json_value(value):
@@ -201,263 +148,6 @@ def _version_paths(
             raise FileNotFoundError(f"批次输入版本文件不存在：{path}")
         result[kind] = path
     return result
-
-
-def _claim_job(database: Database) -> tuple[int, int, str, str] | None:
-    with database.session() as session:
-        job = session.scalar(
-            select(Job)
-            .where(Job.status == "queued")
-            .order_by(Job.id)
-            .with_for_update(skip_locked=True)
-        )
-        if job is None:
-            return None
-        now = datetime.utcnow()
-        claim_token = uuid4().hex
-        job.status = "running"
-        job.claim_token = claim_token
-        job.attempts += 1
-        job.claimed_at = now
-        job.heartbeat_at = now
-        job.error_message = None
-        batch = session.get(Batch, job.batch_id)
-        if batch is None:
-            raise RuntimeError("任务关联的批次不存在")
-        if job.kind == "compute":
-            batch.status = "running"
-            batch.error_message = None
-        session.commit()
-        return job.id, job.batch_id, job.kind, claim_token
-
-
-def _heartbeat(database: Database, job_id: int, claim_token: str) -> None:
-    with database.session() as session:
-        result = session.execute(
-            update(Job)
-            .where(
-                Job.id == job_id,
-                Job.status == "running",
-                Job.claim_token == claim_token,
-            )
-            .values(heartbeat_at=datetime.utcnow())
-        )
-        session.commit()
-        if result.rowcount != 1:
-            raise LostJobLeaseError("任务租约已失效")
-
-
-def _claim_purchase_sync_job(database: Database) -> tuple[int, str] | None:
-    with database.session() as session:
-        job = session.scalar(
-            select(PurchaseSyncJob)
-            .where(PurchaseSyncJob.status == "queued")
-            .order_by(PurchaseSyncJob.id)
-            .with_for_update(skip_locked=True)
-        )
-        if job is None:
-            return None
-        now = datetime.utcnow()
-        claim_token = uuid4().hex
-        job.status = "running"
-        job.claim_token = claim_token
-        job.attempts += 1
-        job.claimed_at = now
-        job.heartbeat_at = now
-        job.error_message = None
-        session.commit()
-        return job.id, claim_token
-
-
-def _purchase_sync_heartbeat(
-    database: Database,
-    job_id: int,
-    claim_token: str,
-    **values,
-) -> None:
-    with database.session() as session:
-        result = session.execute(
-            update(PurchaseSyncJob)
-            .where(
-                PurchaseSyncJob.id == job_id,
-                PurchaseSyncJob.status == "running",
-                PurchaseSyncJob.claim_token == claim_token,
-            )
-            .values(heartbeat_at=datetime.utcnow(), **values)
-        )
-        session.commit()
-        if result.rowcount != 1:
-            raise LostJobLeaseError("采购同步任务租约已失效")
-
-
-def _claim_self_operated_inbound_sync_job(
-    database: Database,
-) -> tuple[int, str] | None:
-    with database.session() as session:
-        job = session.scalar(
-            select(SelfOperatedInboundSyncJob)
-            .where(SelfOperatedInboundSyncJob.status == "queued")
-            .order_by(SelfOperatedInboundSyncJob.id)
-            .with_for_update(skip_locked=True)
-        )
-        if job is None:
-            return None
-        now = datetime.utcnow()
-        claim_token = uuid4().hex
-        job.status = "running"
-        job.claim_token = claim_token
-        job.attempts += 1
-        job.claimed_at = now
-        job.heartbeat_at = now
-        job.error_message = None
-        session.commit()
-        return job.id, claim_token
-
-
-def _self_operated_inbound_sync_heartbeat(
-    database: Database,
-    job_id: int,
-    claim_token: str,
-    **values,
-) -> None:
-    with database.session() as session:
-        result = session.execute(
-            update(SelfOperatedInboundSyncJob)
-            .where(
-                SelfOperatedInboundSyncJob.id == job_id,
-                SelfOperatedInboundSyncJob.status == "running",
-                SelfOperatedInboundSyncJob.claim_token == claim_token,
-            )
-            .values(heartbeat_at=datetime.utcnow(), **values)
-        )
-        session.commit()
-        if result.rowcount != 1:
-            raise LostJobLeaseError("待入库同步任务租约已失效")
-
-
-def _recover_stale_jobs(
-    database: Database,
-    stale_after: timedelta = timedelta(minutes=30),
-    queue: str = "all",
-    max_attempts: int = 3,
-) -> int:
-    cutoff = datetime.utcnow() - stale_after
-    recovered = 0
-    with database.session() as session:
-        if queue in {"all", "batch"}:
-            jobs = session.scalars(
-                select(Job)
-                .where(Job.status == "running")
-                .with_for_update(skip_locked=True)
-            ).all()
-            for job in jobs:
-                marker = job.heartbeat_at or job.claimed_at
-                if marker is None or marker >= cutoff:
-                    continue
-                batch = session.get(Batch, job.batch_id)
-                if job.attempts >= max_attempts:
-                    now = datetime.utcnow()
-                    job.status = "failed"
-                    job.finished_at = now
-                    job.heartbeat_at = now
-                    job.error_message = (
-                        f"任务运行超时，已达到最大自动尝试次数（{max_attempts}）"
-                    )
-                    if batch is not None:
-                        batch.error_message = job.error_message
-                        if job.kind == "compute":
-                            batch.status = "failed"
-                else:
-                    job.status = "queued"
-                    job.claimed_at = None
-                    job.heartbeat_at = None
-                    job.finished_at = None
-                    job.error_message = "任务运行超时，已自动重试"
-                    if batch is not None and job.kind == "compute":
-                        batch.status = "queued"
-                        batch.error_message = job.error_message
-                job.claim_token = None
-                recovered += 1
-        if queue in {"all", "purchase-sync"}:
-            sync_jobs = session.scalars(
-                select(PurchaseSyncJob)
-                .where(PurchaseSyncJob.status == "running")
-                .with_for_update(skip_locked=True)
-            ).all()
-            for job in sync_jobs:
-                marker = job.heartbeat_at or job.claimed_at
-                if marker is None or marker >= cutoff:
-                    continue
-                if job.attempts >= max_attempts:
-                    now = datetime.utcnow()
-                    job.status = "failed"
-                    job.active_slot = None
-                    job.finished_at = now
-                    job.heartbeat_at = now
-                    job.error_message = (
-                        "采购同步运行超时，"
-                        f"已达到最大自动尝试次数（{max_attempts}）"
-                    )
-                else:
-                    job.status = "queued"
-                    job.claimed_at = None
-                    job.heartbeat_at = None
-                    job.finished_at = None
-                    job.error_message = "采购同步运行超时，已自动重试"
-                job.claim_token = None
-                recovered += 1
-        if queue in {"all", "inbound-sync"}:
-            inbound_sync_jobs = session.scalars(
-                select(SelfOperatedInboundSyncJob)
-                .where(SelfOperatedInboundSyncJob.status == "running")
-                .with_for_update(skip_locked=True)
-            ).all()
-            for job in inbound_sync_jobs:
-                marker = job.heartbeat_at or job.claimed_at
-                if marker is None or marker >= cutoff:
-                    continue
-                if job.attempts >= max_attempts:
-                    now = datetime.utcnow()
-                    job.status = "failed"
-                    job.active_slot = None
-                    job.finished_at = now
-                    job.heartbeat_at = now
-                    job.error_message = (
-                        "待入库同步运行超时，"
-                        f"已达到最大自动尝试次数（{max_attempts}）"
-                    )
-                else:
-                    job.status = "queued"
-                    job.claimed_at = None
-                    job.heartbeat_at = None
-                    job.finished_at = None
-                    job.error_message = "待入库同步运行超时，已自动重试"
-                job.claim_token = None
-                recovered += 1
-        session.commit()
-    return recovered
-
-
-def recover_stale_jobs(
-    database_url: str,
-    stale_after: timedelta = timedelta(minutes=30),
-    queue: str = "all",
-    max_attempts: int = 3,
-) -> int:
-    if queue not in WORKER_QUEUES:
-        raise ValueError(f"未知 Worker 队列：{queue}")
-    if max_attempts <= 0:
-        raise ValueError("最大尝试次数必须大于 0")
-    database = Database(database_url)
-    try:
-        return _recover_stale_jobs(
-            database,
-            stale_after=stale_after,
-            queue=queue,
-            max_attempts=max_attempts,
-        )
-    finally:
-        database.dispose()
 
 
 def _load_compute_inputs(database: Database, batch_id: int):
@@ -2054,95 +1744,90 @@ def _fail_job(
         session.commit()
 
 
-def _run_once(
+def _run_batch_job(
     database: Database,
+    claimed: tuple[int, int, str, str],
     storage_root: Path | str,
-    queue: str = "all",
-) -> int | None:
-    if queue not in WORKER_QUEUES:
-        raise ValueError(f"未知 Worker 队列：{queue}")
-    claimed = _claim_job(database) if queue in {"all", "batch"} else None
-    if claimed is not None:
-        job_id, batch_id, kind, claim_token = claimed
-        try:
-            with _LeaseKeeper(
-                lambda: _heartbeat(database, job_id, claim_token),
-                "batch",
-                job_id,
-                claim_token,
-            ) as lease_keeper:
-                if kind == "compute":
-                    _execute_compute(
-                        database,
-                        job_id,
-                        batch_id,
-                        claim_token,
-                        lease_keeper.stop,
-                    )
-                elif kind == "export":
-                    _execute_export(
-                        database,
-                        job_id,
-                        batch_id,
-                        claim_token,
-                        Path(storage_root),
-                        lease_keeper.stop,
-                    )
-                else:
-                    raise RuntimeError(f"未知任务类型：{kind}")
-        except Exception as error:
-            LOGGER.exception(
-                "Worker 任务执行失败 queue=batch job_id=%s claim=%s",
-                job_id,
-                claim_token[:8],
-            )
-            _fail_job(database, job_id, claim_token, str(error))
-        return job_id
-    if queue == "batch":
-        return None
-
-    sync_claimed = (
-        _claim_purchase_sync_job(database)
-        if queue in {"all", "purchase-sync"}
-        else None
-    )
-    if sync_claimed is not None:
-        job_id, claim_token = sync_claimed
-        try:
-            with _LeaseKeeper(
-                lambda: _purchase_sync_heartbeat(
+) -> int:
+    job_id, batch_id, kind, claim_token = claimed
+    try:
+        with LeaseKeeper(
+            lambda: _heartbeat(database, job_id, claim_token),
+            "batch",
+            job_id,
+            claim_token,
+        ) as lease_keeper:
+            if kind == "compute":
+                _execute_compute(
                     database,
                     job_id,
+                    batch_id,
                     claim_token,
-                ),
-                "purchase-sync",
-                job_id,
-                claim_token,
-            ) as lease_keeper:
-                _execute_purchase_sync(
+                    lease_keeper.stop,
+                )
+            elif kind == "export":
+                _execute_export(
                     database,
                     job_id,
+                    batch_id,
                     claim_token,
                     Path(storage_root),
                     lease_keeper.stop,
                 )
-        except Exception as error:
-            LOGGER.exception(
-                "Worker 任务执行失败 queue=purchase-sync job_id=%s claim=%s",
-                job_id,
-                claim_token[:8],
-            )
-            _fail_purchase_sync(database, job_id, claim_token, str(error))
-        return job_id
-    if queue == "purchase-sync":
-        return None
+            else:
+                raise RuntimeError(f"未知任务类型：{kind}")
+    except Exception as error:
+        LOGGER.exception(
+            "Worker 任务执行失败 queue=batch job_id=%s claim=%s",
+            job_id,
+            claim_token[:8],
+        )
+        _fail_job(database, job_id, claim_token, str(error))
+    return job_id
 
-    inbound_sync_claimed = _claim_self_operated_inbound_sync_job(database)
-    if inbound_sync_claimed is None:
-        return None
+
+def _run_purchase_job(
+    database: Database,
+    sync_claimed: tuple[int, str],
+    storage_root: Path | str,
+) -> int:
+    job_id, claim_token = sync_claimed
+    try:
+        with LeaseKeeper(
+            lambda: _purchase_sync_heartbeat(
+                database,
+                job_id,
+                claim_token,
+            ),
+            "purchase-sync",
+            job_id,
+            claim_token,
+        ) as lease_keeper:
+            _execute_purchase_sync(
+                database,
+                job_id,
+                claim_token,
+                Path(storage_root),
+                lease_keeper.stop,
+            )
+    except Exception as error:
+        LOGGER.exception(
+            "Worker 任务执行失败 queue=purchase-sync job_id=%s claim=%s",
+            job_id,
+            claim_token[:8],
+        )
+        _fail_purchase_sync(database, job_id, claim_token, str(error))
+    return job_id
+
+
+def _run_inbound_job(
+    database: Database,
+    inbound_sync_claimed: tuple[int, str],
+    storage_root: Path | str,
+) -> int:
     job_id, claim_token = inbound_sync_claimed
     try:
-        with _LeaseKeeper(
+        with LeaseKeeper(
             lambda: _self_operated_inbound_sync_heartbeat(
                 database,
                 job_id,
@@ -2172,6 +1857,33 @@ def _run_once(
             str(error),
         )
     return job_id
+
+
+def _run_once(
+    database: Database,
+    storage_root: Path | str,
+    queue: str = "all",
+) -> int | None:
+    if queue not in WORKER_QUEUES:
+        raise ValueError(f"未知 Worker 队列：{queue}")
+    claimed = _claim_job(database) if queue in {"all", "batch"} else None
+    if claimed is not None:
+        return _run_batch_job(database, claimed, storage_root)
+    if queue == "batch":
+        return None
+    sync_claimed = (
+        _claim_purchase_sync_job(database)
+        if queue in {"all", "purchase-sync"}
+        else None
+    )
+    if sync_claimed is not None:
+        return _run_purchase_job(database, sync_claimed, storage_root)
+    if queue == "purchase-sync":
+        return None
+    inbound_sync_claimed = _claim_self_operated_inbound_sync_job(database)
+    if inbound_sync_claimed is None:
+        return None
+    return _run_inbound_job(database, inbound_sync_claimed, storage_root)
 
 
 def run_once(
@@ -2219,31 +1931,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("WORKER_MAX_ATTEMPTS", "3"),
     )
     return parser
-
-
-def _watch_stale_jobs(
-    database: Database,
-    stale_after: timedelta,
-    stop_event: Event,
-    queue: str = "all",
-    max_attempts: int = 3,
-) -> None:
-    while not stop_event.wait(60):
-        try:
-            recovered = _recover_stale_jobs(
-                database,
-                stale_after=stale_after,
-                queue=queue,
-                max_attempts=max_attempts,
-            )
-            if recovered:
-                LOGGER.info(
-                    "已处理 %s 个超时任务 queue=%s",
-                    recovered,
-                    queue,
-                )
-        except Exception:
-            LOGGER.exception("任务恢复扫描失败 queue=%s", queue)
 
 
 def main(argv: list[str] | None = None) -> int:

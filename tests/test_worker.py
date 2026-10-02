@@ -19,6 +19,8 @@ from delivery_note.pipeline import IMPORT_COLUMNS
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from tests.asgi_client import SyncASGIClient
 import delivery_note.worker as worker_module
+import delivery_note.workers.leases as lease_module
+import delivery_note.workers.recovery as recovery_module
 from delivery_note.web.api import create_app
 from delivery_note.web.database import Database
 from delivery_note.web.models import (
@@ -1468,7 +1470,7 @@ class WorkerIntegrationTests(unittest.TestCase):
 
         result = []
         with (
-            patch.object(worker_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.01),
+            patch.object(lease_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.01),
             patch.object(
                 worker_module,
                 "_execute_compute",
@@ -1525,7 +1527,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         with self.assertLogs("delivery_note.worker", level="ERROR") as logs:
             with (
                 patch.object(
-                    worker_module,
+                    lease_module,
                     "LEASE_HEARTBEAT_INTERVAL_SECONDS",
                     0.01,
                 ),
@@ -1596,7 +1598,7 @@ class WorkerIntegrationTests(unittest.TestCase):
             original_heartbeat(database, current_job_id, claim_token)
 
         with (
-            patch.object(worker_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.005),
+            patch.object(lease_module, "LEASE_HEARTBEAT_INTERVAL_SECONDS", 0.005),
             patch.object(
                 worker_module,
                 "_execute_compute",
@@ -1699,12 +1701,12 @@ class WorkerProcessLifecycleTests(unittest.TestCase):
 
         database = MagicMock()
         with patch.object(
-            worker_module,
+            recovery_module,
             "_recover_stale_jobs",
             return_value=1,
             create=True,
         ) as recover:
-            worker_module._watch_stale_jobs(
+            recovery_module._watch_stale_jobs(
                 database,
                 timedelta(minutes=30),
                 StopAfterRecovery(),
