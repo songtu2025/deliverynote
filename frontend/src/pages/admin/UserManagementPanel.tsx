@@ -34,13 +34,7 @@ const USER_TABLE_COMPONENTS: NonNullable<TableProps<User>["components"]> = {
   table: (props) => <table {...props} aria-label="内部账号" />
 };
 
-export function UserManagementPanel({
-  currentUser,
-  users,
-  loading,
-  error,
-  onDataChanged
-}: UserManagementPanelProps) {
+export function UserManagementPanel({ currentUser, users, loading, error, onDataChanged }: UserManagementPanelProps) {
   const [userModal, setUserModal] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<User | null>(null);
   const [action, setAction] = useState<UserAction>(null);
@@ -125,7 +119,7 @@ export function UserManagementPanel({
     <Card
       className="admin-panel-card user-management-panel"
       title="内部账号"
-      extra={(
+      extra={
         <Button
           aria-label="创建用户"
           type="primary"
@@ -135,7 +129,7 @@ export function UserManagementPanel({
         >
           创建用户
         </Button>
-      )}
+      }
     >
       <div className="admin-panel-intro">
         <div>
@@ -177,15 +171,13 @@ export function UserManagementPanel({
             title: "角色",
             dataIndex: "role",
             width: 150,
-            render: (role: Role) => role === "admin"
-              ? <Tag color="processing">管理员</Tag>
-              : <Tag>操作员</Tag>
+            render: (role: Role) => (role === "admin" ? <Tag color="processing">管理员</Tag> : <Tag>操作员</Tag>)
           },
           {
             title: "状态",
             dataIndex: "active",
             width: 130,
-            render: (active: boolean) => active ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>
+            render: (active: boolean) => (active ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>)
           },
           {
             title: "操作",
@@ -255,7 +247,12 @@ export function UserManagementPanel({
             <Input.Password autoComplete="new-password" />
           </Form.Item>
           <Form.Item label="角色" name="role" rules={[{ required: true, message: "请选择角色" }]}>
-            <Select options={[{ value: "operator", label: "操作员" }, { value: "admin", label: "管理员" }]} />
+            <Select
+              options={[
+                { value: "operator", label: "操作员" },
+                { value: "admin", label: "管理员" }
+              ]}
+            />
           </Form.Item>
         </Form>
       </Modal>

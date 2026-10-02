@@ -5,18 +5,26 @@ import { api } from "../api";
 import type { AuditLog, InputVersion, User } from "../types";
 import { InputDataPanel } from "./admin/InputDataPanel";
 
-const AuditLogPanel = lazy(() => import("./admin/AuditLogPanel").then((module) => ({
-  default: module.AuditLogPanel
-})));
-const IntegrationConfigPanel = lazy(() => import("./admin/IntegrationConfigPanel").then((module) => ({
-  default: module.IntegrationConfigPanel
-})));
-const PositionMaintenance = lazy(() => import("./admin/PositionMaintenance").then((module) => ({
-  default: module.PositionMaintenance
-})));
-const UserManagementPanel = lazy(() => import("./admin/UserManagementPanel").then((module) => ({
-  default: module.UserManagementPanel
-})));
+const AuditLogPanel = lazy(() =>
+  import("./admin/AuditLogPanel").then((module) => ({
+    default: module.AuditLogPanel
+  }))
+);
+const IntegrationConfigPanel = lazy(() =>
+  import("./admin/IntegrationConfigPanel").then((module) => ({
+    default: module.IntegrationConfigPanel
+  }))
+);
+const PositionMaintenance = lazy(() =>
+  import("./admin/PositionMaintenance").then((module) => ({
+    default: module.PositionMaintenance
+  }))
+);
+const UserManagementPanel = lazy(() =>
+  import("./admin/UserManagementPanel").then((module) => ({
+    default: module.UserManagementPanel
+  }))
+);
 
 type AdminPageProps = { currentUser: User; active?: boolean };
 type InputView = "catalog" | "position";
@@ -182,9 +190,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
     if (!focusInputViewRef.current || inputView !== "catalog") return undefined;
     focusInputViewRef.current = false;
     const timer = window.setTimeout(() => {
-      inputWorkspaceRef.current
-        ?.querySelector<HTMLElement>('[data-input-catalog-heading="true"]')
-        ?.focus();
+      inputWorkspaceRef.current?.querySelector<HTMLElement>('[data-input-catalog-heading="true"]')?.focus();
     }, 0);
     return () => window.clearTimeout(timer);
   }, [inputView]);
@@ -211,11 +217,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
 
   if (!versionsLoadedRef.current) {
     return (
-      <div
-        className="page-shell admin-maintenance-pc"
-        aria-busy="true"
-        aria-label="正在加载管理员维护"
-      >
+      <div className="page-shell admin-maintenance-pc" aria-busy="true" aria-label="正在加载管理员维护">
         <Skeleton active title={{ width: 220 }} paragraph={{ rows: 8 }} />
       </div>
     );
@@ -243,7 +245,9 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
                   <div className="input-data-view">
                     <div className="admin-section-heading">
                       <div>
-                        <Typography.Title data-input-catalog-heading="true" tabIndex={-1} level={4}>基础资料目录</Typography.Title>
+                        <Typography.Title data-input-catalog-heading="true" tabIndex={-1} level={4}>
+                          基础资料目录
+                        </Typography.Title>
                       </div>
                     </div>
                     {errors.versions && (
@@ -253,7 +257,11 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
                         showIcon
                         title="无法读取基础资料"
                         description={errors.versions}
-                        action={<Button size="small" onClick={() => void refreshVersions()}>重新加载</Button>}
+                        action={
+                          <Button size="small" onClick={() => void refreshVersions()}>
+                            重新加载
+                          </Button>
+                        }
                       />
                     )}
                     <div className="input-data-layout">

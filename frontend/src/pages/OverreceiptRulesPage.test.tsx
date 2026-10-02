@@ -42,10 +42,8 @@ const previousSelfOperatedRule = {
   created_at: "2026-08-20T04:08:41Z"
 };
 
-const jsonResponse = (payload: unknown, status = 200) => new Response(
-  JSON.stringify(payload),
-  { status, headers: { "Content-Type": "application/json" } }
-);
+const jsonResponse = (payload: unknown, status = 200) =>
+  new Response(JSON.stringify(payload), { status, headers: { "Content-Type": "application/json" } });
 
 let failPublishOnce = false;
 let deliveryRuleRows = [firstRule, previousRule];
@@ -56,52 +54,47 @@ describe("OverreceiptRulesPage", () => {
     failPublishOnce = false;
     deliveryRuleRows = [firstRule, previousRule];
     selfOperatedRuleRows = [selfOperatedRule, previousSelfOperatedRule];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      if (url.endsWith("/api/overreceipt-rule-versions/warehouses")) {
-        return jsonResponse(["供应商成品本地仓", "水鞋-广州仓"]);
-      }
-      if (url.endsWith("/api/overreceipt-rule-versions") && method === "GET") {
-        return jsonResponse(deliveryRuleRows);
-      }
-      if (url.endsWith("/api/self-operated-overreceipt-rule-versions") && method === "GET") {
-        return jsonResponse(selfOperatedRuleRows);
-      }
-      if (url.endsWith("/api/self-operated-overreceipt-rule-versions") && method === "POST") {
-        return jsonResponse({ ...selfOperatedRule, id: 12, name: "2026-09 自营仓规则" }, 201);
-      }
-      const selfOperatedRenameMatch = url.match(
-        /\/api\/self-operated-overreceipt-rule-versions\/(\d+)\/name$/
-      );
-      if (selfOperatedRenameMatch && method === "PUT") {
-        const id = Number(selfOperatedRenameMatch[1]);
-        const { name } = JSON.parse(String(init?.body));
-        selfOperatedRuleRows = selfOperatedRuleRows.map((rule) => (
-          rule.id === id ? { ...rule, name } : rule
-        ));
-        return jsonResponse(selfOperatedRuleRows.find((rule) => rule.id === id));
-      }
-      if (url.endsWith("/api/overreceipt-rule-versions") && method === "POST") {
-        if (failPublishOnce) {
-          failPublishOnce = false;
-          return jsonResponse({ detail: "发布服务暂时不可用" }, 500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (url.endsWith("/api/overreceipt-rule-versions/warehouses")) {
+          return jsonResponse(["供应商成品本地仓", "水鞋-广州仓"]);
         }
-        return jsonResponse({ ...firstRule, id: 2, name: "2026-08 新规则" }, 201);
-      }
-      const deliveryRenameMatch = url.match(
-        /\/api\/overreceipt-rule-versions\/(\d+)\/name$/
-      );
-      if (deliveryRenameMatch && method === "PUT") {
-        const id = Number(deliveryRenameMatch[1]);
-        const { name } = JSON.parse(String(init?.body));
-        deliveryRuleRows = deliveryRuleRows.map((rule) => (
-          rule.id === id ? { ...rule, name } : rule
-        ));
-        return jsonResponse(deliveryRuleRows.find((rule) => rule.id === id));
-      }
-      throw new Error(`Unexpected request: ${method} ${url}`);
-    }));
+        if (url.endsWith("/api/overreceipt-rule-versions") && method === "GET") {
+          return jsonResponse(deliveryRuleRows);
+        }
+        if (url.endsWith("/api/self-operated-overreceipt-rule-versions") && method === "GET") {
+          return jsonResponse(selfOperatedRuleRows);
+        }
+        if (url.endsWith("/api/self-operated-overreceipt-rule-versions") && method === "POST") {
+          return jsonResponse({ ...selfOperatedRule, id: 12, name: "2026-09 自营仓规则" }, 201);
+        }
+        const selfOperatedRenameMatch = url.match(/\/api\/self-operated-overreceipt-rule-versions\/(\d+)\/name$/);
+        if (selfOperatedRenameMatch && method === "PUT") {
+          const id = Number(selfOperatedRenameMatch[1]);
+          const { name } = JSON.parse(String(init?.body));
+          selfOperatedRuleRows = selfOperatedRuleRows.map((rule) => (rule.id === id ? { ...rule, name } : rule));
+          return jsonResponse(selfOperatedRuleRows.find((rule) => rule.id === id));
+        }
+        if (url.endsWith("/api/overreceipt-rule-versions") && method === "POST") {
+          if (failPublishOnce) {
+            failPublishOnce = false;
+            return jsonResponse({ detail: "发布服务暂时不可用" }, 500);
+          }
+          return jsonResponse({ ...firstRule, id: 2, name: "2026-08 新规则" }, 201);
+        }
+        const deliveryRenameMatch = url.match(/\/api\/overreceipt-rule-versions\/(\d+)\/name$/);
+        if (deliveryRenameMatch && method === "PUT") {
+          const id = Number(deliveryRenameMatch[1]);
+          const { name } = JSON.parse(String(init?.body));
+          deliveryRuleRows = deliveryRuleRows.map((rule) => (rule.id === id ? { ...rule, name } : rule));
+          return jsonResponse(deliveryRuleRows.find((rule) => rule.id === id));
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`);
+      })
+    );
   });
 
   afterEach(() => {
@@ -130,20 +123,19 @@ describe("OverreceiptRulesPage", () => {
     expect(drawerConfirmButton).toHaveAttribute("form", "self-operated-overreceipt-form");
     fireEvent.click(drawerConfirmButton);
 
-    const confirmTitle = await screen.findByText(
-      "确认发布自营仓超收规则？",
-      { selector: ".ant-modal-confirm-title" }
-    );
+    const confirmTitle = await screen.findByText("确认发布自营仓超收规则？", { selector: ".ant-modal-confirm-title" });
     const dialog = confirmTitle.closest<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(within(dialog!).getByText("2026-09 自营仓规则")).toBeInTheDocument();
     fireEvent.click(within(dialog!).getByRole("button", { name: "确认发布" }));
 
     await waitFor(() => {
-      const post = vi.mocked(fetch).mock.calls.find(([input, init]) => (
-        String(input).endsWith("/api/self-operated-overreceipt-rule-versions")
-        && init?.method === "POST"
-      ));
+      const post = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([input, init]) =>
+            String(input).endsWith("/api/self-operated-overreceipt-rule-versions") && init?.method === "POST"
+        );
       expect(post).toBeDefined();
       expect(JSON.parse(String(post?.[1]?.body))).toEqual({
         name: "2026-09 自营仓规则",
@@ -168,9 +160,7 @@ describe("OverreceiptRulesPage", () => {
     expect(screen.getAllByText("未开放任何仓库").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "重新启用 2026-06 基线规则" })).toBeInTheDocument();
     expect(
-      vi.mocked(fetch).mock.calls.some(([input]) => (
-        String(input).endsWith("/api/overreceipt-rule-versions/warehouses")
-      ))
+      vi.mocked(fetch).mock.calls.some(([input]) => String(input).endsWith("/api/overreceipt-rule-versions/warehouses"))
     ).toBe(false);
 
     fireEvent.click(screen.getByRole("button", { name: /发布新版本/ }));
@@ -182,19 +172,16 @@ describe("OverreceiptRulesPage", () => {
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "允许超收仓库" }));
     fireEvent.click(await screen.findByText("水鞋-广州仓", { selector: ".ant-select-item-option-content" }));
     expect(
-      vi.mocked(fetch).mock.calls.filter(([input]) => (
-        String(input).endsWith("/api/overreceipt-rule-versions/warehouses")
-      ))
+      vi
+        .mocked(fetch)
+        .mock.calls.filter(([input]) => String(input).endsWith("/api/overreceipt-rule-versions/warehouses"))
     ).toHaveLength(1);
     const drawerConfirmButton = screen.getByRole("button", { name: /确\s*认/ });
     expect(drawerConfirmButton).toHaveAttribute("type", "submit");
     expect(drawerConfirmButton).toHaveAttribute("form", "delivery-overreceipt-form");
     fireEvent.click(drawerConfirmButton);
 
-    const confirmTitle = await screen.findByText(
-      "确认发布不可变版本？",
-      { selector: ".ant-modal-confirm-title" }
-    );
+    const confirmTitle = await screen.findByText("确认发布不可变版本？", { selector: ".ant-modal-confirm-title" });
     const dialog = confirmTitle.closest<HTMLElement>('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(within(dialog!).getByText("2026-08 新规则")).toBeInTheDocument();
@@ -202,9 +189,7 @@ describe("OverreceiptRulesPage", () => {
     expect(within(dialog!).getByText("中尾 +20 件")).toBeInTheDocument();
     expect(within(dialog!).getByText("长尾 +10 件")).toBeInTheDocument();
     expect(within(dialog!).getByText("水鞋-广州仓")).toBeInTheDocument();
-    expect(
-      vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")
-    ).toBe(false);
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
     fireEvent.click(within(dialog!).getByRole("button", { name: "确认发布" }));
 
     await waitFor(() => {
@@ -243,19 +228,19 @@ describe("OverreceiptRulesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "重命名 自营仓基线规则" }));
     const selfOperatedDialog = await screen.findByRole("dialog", { name: "修改版本名称" });
     expect(within(selfOperatedDialog).getByLabelText("版本名称")).toHaveValue("自营仓基线规则");
-    expect(within(selfOperatedDialog).getByText(
-      "只修改名称，不影响规则参数或历史批次"
-    )).toBeInTheDocument();
+    expect(within(selfOperatedDialog).getByText("只修改名称，不影响规则参数或历史批次")).toBeInTheDocument();
     fireEvent.change(within(selfOperatedDialog).getByLabelText("版本名称"), {
       target: { value: "自营仓历史规则新名称" }
     });
     fireEvent.click(within(selfOperatedDialog).getByRole("button", { name: /保\s*存/ }));
 
     await waitFor(() => {
-      const rename = vi.mocked(fetch).mock.calls.find(([input, init]) => (
-        String(input).endsWith("/api/self-operated-overreceipt-rule-versions/10/name")
-        && init?.method === "PUT"
-      ));
+      const rename = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([input, init]) =>
+            String(input).endsWith("/api/self-operated-overreceipt-rule-versions/10/name") && init?.method === "PUT"
+        );
       expect(rename).toBeDefined();
       expect(JSON.parse(String(rename?.[1]?.body))).toEqual({
         name: "自营仓历史规则新名称"
@@ -273,10 +258,11 @@ describe("OverreceiptRulesPage", () => {
     fireEvent.click(within(deliveryDialog).getByRole("button", { name: /保\s*存/ }));
 
     await waitFor(() => {
-      const rename = vi.mocked(fetch).mock.calls.find(([input, init]) => (
-        String(input).endsWith("/api/overreceipt-rule-versions/1/name")
-        && init?.method === "PUT"
-      ));
+      const rename = vi
+        .mocked(fetch)
+        .mock.calls.find(
+          ([input, init]) => String(input).endsWith("/api/overreceipt-rule-versions/1/name") && init?.method === "PUT"
+        );
       expect(rename).toBeDefined();
       expect(JSON.parse(String(rename?.[1]?.body))).toEqual({
         name: "交货当前规则新名称"

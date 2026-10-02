@@ -16,23 +16,11 @@ import {
   Typography,
   message
 } from "antd";
-import {
-  CheckCircleFilled,
-  EditOutlined,
-  LockOutlined,
-  PlusOutlined,
-  ReloadOutlined
-} from "@ant-design/icons";
+import { CheckCircleFilled, EditOutlined, LockOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 
 import { api } from "../api";
-import {
-  formatBeijingDate,
-  formatBeijingTime
-} from "../dateTime";
-import type {
-  OverreceiptRuleVersion,
-  SelfOperatedOverreceiptRuleVersion
-} from "../types";
+import { formatBeijingDate, formatBeijingTime } from "../dateTime";
+import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../types";
 
 type RuleForm = {
   name: string;
@@ -136,9 +124,7 @@ function RuleScopeSwitcher({
           <strong>自营仓入库</strong>
         </span>
         <span className={`overreceipt-scope-badge ${activeSelfOperatedAllowance !== undefined ? "" : "is-disabled"}`}>
-          {activeSelfOperatedAllowance !== undefined
-            ? `每键 +${activeSelfOperatedAllowance} 件`
-            : "未启用"}
+          {activeSelfOperatedAllowance !== undefined ? `每键 +${activeSelfOperatedAllowance} 件` : "未启用"}
         </span>
       </button>
     </div>
@@ -164,7 +150,9 @@ function CurrentSelfOperatedRule({
           {rule ? (
             <div className="overreceipt-current-title">
               <Typography.Title level={4}>{rule.name}</Typography.Title>
-              <Tag color="success" icon={<CheckCircleFilled />}>用于新批次</Tag>
+              <Tag color="success" icon={<CheckCircleFilled />}>
+                用于新批次
+              </Tag>
             </div>
           ) : (
             <Typography.Title level={4}>尚未启用自营仓超收规则</Typography.Title>
@@ -172,11 +160,7 @@ function CurrentSelfOperatedRule({
         </div>
         <Space>
           {rule ? (
-            <Button
-              icon={<EditOutlined />}
-              aria-label={`重命名 ${rule.name}`}
-              onClick={() => onRename(rule)}
-            >
+            <Button icon={<EditOutlined />} aria-label={`重命名 ${rule.name}`} onClick={() => onRename(rule)}>
               重命名
             </Button>
           ) : null}
@@ -224,7 +208,9 @@ function CurrentDeliveryRule({
           {rule ? (
             <div className="overreceipt-current-title">
               <Typography.Title level={4}>{rule.name}</Typography.Title>
-              <Tag color="success" icon={<CheckCircleFilled />}>用于新批次</Tag>
+              <Tag color="success" icon={<CheckCircleFilled />}>
+                用于新批次
+              </Tag>
             </div>
           ) : (
             <Typography.Title level={4}>尚未启用普通交货超收规则</Typography.Title>
@@ -232,11 +218,7 @@ function CurrentDeliveryRule({
         </div>
         <Space>
           {rule ? (
-            <Button
-              icon={<EditOutlined />}
-              aria-label={`重命名 ${rule.name}`}
-              onClick={() => onRename(rule)}
-            >
+            <Button icon={<EditOutlined />} aria-label={`重命名 ${rule.name}`} onClick={() => onRename(rule)}>
               重命名
             </Button>
           ) : null}
@@ -254,11 +236,7 @@ function CurrentDeliveryRule({
           </div>
           <div className="overreceipt-metric">
             <span>允许超收仓库</span>
-            <strong>
-              {rule.allowed_warehouses.length
-                ? rule.allowed_warehouses.join("、")
-                : "未开放任何仓库"}
-            </strong>
+            <strong>{rule.allowed_warehouses.length ? rule.allowed_warehouses.join("、") : "未开放任何仓库"}</strong>
             <small>目的仓名称必须精确匹配</small>
           </div>
         </div>
@@ -304,91 +282,95 @@ function HistoryCard({
   return (
     <Card
       className="section-card overreceipt-history-card"
-      title={(
+      title={
         <div className="overreceipt-history-heading">
           <strong>历史版本</strong>
           <small>可重新启用于新批次。</small>
         </div>
-      )}
+      }
       extra={<Typography.Text type="secondary">{count} 个历史版本</Typography.Text>}
     >
-      {isSelfOperated ? (loading || historicalSelfOperatedRules.length > 0 ? (
-        <Table<SelfOperatedOverreceiptRuleVersion>
-          className="overreceipt-history-table"
-          rowKey="id"
-          loading={loading}
-          dataSource={historicalSelfOperatedRules}
-          pagination={false}
-          locale={{ emptyText }}
-          tableLayout="fixed"
-          components={{
-            table: (props) => <table {...props} aria-label="自营仓超收规则历史版本" />
-          }}
-          columns={[
-            {
-              title: "版本",
-              dataIndex: "name",
-              render: (name: string) => <Typography.Text strong>{name}</Typography.Text>
-            },
-            {
-              title: "允许超收",
-              dataIndex: "allowance",
-              width: 118,
-              render: (value: number) => <strong className="overreceipt-allowance-value">+{value} 件</strong>
-            },
-            {
-              title: "共享范围",
-              width: 250,
-              render: () => (
-                <span className="overreceipt-table-stack">
-                  供应商 + SKU + 完整站点
-                  <small>批次内共享</small>
-                </span>
-              )
-            },
-            {
-              title: "发布人",
-              dataIndex: "created_by",
-              width: 100,
-              render: (value: number) => `用户 #${value}`
-            },
-            {
-              title: "发布时间",
-              dataIndex: "created_at",
-              width: 150,
-              render: (value: string) => (
-                <span className="overreceipt-published-at">
-                  {formatBeijingDate(value)}
-                  <small>{formatBeijingTime(value)}</small>
-                </span>
-              )
-            },
-            {
-              title: "操作",
-              width: 174,
-              render: (_, rule) => (
-                <Space size={0}>
-                  <Button
-                    type="link"
-                    aria-label={`重命名 ${rule.name}`}
-                    onClick={() => onRename({ scope: "self_operated", rule })}
-                  >
-                    重命名
-                  </Button>
-                  <Button
-                    type="link"
-                    aria-label={`重新启用 ${rule.name}`}
-                    loading={selfOperatedActivatingId === rule.id}
-                    onClick={() => onActivateSelfOperated(rule)}
-                  >
-                    重新启用
-                  </Button>
-                </Space>
-              )
-            }
-          ]}
-        />
-      ) : emptyText) : (loading || historicalRules.length > 0 ? (
+      {isSelfOperated ? (
+        loading || historicalSelfOperatedRules.length > 0 ? (
+          <Table<SelfOperatedOverreceiptRuleVersion>
+            className="overreceipt-history-table"
+            rowKey="id"
+            loading={loading}
+            dataSource={historicalSelfOperatedRules}
+            pagination={false}
+            locale={{ emptyText }}
+            tableLayout="fixed"
+            components={{
+              table: (props) => <table {...props} aria-label="自营仓超收规则历史版本" />
+            }}
+            columns={[
+              {
+                title: "版本",
+                dataIndex: "name",
+                render: (name: string) => <Typography.Text strong>{name}</Typography.Text>
+              },
+              {
+                title: "允许超收",
+                dataIndex: "allowance",
+                width: 118,
+                render: (value: number) => <strong className="overreceipt-allowance-value">+{value} 件</strong>
+              },
+              {
+                title: "共享范围",
+                width: 250,
+                render: () => (
+                  <span className="overreceipt-table-stack">
+                    供应商 + SKU + 完整站点
+                    <small>批次内共享</small>
+                  </span>
+                )
+              },
+              {
+                title: "发布人",
+                dataIndex: "created_by",
+                width: 100,
+                render: (value: number) => `用户 #${value}`
+              },
+              {
+                title: "发布时间",
+                dataIndex: "created_at",
+                width: 150,
+                render: (value: string) => (
+                  <span className="overreceipt-published-at">
+                    {formatBeijingDate(value)}
+                    <small>{formatBeijingTime(value)}</small>
+                  </span>
+                )
+              },
+              {
+                title: "操作",
+                width: 174,
+                render: (_, rule) => (
+                  <Space size={0}>
+                    <Button
+                      type="link"
+                      aria-label={`重命名 ${rule.name}`}
+                      onClick={() => onRename({ scope: "self_operated", rule })}
+                    >
+                      重命名
+                    </Button>
+                    <Button
+                      type="link"
+                      aria-label={`重新启用 ${rule.name}`}
+                      loading={selfOperatedActivatingId === rule.id}
+                      onClick={() => onActivateSelfOperated(rule)}
+                    >
+                      重新启用
+                    </Button>
+                  </Space>
+                )
+              }
+            ]}
+          />
+        ) : (
+          emptyText
+        )
+      ) : loading || historicalRules.length > 0 ? (
         <Table<OverreceiptRuleVersion>
           className="overreceipt-history-table"
           rowKey="id"
@@ -414,9 +396,12 @@ function HistoryCard({
             },
             {
               title: "允许仓库",
-              render: (_, rule) => rule.allowed_warehouses.length
-                ? rule.allowed_warehouses.join("、")
-                : <Typography.Text type="secondary">未开放任何仓库</Typography.Text>
+              render: (_, rule) =>
+                rule.allowed_warehouses.length ? (
+                  rule.allowed_warehouses.join("、")
+                ) : (
+                  <Typography.Text type="secondary">未开放任何仓库</Typography.Text>
+                )
             },
             {
               title: "发布人",
@@ -460,7 +445,9 @@ function HistoryCard({
             }
           ]}
         />
-      ) : emptyText)}
+      ) : (
+        emptyText
+      )}
     </Card>
   );
 }
@@ -524,10 +511,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
   }, [active, load]);
 
   const activeRule = useMemo(() => rules.find((rule) => rule.active), [rules]);
-  const activeSelfOperatedRule = useMemo(
-    () => selfOperatedRules.find((rule) => rule.active),
-    [selfOperatedRules]
-  );
+  const activeSelfOperatedRule = useMemo(() => selfOperatedRules.find((rule) => rule.active), [selfOperatedRules]);
 
   const openRename = (target: RenameRuleTarget) => {
     setRenameTarget(target);
@@ -546,21 +530,17 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
     setRenaming(true);
     try {
       if (target.scope === "delivery") {
-        const renamed = await api<OverreceiptRuleVersion>(
-          `/api/overreceipt-rule-versions/${target.rule.id}/name`,
-          { method: "PUT", body: JSON.stringify({ name }) }
-        );
-        setRules((current) => current.map((rule) => (
-          rule.id === renamed.id ? renamed : rule
-        )));
+        const renamed = await api<OverreceiptRuleVersion>(`/api/overreceipt-rule-versions/${target.rule.id}/name`, {
+          method: "PUT",
+          body: JSON.stringify({ name })
+        });
+        setRules((current) => current.map((rule) => (rule.id === renamed.id ? renamed : rule)));
       } else {
         const renamed = await api<SelfOperatedOverreceiptRuleVersion>(
           `/api/self-operated-overreceipt-rule-versions/${target.rule.id}/name`,
           { method: "PUT", body: JSON.stringify({ name }) }
         );
-        setSelfOperatedRules((current) => current.map((rule) => (
-          rule.id === renamed.id ? renamed : rule
-        )));
+        setSelfOperatedRules((current) => current.map((rule) => (rule.id === renamed.id ? renamed : rule)));
       }
       message.success("版本名称已更新");
       closeRename();
@@ -613,9 +593,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
               <Typography.Text type="warning">未开放任何仓库（不会自动超收）</Typography.Text>
             )}
           </div>
-          <Typography.Text type="secondary">
-            参数发布后不可修改；新版本仅用于新批次。
-          </Typography.Text>
+          <Typography.Text type="secondary">参数发布后不可修改；新版本仅用于新批次。</Typography.Text>
         </div>
       ),
       okText: "确认发布",
@@ -627,10 +605,10 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
   const publishSelfOperated = async (values: SelfOperatedRuleForm) => {
     setSelfOperatedSubmitting(true);
     try {
-      await api<SelfOperatedOverreceiptRuleVersion>(
-        "/api/self-operated-overreceipt-rule-versions",
-        { method: "POST", body: JSON.stringify(values) }
-      );
+      await api<SelfOperatedOverreceiptRuleVersion>("/api/self-operated-overreceipt-rule-versions", {
+        method: "POST",
+        body: JSON.stringify(values)
+      });
       message.success("自营仓超收规则已发布，将用于新批次");
       selfOperatedForm.resetFields();
       setPublishScope(undefined);
@@ -649,9 +627,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
       content: (
         <div className="overreceipt-confirm-summary">
           <Typography.Text strong>{values.name}</Typography.Text>
-          <Typography.Text>
-            每个“供应商 + SKU + 完整站点”在新批次内共享 {values.allowance} 件超收额度。
-          </Typography.Text>
+          <Typography.Text>每个“供应商 + SKU + 完整站点”在新批次内共享 {values.allowance} 件超收额度。</Typography.Text>
           <Typography.Text type="secondary">
             规则内超收数量挂到最后一个 PO 单，且不会改变上游交货量或采购量。
           </Typography.Text>
@@ -666,10 +642,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
   const activate = async (rule: OverreceiptRuleVersion) => {
     setActivatingId(rule.id);
     try {
-      await api<OverreceiptRuleVersion>(
-        `/api/overreceipt-rule-versions/${rule.id}/activate`,
-        { method: "POST" }
-      );
+      await api<OverreceiptRuleVersion>(`/api/overreceipt-rule-versions/${rule.id}/activate`, { method: "POST" });
       message.success(`已重新启用 ${rule.name}，仅影响新建批次`);
       await load();
     } catch (activateError) {
@@ -703,9 +676,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
       <div className="page-heading overreceipt-page-heading">
         <div>
           <Typography.Title level={2}>超收规则</Typography.Title>
-          <Typography.Text type="secondary">
-            设置新批次的超收额度和适用仓库。
-          </Typography.Text>
+          <Typography.Text type="secondary">设置新批次的超收额度和适用仓库。</Typography.Text>
         </div>
         <Button
           icon={<ReloadOutlined />}
@@ -787,11 +758,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
           showIcon
           title="只修改名称，不影响规则参数或历史批次"
         />
-        <Form<RenameRuleForm>
-          form={renameForm}
-          layout="vertical"
-          onFinish={(values) => void renameRule(values)}
-        >
+        <Form<RenameRuleForm> form={renameForm} layout="vertical" onFinish={(values) => void renameRule(values)}>
           <Form.Item
             label="版本名称"
             name="name"
@@ -808,21 +775,19 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         open={publishScope !== undefined}
         size={460}
         onClose={() => setPublishScope(undefined)}
-        footer={(
+        footer={
           <div className="overreceipt-drawer-actions">
             <Button onClick={() => setPublishScope(undefined)}>取消</Button>
             <Button
               type="primary"
               htmlType="submit"
-              form={drawerIsSelfOperated
-                ? "self-operated-overreceipt-form"
-                : "delivery-overreceipt-form"}
+              form={drawerIsSelfOperated ? "self-operated-overreceipt-form" : "delivery-overreceipt-form"}
               loading={drawerIsSelfOperated ? selfOperatedSubmitting : submitting}
             >
               确认
             </Button>
           </div>
-        )}
+        }
       >
         <Alert
           className="overreceipt-drawer-notice"
@@ -851,9 +816,11 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
             <Form.Item
               label="每个匹配键允许超收"
               name="allowance"
-              extra={activeSelfOperatedRule
-                ? `当前启用版本为每键 +${activeSelfOperatedRule.allowance} 件`
-                : "当前尚未启用自营仓超收规则"}
+              extra={
+                activeSelfOperatedRule
+                  ? `当前启用版本为每键 +${activeSelfOperatedRule.allowance} 件`
+                  : "当前尚未启用自营仓超收规则"
+              }
               rules={[{ required: true, message: "请输入允许超收数量" }]}
             >
               <InputNumber min={0} precision={0} suffix="件" />
