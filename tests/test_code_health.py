@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from scripts.check_code_health import check_sizes, changed_files
+from scripts.check_code_health import check_new_python_types, check_sizes, changed_files
 from scripts.python_imports import import_cycles
 
 
@@ -68,6 +68,18 @@ class CodeHealthTests(unittest.TestCase):
     def test_invalid_base_fails(self) -> None:
         with self.assertRaises(subprocess.CalledProcessError):
             changed_files(self.root, "missing-ref")
+
+    def test_new_python_type_error_is_rejected(self) -> None:
+        self.write("broken.py", 'def value() -> int:\n    return "错误类型"\n')
+        self.assertNotEqual(
+            check_new_python_types(self.root, changed_files(self.root), "HEAD"), 0
+        )
+
+    def test_valid_new_python_module_passes_types(self) -> None:
+        self.write("valid.py", "def value() -> int:\n    return 1\n")
+        self.assertEqual(
+            check_new_python_types(self.root, changed_files(self.root), "HEAD"), 0
+        )
 
     def test_relative_import_cycle_is_detected(self) -> None:
         self.write("delivery_note/__init__.py", "")

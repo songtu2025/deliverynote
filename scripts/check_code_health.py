@@ -81,12 +81,17 @@ def check_sizes(root: Path, files: list[str], base: str) -> tuple[list[str], lis
     return failures, warnings
 
 
-def check_new_python_complexity(root: Path, files: list[str], base: str) -> int:
+def new_python_files(root: Path, files: list[str], base: str) -> list[str]:
     new_python: list[str] = []
     tracked = set(_git(root, "ls-tree", "-r", "--name-only", "-z", base).split("\0"))
     for name in files:
         if name.endswith(".py") and name not in tracked:
             new_python.append(name)
+    return new_python
+
+
+def check_new_python_complexity(root: Path, files: list[str], base: str) -> int:
+    new_python = new_python_files(root, files, base)
     if not new_python:
         return 0
     return subprocess.call(
@@ -99,6 +104,17 @@ def check_new_python_complexity(root: Path, files: list[str], base: str) -> int:
             COMPLEXITY_RULES,
             *new_python,
         ],
+        cwd=root,
+    )
+
+
+def check_new_python_types(root: Path, files: list[str], base: str) -> int:
+    """新增模块须通过类型检查，后续变更由项目类型配置继续覆盖。"""
+    new_python = new_python_files(root, files, base)
+    if not new_python:
+        return 0
+    return subprocess.call(
+        [sys.executable, "-m", "mypy", "--follow-imports=silent", *new_python],
         cwd=root,
     )
 
@@ -117,9 +133,10 @@ def main() -> int:
     for cycle in cycles:
         print(f"Python 导入循环：{' -> '.join(cycle)}")
     complexity_status = check_new_python_complexity(root, files, base)
+    type_status = check_new_python_types(root, files, base)
     print(f"规模检查：{len(files)} 个变更文件，{len(failures)} 个失败")
     print(f"Python 静态导入检查：{len(cycles)} 个循环")
-    return int(bool(failures or cycles or complexity_status))
+    return int(bool(failures or cycles or complexity_status or type_status))
 
 
 if __name__ == "__main__":

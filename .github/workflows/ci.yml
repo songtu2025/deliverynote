@@ -55,6 +55,8 @@ jobs:
         run: |
           python -m mypy --strict scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
           python -m ruff format --check scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
+      - name: Worker 与已整理 Web 模块类型检查
+        run: python -m mypy
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试
