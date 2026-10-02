@@ -9,6 +9,11 @@ from typing import Any, Callable, TypedDict
 import pandas as pd
 
 from ..excel_io import read_position_workbook
+from ..input_inspection import (
+    inspect_input_version_with_preview,
+    preview_input_version_page,
+)
+from .models import InputVersion
 
 
 class _InspectionEntry(TypedDict):
@@ -28,6 +33,19 @@ class InputInspectionCache:
         self._version_loads: dict[int, Future[None]] = {}
         self._page_loads: dict[tuple[int, int, int], Future[dict[str, Any]]] = {}
         self._lock = Lock()
+
+    def inspect(self, version: InputVersion, offset: int, limit: int) -> dict:
+        return self.get(
+            version.id,
+            offset,
+            limit,
+            lambda: inspect_input_version_with_preview(
+                version.kind, Path(version.storage_path), offset, limit
+            ),
+            lambda summary: preview_input_version_page(
+                version.kind, Path(version.storage_path), offset, limit, summary
+            ),
+        )
 
     @staticmethod
     def _result(entry: _InspectionEntry, page_key: tuple[int, int]) -> dict[str, Any]:

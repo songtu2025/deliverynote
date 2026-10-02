@@ -1,4 +1,5 @@
 import asyncio
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
@@ -369,7 +370,7 @@ class WebApiTests(unittest.TestCase):
             with self.subTest(configured=configured), TemporaryDirectory() as directory:
                 root = Path(directory)
                 with patch.dict(
-                    web_api_module.os.environ,
+                    os.environ,
                     {"SESSION_COOKIE_SECURE": configured},
                 ):
                     app = create_app(
@@ -396,7 +397,7 @@ class WebApiTests(unittest.TestCase):
             root = Path(directory)
             with (
                 patch.dict(
-                    web_api_module.os.environ,
+                    os.environ,
                     {"SESSION_COOKIE_SECURE": "sometimes"},
                 ),
                 self.assertRaisesRegex(ValueError, "SESSION_COOKIE_SECURE"),

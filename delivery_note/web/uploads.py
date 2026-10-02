@@ -1,8 +1,10 @@
+import asyncio
+from collections.abc import Awaitable, Callable
 import logging
 import os
 import re
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
@@ -56,3 +58,14 @@ async def _save_upload(
             await run_in_threadpool(output.close)
         await run_in_threadpool(temporary.unlink, missing_ok=True)
         await upload.close()
+
+
+def build_upload_parser(limit: int) -> Callable[..., Awaitable[Any]]:
+    """限制进程内并发，并在线程池执行工作簿解析。"""
+    semaphore = asyncio.Semaphore(limit)
+
+    async def parse_workbook(function: Callable, *args):
+        async with semaphore:
+            return await run_in_threadpool(function, *args)
+
+    return parse_workbook
