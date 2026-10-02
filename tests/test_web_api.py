@@ -29,36 +29,22 @@ from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from delivery_note.web.auth import hash_token
 from tests.asgi_client import SyncASGIClient
 
-try:
-    import delivery_note.web.api as web_api_module
-    import delivery_note.web.caches as cache_module
-    from delivery_note.web.api import create_app
-    from delivery_note.web.models import (
-        AuthSession,
-        Batch,
-        BatchFile,
-        ExceptionRecord,
-        InputVersion,
-        Job,
-        PurchaseSyncJob,
-        SelfOperatedBatch,
-        SelfOperatedInboundSyncJob,
-        SplitRecord,
-        User,
-    )
-except ImportError:
-    web_api_module = None
-    create_app = None
-    AuthSession = None
-    Batch = None
-    BatchFile = None
-    ExceptionRecord = None
-    InputVersion = None
-    PurchaseSyncJob = None
-    SelfOperatedBatch = None
-    SelfOperatedInboundSyncJob = None
-    SplitRecord = None
-    User = None
+import delivery_note.web.api as web_api_module
+import delivery_note.web.caches as cache_module
+from delivery_note.web.api import create_app
+from delivery_note.web.models import (
+    AuthSession,
+    Batch,
+    BatchFile,
+    ExceptionRecord,
+    InputVersion,
+    Job,
+    PurchaseSyncJob,
+    SelfOperatedBatch,
+    SelfOperatedInboundSyncJob,
+    SplitRecord,
+    User,
+)
 
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
@@ -66,9 +52,6 @@ INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
 
 class WebApiTests(unittest.TestCase):
     def setUp(self):
-        self.assertIsNotNone(create_app, "FastAPI 应用尚未实现")
-        if create_app is None:
-            self.skipTest("FastAPI 应用尚未实现")
         self.directory = TemporaryDirectory()
         root = Path(self.directory.name)
         self.root = root

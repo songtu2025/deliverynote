@@ -12,7 +12,7 @@ from ..self_operated_inbound_sync import (
     write_self_operated_inbound_source,
 )
 from ..web.models import SelfOperatedInboundSyncJob
-from ..workers.leases import JobContext, _self_operated_inbound_sync_heartbeat
+from ..workers.leases import JobContext, _sync_heartbeat
 from .sync_results import (
     SyncCandidate,
     _block_sync,
@@ -36,8 +36,9 @@ def _execute_self_operated_inbound_sync(
     orders = client.list_self_operated_inbound_orders()
     mapped = map_self_operated_inbound_orders(orders)
     findings = [*mapped.issues, *mapped.warnings]
-    _self_operated_inbound_sync_heartbeat(
+    _sync_heartbeat(
         database,
+        SelfOperatedInboundSyncJob,
         job_id,
         claim_token,
         total_orders=len(orders),

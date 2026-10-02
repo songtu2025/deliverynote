@@ -13,7 +13,8 @@ from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
 
 from ..web.database import Database
-from ..web.models import Batch, Job, PurchaseSyncJob, SelfOperatedInboundSyncJob
+from ..web.models import Batch, Job
+from .sync_models import SYNC_METADATA, SyncJob, SyncJobModel
 
 WORKER_QUEUES = ("all", "batch", "purchase-sync", "inbound-sync")
 LEASE_HEARTBEAT_INTERVAL_SECONDS = 30.0
@@ -145,13 +146,16 @@ def _heartbeat(database: Database, job_id: int, claim_token: str) -> None:
             raise LostJobLeaseError("任务租约已失效")
 
 
-def _claim_purchase_sync_job(database: Database) -> tuple[int, str] | None:
+def _claim_sync_job(database: Database, model: SyncJobModel) -> tuple[int, str] | None:
     with database.session() as session:
-        job = session.scalar(
-            select(PurchaseSyncJob)
-            .where(PurchaseSyncJob.status == "queued")
-            .order_by(PurchaseSyncJob.id)
-            .with_for_update(skip_locked=True)
+        job = cast(
+            SyncJob | None,
+            session.scalar(
+                select(model)
+                .where(model.status == "queued")
+                .order_by(model.id)
+                .with_for_update(skip_locked=True)
+            ),
         )
         if job is None:
             return None
@@ -167,8 +171,9 @@ def _claim_purchase_sync_job(database: Database) -> tuple[int, str] | None:
         return job.id, claim_token
 
 
-def _purchase_sync_heartbeat(
+def _sync_heartbeat(
     database: Database,
+    model: SyncJobModel,
     job_id: int,
     claim_token: str,
     **values: Any,
@@ -177,63 +182,15 @@ def _purchase_sync_heartbeat(
         result = cast(
             CursorResult[Any],
             session.execute(
-                update(PurchaseSyncJob)
+                update(model)
                 .where(
-                    PurchaseSyncJob.id == job_id,
-                    PurchaseSyncJob.status == "running",
-                    PurchaseSyncJob.claim_token == claim_token,
+                    model.id == job_id,
+                    model.status == "running",
+                    model.claim_token == claim_token,
                 )
                 .values(heartbeat_at=datetime.utcnow(), **values)
             ),
         )
         session.commit()
         if result.rowcount != 1:
-            raise LostJobLeaseError("采购同步任务租约已失效")
-
-
-def _claim_self_operated_inbound_sync_job(
-    database: Database,
-) -> tuple[int, str] | None:
-    with database.session() as session:
-        job = session.scalar(
-            select(SelfOperatedInboundSyncJob)
-            .where(SelfOperatedInboundSyncJob.status == "queued")
-            .order_by(SelfOperatedInboundSyncJob.id)
-            .with_for_update(skip_locked=True)
-        )
-        if job is None:
-            return None
-        now = datetime.utcnow()
-        claim_token = uuid4().hex
-        job.status = "running"
-        job.claim_token = claim_token
-        job.attempts += 1
-        job.claimed_at = now
-        job.heartbeat_at = now
-        job.error_message = None
-        session.commit()
-        return job.id, claim_token
-
-
-def _self_operated_inbound_sync_heartbeat(
-    database: Database,
-    job_id: int,
-    claim_token: str,
-    **values: Any,
-) -> None:
-    with database.session() as session:
-        result = cast(
-            CursorResult[Any],
-            session.execute(
-                update(SelfOperatedInboundSyncJob)
-                .where(
-                    SelfOperatedInboundSyncJob.id == job_id,
-                    SelfOperatedInboundSyncJob.status == "running",
-                    SelfOperatedInboundSyncJob.claim_token == claim_token,
-                )
-                .values(heartbeat_at=datetime.utcnow(), **values)
-            ),
-        )
-        session.commit()
-        if result.rowcount != 1:
-            raise LostJobLeaseError("待入库同步任务租约已失效")
+            raise LostJobLeaseError(f"{SYNC_METADATA[model][0]}任务租约已失效")

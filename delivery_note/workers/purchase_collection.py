@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..gerpgo import GerpgoClient
+from ..web.models import PurchaseSyncJob
 from ..purchase_detail_cache import (
     ShadowCacheStats,
     build_purchase_detail_cache,
@@ -15,7 +16,7 @@ from ..purchase_detail_cache import (
     purchase_detail_cache_path,
     write_purchase_detail_cache,
 )
-from ..workers.leases import JobContext, _purchase_sync_heartbeat
+from ..workers.leases import JobContext, _sync_heartbeat
 from ..workers.purchase_details import (
     _fetch_incremental_purchase_order_details,
     _fetch_purchase_order_details,
@@ -45,8 +46,9 @@ def _collect_purchase_details(
     )
     client = GerpgoClient.from_config(storage_root)
     orders = client.list_purchase_orders()
-    _purchase_sync_heartbeat(
+    _sync_heartbeat(
         database,
+        PurchaseSyncJob,
         job_id,
         claim_token,
         total_orders=len(orders),
@@ -54,8 +56,9 @@ def _collect_purchase_details(
     )
 
     def update_progress(processed_orders: int, current_order: str) -> None:
-        _purchase_sync_heartbeat(
+        _sync_heartbeat(
             database,
+            PurchaseSyncJob,
             job_id,
             claim_token,
             processed_orders=processed_orders,

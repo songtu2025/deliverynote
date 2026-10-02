@@ -19,10 +19,10 @@ from ..excel_io import (
 )
 from ..exception_reasons import exception_reason_code
 from ..web.database import Database
-from ..web.models import AuditLog, Batch, BatchFile, ExceptionRecord, Job
+from ..web.models import AuditLog, Batch, ExceptionRecord, Job
 from .compute_inbound import _execute_self_operated_compute
 from .compute_inputs import _load_compute_inputs
-from .compute_records import _json_records, clear_compute_results
+from .compute_records import _json_records, clear_compute_results, update_compute_source
 from .leases import JobContext, LostJobLeaseError, _heartbeat
 
 
@@ -48,17 +48,9 @@ def _save_delivery_compute(
         clear_compute_results(session, payloads)
 
         for payload in payloads:
-            source = session.get(BatchFile, payload["source_id"])
-            if source is None or source.batch_id != batch.id:
-                raise RuntimeError("批次来源文件已变化")
-            source.supplier_name = payload["supplier"].name
-            source.supplier_code = payload["supplier"].code
-            source.document_note = payload["document_note"]
-            source.delivery_total = payload["delivery_total"]
-            source.import_total = payload["import_total"]
-            source.manual_total = payload["manual_total"]
-            source.import_rows = payload["import_rows"]
-            source.result_path = None
+            source = update_compute_source(
+                session, batch.id, payload, payload["document_note"]
+            )
             for exception in payload["exceptions"]:
                 session.add(
                     ExceptionRecord(

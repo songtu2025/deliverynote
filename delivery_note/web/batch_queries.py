@@ -20,13 +20,7 @@ from .models import (
 )
 
 
-VERSION_FIELDS = {
-    "purchase": "purchase_version_id",
-    "product": "product_version_id",
-    "supplier": "supplier_version_id",
-    "position": "position_version_id",
-    "template": "template_version_id",
-}
+from .batch_versions import VERSION_FIELDS
 
 
 @dataclass
@@ -67,7 +61,7 @@ def batch_sources(session: Session, batch_id: int) -> list[BatchFile]:
 
 def batch_source_rows(
     session: Session, batch_ids: list[int]
-) -> list[Row[tuple[int, int, int, int]]]:
+) -> list[Row[int, int, int, int]]:
     return list(
         session.execute(
             select(
@@ -144,11 +138,9 @@ def _self_operated_metadata_rows(
     session: Session, batch_ids: list[int]
 ) -> list[
     Row[
-        tuple[
-            SelfOperatedBatch,
-            SelfOperatedOverreceiptRuleVersion | None,
-            InputVersion | None,
-        ]
+        SelfOperatedBatch,
+        SelfOperatedOverreceiptRuleVersion | None,
+        InputVersion | None,
     ]
 ]:
     return list(
@@ -187,8 +179,10 @@ def batch_metadata_by_id(
         )
         .where(BatchOverreceiptRule.batch_id.in_(batch_ids))
     ).all()
-    for binding, rule in bindings:
-        metadata.setdefault(binding.batch_id, BatchMetadata()).overreceipt_rule = rule
+    for binding, overreceipt_rule in bindings:
+        metadata.setdefault(
+            binding.batch_id, BatchMetadata()
+        ).overreceipt_rule = overreceipt_rule
     for self_operated, rule, inbound_source in _self_operated_metadata_rows(
         session, batch_ids
     ):

@@ -21,11 +21,9 @@ from .leases import (
     JobContext,
     LeaseKeeper,
     _claim_job,
-    _claim_purchase_sync_job,
-    _claim_self_operated_inbound_sync_job,
+    _claim_sync_job,
     _heartbeat,
-    _purchase_sync_heartbeat,
-    _self_operated_inbound_sync_heartbeat,
+    _sync_heartbeat,
 )
 from .sync_inbound import _execute_self_operated_inbound_sync
 from .sync_purchase import _execute_purchase_sync
@@ -113,8 +111,9 @@ def _run_purchase_job(
     job_id, claim_token = sync_claimed
     try:
         with LeaseKeeper(
-            lambda: _purchase_sync_heartbeat(
+            lambda: _sync_heartbeat(
                 database,
+                PurchaseSyncJob,
                 job_id,
                 claim_token,
             ),
@@ -144,8 +143,9 @@ def _run_inbound_job(
     job_id, claim_token = inbound_sync_claimed
     try:
         with LeaseKeeper(
-            lambda: _self_operated_inbound_sync_heartbeat(
+            lambda: _sync_heartbeat(
                 database,
+                SelfOperatedInboundSyncJob,
                 job_id,
                 claim_token,
             ),
@@ -186,7 +186,7 @@ def _run_once(
     if queue == "batch":
         return None
     sync_claimed = (
-        _claim_purchase_sync_job(database)
+        _claim_sync_job(database, PurchaseSyncJob)
         if queue in {"all", "purchase-sync"}
         else None
     )
@@ -194,7 +194,7 @@ def _run_once(
         return _run_purchase_job(database, sync_claimed, storage_root)
     if queue == "purchase-sync":
         return None
-    inbound_sync_claimed = _claim_self_operated_inbound_sync_job(database)
+    inbound_sync_claimed = _claim_sync_job(database, SelfOperatedInboundSyncJob)
     if inbound_sync_claimed is None:
         return None
     return _run_inbound_job(database, inbound_sync_claimed, storage_root)

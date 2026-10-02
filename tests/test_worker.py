@@ -443,28 +443,14 @@ class WorkerIntegrationTests(unittest.TestCase):
         finally:
             database.dispose()
 
-    @patch(
-        "delivery_note.workers.scheduler._claim_self_operated_inbound_sync_job",
-        return_value=None,
-    )
-    @patch("delivery_note.workers.scheduler._claim_purchase_sync_job")
+    @patch("delivery_note.workers.scheduler._claim_sync_job", return_value=None)
     @patch("delivery_note.workers.scheduler._claim_job")
-    def test_inbound_worker_only_claims_inbound_queue(
-        self,
-        claim_batch,
-        claim_purchase,
-        claim_inbound,
-    ):
-        completed_id = run_once(
-            self.database_url,
-            self.storage_root,
-            "inbound-sync",
-        )
-
+    def test_inbound_worker_only_claims_inbound_queue(self, claim_batch, claim_sync):
+        completed_id = run_once(self.database_url, self.storage_root, "inbound-sync")
         self.assertIsNone(completed_id)
         claim_batch.assert_not_called()
-        claim_purchase.assert_not_called()
-        claim_inbound.assert_called_once()
+        claim_sync.assert_called_once()
+        self.assertIs(claim_sync.call_args.args[1], SelfOperatedInboundSyncJob)
 
     def test_worker_queue_argument_defaults_to_all(self):
         parser = build_parser()

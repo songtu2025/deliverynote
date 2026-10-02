@@ -20,13 +20,7 @@ from ..web.models import (
     SelfOperatedSiteResolution,
 )
 
-VERSION_FIELDS = {
-    "purchase": "purchase_version_id",
-    "product": "product_version_id",
-    "supplier": "supplier_version_id",
-    "position": "position_version_id",
-    "template": "template_version_id",
-}
+from ..web.batch_versions import VERSION_FIELDS
 
 
 @dataclass

@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timedelta
 from threading import Event
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -8,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..web.database import Database
 from ..web.models import Batch, Job, PurchaseSyncJob, SelfOperatedInboundSyncJob
 from .leases import WORKER_QUEUES
+from .sync_models import SYNC_METADATA, SyncJob, SyncJobModel
 
 LOGGER = logging.getLogger("delivery_note.worker")
 
@@ -48,16 +50,15 @@ def _recover_batch_jobs(session: Session, cutoff: datetime, max_attempts: int) -
     return recovered
 
 
-def _recover_purchase_jobs(
-    session: Session, cutoff: datetime, max_attempts: int
+def _recover_sync_jobs(
+    session: Session, model: SyncJobModel, cutoff: datetime, max_attempts: int
 ) -> int:
     recovered = 0
     sync_jobs = session.scalars(
-        select(PurchaseSyncJob)
-        .where(PurchaseSyncJob.status == "running")
-        .with_for_update(skip_locked=True)
+        select(model).where(model.status == "running").with_for_update(skip_locked=True)
     ).all()
-    for job in sync_jobs:
+    for item in sync_jobs:
+        job = cast(SyncJob, item)
         marker = job.heartbeat_at or job.claimed_at
         if marker is None or marker >= cutoff:
             continue
@@ -68,45 +69,15 @@ def _recover_purchase_jobs(
             job.finished_at = now
             job.heartbeat_at = now
             job.error_message = (
-                f"采购同步运行超时，已达到最大自动尝试次数（{max_attempts}）"
+                f"{SYNC_METADATA[model][0]}运行超时，"
+                f"已达到最大自动尝试次数（{max_attempts}）"
             )
         else:
             job.status = "queued"
             job.claimed_at = None
             job.heartbeat_at = None
             job.finished_at = None
-            job.error_message = "采购同步运行超时，已自动重试"
-        job.claim_token = None
-        recovered += 1
-    return recovered
-
-
-def _recover_inbound_jobs(session: Session, cutoff: datetime, max_attempts: int) -> int:
-    recovered = 0
-    inbound_sync_jobs = session.scalars(
-        select(SelfOperatedInboundSyncJob)
-        .where(SelfOperatedInboundSyncJob.status == "running")
-        .with_for_update(skip_locked=True)
-    ).all()
-    for job in inbound_sync_jobs:
-        marker = job.heartbeat_at or job.claimed_at
-        if marker is None or marker >= cutoff:
-            continue
-        if job.attempts >= max_attempts:
-            now = datetime.utcnow()
-            job.status = "failed"
-            job.active_slot = None
-            job.finished_at = now
-            job.heartbeat_at = now
-            job.error_message = (
-                f"待入库同步运行超时，已达到最大自动尝试次数（{max_attempts}）"
-            )
-        else:
-            job.status = "queued"
-            job.claimed_at = None
-            job.heartbeat_at = None
-            job.finished_at = None
-            job.error_message = "待入库同步运行超时，已自动重试"
+            job.error_message = f"{SYNC_METADATA[model][0]}运行超时，已自动重试"
         job.claim_token = None
         recovered += 1
     return recovered
@@ -124,9 +95,13 @@ def _recover_stale_jobs(
         if queue in {"all", "batch"}:
             recovered += _recover_batch_jobs(session, cutoff, max_attempts)
         if queue in {"all", "purchase-sync"}:
-            recovered += _recover_purchase_jobs(session, cutoff, max_attempts)
+            recovered += _recover_sync_jobs(
+                session, PurchaseSyncJob, cutoff, max_attempts
+            )
         if queue in {"all", "inbound-sync"}:
-            recovered += _recover_inbound_jobs(session, cutoff, max_attempts)
+            recovered += _recover_sync_jobs(
+                session, SelfOperatedInboundSyncJob, cutoff, max_attempts
+            )
         session.commit()
     return recovered
 

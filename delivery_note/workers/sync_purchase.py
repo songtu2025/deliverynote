@@ -12,7 +12,7 @@ from ..purchase_sync import (
     write_purchase_workbook,
 )
 from ..web.models import PurchaseSyncJob
-from ..workers.leases import JobContext, _purchase_sync_heartbeat
+from ..workers.leases import JobContext, _sync_heartbeat
 from .purchase_collection import (
     _collect_purchase_details,
     _purchase_audit_details,
@@ -48,8 +48,9 @@ def _execute_purchase_sync(
 
     mapped = map_purchase_orders(order_details)
     findings = [*mapped.issues, *mapped.warnings]
-    _purchase_sync_heartbeat(
+    _sync_heartbeat(
         database,
+        PurchaseSyncJob,
         job_id,
         claim_token,
         raw_detail_count=mapped.raw_count,

@@ -19,9 +19,9 @@ from ..self_operated_inbound import (
     SelfOperatedInboundRequest,
     process_self_operated_inbound_batch,
 )
-from ..web.models import AuditLog, Batch, BatchFile, ExceptionRecord, Job
+from ..web.models import AuditLog, Batch, ExceptionRecord, Job
 from .compute_inputs import ComputeInputs
-from .compute_records import _json_records, clear_compute_results
+from .compute_records import _json_records, clear_compute_results, update_compute_source
 from .leases import JobContext, LostJobLeaseError, _heartbeat
 
 
@@ -46,18 +46,9 @@ def _save_inbound_compute(
             raise LostJobLeaseError("计算任务租约已失效")
         clear_compute_results(session, payloads)
         for payload in payloads:
-            stored_source = session.get(BatchFile, payload["source_id"])
-            if stored_source is None or stored_source.batch_id != batch.id:
-                raise RuntimeError("批次来源文件已变化")
-            supplier = payload["supplier"]
-            stored_source.supplier_name = supplier.name
-            stored_source.supplier_code = supplier.code
-            stored_source.document_note = "、".join(payload["delivery_numbers"])
-            stored_source.delivery_total = payload["delivery_total"]
-            stored_source.import_total = payload["import_total"]
-            stored_source.manual_total = payload["manual_total"]
-            stored_source.import_rows = payload["import_rows"]
-            stored_source.result_path = None
+            stored_source = update_compute_source(
+                session, batch.id, payload, "、".join(payload["delivery_numbers"])
+            )
 
             for pending in payload["pending_rows"]:
                 normal = int(pending["正常分配数量"])

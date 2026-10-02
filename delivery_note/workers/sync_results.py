@@ -11,21 +11,10 @@ from ..web.database import Database
 from ..web.models import (
     AuditLog,
     InputVersion,
-    PurchaseSyncJob,
-    SelfOperatedInboundSyncJob,
 )
 from .leases import JobContext, LostJobLeaseError
 
-SyncJobModel = type[PurchaseSyncJob] | type[SelfOperatedInboundSyncJob]
-SyncJob = PurchaseSyncJob | SelfOperatedInboundSyncJob
-SYNC_METADATA = {
-    PurchaseSyncJob: ("采购同步", "purchase_sync_job", "purchase_sync"),
-    SelfOperatedInboundSyncJob: (
-        "待入库同步",
-        "self_operated_inbound_sync_job",
-        "self_operated_inbound_sync",
-    ),
-}
+from .sync_models import SYNC_METADATA, SyncJob, SyncJobModel
 
 
 @dataclass(frozen=True)
