@@ -3918,11 +3918,21 @@ input {
 
 .batch-list-toolbar-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   min-width: 0;
   padding-bottom: 5px;
   white-space: nowrap;
+}
+
+.batch-list-toolbar-heading > * {
+  flex-shrink: 0;
+}
+
+.batch-list-toolbar > .table-filter-field {
+  min-width: 0;
+  width: 100%;
 }
 
 .batch-list-toolbar-heading strong {
@@ -4002,6 +4012,16 @@ input {
 
   .batch-status-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1200px) {
+  .batch-list-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .batch-list-toolbar-heading {
+    grid-column: 1 / -1;
   }
 }
 
