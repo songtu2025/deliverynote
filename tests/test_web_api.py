@@ -17,6 +17,7 @@ from sqlalchemy import delete, event, select
 from sqlalchemy.orm import Session
 
 import delivery_note.input_inspection as input_inspection_module
+import delivery_note.web.batch_file_uploads as batch_file_uploads_module
 import delivery_note.web.batch_preflight as batch_preflight_module
 import delivery_note.web.gerpgo_routes as gerpgo_routes_module
 import delivery_note.web.input_version_routes as input_version_routes_module
@@ -1213,6 +1214,28 @@ class WebApiTests(unittest.TestCase):
             batch["inbound_file"]["original_name"],
             "积加待入库.xlsx",
         )
+
+        previous_upload = None
+        for filename in ("首次替换.xlsx", "再次替换.xlsx"):
+            replaced = self.client.post(
+                f"/api/self-operated-batches/{batch['id']}/inbound-file",
+                headers=headers,
+                files={
+                    "file": (filename, BytesIO(self.self_operated_inbound_bytes()))
+                },
+            )
+            self.assertEqual(replaced.status_code, 200, replaced.text)
+            self.assertTrue(inbound_path.is_file(), "不能删除共享 API 版本文件")
+            if previous_upload is not None:
+                self.assertFalse(previous_upload.exists())
+            with self.app.state.database.session() as session:
+                profile = session.get(SelfOperatedBatch, batch["id"])
+                previous_upload = Path(profile.inbound_storage_path)
+            self.assertTrue(previous_upload.is_file())
+        downloaded = self.client.get(
+            f"/api/input-versions/{inbound_version_id}/download", headers=headers
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
 
     def test_purchase_sync_issues_can_be_previewed_by_an_operator(self):
         admin_headers = self.login("admin", "admin-pass")
@@ -3561,7 +3584,7 @@ class WebApiTests(unittest.TestCase):
             json={"name": "并发上传排序测试"},
         ).json()["id"]
         saved_uploads = Barrier(2)
-        original_save_upload = web_api_module._save_upload
+        original_save_upload = batch_file_uploads_module._save_upload
 
         async def synchronized_save_upload(*args, **kwargs):
             await original_save_upload(*args, **kwargs)
@@ -3577,7 +3600,7 @@ class WebApiTests(unittest.TestCase):
         filenames = ("KuangBiao-A.xlsx", "KuangBiao-B.xlsx")
         with (
             patch.object(
-                web_api_module,
+                batch_file_uploads_module,
                 "_save_upload",
                 new=synchronized_save_upload,
             ),
@@ -3621,9 +3644,9 @@ class WebApiTests(unittest.TestCase):
         files_before = set(input_root.iterdir())
 
         with patch.object(
-            web_api_module,
+            batch_file_uploads_module,
             "_save_upload",
-            wraps=web_api_module._save_upload,
+            wraps=batch_file_uploads_module._save_upload,
         ) as save_upload:
             rejected = self.client.post(
                 f"/api/batches/{batch_id}/files",
@@ -3651,7 +3674,7 @@ class WebApiTests(unittest.TestCase):
         ).json()["id"]
         self.app.state.max_batch_upload_files = 1
         saved_uploads = Barrier(2)
-        original_save_upload = web_api_module._save_upload
+        original_save_upload = batch_file_uploads_module._save_upload
 
         async def synchronized_save_upload(*args, **kwargs):
             await original_save_upload(*args, **kwargs)
@@ -3666,7 +3689,7 @@ class WebApiTests(unittest.TestCase):
 
         with (
             patch.object(
-                web_api_module,
+                batch_file_uploads_module,
                 "_save_upload",
                 new=synchronized_save_upload,
             ),

@@ -16,8 +16,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -36,14 +35,16 @@ from .dependencies import build_request_dependencies
 from .health_routes import register_health_routes
 from .auth import hash_password
 from .job_routes import build_job_queue, register_job_routes
+from .batch_file_edits import BatchFileEditor
+from .batch_file_uploads import BatchFileUploader
+from .batch_file_routes import register_batch_file_routes
 from .batch_export_routes import register_batch_export_routes
 from .batch_read_routes import register_batch_read_routes
 from .batch_maintenance import BatchMaintenance
 from .batch_maintenance_routes import register_batch_maintenance_routes
 from .batch_queries import VERSION_FIELDS
 from .batch_views import (
-    batch_json, batch_list_json, file_json,
-    merged_export_path, merged_export_ready,
+    batch_json, batch_list_json, merged_export_path, merged_export_ready,
 )
 from .database import Database
 from .errors import (
@@ -61,7 +62,7 @@ from .self_operated_rule_routes import register_self_operated_rule_routes
 from .input_version_routes import register_input_version_routes
 from .input_versions import INPUT_KINDS, SELF_OPERATED_INPUT_KINDS
 from .input_versions import bootstrap_builtin_templates
-from .uploads import _safe_filename, _save_upload, _unlink_after_commit
+from .uploads import _safe_filename, _save_upload
 from .gerpgo_routes import register_gerpgo_routes
 from .exception_views import (
     _exception_json, _exception_position_values, _split_records_by_exception,
@@ -74,18 +75,15 @@ from .models import (
     Batch,
     BatchFile,
     BatchOverreceiptRule,
-    ExceptionRecord,
     InputVersion,
     OverreceiptRuleVersion,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
-    SplitRecord,
     User,
 )
 from .sync_routes import register_sync_routes
 from .schemas import (
     BatchPayload,
-    FileOrderPayload,
 )
 from .caches import (
     InputInspectionCache,
@@ -228,7 +226,6 @@ def create_app(
     import_candidate_root = storage / "temporary" / "position-imports"
     import_candidates_state = PositionImportCandidates(import_candidate_root)
     import_candidates_state.remove_expired(configured_import_candidate_ttl)
-    batch_file_upload_lock = asyncio.Lock()
     upload_parse_semaphore = asyncio.Semaphore(
         configured_max_concurrent_upload_parses
     )
@@ -408,6 +405,11 @@ def create_app(
 
 
 
+    register_batch_file_routes(
+        app, dependencies,
+        BatchFileUploader(app, dependencies, storage, _audit, parse_uploaded_workbook),
+        BatchFileEditor(dependencies, _audit),
+    )
     register_batch_maintenance_routes(
         app, dependencies, BatchMaintenance(storage, _audit)
     )
@@ -883,285 +885,9 @@ def create_app(
 
 
 
-    @app.post("/api/self-operated-batches/{batch_id}/inbound-file")
-    async def upload_self_operated_inbound_file(
-        batch_id: int,
-        file: UploadFile = File(...),
-        user: User = Depends(current_user),
-        session: Session = Depends(get_session),
-    ):
-        batch = get_batch_or_404(batch_id, session)
-        profile = session.get(SelfOperatedBatch, batch.id)
-        if profile is None:
-            raise HTTPException(status_code=404, detail="自营仓入库批次不存在")
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
-        original_name = _safe_filename(file.filename or "")
-        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
-            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
-        destination = (
-            storage
-            / "batches"
-            / str(batch.id)
-            / "inputs"
-            / f"{uuid4().hex}_{original_name}"
-        )
-        await _save_upload(file, destination, app.state.max_upload_bytes)
-        try:
-            await parse_uploaded_workbook(
-                read_self_operated_inbound_workbook,
-                destination,
-            )
-        except Exception as error:
-            await run_in_threadpool(destination.unlink, missing_ok=True)
-            raise HTTPException(
-                status_code=400,
-                detail=f"自营仓收货入库单校验失败：{error}",
-            ) from error
 
-        try:
-            batch = get_batch_or_404(batch_id, session, for_update=True)
-            if batch.status not in {"draft", "preflight_ready", "failed"}:
-                raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
-            profile = session.scalar(
-                select(SelfOperatedBatch)
-                .where(SelfOperatedBatch.batch_id == batch_id)
-                .execution_options(populate_existing=True)
-            )
-            if profile is None:
-                raise HTTPException(status_code=404, detail="自营仓入库批次不存在")
-            old_path = (
-                Path(profile.inbound_storage_path)
-                if profile.inbound_storage_path
-                else None
-            )
-            profile.inbound_original_name = original_name
-            profile.inbound_storage_path = str(destination)
-            batch.status = "draft"
-            batch.error_message = None
-            batch.zip_path = None
-            _audit(
-                session,
-                user.id,
-                "upload_self_operated_inbound_file",
-                "batch",
-                batch.id,
-                {"original_name": original_name},
-            )
-            session.commit()
-        except Exception:
-            session.rollback()
-            await run_in_threadpool(destination.unlink, missing_ok=True)
-            raise
-        if old_path is not None and old_path != destination:
-            await run_in_threadpool(_unlink_after_commit, old_path)
-        return batch_json(batch, session)
 
-    @app.post(
-        "/api/batches/{batch_id}/files",
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def upload_batch_file(
-        batch_id: int,
-        file: UploadFile = File(...),
-        user: User = Depends(current_user),
-        session: Session = Depends(get_session),
-    ):
-        batch = get_batch_or_404(batch_id, session)
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
-        source_count = session.scalar(
-            select(func.count())
-            .select_from(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-        )
-        if source_count >= app.state.max_batch_upload_files:
-            await file.close()
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"单批次最多上传 {app.state.max_batch_upload_files} 份交货文件",
-            )
-        original_name = _safe_filename(file.filename or "")
-        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
-            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
-        duplicate = session.scalar(
-            select(BatchFile).where(
-                BatchFile.batch_id == batch.id,
-                BatchFile.original_name == original_name,
-            )
-        )
-        if duplicate is not None:
-            raise HTTPException(status_code=409, detail="同一批次不可上传同名文件")
-        destination = (
-            storage
-            / "batches"
-            / str(batch.id)
-            / "inputs"
-            / f"{uuid4().hex}_{original_name}"
-        )
-        await _save_upload(file, destination, app.state.max_upload_bytes)
-        try:
-            async with batch_file_upload_lock:
-                batch = get_batch_or_404(batch_id, session, for_update=True)
-                if batch.status not in {"draft", "preflight_ready", "failed"}:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="当前批次状态不可修改文件",
-                    )
-                source_count = session.scalar(
-                    select(func.count())
-                    .select_from(BatchFile)
-                    .where(BatchFile.batch_id == batch.id)
-                )
-                if source_count >= app.state.max_batch_upload_files:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                        detail=(
-                            "单批次最多上传 "
-                            f"{app.state.max_batch_upload_files} 份交货文件"
-                        ),
-                    )
-                duplicate = session.scalar(
-                    select(BatchFile).where(
-                        BatchFile.batch_id == batch.id,
-                        BatchFile.original_name == original_name,
-                    )
-                )
-                if duplicate is not None:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="同一批次不可上传同名文件",
-                    )
-                current_max = (
-                    session.scalar(
-                        select(func.max(BatchFile.file_order)).where(
-                            BatchFile.batch_id == batch.id
-                        )
-                    )
-                    or 0
-                )
-                source = BatchFile(
-                    batch_id=batch.id,
-                    original_name=original_name,
-                    storage_path=str(destination),
-                    file_order=current_max + 1,
-                )
-                session.add(source)
-                batch.status = "draft"
-                batch.error_message = None
-                session.flush()
-                _audit(
-                    session,
-                    user.id,
-                    "upload_batch_file",
-                    "batch_file",
-                    source.id,
-                    {"batch_id": batch.id},
-                )
-                session.commit()
-        except HTTPException:
-            session.rollback()
-            await run_in_threadpool(destination.unlink, missing_ok=True)
-            raise
-        except IntegrityError as error:
-            session.rollback()
-            await run_in_threadpool(destination.unlink, missing_ok=True)
-            raise HTTPException(
-                status_code=409,
-                detail="文件上传发生并发冲突，请刷新后重试",
-            ) from error
-        return file_json(source)
 
-    @app.delete("/api/batches/{batch_id}/files/{file_id}")
-    def delete_batch_file(
-        batch_id: int,
-        file_id: int,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        batch = get_batch_or_404(batch_id, session, for_update=True)
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可删除文件")
-        source = session.scalar(
-            select(BatchFile).where(
-                BatchFile.id == file_id,
-                BatchFile.batch_id == batch.id,
-            )
-        )
-        if source is None:
-            raise HTTPException(status_code=404, detail="交货文件不存在")
-        storage_path = Path(source.storage_path)
-        exception_ids = session.scalars(
-            select(ExceptionRecord.id).where(ExceptionRecord.batch_file_id == source.id)
-        ).all()
-        if exception_ids:
-            session.execute(
-                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
-            )
-            session.execute(
-                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
-            )
-        session.delete(source)
-        session.flush()
-        remaining = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-            .order_by(BatchFile.file_order)
-        ).all()
-        for item in remaining:
-            item.file_order = -item.id
-        session.flush()
-        for file_order, item in enumerate(remaining, start=1):
-            item.file_order = file_order
-        batch.status = "draft"
-        batch.error_message = None
-        batch.zip_path = None
-        _audit(
-            session,
-            user.id,
-            "delete_batch_file",
-            "batch_file",
-            source.id,
-            {"batch_id": batch.id, "original_name": source.original_name},
-        )
-        session.commit()
-        _unlink_after_commit(storage_path)
-        return batch_json(batch, session)
-
-    @app.put("/api/batches/{batch_id}/files/order")
-    def reorder_batch_files(
-        batch_id: int,
-        payload: FileOrderPayload,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        batch = get_batch_or_404(batch_id, session, for_update=True)
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可调整顺序")
-        sources = session.scalars(
-            select(BatchFile).where(BatchFile.batch_id == batch.id)
-        ).all()
-        by_id = {source.id: source for source in sources}
-        if len(payload.file_ids) != len(set(payload.file_ids)) or set(
-            payload.file_ids
-        ) != set(by_id):
-            raise HTTPException(status_code=400, detail="文件顺序必须完整且不可重复")
-        for source in sources:
-            source.file_order = -source.id
-        session.flush()
-        for file_order, source_id in enumerate(payload.file_ids, start=1):
-            by_id[source_id].file_order = file_order
-        batch.status = "draft"
-        _audit(
-            session,
-            user.id,
-            "reorder_batch_files",
-            "batch",
-            batch.id,
-            {"file_ids": payload.file_ids},
-        )
-        session.commit()
-        return batch_json(batch, session)
 
 
 
