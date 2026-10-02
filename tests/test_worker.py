@@ -16,6 +16,11 @@ import pandas as pd
 from sqlalchemy import select
 
 from delivery_note.pipeline import IMPORT_COLUMNS
+from delivery_note.workers.purchase_details import (
+    _fetch_purchase_order_details,
+    _fetch_incremental_purchase_order_details,
+)
+from delivery_note.purchase_detail_cache import PurchaseDetailCacheState
 from delivery_note.workers.export_rows import _consolidate_import_rows
 import delivery_note.workers.export_files as export_files_module
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
@@ -39,8 +44,6 @@ from delivery_note.web.models import (
 
 from delivery_note.worker import (
     _fail_job,
-    _fetch_purchase_order_details,
-    _fetch_incremental_purchase_order_details,
     build_parser,
     recover_stale_jobs,
     run_once,
@@ -111,8 +114,7 @@ class WorkerExportConsolidationTests(unittest.TestCase):
         fetched, stats, _ = _fetch_incremental_purchase_order_details(
             stable,
             orders,
-            cached,
-            last_full,
+            PurchaseDetailCacheState(cached, last_full),
             lambda _count, _code: None,
             last_full,
         )
@@ -141,8 +143,7 @@ class WorkerExportConsolidationTests(unittest.TestCase):
         fetched, stats, _ = _fetch_incremental_purchase_order_details(
             mismatch,
             orders,
-            cached,
-            last_full,
+            PurchaseDetailCacheState(cached, last_full),
             lambda _count, _code: None,
             last_full,
         )
