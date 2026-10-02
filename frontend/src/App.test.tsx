@@ -1,13 +1,21 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { ConfigProvider, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App";
+import { api } from "./api";
 import "./styles.css";
 import type { User } from "./types";
 
 const adminUser: User = { id: 1, username: "admin", role: "admin", active: true };
 const operatorUser: User = { id: 2, username: "operator", role: "operator", active: true };
 let authenticatedUser: User | null;
+
+function submitLogin(username: string, password: string) {
+  fireEvent.change(screen.getByPlaceholderText("请输入用户名"), { target: { value: username } });
+  fireEvent.change(screen.getByPlaceholderText("请输入密码"), { target: { value: password } });
+  fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
+}
 
 const routeBatch = {
   id: 7,
@@ -150,8 +158,16 @@ describe("App", () => {
 
   afterEach(() => {
     window.history.replaceState({}, "", "/");
-    document.querySelectorAll(".ant-message").forEach((node) => node.remove());
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("shows login without an expiration warning on an anonymous visit", async () => {
+    const staticWarning = vi.spyOn(message, "warning");
+    render(<App />);
+    await screen.findByRole("heading", { name: "欢迎回来" });
+    expect(screen.queryByText("登录已过期，请重新登录")).not.toBeInTheDocument();
+    expect(staticWarning).not.toHaveBeenCalled();
   });
 
   it("logs in and opens the batch workspace", async () => {
@@ -164,13 +180,7 @@ describe("App", () => {
     expect(screen.getByText("请使用系统账号登录")).toBeInTheDocument();
     expect(screen.getByText("DeliveryNote · 内部供应链单据处理系统")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText("请输入用户名"), {
-      target: { value: "admin" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("请输入密码"), {
-      target: { value: "admin-pass" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
+    submitLogin("admin", "admin-pass");
 
     await screen.findByRole("heading", { name: "交货批次" });
     expect(screen.getByText("单据处理")).toBeInTheDocument();
@@ -198,6 +208,7 @@ describe("App", () => {
   });
 
   it("shows only the credential error when login is rejected", async () => {
+    const staticError = vi.spyOn(message, "error");
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       return new Response(
@@ -211,16 +222,14 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("heading", { name: "欢迎回来" });
 
-    fireEvent.change(screen.getByPlaceholderText("请输入用户名"), {
-      target: { value: "admin" }
-    });
-    fireEvent.change(screen.getByPlaceholderText("请输入密码"), {
-      target: { value: "wrong-password" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: /登\s*录/ }));
+    submitLogin("admin", "wrong-password");
 
     expect(await screen.findByText("用户名或密码错误")).toBeInTheDocument();
     expect(screen.queryByText("登录已过期，请重新登录")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("请输入用户名")).toHaveValue("admin");
+    expect(screen.getByPlaceholderText("请输入密码")).toHaveValue("wrong-password");
+    await waitFor(() => expect(screen.getByRole("button", { name: /登\s*录/ })).not.toHaveClass("ant-btn-loading"));
+    expect(staticError).not.toHaveBeenCalled();
   });
 
   it("shows overreceipt rule management to operators", async () => {
@@ -361,6 +370,7 @@ describe("App", () => {
   });
 
   it("returns to login when a cookie session expires", async () => {
+    const staticWarning = vi.spyOn(message, "warning");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -380,10 +390,53 @@ describe("App", () => {
     render(<App />);
 
     await screen.findByRole("button", { name: /登\s*录/ });
+    expect(await screen.findByText("登录已过期，请重新登录")).toBeInTheDocument();
+    expect(staticWarning).not.toHaveBeenCalled();
     expect(localStorage.getItem("delivery-note-token")).toBeNull();
     expect(localStorage.getItem("delivery-note-user")).toBeNull();
     expect(fetch).toHaveBeenCalled();
   });
+
+  it("reports concurrent unauthorized requests once and resets after logging in again", async () => {
+    authenticatedUser = adminUser;
+    const staticWarning = vi.spyOn(message, "warning");
+    const authenticatedFetch = fetch;
+    let expired = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        expired
+          ? Promise.resolve(new Response(JSON.stringify({ detail: "未登录" }), { status: 401 }))
+          : authenticatedFetch(input, init)
+      )
+    );
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <App />
+      </ConfigProvider>
+    );
+    await screen.findByRole("heading", { name: "交货批次" });
+
+    for (let episode = 0; episode < 2; episode += 1) {
+      expired = true;
+      await act(async () => {
+        const results = await Promise.allSettled([api("/api/input-versions"), api("/api/purchase-sync")]);
+        expect(results.every((result) => result.status === "rejected")).toBe(true);
+      });
+      await screen.findByRole("heading", { name: "欢迎回来" });
+      await screen.findByText("登录已过期，请重新登录");
+      expect(screen.getAllByText("登录已过期，请重新登录")).toHaveLength(1);
+      expect(staticWarning).not.toHaveBeenCalled();
+      if (episode === 1) break;
+
+      expired = false;
+      submitLogin("admin", "admin-pass");
+      await screen.findByRole("heading", { name: "交货批次" });
+      await waitFor(() => expect(screen.queryByText("登录已过期，请重新登录")).not.toBeInTheDocument(), {
+        timeout: 5000
+      });
+    }
+  }, 15000);
 
   it("restores a batch detail from its URL and returns to the list URL", async () => {
     authenticatedUser = adminUser;

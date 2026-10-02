@@ -1,17 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import {
-  App as AntApp,
-  Button,
-  ConfigProvider,
-  Form,
-  Input,
-  Layout,
-  Menu,
-  Skeleton,
-  Typography,
-  message,
-  theme
-} from "antd";
+import { App as AntApp, Button, ConfigProvider, Form, Input, Layout, Menu, Skeleton, Typography, theme } from "antd";
 import {
   ApartmentOutlined,
   InboxOutlined,
@@ -104,6 +92,7 @@ function clearStoredUser(): void {
 }
 
 function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
+  const { message } = AntApp.useApp();
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (values: { username: string; password: string }) => {
@@ -330,7 +319,8 @@ function Workspace({ user, onLogout }: { user: User; onLogout: () => void }) {
   );
 }
 
-export default function App() {
+function SessionWorkspace() {
+  const { message } = AntApp.useApp();
   const [user, setUser] = useState<User | null>(null);
   const [checkingSession, setCheckingSession] = useState(true);
 
@@ -343,7 +333,7 @@ export default function App() {
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
-  }, []);
+  }, [message]);
 
   useEffect(() => {
     let cancelled = false;
@@ -375,6 +365,16 @@ export default function App() {
     setUser(null);
   };
 
+  return checkingSession ? (
+    <WorkspacePageFallback />
+  ) : user ? (
+    <Workspace user={user} onLogout={logout} />
+  ) : (
+    <LoginPage onLogin={setUser} />
+  );
+}
+
+export default function App() {
   return (
     <ConfigProvider
       theme={{
@@ -392,13 +392,7 @@ export default function App() {
       }}
     >
       <AntApp>
-        {checkingSession ? (
-          <WorkspacePageFallback />
-        ) : user ? (
-          <Workspace user={user} onLogout={logout} />
-        ) : (
-          <LoginPage onLogin={setUser} />
-        )}
+        <SessionWorkspace />
       </AntApp>
     </ConfigProvider>
   );
