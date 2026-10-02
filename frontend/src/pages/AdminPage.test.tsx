@@ -1,6 +1,6 @@
-import { StrictMode } from "react";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { message } from "antd";
+import { StrictMode, type ReactElement } from "react";
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { App as AntApp, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as apiModule from "../api";
@@ -8,6 +8,8 @@ import type { AuditLog, InputVersion, User } from "../types";
 import AdminPage from "./AdminPage";
 import { AuditLogPanel } from "./admin/AuditLogPanel";
 import { UserManagementPanel } from "./admin/UserManagementPanel";
+
+const render = (ui: ReactElement) => renderComponent(ui, { wrapper: AntApp });
 
 const jsonResponse = (payload: unknown, status = 200) =>
   new Response(JSON.stringify(payload), {
@@ -69,18 +71,13 @@ describe("AdminPage", () => {
     ];
     positionFlow = false;
     positionEntryRequest = null;
-    vi.spyOn(message, "success").mockImplementation(() => {
-      const result = (() => undefined) as ReturnType<typeof message.success>;
-      const completed = Promise.resolve(true);
-      result.then = completed.then.bind(completed);
-      return result;
-    });
 
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = init?.method ?? "GET";
+        if (url.endsWith("/api/auth/me")) return jsonResponse(admin);
 
         if (url.endsWith("/api/users") && method === "GET") return jsonResponse(users);
         if (url.endsWith("/api/users") && method === "POST") {
@@ -193,6 +190,84 @@ describe("AdminPage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each([500, 401])("does not repeat a saved user creation after a %s refresh error", async (status) => {
+    await apiModule.api("/api/auth/me");
+    const originalFetch = fetch;
+    let saved = false;
+    let failRefresh = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") saved = true;
+        if (saved && failRefresh && String(input).endsWith("/api/users") && !init?.method) {
+          return jsonResponse({ detail: status === 401 ? "未登录" : "读取暂不可用" }, status);
+        }
+        return originalFetch(input, init);
+      })
+    );
+    render(<AdminPage currentUser={admin} />);
+    await screen.findByText("基础资料目录");
+    fireEvent.click(screen.getByRole("tab", { name: "用户账号" }));
+    await screen.findByText(operator.username);
+    fireEvent.click(screen.getByRole("button", { name: "创建用户" }));
+    const dialog = await screen.findByRole("dialog", { name: "创建内部用户" });
+    fireEvent.change(within(dialog).getByLabelText("用户名"), { target: { value: "操作员<&>" } });
+    fireEvent.change(within(dialog).getByLabelText("初始密码"), { target: { value: "synthetic123" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(dialog).not.toBeVisible());
+    expect(screen.queryByText("用户已创建")).not.toBeInTheDocument();
+    if (status === 500) {
+      expect(await screen.findByText(/变更已保存.*读取暂不可用/)).toBeInTheDocument();
+      failRefresh = false;
+      fireEvent.click(screen.getByText("重新加载用户账号", { selector: "button > span" }));
+      expect(await screen.findByText("操作员<&>")).toBeInTheDocument();
+      expect(screen.queryByText("无法读取用户账号")).not.toBeInTheDocument();
+    } else {
+      expect(screen.queryByText("未登录")).not.toBeInTheDocument();
+      expect(screen.queryByText("无法读取用户账号")).not.toBeInTheDocument();
+    }
+    expect(requestCount("POST", "/api/users")).toBe(1);
+  });
+
+  it.each([401, 403, 409, 422, 500])("handles a %s user write failure without losing input", async (status) => {
+    await apiModule.api("/api/auth/me");
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        init?.method === "POST"
+          ? Promise.resolve(jsonResponse({ detail: "写入失败" }, status))
+          : originalFetch(input, init)
+      )
+    );
+    const changed = vi.fn();
+    render(
+      <UserManagementPanel currentUser={admin} users={users} loading={false} error={null} onDataChanged={changed} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "创建用户" }));
+    const dialog = await screen.findByRole("dialog", { name: "创建内部用户" });
+    fireEvent.change(within(dialog).getByLabelText("用户名"), { target: { value: "保留输入" } });
+    fireEvent.change(within(dialog).getByLabelText("初始密码"), { target: { value: "synthetic123" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(requestCount("POST", "/api/users")).toBe(1));
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "创建" })).toBeEnabled());
+    expect(within(dialog).getByLabelText("用户名")).toHaveValue("保留输入");
+    expect(changed).not.toHaveBeenCalled();
+    if (status === 401) expect(screen.queryByText("写入失败")).not.toBeInTheDocument();
+    else expect(await screen.findByText("写入失败")).toBeInTheDocument();
+  });
+
+  it("uses contextual user success feedback", async () => {
+    const staticSuccess = vi.spyOn(message, "success");
+    render(
+      <UserManagementPanel currentUser={admin} users={users} loading={false} error={null} onDataChanged={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "停用 operator" }));
+    fireEvent.click(await screen.findByRole("button", { name: "确认停用" }));
+    expect(await screen.findByText("用户已停用")).toBeInTheDocument();
+    expect(staticSuccess).not.toHaveBeenCalled();
   });
 
   it("does not render administrator content before the initial data is ready", async () => {
@@ -335,9 +410,11 @@ describe("AdminPage", () => {
       })
     );
 
-    render(
+    renderComponent(
       <StrictMode>
-        <AdminPage currentUser={admin} />
+        <AntApp>
+          <AdminPage currentUser={admin} />
+        </AntApp>
       </StrictMode>
     );
     await waitFor(() => {

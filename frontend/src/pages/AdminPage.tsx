@@ -1,7 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Skeleton, Tabs, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type { AuditLog, InputVersion, User } from "../types";
 import { InputDataPanel } from "./admin/InputDataPanel";
 
@@ -75,9 +76,9 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
   const versionsLoadedRef = useRef(false);
   const auditLoadedRef = useRef(false);
 
-  const loadUsers = useCallback(async (background = false) => {
+  const loadUsers = useCallback(async (background = false, afterWrite = false) => {
     const requestId = ++usersRequestRef.current;
-    if (!mountedRef.current) return;
+    if (!mountedRef.current) return false;
 
     if (!background) setLoading((current) => ({ ...current, users: true }));
     setErrors((current) => ({ ...current, users: null }));
@@ -85,14 +86,21 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
       const nextUsers = await api<User[]>("/api/users");
       if (mountedRef.current && usersRequestRef.current === requestId) {
         setUsers(nextUsers);
+        return true;
       }
+      return false;
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        if (afterWrite) throw error;
+        return false;
+      }
       if (mountedRef.current && usersRequestRef.current === requestId) {
         setErrors((current) => ({
           ...current,
-          users: errorMessage(error, "读取用户账号失败")
+          users: `${afterWrite ? "变更已保存，但读取用户账号失败：" : ""}${errorMessage(error, "读取用户账号失败")}`
         }));
       }
+      return false;
     } finally {
       if (mountedRef.current && usersRequestRef.current === requestId) {
         usersLoadedRef.current = true;
@@ -113,6 +121,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
         setVersions(nextVersions);
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return;
       if (mountedRef.current && versionsRequestRef.current === requestId) {
         setErrors((current) => ({
           ...current,
@@ -139,6 +148,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
         setAuditLogs(nextAuditLogs);
       }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return;
       if (mountedRef.current && auditRequestRef.current === requestId) {
         setErrors((current) => ({
           ...current,
@@ -301,12 +311,17 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
             label: "用户账号",
             children: (
               <Suspense fallback={<AdminPanelFallback />}>
+                {errors.users && (
+                  <Button icon={<ReloadOutlined />} loading={loading.users} onClick={() => void loadUsers()}>
+                    重新加载用户账号
+                  </Button>
+                )}
                 <UserManagementPanel
                   currentUser={currentUser}
                   users={users}
                   loading={loading.users}
                   error={errors.users}
-                  onDataChanged={() => loadUsers(true)}
+                  onDataChanged={() => loadUsers(true, true)}
                 />
               </Suspense>
             )

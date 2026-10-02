@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
   Card,
   Drawer,
@@ -13,12 +14,11 @@ import {
   Space,
   Table,
   Tag,
-  Typography,
-  message
+  Typography
 } from "antd";
 import { CheckCircleFilled, EditOutlined, LockOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import { formatBeijingDate, formatBeijingTime } from "../dateTime";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../types";
 
@@ -453,6 +453,7 @@ function HistoryCard({
 }
 
 export default function OverreceiptRulesPage({ active = true }: { active?: boolean }) {
+  const { message } = AntApp.useApp();
   const [scope, setScope] = useState<RuleScope>("self_operated");
   const [rules, setRules] = useState<OverreceiptRuleVersion[]>([]);
   const [selfOperatedRules, setSelfOperatedRules] = useState<SelfOperatedOverreceiptRuleVersion[]>([]);
@@ -473,8 +474,10 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
   const [renameForm] = Form.useForm<RenameRuleForm>();
   const [modal, modalContextHolder] = Modal.useModal();
   const loadedRef = useRef(false);
+  const loadRequestRef = useRef(0);
 
-  const load = useCallback(async (background = false) => {
+  const load = useCallback(async (background = false, afterWrite = false) => {
+    const requestId = ++loadRequestRef.current;
     if (!background) setLoading(true);
     setError(null);
     try {
@@ -482,13 +485,25 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions"),
         api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
       ]);
+      if (requestId !== loadRequestRef.current) return false;
       setRules(ruleRows);
       setSelfOperatedRules(selfOperatedRuleRows);
+      return true;
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "读取超收规则失败");
+      if (loadError instanceof ApiError && loadError.status === 401) {
+        if (afterWrite) throw loadError;
+        return false;
+      }
+      if (requestId === loadRequestRef.current) {
+        const detail = loadError instanceof Error ? loadError.message : "读取超收规则失败";
+        setError(`${afterWrite ? "变更已保存，但读取超收规则失败：" : ""}${detail}`);
+      }
+      return false;
     } finally {
-      loadedRef.current = true;
-      if (!background) setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        loadedRef.current = true;
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -500,14 +515,18 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
       setWarehouses(rows);
       setWarehousesLoaded(true);
     } catch (loadError) {
+      if (loadError instanceof ApiError && loadError.status === 401) return;
       message.error(loadError instanceof Error ? loadError.message : "读取仓库选项失败");
     } finally {
       setWarehousesLoading(false);
     }
-  }, [warehousesLoaded, warehousesLoading]);
+  }, [message, warehousesLoaded, warehousesLoading]);
 
   useEffect(() => {
     if (!loadedRef.current || active) void load(loadedRef.current);
+    return () => {
+      loadRequestRef.current += 1;
+    };
   }, [active, load]);
 
   const activeRule = useMemo(() => rules.find((rule) => rule.active), [rules]);
@@ -545,6 +564,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
       message.success("版本名称已更新");
       closeRename();
     } catch (renameError) {
+      if (renameError instanceof ApiError && renameError.status === 401) return;
       message.error(renameError instanceof Error ? renameError.message : "名称修改失败");
     } finally {
       setRenaming(false);
@@ -558,11 +578,11 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         method: "POST",
         body: JSON.stringify(values)
       });
-      message.success("超收规则已发布，将用于新批次");
       form.resetFields();
       setPublishScope(undefined);
-      await load();
+      if (await load(false, true)) message.success("超收规则已发布，将用于新批次");
     } catch (publishError) {
+      if (publishError instanceof ApiError && publishError.status === 401) return;
       message.error(publishError instanceof Error ? publishError.message : "发布失败");
       throw publishError;
     } finally {
@@ -609,11 +629,11 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         method: "POST",
         body: JSON.stringify(values)
       });
-      message.success("自营仓超收规则已发布，将用于新批次");
       selfOperatedForm.resetFields();
       setPublishScope(undefined);
-      await load();
+      if (await load(false, true)) message.success("自营仓超收规则已发布，将用于新批次");
     } catch (publishError) {
+      if (publishError instanceof ApiError && publishError.status === 401) return;
       message.error(publishError instanceof Error ? publishError.message : "发布失败");
       throw publishError;
     } finally {
@@ -643,9 +663,9 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
     setActivatingId(rule.id);
     try {
       await api<OverreceiptRuleVersion>(`/api/overreceipt-rule-versions/${rule.id}/activate`, { method: "POST" });
-      message.success(`已重新启用 ${rule.name}，仅影响新建批次`);
-      await load();
+      if (await load(false, true)) message.success(`已重新启用 ${rule.name}，仅影响新建批次`);
     } catch (activateError) {
+      if (activateError instanceof ApiError && activateError.status === 401) return;
       message.error(activateError instanceof Error ? activateError.message : "启用失败");
     } finally {
       setActivatingId(undefined);
@@ -659,9 +679,9 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         `/api/self-operated-overreceipt-rule-versions/${rule.id}/activate`,
         { method: "POST" }
       );
-      message.success(`已重新启用 ${rule.name}，仅影响新建自营仓批次`);
-      await load();
+      if (await load(false, true)) message.success(`已重新启用 ${rule.name}，仅影响新建自营仓批次`);
     } catch (activateError) {
+      if (activateError instanceof ApiError && activateError.status === 401) return;
       message.error(activateError instanceof Error ? activateError.message : "启用失败");
     } finally {
       setSelfOperatedActivatingId(undefined);

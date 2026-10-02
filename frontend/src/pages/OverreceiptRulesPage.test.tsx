@@ -1,7 +1,12 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
+import { App as AntApp, message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import OverreceiptRulesPage from "./OverreceiptRulesPage";
+import { api, AUTH_EXPIRED_EVENT } from "../api";
+
+const render = (ui: ReactElement) => renderComponent(ui, { wrapper: AntApp });
 
 const firstRule = {
   id: 1,
@@ -59,6 +64,7 @@ describe("OverreceiptRulesPage", () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
         const method = init?.method ?? "GET";
+        if (url.endsWith("/api/auth/me")) return jsonResponse({ id: 1 });
         if (url.endsWith("/api/overreceipt-rule-versions/warehouses")) {
           return jsonResponse(["供应商成品本地仓", "水鞋-广州仓"]);
         }
@@ -98,6 +104,7 @@ describe("OverreceiptRulesPage", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -300,5 +307,131 @@ describe("OverreceiptRulesPage", () => {
       expect(posts).toHaveLength(2);
     });
     await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
+  });
+
+  it.each(["delivery", "self_operated"])("does not repeat a saved %s publication when refresh fails", async (scope) => {
+    const originalFetch = fetch;
+    let saved = false;
+    let failRefresh = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") saved = true;
+        if (saved && failRefresh && !init?.method) return jsonResponse({ detail: "读取暂不可用" }, 500);
+        return originalFetch(input, init);
+      })
+    );
+    const staticSuccess = vi.spyOn(message, "success");
+    render(<OverreceiptRulesPage />);
+    await screen.findByText(selfOperatedRule.name);
+    if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    fireEvent.click(screen.getByRole("button", { name: /发布新版本/ }));
+    fireEvent.change(screen.getByLabelText("规则版本名称"), { target: { value: "规则<&>" } });
+    fireEvent.click(screen.getByRole("button", { name: /确\s*认/ }));
+    const confirm = await screen.findByRole("button", { name: "确认发布" });
+    const dialog = confirm.closest('[role="dialog"]');
+    fireEvent.click(confirm);
+    expect(await screen.findByText(/变更已保存.*读取暂不可用/)).toBeInTheDocument();
+    await waitFor(() => expect(dialog).toHaveClass("ant-zoom-leave"));
+    expect(screen.queryByText(/已发布，将用于新批次/)).not.toBeInTheDocument();
+    failRefresh = false;
+    fireEvent.click(screen.getByRole("button", { name: /重\s*试/ }));
+    await waitFor(() => expect(screen.queryByText("超收规则读取失败")).not.toBeInTheDocument());
+    expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    expect(staticSuccess).not.toHaveBeenCalled();
+  });
+
+  it("ignores an older read that arrives after a newer read", async () => {
+    const originalFetch = fetch;
+    let resolveOld!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveOld = resolve;
+    });
+    let reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/api/self-operated-overreceipt-rule-versions")) {
+          reads += 1;
+          return reads === 1 ? pending : Promise.resolve(jsonResponse([{ ...selfOperatedRule, name: "最新规则" }]));
+        }
+        return originalFetch(input, init);
+      })
+    );
+    const view = render(<OverreceiptRulesPage active />);
+    view.rerender(<OverreceiptRulesPage active={false} />);
+    expect(await screen.findByText("最新规则")).toBeInTheDocument();
+    await act(async () => {
+      resolveOld(jsonResponse([selfOperatedRule]));
+    });
+    expect(screen.queryByText(selfOperatedRule.name)).not.toBeInTheDocument();
+  });
+
+  it.each(
+    ["delivery", "self_operated"].flatMap((scope) => [403, 409, 422, 500, 0, 401].map((status) => ({ scope, status })))
+  )("handles $scope activation error $status without success feedback", async ({ scope, status }) => {
+    await api("/api/auth/me");
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/activate")) {
+          return status === 0
+            ? Promise.reject(new Error("网络断开"))
+            : Promise.resolve(jsonResponse({ detail: `启用失败 ${status}` }, status));
+        }
+        return originalFetch(input, init);
+      })
+    );
+    render(<OverreceiptRulesPage />);
+    await screen.findByText(selfOperatedRule.name);
+    if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    const button = () =>
+      screen.getByRole("button", {
+        name: `重新启用 ${scope === "delivery" ? previousRule.name : previousSelfOperatedRule.name}`
+      });
+    fireEvent.click(button());
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/activate"))).toHaveLength(1)
+    );
+    if (status !== 401)
+      expect(await screen.findByText(status === 0 ? "网络断开" : `启用失败 ${status}`)).toBeInTheDocument();
+    await waitFor(() => expect(button()).not.toHaveClass("ant-btn-loading"));
+    expect(screen.queryByText(/已重新启用/)).not.toBeInTheDocument();
+    expect(screen.queryByText("启用失败 401")).not.toBeInTheDocument();
+  });
+
+  it.each(["initial", "after-write"])("leaves %s 401 feedback to authentication", async (phase) => {
+    await api("/api/auth/me");
+    const expired = vi.fn();
+    window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+    const originalFetch = fetch;
+    let saved = phase === "initial";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "POST") saved = true;
+        if (saved && !init?.method) return jsonResponse({ detail: "未登录" }, 401);
+        return originalFetch(input, init);
+      })
+    );
+    try {
+      render(<OverreceiptRulesPage />);
+      if (phase === "after-write") {
+        await screen.findByText(selfOperatedRule.name);
+        fireEvent.click(screen.getByRole("button", { name: /发布新版本/ }));
+        fireEvent.change(screen.getByLabelText("规则版本名称"), { target: { value: "规则" } });
+        fireEvent.click(screen.getByRole("button", { name: /确\s*认/ }));
+        const confirm = await screen.findByRole("button", { name: "确认发布" });
+        fireEvent.click(confirm);
+        await waitFor(() => expect(confirm.closest('[role="dialog"]')).toHaveClass("ant-zoom-leave"));
+      }
+      await waitFor(() => expect(expired).toHaveBeenCalledTimes(1));
+      expect(screen.queryByText("未登录")).not.toBeInTheDocument();
+      expect(screen.queryByText("超收规则读取失败")).not.toBeInTheDocument();
+      expect(screen.queryByText(/已发布，将用于新批次/)).not.toBeInTheDocument();
+    } finally {
+      window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
+    }
   });
 });

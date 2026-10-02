@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   Alert,
+  App as AntApp,
   Button,
   Card,
   Form,
@@ -11,13 +12,12 @@ import {
   Space,
   Table,
   Tag,
-  Typography,
-  message
+  Typography
 } from "antd";
 import { KeyOutlined, PlusOutlined } from "@ant-design/icons";
 import type { TableProps } from "antd";
 
-import { api, expireSession } from "../../api";
+import { api, ApiError, expireSession } from "../../api";
 import type { Role, User } from "../../types";
 
 interface UserManagementPanelProps {
@@ -25,7 +25,7 @@ interface UserManagementPanelProps {
   users: User[];
   loading: boolean;
   error: string | null;
-  onDataChanged: () => void | Promise<void>;
+  onDataChanged: () => void | boolean | Promise<void | boolean>;
 }
 
 type UserAction = "create" | "status" | "password" | null;
@@ -35,6 +35,7 @@ const USER_TABLE_COMPONENTS: NonNullable<TableProps<User>["components"]> = {
 };
 
 export function UserManagementPanel({ currentUser, users, loading, error, onDataChanged }: UserManagementPanelProps) {
+  const { message } = AntApp.useApp();
   const [userModal, setUserModal] = useState(false);
   const [passwordTarget, setPasswordTarget] = useState<User | null>(null);
   const [action, setAction] = useState<UserAction>(null);
@@ -59,9 +60,9 @@ export function UserManagementPanel({ currentUser, users, loading, error, onData
       });
       setUserModal(false);
       userForm.resetFields();
-      await onDataChanged();
-      message.success("用户已创建");
+      if ((await onDataChanged()) !== false) message.success("用户已创建");
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) return;
       message.error(requestError instanceof Error ? requestError.message : "创建用户失败");
     } finally {
       setAction(null);
@@ -76,9 +77,9 @@ export function UserManagementPanel({ currentUser, users, loading, error, onData
         method: "PUT",
         body: JSON.stringify({ active: !user.active })
       });
-      await onDataChanged();
-      message.success(user.active ? "用户已停用" : "用户已启用");
+      if ((await onDataChanged()) !== false) message.success(user.active ? "用户已停用" : "用户已启用");
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) return;
       message.error(requestError instanceof Error ? requestError.message : "更新用户状态失败");
     } finally {
       setAction(null);
@@ -106,9 +107,9 @@ export function UserManagementPanel({ currentUser, users, loading, error, onData
         expireSession("密码已重置，请使用新密码重新登录");
         return;
       }
-      await onDataChanged();
-      message.success("密码已重置，该用户需要重新登录");
+      if ((await onDataChanged()) !== false) message.success("密码已重置，该用户需要重新登录");
     } catch (requestError) {
+      if (requestError instanceof ApiError && requestError.status === 401) return;
       message.error(requestError instanceof Error ? requestError.message : "重置密码失败");
     } finally {
       setAction(null);
