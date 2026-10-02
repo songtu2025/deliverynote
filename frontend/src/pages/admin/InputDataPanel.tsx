@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App as AntApp, Button, Drawer, Form, Input, Space, Tabs, Tag, Typography, Upload } from "antd";
-import { CheckCircleFilled, DownloadOutlined, InboxOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
+import { Alert, App as AntApp, Button, Form, Space, Tabs, Tag, Typography } from "antd";
+import { CheckCircleFilled, DownloadOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
 import type { UploadFile, UploadProps } from "antd";
 
 import { api, download } from "../../api";
@@ -11,6 +11,7 @@ import type { InputKind } from "./adminConstants";
 import { InputVersionHistoryPanel } from "./InputVersionHistoryPanel";
 import { InputVersionPreviewPanel } from "./InputVersionPreviewPanel";
 import { InputVersionQualityPanel } from "./InputVersionQualityPanel";
+import { InputVersionUploadDrawer } from "./InputVersionUploadDrawer";
 
 interface InputDataPanelProps {
   versions: InputVersion[];
@@ -431,104 +432,19 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
         </section>
       </main>
 
-      <Drawer
-        rootClassName="input-data-maintenance-drawer"
-        classNames={{ header: "input-data-maintenance-header", body: "input-data-maintenance-body" }}
-        styles={{
-          header: { borderColor: "#e2e9e7", background: "#f7f9f8" },
-          body: { padding: "22px 24px" }
-        }}
-        title={activeVersion ? `更新${selectedDefinition.label}` : `上传${selectedDefinition.label}`}
-        size={520}
+      <InputVersionUploadDrawer
+        kind={selectedKind}
+        hasActiveVersion={activeVersion !== null}
         open={maintenanceOpen}
-        getContainer={false}
-        destroyOnHidden
-        motion={
-          import.meta.env.MODE === "test"
-            ? {
-                motionAppear: false,
-                motionEnter: false,
-                motionLeave: false
-              }
-            : undefined
-        }
-        maskMotion={
-          import.meta.env.MODE === "test"
-            ? {
-                motionAppear: false,
-                motionEnter: false,
-                motionLeave: false
-              }
-            : undefined
-        }
-        closable={!mutationBusy}
-        maskClosable={!mutationBusy}
-        keyboard={!mutationBusy}
-        onClose={() => {
-          if (!mutationBusy) setMaintenanceOpen(false);
-        }}
-      >
-        <div className="input-data-maintenance-form">
-          <Typography.Title level={5}>{activeVersion ? "上传替换当前版本" : "上传首个版本"}</Typography.Title>
-          <Typography.Paragraph type="secondary">选择文件并确认版本名称；校验通过后立即启用。</Typography.Paragraph>
-          {selectedKind === "supplier" && (
-            <Alert
-              type="info"
-              showIcon
-              title="供应商别名为可选列"
-              styles={{ root: { borderRadius: 8 } }}
-              description="一个单元格内的多个别名请用 | 分隔。启用供应商之间名称或别名相同、互为子串时，上传会被拒绝并提示 Excel 行号。"
-            />
-          )}
-          {uploadError?.kind === selectedKind && (
-            <Alert
-              className="inline-alert"
-              type="error"
-              showIcon
-              title="上传失败"
-              description={uploadError.message}
-              styles={{ root: { borderRadius: 8 } }}
-            />
-          )}
-          <Form form={uploadForm} layout="vertical" clearOnDestroy>
-            <Form.Item label="新版本名称" name="name" rules={[{ required: true, message: "请输入版本名称" }]}>
-              <Input disabled={mutationBusy} placeholder={`例如：${selectedKind}-20260721`} />
-            </Form.Item>
-            <Upload.Dragger
-              className="input-data-uploader"
-              disabled={mutationBusy}
-              accept=".xls,.xlsx"
-              maxCount={1}
-              multiple={false}
-              beforeUpload={() => false}
-              fileList={pendingFiles}
-              onChange={selectUploadFile}
-            >
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined />
-              </p>
-              <p className="ant-upload-text">拖放 Excel 到这里，或点击选择</p>
-              <p className="ant-upload-hint">支持 .xls、.xlsx；选择后不会立即生效</p>
-            </Upload.Dragger>
-            <Button
-              className="input-data-upload-submit"
-              block
-              type="primary"
-              icon={<UploadOutlined />}
-              aria-label="校验并启用新版本"
-              aria-busy={uploading}
-              disabled={mutationBusy}
-              loading={uploading}
-              onClick={() => void uploadVersion()}
-            >
-              校验并启用新版本
-            </Button>
-          </Form>
-          <Typography.Paragraph className="input-data-upload-impact" type="secondary">
-            仅用于新批次；已有批次不变。
-          </Typography.Paragraph>
-        </div>
-      </Drawer>
+        busy={mutationBusy}
+        uploading={uploading}
+        form={uploadForm}
+        files={pendingFiles}
+        error={uploadError?.kind === selectedKind ? uploadError.message : null}
+        onFileChange={selectUploadFile}
+        onSubmit={uploadVersion}
+        onClose={() => setMaintenanceOpen(false)}
+      />
     </div>
   );
 }

@@ -831,6 +831,20 @@ describe("InputDataPanel", () => {
     expect(supplierButton).toBeEnabled();
   }, 30_000);
 
+  it.each([false, true])("does not upload when the name or file is missing, hasName=%s", async (hasName) => {
+    render(
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
+    if (hasName) {
+      fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: "synthetic-no-file" } });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
+    expect(await screen.findByText(hasName ? "请选择要上传的 Excel 文件" : "请输入版本名称")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    if (hasName) expect(screen.getByLabelText("新版本名称")).toHaveValue("synthetic-no-file");
+  });
+
   it("downloads the current file from the selected-type status header", async () => {
     render(
       <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
@@ -883,5 +897,16 @@ describe("InputDataPanel", () => {
     fireEvent.click(getCatalogButton("商品信息"));
     fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
     expect(screen.getByText("输入版本校验失败：缺少 SKU")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: "synthetic-retry" } });
+    const retryFileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+    fireEvent.change(retryFileInput, { target: { files: [new File(["replacement"], "replacement.xlsx")] } });
+    await screen.findByText("replacement.xlsx");
+    expect(screen.queryByText("输入版本校验失败：缺少 SKU")).not.toBeInTheDocument();
+    expect(screen.queryByText("broken.xlsx")).not.toBeInTheDocument();
+    failUpload = false;
+    fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
+    await waitFor(() => expect(onVersionsChanged).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });
