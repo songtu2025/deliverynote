@@ -86,17 +86,13 @@ const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({
 
 type SelfOperatedIssueFilter = "all" | "warning" | "error";
 
-const SELF_OPERATED_ISSUE_COLUMNS: NonNullable<
-  TableProps<SelfOperatedInboundSyncIssue>["columns"]
-> = [
+const SELF_OPERATED_ISSUE_COLUMNS: NonNullable<TableProps<SelfOperatedInboundSyncIssue>["columns"]> = [
   {
     title: "级别",
     dataIndex: "severity",
     width: 80,
     render: (value: SelfOperatedInboundSyncIssue["severity"]) => (
-      <Tag color={value === "error" ? "error" : "warning"}>
-        {value === "error" ? "错误" : "提醒"}
-      </Tag>
+      <Tag color={value === "error" ? "error" : "warning"}>{value === "error" ? "错误" : "提醒"}</Tag>
     )
   },
   { title: "问题", dataIndex: "message", width: 250 },
@@ -207,54 +203,54 @@ export default function BatchesPage({
     return nextVersions;
   }, []);
 
-  const load = useCallback(async (
-    background = false,
-    knownInboundSyncStatus?: SelfOperatedInboundSyncStatus
-  ) => {
-    const request = ++loadRequestRef.current;
-    if (!background) setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        workflow,
-        offset: String((page - 1) * 12),
-        limit: "12"
-      });
-      if (debouncedQuery.trim()) params.set("search", debouncedQuery.trim());
-      if (statusFilter) params.set("batch_status", statusFilter);
-      const [batchPage, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
-        api<{ items: Batch[]; total: number; empty_draft_count: number }>(`/api/batches?${params}`),
-        api<InputVersion[]>("/api/input-versions"),
-        workflow === "self_operated_inbound"
-          ? api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
-          : api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions"),
-        workflow === "self_operated_inbound"
-          ? knownInboundSyncStatus
-            ? Promise.resolve(knownInboundSyncStatus)
-            : api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
-          : Promise.resolve(null)
-      ]);
-      if (request !== loadRequestRef.current) return;
-      setBatches(batchPage.items);
-      setBatchTotal(batchPage.total);
-      setEmptyDraftCount(batchPage.empty_draft_count);
-      setVersions(versionRows);
-      if (workflow === "self_operated_inbound") {
-        setSelfOperatedRules(overreceiptRuleRows as SelfOperatedOverreceiptRuleVersion[]);
-        setSyncStatus(inboundSyncStatus);
-      } else {
-        setOverreceiptRules(overreceiptRuleRows as OverreceiptRuleVersion[]);
+  const load = useCallback(
+    async (background = false, knownInboundSyncStatus?: SelfOperatedInboundSyncStatus) => {
+      const request = ++loadRequestRef.current;
+      if (!background) setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          workflow,
+          offset: String((page - 1) * 12),
+          limit: "12"
+        });
+        if (debouncedQuery.trim()) params.set("search", debouncedQuery.trim());
+        if (statusFilter) params.set("batch_status", statusFilter);
+        const [batchPage, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
+          api<{ items: Batch[]; total: number; empty_draft_count: number }>(`/api/batches?${params}`),
+          api<InputVersion[]>("/api/input-versions"),
+          workflow === "self_operated_inbound"
+            ? api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
+            : api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions"),
+          workflow === "self_operated_inbound"
+            ? knownInboundSyncStatus
+              ? Promise.resolve(knownInboundSyncStatus)
+              : api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync")
+            : Promise.resolve(null)
+        ]);
+        if (request !== loadRequestRef.current) return;
+        setBatches(batchPage.items);
+        setBatchTotal(batchPage.total);
+        setEmptyDraftCount(batchPage.empty_draft_count);
+        setVersions(versionRows);
+        if (workflow === "self_operated_inbound") {
+          setSelfOperatedRules(overreceiptRuleRows as SelfOperatedOverreceiptRuleVersion[]);
+          setSyncStatus(inboundSyncStatus);
+        } else {
+          setOverreceiptRules(overreceiptRuleRows as OverreceiptRuleVersion[]);
+        }
+      } catch (error) {
+        if (request === loadRequestRef.current) {
+          message.error(error instanceof Error ? error.message : "读取批次失败");
+        }
+      } finally {
+        if (request === loadRequestRef.current) {
+          loadedRef.current = true;
+          if (!background) setLoading(false);
+        }
       }
-    } catch (error) {
-      if (request === loadRequestRef.current) {
-        message.error(error instanceof Error ? error.message : "读取批次失败");
-      }
-    } finally {
-      if (request === loadRequestRef.current) {
-        loadedRef.current = true;
-        if (!background) setLoading(false);
-      }
-    }
-  }, [page, debouncedQuery, statusFilter, workflow]);
+    },
+    [page, debouncedQuery, statusFilter, workflow]
+  );
 
   useEffect(() => {
     if (!loadedRef.current || active) void load(loadedRef.current);
@@ -282,9 +278,7 @@ export default function BatchesPage({
       inboundSyncPollInFlightRef.current = true;
       let shouldContinue = false;
       try {
-        const next = await api<SelfOperatedInboundSyncStatus>(
-          "/api/self-operated-inbound-sync"
-        );
+        const next = await api<SelfOperatedInboundSyncStatus>("/api/self-operated-inbound-sync");
         if (cancelled) return;
         setSyncStatus(next);
         setSyncError("");
@@ -316,9 +310,7 @@ export default function BatchesPage({
     () => Object.fromEntries(versions.filter((version) => version.active).map((version) => [version.kind, version])),
     [versions]
   );
-  const versionKinds = workflow === "self_operated_inbound"
-    ? SELF_OPERATED_VERSION_KINDS
-    : DELIVERY_VERSION_KINDS;
+  const versionKinds = workflow === "self_operated_inbound" ? SELF_OPERATED_VERSION_KINDS : DELIVERY_VERSION_KINDS;
   const missingKinds = versionKinds.filter((kind) => !activeVersions[kind.value]);
   const activeOverreceiptRule = overreceiptRules.find((rule) => rule.active);
   const activeSelfOperatedRule = selfOperatedRules.find((rule) => rule.active);
@@ -328,9 +320,7 @@ export default function BatchesPage({
       const values = await form.validateFields();
       let batch: Batch;
       if (workflow === "self_operated_inbound") {
-        const files = sourceFiles.flatMap((file) => (
-          file.originFileObj ? [file.originFileObj] : []
-        ));
+        const files = sourceFiles.flatMap((file) => (file.originFileObj ? [file.originFileObj] : []));
         if (!files.length) {
           message.warning("请至少选择一份质检交货单");
           return;
@@ -343,9 +333,7 @@ export default function BatchesPage({
           body: formData
         });
       } else {
-        const files = deliveryFiles.flatMap((file) => (
-          file.originFileObj ? [file.originFileObj] : []
-        ));
+        const files = deliveryFiles.flatMap((file) => (file.originFileObj ? [file.originFileObj] : []));
         if (!files.length) {
           message.warning("请至少选择一份交货文件");
           return;
@@ -431,9 +419,9 @@ export default function BatchesPage({
     setPreviewError("");
     setSyncPreview(null);
     try {
-      setSyncPreview(await api<SelfOperatedInboundSyncPreview>(
-        `/api/self-operated-inbound-sync/${job.id}/preview?limit=100`
-      ));
+      setSyncPreview(
+        await api<SelfOperatedInboundSyncPreview>(`/api/self-operated-inbound-sync/${job.id}/preview?limit=100`)
+      );
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "读取候选数据失败");
     } finally {
@@ -450,9 +438,7 @@ export default function BatchesPage({
     setIssuesError("");
     setSyncIssues([]);
     try {
-      setSyncIssues(await api<SelfOperatedInboundSyncIssue[]>(
-        `/api/self-operated-inbound-sync/${job.id}/issues`
-      ));
+      setSyncIssues(await api<SelfOperatedInboundSyncIssue[]>(`/api/self-operated-inbound-sync/${job.id}/issues`));
     } catch (error) {
       setIssuesError(error instanceof Error ? error.message : "读取异常数据失败");
     } finally {
@@ -464,10 +450,7 @@ export default function BatchesPage({
     const job = syncStatus?.job;
     if (!job) return;
     try {
-      await download(
-        `/api/self-operated-inbound-sync/${job.id}/issues/download`,
-        `待入库同步异常_${job.id}.xlsx`
-      );
+      await download(`/api/self-operated-inbound-sync/${job.id}/issues/download`, `待入库同步异常_${job.id}.xlsx`);
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : "下载异常清单失败");
     }
@@ -477,9 +460,7 @@ export default function BatchesPage({
     setCleaningEmpty(true);
     try {
       const result = await api<{ deleted_count: number }>(
-        workflow === "self_operated_inbound"
-          ? "/api/self-operated-batches/empty"
-          : "/api/batches/empty",
+        workflow === "self_operated_inbound" ? "/api/self-operated-batches/empty" : "/api/batches/empty",
         {
           method: "DELETE"
         }
@@ -530,8 +511,7 @@ export default function BatchesPage({
   const syncJob = syncStatus?.job ?? null;
   const syncRunning = syncJob?.status === "queued" || syncJob?.status === "running";
   const syncCandidateActive = Boolean(
-    syncJob?.candidate_version_id
-    && syncStatus?.active_version?.id === syncJob.candidate_version_id
+    syncJob?.candidate_version_id && syncStatus?.active_version?.id === syncJob.candidate_version_id
   );
   const previewColumnWidths: Record<string, number> = {
     入库单号: 160,
@@ -543,21 +523,17 @@ export default function BatchesPage({
     应收货: 100
   };
   const previewColumns = Object.keys(previewColumnWidths)
-    .filter((column) => syncPreview?.columns.includes(column)).map((column) => ({
-    title: column === "应收货" ? "剩余应收货" : column,
-    dataIndex: column,
-    key: column,
-    width: previewColumnWidths[column],
-    ellipsis: true,
-    render: (value: string | number | null) => (
-      column === "平台站点" && value === "共享"
-        ? <Tag color="warning">共享 · 不可自动匹配</Tag>
-        : value ?? "—"
-    )
-  }));
-  const filteredSyncIssues = syncIssues.filter((issue) => (
-    issueFilter === "all" || issue.severity === issueFilter
-  ));
+    .filter((column) => syncPreview?.columns.includes(column))
+    .map((column) => ({
+      title: column === "应收货" ? "剩余应收货" : column,
+      dataIndex: column,
+      key: column,
+      width: previewColumnWidths[column],
+      ellipsis: true,
+      render: (value: string | number | null) =>
+        column === "平台站点" && value === "共享" ? <Tag color="warning">共享 · 不可自动匹配</Tag> : (value ?? "—")
+    }));
+  const filteredSyncIssues = syncIssues.filter((issue) => issueFilter === "all" || issue.severity === issueFilter);
 
   if (loading && !loadedRef.current) {
     return (
@@ -588,9 +564,11 @@ export default function BatchesPage({
           {emptyDraftCount > 0 && (
             <Popconfirm
               title={`删除 ${emptyDraftCount} 个空批次？`}
-              description={workflow === "self_operated_inbound"
-                ? "仅删除未上传质检交货单和收货入库单的草稿，无法恢复。"
-                : "仅删除未上传任何交货文件的草稿，无法恢复。"}
+              description={
+                workflow === "self_operated_inbound"
+                  ? "仅删除未上传质检交货单和收货入库单的草稿，无法恢复。"
+                  : "仅删除未上传任何交货文件的草稿，无法恢复。"
+              }
               okText="删除"
               cancelText="取消"
               onConfirm={() => void cleanEmptyBatches()}
@@ -629,9 +607,7 @@ export default function BatchesPage({
                 <Typography.Title level={5}>积加待入库数据</Typography.Title>
                 <Tag color="processing">待入库 + 部分入库</Tag>
               </Space>
-              <Typography.Text type="secondary">
-                同步待入库和部分入库采购单；启用后用于新批次。
-              </Typography.Text>
+              <Typography.Text type="secondary">同步待入库和部分入库采购单；启用后用于新批次。</Typography.Text>
             </div>
             <Button
               type="primary"
@@ -644,9 +620,7 @@ export default function BatchesPage({
             </Button>
           </div>
 
-          {!syncStatus?.configured && (
-            <Alert type="warning" showIcon title="积加 API 尚未完成配置" />
-          )}
+          {!syncStatus?.configured && <Alert type="warning" showIcon title="积加 API 尚未完成配置" />}
           {syncError && <Alert type="error" showIcon title="同步操作失败" description={syncError} />}
           {syncRunning && syncJob && (
             <div className="purchase-sync-progress" aria-label="待入库同步进度">
@@ -672,16 +646,22 @@ export default function BatchesPage({
               showIcon
               title={`发现 ${syncJob.issue_count} 条阻断问题，未生成候选版本`}
               description="核对入库单号、SKU、入库仓、关联单号和站点；本环节不校验供应商。"
-              action={(
+              action={
                 <Space size={4} wrap>
-                  <Button size="small" icon={<EyeOutlined />} onClick={() => void openInboundIssues("error")}>查看异常数据</Button>
-                  <Button size="small" onClick={() => void downloadInboundIssues()}>下载问题清单</Button>
+                  <Button size="small" icon={<EyeOutlined />} onClick={() => void openInboundIssues("error")}>
+                    查看异常数据
+                  </Button>
+                  <Button size="small" onClick={() => void downloadInboundIssues()}>
+                    下载问题清单
+                  </Button>
                 </Space>
-              )}
+              }
             />
           )}
           {syncJob?.status === "succeeded" && (
-            <div className={`purchase-sync-result${syncCandidateActive ? " is-active" : ""}${syncDetailsOpen ? "" : " is-collapsed"}`}>
+            <div
+              className={`purchase-sync-result${syncCandidateActive ? " is-active" : ""}${syncDetailsOpen ? "" : " is-collapsed"}`}
+            >
               <div className="purchase-sync-result-copy">
                 <CheckCircleFilled />
                 <div>
@@ -695,10 +675,22 @@ export default function BatchesPage({
               </div>
               {syncDetailsOpen && (
                 <dl className="purchase-sync-diff">
-                  <div><dt>新增匹配项</dt><dd>{syncJob.diff.added_lines ?? 0}</dd></div>
-                  <div><dt>数量变化项</dt><dd>{syncJob.diff.changed_lines ?? 0}</dd></div>
-                  <div><dt>移除匹配项</dt><dd>{syncJob.diff.removed_lines ?? 0}</dd></div>
-                  <div><dt>候选剩余应收总量</dt><dd>{syncJob.diff.after_quantity ?? 0}</dd></div>
+                  <div>
+                    <dt>新增匹配项</dt>
+                    <dd>{syncJob.diff.added_lines ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>数量变化项</dt>
+                    <dd>{syncJob.diff.changed_lines ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>移除匹配项</dt>
+                    <dd>{syncJob.diff.removed_lines ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>候选剩余应收总量</dt>
+                    <dd>{syncJob.diff.after_quantity ?? 0}</dd>
+                  </div>
                 </dl>
               )}
               {syncDetailsOpen && syncJob.warning_count > 0 && (
@@ -707,12 +699,16 @@ export default function BatchesPage({
                   showIcon
                   title={`包含 ${syncJob.warning_count} 条“共享”站点数据`}
                   description="数据保留原值，但不能自动匹配，需业务复核。"
-                  action={(
+                  action={
                     <Space size={4} wrap>
-                      <Button size="small" onClick={() => void openInboundIssues("warning")}>查看异常数据</Button>
-                      <Button size="small" onClick={() => void downloadInboundIssues()}>下载提醒清单</Button>
+                      <Button size="small" onClick={() => void openInboundIssues("warning")}>
+                        查看异常数据
+                      </Button>
+                      <Button size="small" onClick={() => void downloadInboundIssues()}>
+                        下载提醒清单
+                      </Button>
                     </Space>
-                  )}
+                  }
                 />
               )}
               <Space className="purchase-sync-actions" size={8} wrap>
@@ -720,7 +716,9 @@ export default function BatchesPage({
                   {syncDetailsOpen ? "收起同步详情" : "查看同步详情"}
                 </Button>
                 {syncDetailsOpen && (
-                  <Button icon={<EyeOutlined />} onClick={() => void openInboundPreview()}>预览候选数据</Button>
+                  <Button icon={<EyeOutlined />} onClick={() => void openInboundPreview()}>
+                    预览候选数据
+                  </Button>
                 )}
                 {!syncCandidateActive && (
                   <Popconfirm
@@ -730,7 +728,9 @@ export default function BatchesPage({
                     cancelText="取消"
                     onConfirm={() => void activateInboundSync()}
                   >
-                    <Button type="primary" loading={syncActivating}>启用最新数据</Button>
+                    <Button type="primary" loading={syncActivating}>
+                      启用最新数据
+                    </Button>
                   </Popconfirm>
                 )}
               </Space>
@@ -755,8 +755,8 @@ export default function BatchesPage({
               : "待同步"}
           </strong>
           <small>
-            {activeVersions[workflow === "self_operated_inbound" ? "self_operated_inbound" : "purchase"]?.name
-              ?? "暂无启用版本"}
+            {activeVersions[workflow === "self_operated_inbound" ? "self_operated_inbound" : "purchase"]?.name ??
+              "暂无启用版本"}
           </small>
         </div>
         <div className="batch-status-item">
@@ -771,7 +771,7 @@ export default function BatchesPage({
               ? activeSelfOperatedRule
                 ? `${activeSelfOperatedRule.name} · ${activeSelfOperatedRule.allowance} 件`
                 : "新批次超收数量为 0"
-              : activeOverreceiptRule?.name ?? "新批次不会自动超收"}
+              : (activeOverreceiptRule?.name ?? "新批次不会自动超收")}
           </small>
         </div>
       </section>
@@ -823,7 +823,10 @@ export default function BatchesPage({
             prefix={<SearchOutlined />}
             placeholder="搜索批次名称"
             value={query}
-            onChange={(event) => { setPage(1); setQuery(event.target.value); }}
+            onChange={(event) => {
+              setPage(1);
+              setQuery(event.target.value);
+            }}
           />
         </div>
         <div className="table-filter-field">
@@ -835,7 +838,10 @@ export default function BatchesPage({
             placeholder="全部状态"
             options={STATUS_OPTIONS}
             value={statusFilter}
-            onChange={(value) => { setPage(1); setStatusFilter(value); }}
+            onChange={(value) => {
+              setPage(1);
+              setStatusFilter(value);
+            }}
           />
         </div>
       </div>
@@ -843,31 +849,44 @@ export default function BatchesPage({
       <Table<Batch>
         className="batch-list-table"
         rowKey="id"
-        rowSelection={canDeleteBatches ? {
-          selectedRowKeys: selectedBatchIds,
-          preserveSelectedRowKeys: true,
-          columnWidth: 52,
-          onChange: (keys) => {
-            setSelectedBatchIds(keys.map(Number));
-          },
-          getCheckboxProps: (batch) => ({
-            disabled: !canDeleteBatch(batch),
-            "aria-label": `选择批次 ${batch.name}`
-          })
-        } : undefined}
+        rowSelection={
+          canDeleteBatches
+            ? {
+                selectedRowKeys: selectedBatchIds,
+                preserveSelectedRowKeys: true,
+                columnWidth: 52,
+                onChange: (keys) => {
+                  setSelectedBatchIds(keys.map(Number));
+                },
+                getCheckboxProps: (batch) => ({
+                  disabled: !canDeleteBatch(batch),
+                  "aria-label": `选择批次 ${batch.name}`
+                })
+              }
+            : undefined
+        }
         loading={loading}
         dataSource={batches}
         components={{
-          table: (props) => <table {...props} aria-label={workflow === "self_operated_inbound" ? "自营仓入库批次列表" : "交货批次列表"} />
+          table: (props) => (
+            <table
+              {...props}
+              aria-label={workflow === "self_operated_inbound" ? "自营仓入库批次列表" : "交货批次列表"}
+            />
+          )
         }}
         locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "暂无批次"} /> }}
-        pagination={batchTotal > 12 ? {
-          current: page,
-          pageSize: 12,
-          total: batchTotal,
-          showSizeChanger: false,
-          onChange: setPage
-        } : false}
+        pagination={
+          batchTotal > 12
+            ? {
+                current: page,
+                pageSize: 12,
+                total: batchTotal,
+                showSizeChanger: false,
+                onChange: setPage
+              }
+            : false
+        }
         columns={[
           {
             title: "批次",
@@ -899,9 +918,7 @@ export default function BatchesPage({
                   {batch.workflow === "self_operated_inbound"
                     ? `${batch.file_count} 份质检单 + ${batch.inbound_file?.uploaded ? 1 : 0} 份待入库数据`
                     : `${batch.file_count} 个文件`}
-                  {batch.summary && batch.summary.delivery_total > 0
-                    ? " · 交货 " + batch.summary.delivery_total
-                    : ""}
+                  {batch.summary && batch.summary.delivery_total > 0 ? " · 交货 " + batch.summary.delivery_total : ""}
                 </span>
               </div>
             )
@@ -938,7 +955,10 @@ export default function BatchesPage({
                   aria-label={"打开 " + batch.name}
                   onClick={() => onOpen(batch.id)}
                 >
-                  <Space size={4}>打开<RightOutlined /></Space>
+                  <Space size={4}>
+                    打开
+                    <RightOutlined />
+                  </Space>
                 </Button>
                 {canDeleteBatches && (
                   <Popconfirm
@@ -976,18 +996,16 @@ export default function BatchesPage({
         okText={workflow === "self_operated_inbound" ? "创建批次" : "创建并上传文件"}
         cancelText="取消"
         okButtonProps={{
-          disabled: workflow === "self_operated_inbound"
-            ? !sourceFiles.length
-            : !deliveryFiles.length
+          disabled: workflow === "self_operated_inbound" ? !sourceFiles.length : !deliveryFiles.length
         }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            label="批次名称"
-            name="name"
-            rules={[{ required: true, message: "请输入批次名称" }]}
-          >
-            <Input placeholder={workflow === "self_operated_inbound" ? "例如：2026-08-21 自营仓入库批次" : "例如：2026-07-21 交货批次"} />
+          <Form.Item label="批次名称" name="name" rules={[{ required: true, message: "请输入批次名称" }]}>
+            <Input
+              placeholder={
+                workflow === "self_operated_inbound" ? "例如：2026-08-21 自营仓入库批次" : "例如：2026-07-21 交货批次"
+              }
+            />
           </Form.Item>
           {workflow === "delivery" && (
             <>
@@ -1002,9 +1020,7 @@ export default function BatchesPage({
                   <Button icon={<UploadOutlined />}>选择交货文件</Button>
                 </Upload>
               </Form.Item>
-              <Typography.Text type="secondary">
-                至少选择一份；校验通过后创建批次。
-              </Typography.Text>
+              <Typography.Text type="secondary">至少选择一份；校验通过后创建批次。</Typography.Text>
             </>
           )}
           {workflow === "self_operated_inbound" && (
@@ -1028,9 +1044,11 @@ export default function BatchesPage({
                 type="info"
                 showIcon
                 title="锁定待入库数据版本"
-                description={activeVersions.self_operated_inbound
-                  ? `本批次将使用：${activeVersions.self_operated_inbound.name}`
-                  : "请先同步并启用待入库 API 数据"}
+                description={
+                  activeVersions.self_operated_inbound
+                    ? `本批次将使用：${activeVersions.self_operated_inbound.name}`
+                    : "请先同步并启用待入库 API 数据"
+                }
               />
             </>
           )}
@@ -1047,8 +1065,8 @@ export default function BatchesPage({
             <span>超收规则</span>
             <strong>
               {workflow === "self_operated_inbound"
-                ? activeSelfOperatedRule?.name ?? "未启用（允许超收 0 件）"
-                : activeOverreceiptRule?.name ?? "未启用（不自动超收）"}
+                ? (activeSelfOperatedRule?.name ?? "未启用（允许超收 0 件）")
+                : (activeOverreceiptRule?.name ?? "未启用（不自动超收）")}
             </strong>
           </div>
         </div>
@@ -1089,7 +1107,11 @@ export default function BatchesPage({
         open={issuesOpen}
         size={980}
         destroyOnHidden
-        extra={<Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadInboundIssues()}>下载完整清单</Button>}
+        extra={
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadInboundIssues()}>
+            下载完整清单
+          </Button>
+        }
         onClose={() => setIssuesOpen(false)}
       >
         <div className="purchase-sync-issues-toolbar">
@@ -1098,8 +1120,19 @@ export default function BatchesPage({
           </Typography.Text>
           <Space size={6} wrap>
             <Typography.Text type="secondary">筛选：</Typography.Text>
-            {([ ["warning", "共享站点提醒"], ["error", "映射错误"], ["all", "全部"] ] as Array<[SelfOperatedIssueFilter, string]>).map(([value, label]) => (
-              <Button key={value} size="small" type={issueFilter === value ? "primary" : "default"} onClick={() => setIssueFilter(value)}>
+            {(
+              [
+                ["warning", "共享站点提醒"],
+                ["error", "映射错误"],
+                ["all", "全部"]
+              ] as Array<[SelfOperatedIssueFilter, string]>
+            ).map(([value, label]) => (
+              <Button
+                key={value}
+                size="small"
+                type={issueFilter === value ? "primary" : "default"}
+                onClick={() => setIssueFilter(value)}
+              >
                 {label}
               </Button>
             ))}
@@ -1110,7 +1143,9 @@ export default function BatchesPage({
         ) : (
           <Table<SelfOperatedInboundSyncIssue>
             className="purchase-sync-issues-table"
-            rowKey={(issue) => `${issue.code}-${issue.order_no}-${issue.sku}-${issue.source_site}-${issue.supplier_code}-${issue.message}`}
+            rowKey={(issue) =>
+              `${issue.code}-${issue.order_no}-${issue.sku}-${issue.source_site}-${issue.supplier_code}-${issue.message}`
+            }
             loading={issuesLoading}
             dataSource={filteredSyncIssues}
             pagination={filteredSyncIssues.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}

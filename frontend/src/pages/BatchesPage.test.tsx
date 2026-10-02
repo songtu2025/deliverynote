@@ -3,10 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
 
-const jsonResponse = (payload: unknown) => new Response(JSON.stringify(payload), {
-  status: 200,
-  headers: { "Content-Type": "application/json" }
-});
+const jsonResponse = (payload: unknown) =>
+  new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json" }
+  });
 
 let inboundSyncStatus: Record<string, unknown>;
 let batchRows: Array<Record<string, unknown>>;
@@ -22,7 +23,15 @@ let deleteRequests: number[][];
 
 describe("BatchesPage", () => {
   beforeEach(() => {
-    const versions = ["purchase", "product", "supplier", "position", "template", "inbound_template", "self_operated_inbound"].map((kind, index) => ({
+    const versions = [
+      "purchase",
+      "product",
+      "supplier",
+      "position",
+      "template",
+      "inbound_template",
+      "self_operated_inbound"
+    ].map((kind, index) => ({
       id: index + 1,
       kind,
       name: `${kind}-v1`,
@@ -53,130 +62,143 @@ describe("BatchesPage", () => {
         finished_at: "2026-07-21T08:00:03"
       }
     };
-    batchRows = [{
-      id: 7,
-      name: "2026-07-21 交货批次",
-      status: "succeeded",
-      created_by: 1,
-      version_ids: {},
-      error_message: null,
-      download_ready: false,
-      created_at: "2026-07-21T08:00:00",
-      updated_at: "2026-07-21T09:00:00",
-      file_count: 2,
-      summary: { delivery_total: 160, import_total: 100, manual_total: 60, conserved: true }
-    }];
+    batchRows = [
+      {
+        id: 7,
+        name: "2026-07-21 交货批次",
+        status: "succeeded",
+        created_by: 1,
+        version_ids: {},
+        error_message: null,
+        download_ready: false,
+        created_at: "2026-07-21T08:00:00",
+        updated_at: "2026-07-21T09:00:00",
+        file_count: 2,
+        summary: { delivery_total: 160, import_total: 100, manual_total: 60, conserved: true }
+      }
+    ];
     deleteRequests = [];
-    vi.stubGlobal("fetch", vi.fn(async (
-      input: RequestInfo | URL,
-      init: RequestInit = {}
-    ) => {
-      const url = String(input);
-      if (url.endsWith("/api/batches") && init.method === "DELETE") {
-        const payload = JSON.parse(String(init.body)) as { batch_ids: number[] };
-        deleteRequests.push(payload.batch_ids);
-        batchRows = batchRows.filter((batch) => !payload.batch_ids.includes(Number(batch.id)));
-        return jsonResponse({
-          deleted_count: payload.batch_ids.length,
-          deleted_ids: payload.batch_ids,
-          file_cleanup_failed_ids: []
-        });
-      }
-      if (url.endsWith("/api/input-versions")) return jsonResponse(versions);
-      if (url.endsWith("/api/purchase-sync")) return jsonResponse({ configured: true, job: null });
-      if (url.endsWith("/api/overreceipt-rule-versions")) return jsonResponse([{
-        id: 9,
-        name: "短尾超收 V1",
-        short_tail_limit: 50,
-        medium_tail_limit: 20,
-        long_tail_limit: 10,
-        allowed_warehouses: ["水鞋-广州仓"],
-        active: true,
-        created_by: 1,
-        created_at: "2026-07-21T08:00:00"
-      }]);
-      if (url.endsWith("/api/self-operated-overreceipt-rule-versions")) return jsonResponse([{
-        id: 10,
-        name: "自营仓超收 5 件",
-        allowance: 5,
-        active: true,
-        created_by: 1,
-        created_at: "2026-07-21T08:00:00"
-      }]);
-      if (url.endsWith("/api/self-operated-inbound-sync/12/preview?limit=100")) {
-        return jsonResponse({
-          columns: ["入库单号", "入库仓", "SKU", "平台站点", "关联交货单/调拨单", "关联采购单", "应收货"],
-          rows: [{
-            _row_number: 1,
-            入库单号: "IN-1",
-            入库仓: "自营仓",
-            SKU: "SKU-A",
-            平台站点: "AMAZON:SEEKWAY:US",
-            "关联交货单/调拨单": "LN-1",
-            关联采购单: "PO-1",
-            应收货: 10
-          }],
-          total: 1
-        });
-      }
-      if (url.endsWith("/api/self-operated-inbound-sync/12/issues")) {
-        return jsonResponse([
-          {
-            severity: "warning",
-            message: "共享站点数据不能自动匹配",
-            order_no: "IN-2",
-            sku: "SKU-B",
-            source_site: "共享",
-            supplier_code: "SUP-1",
-            supplier_name: "供应商 A",
-            warehouse: "自营仓",
-            remaining_quantity: 12,
-            purchase_code: "PO-2",
-            related_code: "LN-2",
-            code: "shared_site"
-          },
-          {
-            severity: "error",
-            message: "关联采购单为空",
-            order_no: "IN-3",
-            sku: "SKU-C",
-            source_site: "SEEKWAY:US",
-            supplier_code: "SUP-2",
-            supplier_name: "供应商 B",
-            warehouse: "水鞋-广州仓",
-            remaining_quantity: 8,
-            purchase_code: "",
-            related_code: "LN-3",
-            code: "missing_purchase_code"
-          }
-        ]);
-      }
-      if (url.endsWith("/api/self-operated-inbound-sync")) return jsonResponse(inboundSyncStatus);
-      if (url.includes("/api/batches?")) {
-        const params = new URL(url, "http://localhost").searchParams;
-        const workflow = params.get("workflow");
-        const search = params.get("search")?.toLocaleLowerCase("zh-CN") ?? "";
-        const status = params.get("batch_status");
-        const matching = batchRows.filter((batch) => (
-          (batch.workflow ?? "delivery") === workflow
-          && String(batch.name).toLocaleLowerCase("zh-CN").includes(search)
-          && (!status || batch.status === status)
-        ));
-        const offset = Number(params.get("offset") ?? 0);
-        const limit = Number(params.get("limit") ?? 12);
-        return jsonResponse({
-          items: matching.slice(offset, offset + limit),
-          total: matching.length,
-          empty_draft_count: batchRows.filter((batch) => (
-            (batch.workflow ?? "delivery") === workflow
-            && batch.status === "draft"
-            && batch.file_count === 0
-            && (workflow !== "self_operated_inbound" || !(batch.inbound_file as { uploaded?: boolean } | undefined)?.uploaded)
-          )).length
-        });
-      }
-      throw new Error(`Unexpected request: ${url}`);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input);
+        if (url.endsWith("/api/batches") && init.method === "DELETE") {
+          const payload = JSON.parse(String(init.body)) as { batch_ids: number[] };
+          deleteRequests.push(payload.batch_ids);
+          batchRows = batchRows.filter((batch) => !payload.batch_ids.includes(Number(batch.id)));
+          return jsonResponse({
+            deleted_count: payload.batch_ids.length,
+            deleted_ids: payload.batch_ids,
+            file_cleanup_failed_ids: []
+          });
+        }
+        if (url.endsWith("/api/input-versions")) return jsonResponse(versions);
+        if (url.endsWith("/api/purchase-sync")) return jsonResponse({ configured: true, job: null });
+        if (url.endsWith("/api/overreceipt-rule-versions"))
+          return jsonResponse([
+            {
+              id: 9,
+              name: "短尾超收 V1",
+              short_tail_limit: 50,
+              medium_tail_limit: 20,
+              long_tail_limit: 10,
+              allowed_warehouses: ["水鞋-广州仓"],
+              active: true,
+              created_by: 1,
+              created_at: "2026-07-21T08:00:00"
+            }
+          ]);
+        if (url.endsWith("/api/self-operated-overreceipt-rule-versions"))
+          return jsonResponse([
+            {
+              id: 10,
+              name: "自营仓超收 5 件",
+              allowance: 5,
+              active: true,
+              created_by: 1,
+              created_at: "2026-07-21T08:00:00"
+            }
+          ]);
+        if (url.endsWith("/api/self-operated-inbound-sync/12/preview?limit=100")) {
+          return jsonResponse({
+            columns: ["入库单号", "入库仓", "SKU", "平台站点", "关联交货单/调拨单", "关联采购单", "应收货"],
+            rows: [
+              {
+                _row_number: 1,
+                入库单号: "IN-1",
+                入库仓: "自营仓",
+                SKU: "SKU-A",
+                平台站点: "AMAZON:SEEKWAY:US",
+                "关联交货单/调拨单": "LN-1",
+                关联采购单: "PO-1",
+                应收货: 10
+              }
+            ],
+            total: 1
+          });
+        }
+        if (url.endsWith("/api/self-operated-inbound-sync/12/issues")) {
+          return jsonResponse([
+            {
+              severity: "warning",
+              message: "共享站点数据不能自动匹配",
+              order_no: "IN-2",
+              sku: "SKU-B",
+              source_site: "共享",
+              supplier_code: "SUP-1",
+              supplier_name: "供应商 A",
+              warehouse: "自营仓",
+              remaining_quantity: 12,
+              purchase_code: "PO-2",
+              related_code: "LN-2",
+              code: "shared_site"
+            },
+            {
+              severity: "error",
+              message: "关联采购单为空",
+              order_no: "IN-3",
+              sku: "SKU-C",
+              source_site: "SEEKWAY:US",
+              supplier_code: "SUP-2",
+              supplier_name: "供应商 B",
+              warehouse: "水鞋-广州仓",
+              remaining_quantity: 8,
+              purchase_code: "",
+              related_code: "LN-3",
+              code: "missing_purchase_code"
+            }
+          ]);
+        }
+        if (url.endsWith("/api/self-operated-inbound-sync")) return jsonResponse(inboundSyncStatus);
+        if (url.includes("/api/batches?")) {
+          const params = new URL(url, "http://localhost").searchParams;
+          const workflow = params.get("workflow");
+          const search = params.get("search")?.toLocaleLowerCase("zh-CN") ?? "";
+          const status = params.get("batch_status");
+          const matching = batchRows.filter(
+            (batch) =>
+              (batch.workflow ?? "delivery") === workflow &&
+              String(batch.name).toLocaleLowerCase("zh-CN").includes(search) &&
+              (!status || batch.status === status)
+          );
+          const offset = Number(params.get("offset") ?? 0);
+          const limit = Number(params.get("limit") ?? 12);
+          return jsonResponse({
+            items: matching.slice(offset, offset + limit),
+            total: matching.length,
+            empty_draft_count: batchRows.filter(
+              (batch) =>
+                (batch.workflow ?? "delivery") === workflow &&
+                batch.status === "draft" &&
+                batch.file_count === 0 &&
+                (workflow !== "self_operated_inbound" ||
+                  !(batch.inbound_file as { uploaded?: boolean } | undefined)?.uploaded)
+            ).length
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      })
+    );
   });
 
   afterEach(() => {
@@ -190,13 +212,13 @@ describe("BatchesPage", () => {
     const loadGate = new Promise<void>((resolve) => {
       releaseLoad = resolve;
     });
-    vi.stubGlobal("fetch", vi.fn(async (
-      input: RequestInfo | URL,
-      init: RequestInit = {}
-    ) => {
-      await loadGate;
-      return fetchMock(input, init);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        await loadGate;
+        return fetchMock(input, init);
+      })
+    );
 
     render(<BatchesPage onOpen={vi.fn()} />);
 
@@ -263,20 +285,14 @@ describe("BatchesPage", () => {
     expect(second).toBeEnabled();
     fireEvent.click(first);
     await waitFor(() => {
-      expect(document.querySelector(".batch-selection-count"))
-        .toHaveTextContent("已选 1 项");
+      expect(document.querySelector(".batch-selection-count")).toHaveTextContent("已选 1 项");
     });
-    fireEvent.click(
-      document.querySelector('tr[data-row-key="8"] input[type="checkbox"]') as HTMLElement
-    );
+    fireEvent.click(document.querySelector('tr[data-row-key="8"] input[type="checkbox"]') as HTMLElement);
     await waitFor(() => {
-      expect(document.querySelector(".batch-selection-count"))
-        .toHaveTextContent("已选 2 项");
+      expect(document.querySelector(".batch-selection-count")).toHaveTextContent("已选 2 项");
     });
-    expect(document.querySelector('tr[data-row-key="7"]'))
-      .toHaveClass("ant-table-row-selected");
-    expect(document.querySelector('tr[data-row-key="8"]'))
-      .toHaveClass("ant-table-row-selected");
+    expect(document.querySelector('tr[data-row-key="7"]')).toHaveClass("ant-table-row-selected");
+    expect(document.querySelector('tr[data-row-key="8"]')).toHaveClass("ant-table-row-selected");
 
     fireEvent.click(screen.getByRole("button", { name: "删除已选（2）" }));
     expect(await screen.findByText("永久删除选中的 2 个批次？")).toBeInTheDocument();
@@ -396,29 +412,32 @@ describe("BatchesPage", () => {
         status: "succeeded"
       }
     };
-    vi.stubGlobal("fetch", vi.fn(async (
-      input: RequestInfo | URL,
-      init: RequestInit = {}
-    ) => {
-      const url = String(input);
-      requests.push(url.replace(/^.*(?=\/api\/)/, ""));
-      if (url.endsWith("/api/self-operated-inbound-sync") && !init.method) {
-        statusRequestCount += 1;
-        if (statusRequestCount === 1) {
-          return jsonResponse({ ...inboundSyncStatus, job: runningJob });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        const url = String(input);
+        requests.push(url.replace(/^.*(?=\/api\/)/, ""));
+        if (url.endsWith("/api/self-operated-inbound-sync") && !init.method) {
+          statusRequestCount += 1;
+          if (statusRequestCount === 1) {
+            return jsonResponse({ ...inboundSyncStatus, job: runningJob });
+          }
+          if (statusRequestCount === 2) {
+            return new Promise<Response>((resolve) => {
+              releaseRunningPoll = () =>
+                resolve(
+                  jsonResponse({
+                    ...inboundSyncStatus,
+                    job: runningJob
+                  })
+                );
+            });
+          }
+          return jsonResponse(completedStatus);
         }
-        if (statusRequestCount === 2) {
-          return new Promise<Response>((resolve) => {
-            releaseRunningPoll = () => resolve(jsonResponse({
-              ...inboundSyncStatus,
-              job: runningJob
-            }));
-          });
-        }
-        return jsonResponse(completedStatus);
-      }
-      return initialFetch(input, init);
-    }));
+        return initialFetch(input, init);
+      })
+    );
 
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />);
     await act(async () => {
@@ -440,12 +459,14 @@ describe("BatchesPage", () => {
       await vi.advanceTimersByTimeAsync(2000);
     });
 
-    expect(requests).toEqual(expect.arrayContaining([
-      "/api/self-operated-inbound-sync",
-      "/api/batches?workflow=self_operated_inbound&offset=0&limit=12",
-      "/api/input-versions",
-      "/api/self-operated-overreceipt-rule-versions"
-    ]));
+    expect(requests).toEqual(
+      expect.arrayContaining([
+        "/api/self-operated-inbound-sync",
+        "/api/batches?workflow=self_operated_inbound&offset=0&limit=12",
+        "/api/input-versions",
+        "/api/self-operated-overreceipt-rule-versions"
+      ])
+    );
     expect(requests).toHaveLength(4);
   });
 
@@ -453,17 +474,17 @@ describe("BatchesPage", () => {
     const onOpen = vi.fn();
     let submittedFiles: FormDataEntryValue[] = [];
     const loadFetch = vi.mocked(fetch);
-    vi.stubGlobal("fetch", vi.fn(async (
-      input: RequestInfo | URL,
-      init: RequestInit = {}
-    ) => {
-      if (String(input).endsWith("/api/self-operated-batches") && init.method === "POST") {
-        const body = init.body as FormData;
-        submittedFiles = body.getAll("delivery_file");
-        return jsonResponse({ id: 88 });
-      }
-      return loadFetch(input, init);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+        if (String(input).endsWith("/api/self-operated-batches") && init.method === "POST") {
+          const body = init.body as FormData;
+          submittedFiles = body.getAll("delivery_file");
+          return jsonResponse({ id: 88 });
+        }
+        return loadFetch(input, init);
+      })
+    );
 
     render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />);
 
@@ -475,8 +496,10 @@ describe("BatchesPage", () => {
     expect(within(dialog).getByText("质检交货单")).toBeInTheDocument();
     expect(within(dialog).queryByText("自营仓收货入库单")).not.toBeInTheDocument();
     expect(within(dialog).getByText("锁定待入库数据版本")).toBeInTheDocument();
-    expect(within(dialog).getByText("锁定待入库数据版本").closest(".ant-alert"))
-      .toHaveClass("self-operated-version-lock", "ant-alert-info");
+    expect(within(dialog).getByText("锁定待入库数据版本").closest(".ant-alert")).toHaveClass(
+      "self-operated-version-lock",
+      "ant-alert-info"
+    );
     expect(within(dialog).getByRole("button", { name: "创建批次" })).toBeDisabled();
     expect(within(dialog).getByText(/本批次将使用：self_operated_inbound-v1/)).toBeInTheDocument();
 
@@ -485,10 +508,7 @@ describe("BatchesPage", () => {
     expect(input).toHaveAttribute("multiple");
     fireEvent.change(input!, {
       target: {
-        files: [
-          new File(["first"], "A质检交货单.xlsx"),
-          new File(["second"], "B质检交货单.xlsx")
-        ]
+        files: [new File(["first"], "A质检交货单.xlsx"), new File(["second"], "B质检交货单.xlsx")]
       }
     });
     await waitFor(() => {
@@ -497,10 +517,7 @@ describe("BatchesPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "创建批次" }));
 
     await waitFor(() => expect(submittedFiles).toHaveLength(2));
-    expect(submittedFiles.map((file) => (file as File).name)).toEqual([
-      "A质检交货单.xlsx",
-      "B质检交货单.xlsx"
-    ]);
+    expect(submittedFiles.map((file) => (file as File).name)).toEqual(["A质检交货单.xlsx", "B质检交货单.xlsx"]);
     expect(onOpen).toHaveBeenCalledWith(88);
   });
 
