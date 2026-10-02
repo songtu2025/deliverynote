@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { formatBeijingDateTime } from "../../dateTime";
 import type { PositionDiff, PositionDraft, PositionIssue } from "../../types";
+import type { usePositionDraftSession } from "./usePositionDraftSession";
 
 function issueRows(issue: PositionIssue): string {
   return issue.row_numbers.length > 0 ? `第 ${issue.row_numbers.join("、")} 行` : "全表";
@@ -16,6 +17,10 @@ interface PositionDraftStatusProps {
   refreshing: boolean;
   actionError: string | null;
   importError: string | null;
+  metadata?: Pick<
+    ReturnType<typeof usePositionDraftSession>,
+    "metadataStale" | "metadataLoading" | "metadataError" | "refreshMetadata"
+  >;
   onRefresh: () => Promise<void>;
   onClearActionError: () => void;
   onClearImportError: () => void;
@@ -28,6 +33,7 @@ export function PositionDraftStatus({
   refreshing,
   actionError,
   importError,
+  metadata,
   onRefresh,
   onClearActionError,
   onClearImportError
@@ -38,15 +44,34 @@ export function PositionDraftStatus({
         className="inline-alert position-save-status"
         type="success"
         showIcon
-        title="草稿已自动保存"
+        title={metadata?.metadataStale ? "草稿已保存，摘要待刷新" : "草稿已自动保存"}
         description={
           <Space wrap separator={<span aria-hidden="true">·</span>}>
             <span>修订号 {draft.revision}</span>
-            <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>
-            <span>最后编辑人：用户 #{draft.updated_by}</span>
+            {!metadata?.metadataStale && <span>最后更新 {formatBeijingDateTime(draft.updated_at)}</span>}
+            {!metadata?.metadataStale && <span>最后编辑人：用户 #{draft.updated_by}</span>}
           </Space>
         }
       />
+      {metadata?.metadataStale && !conflictMessage && (
+        <Alert
+          className="inline-alert"
+          type="warning"
+          showIcon
+          title="草稿摘要待刷新"
+          description={metadata.metadataError ?? "正在读取最新摘要"}
+          action={
+            <Button
+              aria-label="刷新摘要"
+              icon={<ReloadOutlined />}
+              loading={metadata.metadataLoading}
+              onClick={() => void metadata.refreshMetadata()}
+            >
+              刷新摘要
+            </Button>
+          }
+        />
+      )}
       {baseVersionChanged && (
         <Alert
           className="inline-alert"
@@ -114,11 +139,21 @@ export function DiffTags({ diff }: { diff: PositionDiff }) {
 
 export function DraftSummary({
   draft,
-  diff
+  diff,
+  stale = false
 }: {
   draft: Pick<PositionDraft, "row_count" | "modified_count" | "error_count" | "warning_count">;
   diff: PositionDiff;
+  stale?: boolean;
 }) {
+  if (stale)
+    return (
+      <section className="position-summary-strip" aria-label="草稿摘要">
+        <div className="position-summary-metric" style={{ gridColumn: "1 / -1" }}>
+          <Typography.Text type="secondary">摘要待刷新，暂不展示旧统计</Typography.Text>
+        </div>
+      </section>
+    );
   return (
     <section className="position-summary-strip" aria-label="草稿摘要">
       <div className="position-summary-metric">

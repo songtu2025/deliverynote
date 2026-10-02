@@ -175,25 +175,23 @@ describe("usePositionRowMutations", () => {
     expect(view.onBusyChange).toHaveBeenLastCalledWith(null);
   });
 
-  it.each([400, 401, 403, 409, 500])(
-    "keeps ordinary failure %i local and permits retry with the same revision",
-    async (status) => {
-      vi.mocked(positionDraftApi.createRow).mockRejectedValueOnce(new ApiError(status, "记录写入失败"));
-      const view = mutationView();
-      await act(async () => {
-        expect(await view.result.current.copy(baseRow)).toBe(false);
-      });
-      expect(view.onError).toHaveBeenCalledExactlyOnceWith("记录写入失败");
-      expect(view.onConflict).not.toHaveBeenCalled();
-      expect(view.onApplied).not.toHaveBeenCalled();
-      expect(view.getRevision()).toBe(3);
-      await act(async () => {
-        expect(await view.result.current.copy(baseRow)).toBe(true);
-      });
-      expect(vi.mocked(positionDraftApi.createRow).mock.calls.map(([, payload]) => payload.revision)).toEqual([3, 3]);
-      expect(view.onApplied).toHaveBeenCalledOnce();
-    }
-  );
+  it.each([400, 401, 403, 409, 500])("handles failure %i and permits retry with the same revision", async (status) => {
+    vi.mocked(positionDraftApi.createRow).mockRejectedValueOnce(new ApiError(status, "记录写入失败"));
+    const view = mutationView();
+    await act(async () => {
+      expect(await view.result.current.copy(baseRow)).toBe(false);
+    });
+    if (status === 401) expect(view.onError).not.toHaveBeenCalled();
+    else expect(view.onError).toHaveBeenCalledExactlyOnceWith("记录写入失败");
+    expect(view.onConflict).not.toHaveBeenCalled();
+    expect(view.onApplied).not.toHaveBeenCalled();
+    expect(view.getRevision()).toBe(3);
+    await act(async () => {
+      expect(await view.result.current.copy(baseRow)).toBe(true);
+    });
+    expect(vi.mocked(positionDraftApi.createRow).mock.calls.map(([, payload]) => payload.revision)).toEqual([3, 3]);
+    expect(view.onApplied).toHaveBeenCalledOnce();
+  });
 
   it("does not treat a revision error code on a 500 response as a collaboration conflict", async () => {
     vi.mocked(positionDraftApi.deleteRow).mockRejectedValueOnce(

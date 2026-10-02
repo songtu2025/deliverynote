@@ -143,7 +143,9 @@ describe("PositionMaintenance", () => {
 
     expect(await screen.findByText("草稿已在其他位置更新")).toBeInTheDocument();
     expect(screen.getByText("修订号 4")).toBeInTheDocument();
-    expect(screen.getByText("新增 0")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("region", { name: "草稿摘要" })).getByText("摘要待刷新，暂不展示旧统计")
+    ).toBeInTheDocument();
     expect(screen.queryByText("新增 99")).not.toBeInTheDocument();
     expect(screen.queryByText("最后编辑人：用户 #12")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "新增记录" })).toBeDisabled();

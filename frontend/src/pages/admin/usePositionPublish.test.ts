@@ -126,10 +126,11 @@ describe("usePositionPublish", () => {
     expect(positionDraftApi.validateDraft).toHaveBeenCalledTimes(2);
   });
 
-  it.each([401, 403, 500])("reports validation failure %i in the workspace and permits retry", async (status) => {
+  it.each([401, 403, 500])("handles validation failure %i and permits retry", async (status) => {
     vi.mocked(positionDraftApi.validateDraft).mockRejectedValueOnce(new ApiError(status, "校验失败"));
     const view = await preparePublish();
-    expect(view.onValidationError).toHaveBeenCalledExactlyOnceWith("校验失败");
+    if (status === 401) expect(view.onValidationError).not.toHaveBeenCalled();
+    else expect(view.onValidationError).toHaveBeenCalledExactlyOnceWith("校验失败");
     expect(view.onConflict).not.toHaveBeenCalled();
     expect(view.onPublished).not.toHaveBeenCalled();
     expectReset(view);
@@ -195,22 +196,29 @@ describe("usePositionPublish", () => {
     expect(view.onPublished).toHaveBeenCalledOnce();
   });
 
-  it.each([400, 409, 500])("preserves the name and warning confirmation after ordinary failure %i", async (status) => {
-    vi.mocked(positionDraftApi.validateDraft).mockResolvedValue({ ...baseValidation, warning_count: 1 });
-    const view = await preparePublish();
-    act(() => {
-      view.result.current.changeName("keep-name");
-      view.result.current.confirmWarnings(true);
-    });
-    vi.mocked(positionDraftApi.publishDraft).mockRejectedValueOnce(new ApiError(status, "发布失败"));
-    await act(async () => view.result.current.publish());
-    expect(view.result.current).toMatchObject({ name: "keep-name", error: "发布失败", warningsConfirmed: true });
-    expect(view.result.current.validation).not.toBeNull();
-    expect(view.onPublished).not.toHaveBeenCalled();
-    expect(view.onConflict).not.toHaveBeenCalled();
-    await act(async () => view.result.current.publish());
-    expect(view.onPublished).toHaveBeenCalledOnce();
-  });
+  it.each([400, 401, 403, 409, 422, 500])(
+    "preserves the name and warning confirmation after failure %i",
+    async (status) => {
+      vi.mocked(positionDraftApi.validateDraft).mockResolvedValue({ ...baseValidation, warning_count: 1 });
+      const view = await preparePublish();
+      act(() => {
+        view.result.current.changeName("keep-name");
+        view.result.current.confirmWarnings(true);
+      });
+      vi.mocked(positionDraftApi.publishDraft).mockRejectedValueOnce(new ApiError(status, "发布失败"));
+      await act(async () => view.result.current.publish());
+      expect(view.result.current).toMatchObject({
+        name: "keep-name",
+        error: status === 401 ? null : "发布失败",
+        warningsConfirmed: true
+      });
+      expect(view.result.current.validation).not.toBeNull();
+      expect(view.onPublished).not.toHaveBeenCalled();
+      expect(view.onConflict).not.toHaveBeenCalled();
+      await act(async () => view.result.current.publish());
+      expect(view.onPublished).toHaveBeenCalledOnce();
+    }
+  );
 
   it.each(["validate", "publish"] as const)(
     "blocks reentry, cancellation and input changes during pending %s",

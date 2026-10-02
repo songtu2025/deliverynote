@@ -505,24 +505,71 @@ describe("AdminPage", () => {
     }
   });
 
-  it("refreshes only versions and returns to the catalog after position publish", async () => {
-    versions = [positionVersion];
-    positionFlow = true;
-    render(<AdminPage currentUser={admin} />);
+  it.each([200, 401, 500, "network"])(
+    "separates position publication from catalog refresh (%s)",
+    async (status) => {
+      versions = [positionVersion];
+      positionFlow = true;
+      await apiModule.api("/api/auth/me");
+      const authExpired = vi.fn();
+      window.addEventListener(apiModule.AUTH_EXPIRED_EVENT, authExpired, { once: true });
+      const refresh = deferred<Response>();
+      const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+      let refreshHandled = false;
+      vi.mocked(fetch).mockImplementation((input, init) => {
+        if (
+          String(input).endsWith("/api/input-versions") &&
+          requestCount("GET", "/api/input-versions") === 2 &&
+          !refreshHandled
+        ) {
+          refreshHandled = true;
+          return refresh.promise.then((response) => {
+            if (status === "network") throw new TypeError("Failed to fetch");
+            return response;
+          });
+        }
+        return originalFetch(input, init);
+      });
+      render(<AdminPage currentUser={admin} />);
 
-    await screen.findByText("基础资料目录");
-    fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
-    fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
-    fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
-    fireEvent.change(await screen.findByLabelText("新版本名称"), { target: { value: "position-published" } });
-    fireEvent.click(screen.getByRole("button", { name: "确认发布" }));
+      await screen.findByText("基础资料目录");
+      fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
+      fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
+      fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
+      fireEvent.change(await screen.findByLabelText("新版本名称"), { target: { value: "position-published" } });
+      fireEvent.click(screen.getByRole("button", { name: "确认发布" }));
 
-    await waitFor(() => expect(requestCount("GET", "/api/input-versions")).toBe(2));
-    await waitFor(() => expect(screen.queryByText("MSKU 定位维护")).not.toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /MSKU定位，已就绪，当前版本 position-published/ })).toBeInTheDocument();
-    expect(requestCount("GET", "/api/users")).toBe(0);
-    expect(requestCount("GET", "/api/audit-logs")).toBe(0);
-  }, 30_000);
+      await waitFor(() => expect(requestCount("GET", "/api/input-versions")).toBe(2));
+      expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
+      await act(async () =>
+        refresh.resolve(
+          jsonResponse(
+            status === 200 ? versions : { detail: "目录读取失败" },
+            typeof status === "number" ? status : 500
+          )
+        )
+      );
+      if (status === 401) {
+        expect(authExpired).toHaveBeenCalledOnce();
+        expect(screen.queryByText("目录读取失败")).not.toBeInTheDocument();
+        expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
+      } else {
+        await waitFor(() => expect(screen.queryByText("MSKU 定位维护")).not.toBeInTheDocument());
+        if (status !== 200) {
+          expect(screen.getByText(/库位版本已发布，但读取基础资料目录失败/)).toBeInTheDocument();
+          expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
+          fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+        }
+        await screen.findByRole("button", { name: /MSKU定位，已就绪，当前版本 position-published/ });
+        await waitFor(() => expect(screen.getByRole("heading", { name: "基础资料目录" })).toHaveFocus());
+      }
+      window.removeEventListener(apiModule.AUTH_EXPIRED_EVENT, authExpired);
+      expect(requestCount("POST", "/api/input-drafts/7/publish")).toBe(1);
+      expect(requestCount("GET", "/api/users")).toBe(0);
+      expect(requestCount("GET", "/api/audit-logs")).toBe(0);
+    },
+    30_000
+  );
 
   it("keeps the current administrator self-disable action blocked", async () => {
     render(

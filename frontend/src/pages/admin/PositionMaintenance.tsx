@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { App as AntApp } from "antd";
 import type { UploadProps } from "antd";
 
+import { ApiError } from "../../api";
 import { usePositionDraftRows } from "./usePositionDraftRows";
 import { usePositionDraftSession } from "./usePositionDraftSession";
 import { usePositionRowEditor } from "./usePositionRowEditor";
@@ -22,7 +23,7 @@ import type { InputVersion, PositionDiff } from "../../types";
 
 interface PositionMaintenanceProps {
   activeVersion: InputVersion;
-  onPublished: (version: InputVersion) => void;
+  onPublished: (version: InputVersion) => void | Promise<boolean>;
   onBack: () => void;
 }
 
@@ -130,10 +131,13 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     getRevision,
     onBusyChange: changeBusyAction,
     onValidationError: setActionError,
-    onPublished: (published) => {
+    onPublished: async (published) => {
       recordRevision(published.draft_revision);
-      onPublished(published);
-      message.success("新库位版本已发布并启用");
+      try {
+        if ((await onPublished(published)) !== false) message.success("新库位版本已发布并启用");
+      } catch (error) {
+        if (!(error instanceof ApiError && error.status === 401)) message.warning("版本已发布，但读取基础资料目录失败");
+      }
     },
     onConflict: (messageText, kind) => {
       if (kind === "revision") invalidateLocalState(messageText);
@@ -169,6 +173,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const previewImport: NonNullable<UploadProps["customRequest"]> = async (options) => {
     const failure = await importFlow.previewFile(options.file as File);
+    if (failure === false) return;
     if (failure) options.onError?.(failure);
     else options.onSuccess?.({});
   };
@@ -223,12 +228,13 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
         refreshing={entryLoading}
         actionError={actionError}
         importError={importFlow.error}
+        metadata={session}
         onRefresh={loadDraft}
         onClearActionError={() => setActionError(null)}
         onClearImportError={importFlow.clearError}
       />
 
-      <DraftSummary draft={draft} diff={diff} />
+      <DraftSummary draft={draft} diff={diff} stale={session.metadataStale} />
 
       <PositionDraftRecords
         rowsState={rowsState}

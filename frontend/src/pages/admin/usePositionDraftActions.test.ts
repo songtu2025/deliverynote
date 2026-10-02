@@ -67,6 +67,19 @@ describe("usePositionDraftActions", () => {
     expect(view.onError).not.toHaveBeenCalled();
   });
 
+  it.each(["download", "discard"])("does not report a local %s error after 401", async (action) => {
+    const view = actionsView();
+    vi.mocked(
+      action === "download" ? positionDraftApi.downloadDraft : positionDraftApi.discardDraft
+    ).mockRejectedValueOnce(new ApiError(401, "未登录"));
+    await act(async () =>
+      action === "download" ? view.result.current.download() : view.result.current.confirmDiscard()
+    );
+    expect(view.onError).not.toHaveBeenCalledWith("未登录");
+    expect(view.onDiscarded).not.toHaveBeenCalled();
+    expect(view.onConflict).not.toHaveBeenCalled();
+  });
+
   it("uses the current write revision and prevents duplicate confirmation and cancellation while pending", async () => {
     const response = deferred<PositionDraft>();
     vi.mocked(positionDraftApi.discardDraft).mockReturnValueOnce(response.promise);

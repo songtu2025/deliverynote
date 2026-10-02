@@ -81,12 +81,12 @@ describe("usePositionImport", () => {
     expect(view.result.current.fileName).toBe("next.xlsx");
   });
 
-  it.each([401, 403, 500])("keeps preview failure %i local without changing revision", async (status) => {
+  it.each([401, 403, 500])("handles preview failure %i without changing revision", async (status) => {
     const view = importView();
     const failure = new ApiError(status, "预览失败");
     vi.mocked(positionDraftApi.previewImport).mockRejectedValueOnce(failure);
-    await act(async () => expect(await view.result.current.previewFile(file)).toBe(failure));
-    expect(view.result.current.error).toBe("预览失败");
+    await act(async () => expect(await view.result.current.previewFile(file)).toBe(status === 401 ? false : failure));
+    expect(view.result.current.error).toBe(status === 401 ? null : "预览失败");
     expect(view.onConflict).not.toHaveBeenCalled();
     expect(view.onApplied).not.toHaveBeenCalled();
     expect(view.result.current.preview).toBeNull();
@@ -127,13 +127,13 @@ describe("usePositionImport", () => {
     expectReset(view);
   });
 
-  it.each([500, 409])("preserves the candidate on an ordinary apply failure %i", async (status) => {
+  it.each([401, 403, 409, 422, 500])("preserves the candidate after apply failure %i", async (status) => {
     const view = await preparePreview(importView());
     vi.mocked(positionDraftApi.applyImport).mockRejectedValueOnce(new ApiError(status, "替换失败"));
     await act(async () => view.result.current.apply());
     expect(view.result.current.preview).toBe(baseImportPreview);
     expect(view.result.current.fileName).toBe(file.name);
-    expect(view.result.current.error).toBe("替换失败");
+    expect(view.result.current.error).toBe(status === 401 ? null : "替换失败");
     expect(view.onConflict).not.toHaveBeenCalled();
     expect(view.onApplied).not.toHaveBeenCalled();
     act(() => view.result.current.clearError());
@@ -169,7 +169,7 @@ describe("usePositionImport", () => {
       if (stage === "apply") await preparePreview(view);
       vi.mocked(positionDraftApi.previewImport).mockReturnValue(previewResponse.promise);
       vi.mocked(positionDraftApi.applyImport).mockReturnValue(applyResponse.promise);
-      let pending!: Promise<Error | null> | Promise<void>;
+      let pending!: ReturnType<typeof view.result.current.previewFile> | Promise<void>;
       await act(async () => {
         pending = stage === "preview" ? view.result.current.previewFile(file) : view.result.current.apply();
         await view.result.current.apply();
@@ -197,5 +197,35 @@ describe("usePositionImport", () => {
     expect(positionDraftApi.applyImport).not.toHaveBeenCalled();
     act(() => view.result.current.reset());
     expectReset(view);
+  });
+
+  it.each(["preview", "apply"] as const)("ignores late %s responses after reset or unmount", async (stage) => {
+    for (const cleanup of ["reset", "unmount"]) {
+      for (const failure of [false, true]) {
+        const view = importView();
+        if (stage === "apply") await preparePreview(view);
+        const response = deferred<void>();
+        const request = stage === "preview" ? positionDraftApi.previewImport : positionDraftApi.applyImport;
+        vi.mocked(request).mockImplementationOnce(async () => {
+          await response.promise;
+          if (failure) throw new ApiError(409, "旧响应冲突", "draft_revision_conflict");
+          return { ...baseImportPreview, revision: 6 };
+        });
+        let pending!: Promise<unknown>;
+        act(() => {
+          pending = stage === "preview" ? view.result.current.previewFile(file) : view.result.current.apply();
+        });
+        act(() => (cleanup === "reset" ? view.result.current.reset() : view.unmount()));
+        await act(async () => {
+          response.resolve();
+          await pending;
+        });
+        if (cleanup === "reset") expectReset(view);
+        expect(view.onApplied).not.toHaveBeenCalled();
+        expect(view.onConflict).not.toHaveBeenCalled();
+        if (cleanup === "unmount") expect(view.onBusyChange).not.toHaveBeenLastCalledWith(null);
+        view.unmount();
+      }
+    }
   });
 });

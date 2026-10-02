@@ -2,9 +2,17 @@ import { render, screen } from "@testing-library/react";
 import { ConfigProvider } from "antd";
 import { describe, expect, it } from "vitest";
 
-import { IssueList } from "./PositionFeedback";
+import { DraftSummary, IssueList } from "./PositionFeedback";
+import { baseDraft } from "./positionDraftTestSupport";
 
 describe("PositionFeedback IssueList", () => {
+  it("hides stale totals in the existing padded summary area", () => {
+    render(<DraftSummary draft={baseDraft} diff={baseDraft.diff!} stale />);
+    expect(screen.getByText("摘要待刷新，暂不展示旧统计").parentElement).toHaveClass("position-summary-metric");
+    expect(screen.queryByText("新增 0")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "草稿摘要" })).toBeInTheDocument();
+  });
+
   it("keeps the default empty-state message", () => {
     render(<IssueList issues={[]} />);
     expect(screen.getByText("没有发现问题")).toBeInTheDocument();

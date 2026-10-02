@@ -109,38 +109,41 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
     }
   }, []);
 
-  const loadVersions = useCallback(async (background = false, afterWrite = false) => {
-    const requestId = ++versionsRequestRef.current;
-    if (!mountedRef.current) return false;
+  const loadVersions = useCallback(
+    async (background = false, afterWrite = false, savedMessage = "变更已保存，但读取基础资料失败：") => {
+      const requestId = ++versionsRequestRef.current;
+      if (!mountedRef.current) return false;
 
-    if (!background) setLoading((current) => ({ ...current, versions: true }));
-    setErrors((current) => ({ ...current, versions: null }));
-    try {
-      const nextVersions = await api<InputVersion[]>("/api/input-versions");
-      if (mountedRef.current && versionsRequestRef.current === requestId) {
-        setVersions(nextVersions);
-        return true;
-      }
-      return false;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        if (afterWrite) throw error;
+      if (!background) setLoading((current) => ({ ...current, versions: true }));
+      setErrors((current) => ({ ...current, versions: null }));
+      try {
+        const nextVersions = await api<InputVersion[]>("/api/input-versions");
+        if (mountedRef.current && versionsRequestRef.current === requestId) {
+          setVersions(nextVersions);
+          return true;
+        }
         return false;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          if (afterWrite) throw error;
+          return false;
+        }
+        if (mountedRef.current && versionsRequestRef.current === requestId) {
+          setErrors((current) => ({
+            ...current,
+            versions: `${afterWrite ? savedMessage : ""}${errorMessage(error, "读取基础资料失败")}`
+          }));
+        }
+        return false;
+      } finally {
+        if (mountedRef.current && versionsRequestRef.current === requestId) {
+          versionsLoadedRef.current = true;
+          setLoading((current) => ({ ...current, versions: false }));
+        }
       }
-      if (mountedRef.current && versionsRequestRef.current === requestId) {
-        setErrors((current) => ({
-          ...current,
-          versions: `${afterWrite ? "变更已保存，但读取基础资料失败：" : ""}${errorMessage(error, "读取基础资料失败")}`
-        }));
-      }
-      return false;
-    } finally {
-      if (mountedRef.current && versionsRequestRef.current === requestId) {
-        versionsLoadedRef.current = true;
-        setLoading((current) => ({ ...current, versions: false }));
-      }
-    }
-  }, []);
+    },
+    []
+  );
 
   const loadAudit = useCallback(async (background = false) => {
     const requestId = ++auditRequestRef.current;
@@ -227,8 +230,9 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
   };
 
   const handlePublished = async () => {
-    await refreshVersions();
-    returnToCatalog();
+    const refreshed = await loadVersions(false, true, "库位版本已发布，但读取基础资料目录失败：");
+    if (mountedRef.current) returnToCatalog();
+    return refreshed;
   };
 
   if (!versionsLoadedRef.current) {
@@ -294,7 +298,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
                     <Suspense fallback={<AdminPanelFallback />}>
                       <PositionMaintenance
                         activeVersion={activePositionVersion}
-                        onPublished={() => void handlePublished()}
+                        onPublished={handlePublished}
                         onBack={returnToCatalog}
                       />
                     </Suspense>

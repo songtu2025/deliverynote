@@ -94,7 +94,16 @@ describe("PositionMaintenance record mutations", () => {
     expect(await screen.findAllByText("记录已复制到服务器草稿")).toHaveLength(1);
     await waitFor(() => expect(copyButton).toBeEnabled());
     expect(screen.queryByText("草稿已在其他位置更新")).not.toBeInTheDocument();
-    expect(screen.queryByText("演示摘要刷新失败")).not.toBeInTheDocument();
+    expect(await screen.findByText("演示摘要刷新失败")).toBeInTheDocument();
+    expect(screen.getByText("草稿已保存，摘要待刷新")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "草稿摘要" })).queryByText("新增 0")).not.toBeInTheDocument();
+    environment.state.metadataRequest = null;
+    environment.state.metadataResponse = { ...environment.state.draftResponse, revision: 4, row_count: 2 };
+    fireEvent.click(screen.getByRole("button", { name: "刷新摘要" }));
+    expect(await screen.findByText("草稿已自动保存")).toBeInTheDocument();
+    expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(1);
+    expect(environment.requests("POST", "/api/input-drafts/position")).toHaveLength(1);
+    expect(environment.requests("GET", "/api/input-drafts/position")).toHaveLength(2);
 
     fireEvent.click(copyButton);
     await waitFor(() => expect(environment.requests("POST", "/api/input-drafts/7/rows")).toHaveLength(2));

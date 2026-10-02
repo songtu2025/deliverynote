@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { ApiError } from "../../api";
 import type { PositionDraft } from "../../types";
 import { createOrResumeDraft, getDraft } from "./positionDraftApi";
 
@@ -8,6 +9,9 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
   const [entryLoading, setEntryLoading] = useState(true);
   const [entryError, setEntryError] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [metadataStale, setMetadataStale] = useState(false);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
   const entryRequestRef = useRef(0);
   const metadataRequestRef = useRef(0);
   const revisionRef = useRef(0);
@@ -58,18 +62,34 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
     );
   };
 
-  const refreshMetadata = async (expectedRevision: number) => {
+  const refreshMetadata = async (expectedRevision = getRevision()) => {
     const request = ++metadataRequestRef.current;
+    setMetadataLoading(true);
+    setMetadataStale(true);
+    setMetadataError(null);
     try {
       const summary = await getDraft();
-      if (request === metadataRequestRef.current) mergeDraftMetadata(summary, expectedRevision);
-    } catch {
+      if (request !== metadataRequestRef.current || getRevision() !== expectedRevision) return;
+      if (summary.id !== draft?.id || summary.revision < expectedRevision) {
+        setMetadataError("摘要版本与当前草稿不一致，请刷新后重试");
+        return;
+      }
+      mergeDraftMetadata(summary, expectedRevision);
+      if (summary.revision === expectedRevision) setMetadataStale(false);
+    } catch (error) {
       // 写操作已返回权威修订号，摘要刷新失败不撤销已成功的修改。
+      if (request === metadataRequestRef.current && !(error instanceof ApiError && error.status === 401)) {
+        setMetadataError(error instanceof Error ? error.message : "读取草稿摘要失败");
+      }
+    } finally {
+      if (request === metadataRequestRef.current) setMetadataLoading(false);
     }
   };
 
   const loadDraft = async (): Promise<boolean> => {
     const request = ++entryRequestRef.current;
+    metadataRequestRef.current += 1;
+    setMetadataLoading(false);
     setEntryLoading(true);
     setEntryError(null);
     try {
@@ -78,9 +98,11 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
       recordRevision(nextDraft.revision);
       setDraft(nextDraft);
       setConflictMessage(null);
+      setMetadataError(null);
+      setMetadataStale(false);
       return true;
     } catch (error) {
-      if (request === entryRequestRef.current) {
+      if (request === entryRequestRef.current && !(error instanceof ApiError && error.status === 401)) {
         setEntryError(error instanceof Error ? error.message : "无法打开库位草稿");
       }
       return false;
@@ -95,8 +117,7 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
       current
         ? {
             ...current,
-            revision,
-            updated_at: new Date().toISOString()
+            revision
           }
         : current
     );
@@ -108,6 +129,10 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
     entryLoading,
     entryError,
     conflictMessage,
+    metadataLoading,
+    metadataStale,
+    metadataError,
+    refreshMetadata,
     loadDraft,
     getRevision,
     recordRevision,

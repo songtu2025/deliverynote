@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 
+import { ApiError } from "../../api";
 import type { PositionDraftRow } from "../../types";
 import * as positionDraftApi from "./positionDraftApi";
 import type { PositionRevisionResponse, PositionRowValues } from "./positionDraftApi";
@@ -53,7 +54,7 @@ export function usePositionRowMutations({
       onApplied(result.revision, successMessage);
       return true;
     } catch (failure) {
-      if (generation !== generationRef.current) return false;
+      if (generation !== generationRef.current || (failure instanceof ApiError && failure.status === 401)) return false;
       const messageText = errorMessage(failure, `${successMessage}失败`);
       if (isRevisionConflict(failure)) onConflict(messageText);
       else onError(messageText);

@@ -88,8 +88,8 @@ describe("PositionMaintenance row listing", () => {
     expect(screen.queryByRole("button", { name: "重置筛选" })).not.toBeInTheDocument();
   });
 
-  it("retries a failed row read without reopening the draft", async () => {
-    environment.state.rowRequestHandler = () => jsonResponse({ detail: "草稿记录暂时不可用" }, 500);
+  it.each([403, 409, 422, 500])("retries a failed row read (%i) without reopening the draft", async (status) => {
+    environment.state.rowRequestHandler = () => jsonResponse({ detail: "草稿记录暂时不可用" }, status);
     renderMaintenance();
     expect(await screen.findByText("草稿记录暂时不可用")).toBeInTheDocument();
     expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
@@ -100,6 +100,15 @@ describe("PositionMaintenance row listing", () => {
     expect(screen.queryByText("无法读取草稿记录")).not.toBeInTheDocument();
     expect(environment.requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(2);
     expect(environment.requests("POST", "/api/input-drafts/position")).toHaveLength(1);
+  });
+
+  it("does not show a local row read error after authentication expiry", async () => {
+    environment.state.rowRequestHandler = () => jsonResponse({ detail: "未登录" }, 401);
+    renderMaintenance();
+    await waitFor(() => expect(environment.requests("GET", "/api/input-drafts/7/rows?")).toHaveLength(1));
+    await waitFor(() => expect(screen.getByRole("table", { name: "库位草稿记录" })).toBeInTheDocument());
+    expect(screen.queryByText("未登录")).not.toBeInTheDocument();
+    expect(screen.queryByText("无法读取草稿记录")).not.toBeInTheDocument();
   });
 
   it("debounces rapid text filters before requesting rows", async () => {

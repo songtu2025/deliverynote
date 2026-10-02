@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { ApiError } from "../../api";
 import type { PositionDraft } from "../../types";
 import { discardDraft, downloadDraft, errorMessage, isRevisionConflict } from "./positionDraftApi";
 
@@ -58,6 +59,7 @@ export function usePositionDraftActions({
     try {
       await downloadDraft(draft.id, draft.revision);
     } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 401) return;
       if (generation === generationRef.current) onError(errorMessage(failure, "下载草稿失败"));
     }
   };
@@ -76,7 +78,7 @@ export function usePositionDraftActions({
       setConfirmOpen(false);
       onDiscarded();
     } catch (failure) {
-      if (generation !== generationRef.current) return;
+      if (generation !== generationRef.current || (failure instanceof ApiError && failure.status === 401)) return;
       const messageText = errorMessage(failure, "放弃草稿失败");
       if (isRevisionConflict(failure)) onConflict(messageText);
       else onError(messageText);

@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError } from "../../api";
 import type { PositionDraft } from "../../types";
 import * as positionDraftApi from "./positionDraftApi";
 import { baseDraft, deferred } from "./positionDraftTestSupport";
@@ -120,6 +121,8 @@ describe("usePositionDraftSession", () => {
     vi.mocked(positionDraftApi.getDraft).mockResolvedValue({ ...baseDraft, ...overrides, row_count: 99 });
     await act(async () => view.result.current.acceptRevision(4));
     expect(view.result.current.draft).toMatchObject({ id: 7, revision: 4, row_count: 1 });
+    expect(view.result.current.metadataStale).toBe(true);
+    expect(view.result.current.metadataError).toBe("摘要版本与当前草稿不一致，请刷新后重试");
     expect(view.onConflict).not.toHaveBeenCalled();
   });
 
@@ -144,6 +147,30 @@ describe("usePositionDraftSession", () => {
     expect(view.result.current.entryError).toBeNull();
     expect(view.result.current.conflictMessage).toBeNull();
     expect(positionDraftApi.getDraft).toHaveBeenCalledOnce();
+    expect(view.result.current.metadataError).toBe("演示摘要刷新失败");
+    expect(view.result.current.metadataStale).toBe(true);
+    vi.mocked(positionDraftApi.getDraft).mockResolvedValue({ ...baseDraft, revision: 8, row_count: 40 });
+    await act(async () => view.result.current.refreshMetadata());
+    expect(view.result.current.draft).toMatchObject({ revision: 8, row_count: 40 });
+    expect(view.result.current.metadataError).toBeNull();
+    expect(view.result.current.metadataStale).toBe(false);
+    expect(positionDraftApi.createOrResumeDraft).toHaveBeenCalledOnce();
+    expect(positionDraftApi.getDraft).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["entry", "metadata"])("leaves %s authentication expiry to the shared handler", async (stage) => {
+    const view = sessionView();
+    if (stage === "entry") {
+      vi.mocked(positionDraftApi.createOrResumeDraft).mockRejectedValue(new ApiError(401, "未登录"));
+      await act(async () => view.result.current.loadDraft());
+    } else {
+      await openSession(view);
+      vi.mocked(positionDraftApi.getDraft).mockRejectedValue(new ApiError(401, "未登录"));
+      await act(async () => view.result.current.acceptRevision(4));
+    }
+    expect(view.result.current.entryError).toBeNull();
+    expect(view.result.current.metadataError).toBeNull();
+    expect(view.onConflict).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -195,5 +222,23 @@ describe("usePositionDraftSession", () => {
     act(() => view.result.current.recordRevision(12));
     expect(view.result.current.getRevision()).toBe(12);
     expect(positionDraftApi.getDraft).not.toHaveBeenCalled();
+  });
+
+  it("ignores a metadata failure after reopening the authoritative draft", async () => {
+    const view = sessionView();
+    await openSession(view);
+    const old = deferred<PositionDraft>();
+    vi.mocked(positionDraftApi.getDraft).mockImplementationOnce(async () => {
+      await old.promise;
+      throw new Error("旧摘要失败");
+    });
+    act(() => view.result.current.acceptRevision(4));
+    vi.mocked(positionDraftApi.createOrResumeDraft).mockResolvedValue({ ...baseDraft, revision: 9 });
+    await openSession(view);
+    await act(async () => old.resolve(baseDraft));
+    expect(view.result.current.draft?.revision).toBe(9);
+    expect(view.result.current.metadataStale).toBe(false);
+    expect(view.result.current.metadataError).toBeNull();
+    expect(view.result.current.metadataLoading).toBe(false);
   });
 });

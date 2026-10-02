@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { ApiError } from "../../api";
 import type { PositionDraftRow } from "../../types";
 import { useDebouncedValue } from "../../useDebouncedValue";
 import { listRows } from "./positionDraftApi";
@@ -43,7 +44,7 @@ export function usePositionDraftRows(draftId?: number) {
         setSelectedRowIds((current) => current.filter((id) => result.rows.some((row) => row.id === id)));
       })
       .catch((error: unknown) => {
-        if (!active) return;
+        if (!active || (error instanceof ApiError && error.status === 401)) return;
         setRows([]);
         setRowsTotal(0);
         setRowsError(error instanceof Error ? error.message : "读取草稿记录失败");

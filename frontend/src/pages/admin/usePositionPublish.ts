@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
+import { ApiError } from "../../api";
 import { beijingDateTimeParts } from "../../dateTime";
 import type { PositionDraftValidation } from "../../types";
 import {
@@ -17,7 +18,7 @@ interface PositionPublishOptions {
   getRevision: () => number;
   onBusyChange: (action: "validate" | "publish" | null) => void;
   onValidationError: (messageText: string) => void;
-  onPublished: (version: Awaited<ReturnType<typeof publishDraft>>) => void;
+  onPublished: (version: Awaited<ReturnType<typeof publishDraft>>) => void | Promise<void>;
   onConflict: (messageText: string, kind: "revision" | "base") => void;
 }
 
@@ -78,7 +79,7 @@ export function usePositionPublish({
       setValidation(result);
       setName(defaultVersionName());
     } catch (failure) {
-      if (generation !== generationRef.current) return;
+      if (generation !== generationRef.current || (failure instanceof ApiError && failure.status === 401)) return;
       const messageText = errorMessage(failure, "发布前校验失败");
       if (isRevisionConflict(failure)) onConflict(messageText, "revision");
       else onValidationError(messageText);
@@ -96,6 +97,7 @@ export function usePositionPublish({
     !name.trim();
 
   const handlePublishFailure = (failure: unknown) => {
+    if (failure instanceof ApiError && failure.status === 401) return;
     const messageText = errorMessage(failure, "发布失败");
     const revisionConflict = isRevisionConflict(failure);
     if (revisionConflict || hasApiCode(failure, POSITION_ERROR_CODES.baseVersionChanged)) {
@@ -125,7 +127,7 @@ export function usePositionPublish({
       });
       if (generation !== generationRef.current) return;
       reset();
-      onPublished(result);
+      await onPublished(result);
     } catch (failure) {
       if (generation === generationRef.current) handlePublishFailure(failure);
     } finally {
