@@ -1,9 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
-import logging
 import os
 from pathlib import Path
-import re
 import shutil
 from threading import Lock
 from typing import Annotated, Callable
@@ -33,7 +31,6 @@ from starlette.concurrency import run_in_threadpool
 from ..config import (
     PURCHASE_STATUSES,
     resolve_supplier,
-    validate_supplier_frame,
     warehouse_sort_key,
 )
 from ..excel_io import (
@@ -57,13 +54,6 @@ from ..input_inspection import (
     write_position_workbook,
 )
 from ..migrations.runner import migrate_schema as run_schema_migrations
-from ..gerpgo import (
-    GerpgoClient,
-    GerpgoError,
-    GerpgoSettings,
-    load_gerpgo_settings,
-    save_gerpgo_settings,
-)
 from ..pipeline import (
     IMPORT_COLUMNS,
     POSITION_VALUE_COLUMNS,
@@ -81,6 +71,9 @@ from .batch_views import (
     merged_export_path, merged_export_ready,
 )
 from .database import Database
+from .input_versions import _validate_input_version, bootstrap_builtin_templates
+from .uploads import _safe_filename, _save_upload, _unlink_after_commit
+from .gerpgo_routes import register_gerpgo_routes
 from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
 from .input_version_read_routes import register_input_version_read_routes
@@ -132,7 +125,6 @@ from .schemas import (
     OverreceiptRulePayload,
     SelfOperatedOverreceiptRulePayload,
     RuleVersionNamePayload,
-    GerpgoConfigPayload,
 )
 from .caches import (
     InputInspectionCache,
@@ -141,7 +133,6 @@ from .caches import (
 )
 from .serializers import (
     utc_isoformat,
-    gerpgo_config_json,
     version_json,
     overreceipt_rule_json,
     self_operated_overreceipt_rule_json,
@@ -149,7 +140,6 @@ from .serializers import (
 )
 
 
-LOGGER = logging.getLogger(__name__)
 
 
 class CodedHTTPException(HTTPException):
@@ -165,16 +155,6 @@ INPUT_VERSION_NAME_EXISTS_CODE = "input_version_name_exists"
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
 SELF_OPERATED_INPUT_KINDS = ("product", "supplier", "inbound_template")
 UPLOAD_INPUT_KINDS = (*INPUT_KINDS, "inbound_template")
-BUILTIN_EXPORT_TEMPLATE_NAME = "系统内置交货导出模板"
-BUILTIN_EXPORT_TEMPLATE_ORIGINAL_NAME = "交货导入模板.xlsx"
-BUILTIN_EXPORT_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[1] / "assets" / "default_import_template.xlsx"
-)
-BUILTIN_INBOUND_TEMPLATE_NAME = "系统内置积加入库模板"
-BUILTIN_INBOUND_TEMPLATE_ORIGINAL_NAME = "积加批量入库模板.xlsx"
-BUILTIN_INBOUND_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[1] / "assets" / "default_inbound_template.xlsx"
-)
 BATCH_STATUSES = {
     "draft",
     "preflight_ready",
@@ -246,29 +226,6 @@ def _batch_input_signature(
     )
 
 
-def _validate_input_version(kind: str, path: Path) -> None:
-    if kind == "purchase":
-        read_purchase_workbook(path)
-    elif kind == "product":
-        read_product_workbook(path)
-    elif kind == "supplier":
-        supplier_rows = read_supplier_workbook(path)
-        issues = validate_supplier_frame(supplier_rows)
-        if issues:
-            details = "；".join(
-                f"Excel 行 {', '.join(map(str, issue['row_numbers']))}："
-                f"{issue['message']}"
-                for issue in issues
-            )
-            raise ValueError(details)
-    elif kind == "position":
-        read_position_workbook(path)
-    elif kind == "template":
-        validate_template_workbook(path)
-    elif kind == "inbound_template":
-        validate_self_operated_template_workbook(path)
-    else:
-        raise ValueError(f"不支持的输入资料类型：{kind}")
 
 
 def _inspect_position_import(
@@ -413,111 +370,6 @@ def _audit(
     )
 
 
-def _safe_filename(filename: str) -> str:
-    safe = Path(filename).name
-    safe = re.sub(r"[<>:\"/\\|?*\x00-\x1f]", "_", safe).strip(" .")
-    if not safe:
-        raise HTTPException(status_code=400, detail="文件名不能为空")
-    return safe
-
-
-def _unlink_after_commit(path: Path) -> None:
-    """数据库提交后尽力删除旧文件，不让清理故障改变请求结果。"""
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        LOGGER.warning("数据库已提交，但旧文件清理失败：%s", path, exc_info=True)
-
-
-async def _save_upload(
-    upload: UploadFile,
-    destination: Path,
-    max_bytes: int,
-) -> None:
-    await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
-    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
-    bytes_written = 0
-    output = None
-    try:
-        output = await run_in_threadpool(temporary.open, "wb")
-        try:
-            while chunk := await upload.read(1024 * 1024):
-                bytes_written += len(chunk)
-                if bytes_written > max_bytes:
-                    raise HTTPException(
-                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                        detail=f"上传文件不能超过 {max_bytes} 字节",
-                    )
-                await run_in_threadpool(output.write, chunk)
-        finally:
-            await run_in_threadpool(output.close)
-            output = None
-        await run_in_threadpool(os.replace, temporary, destination)
-    finally:
-        if output is not None:
-            await run_in_threadpool(output.close)
-        await run_in_threadpool(temporary.unlink, missing_ok=True)
-        await upload.close()
-
-
-def _bootstrap_builtin_inbound_template(database: Database) -> None:
-    """首次启动时注册系统内置的积加入库模板。"""
-    with database.session() as session:
-        existing_id = session.scalar(
-            select(InputVersion.id).where(InputVersion.kind == "inbound_template")
-        )
-        if existing_id is not None:
-            return
-
-        creator_id = session.scalar(
-            select(User.id).where(User.role == "admin").order_by(User.id)
-        )
-        if creator_id is None:
-            return
-
-        validate_self_operated_template_workbook(BUILTIN_INBOUND_TEMPLATE_PATH)
-        session.add(
-            InputVersion(
-                kind="inbound_template",
-                name=BUILTIN_INBOUND_TEMPLATE_NAME,
-                original_name=BUILTIN_INBOUND_TEMPLATE_ORIGINAL_NAME,
-                storage_path=str(BUILTIN_INBOUND_TEMPLATE_PATH),
-                active=True,
-                created_by=creator_id,
-            )
-        )
-        session.commit()
-
-
-def _bootstrap_builtin_export_template(database: Database) -> None:
-    """首次启动时注册系统内置的交货导出模板。"""
-    with database.session() as session:
-        existing_id = session.scalar(
-            select(InputVersion.id).where(InputVersion.kind == "template")
-        )
-        if existing_id is not None:
-            return
-
-        creator_id = session.scalar(
-            select(User.id).where(User.role == "admin").order_by(User.id)
-        )
-        if creator_id is None:
-            return
-
-        validate_template_workbook(BUILTIN_EXPORT_TEMPLATE_PATH)
-        session.add(
-            InputVersion(
-                kind="template",
-                name=BUILTIN_EXPORT_TEMPLATE_NAME,
-                original_name=BUILTIN_EXPORT_TEMPLATE_ORIGINAL_NAME,
-                storage_path=str(BUILTIN_EXPORT_TEMPLATE_PATH),
-                active=True,
-                created_by=creator_id,
-            )
-        )
-        session.commit()
-
-
 def create_app(
     database_url: str | None = None,
     storage_root: Path | str | None = None,
@@ -631,8 +483,7 @@ def create_app(
                 )
                 session.commit()
 
-    _bootstrap_builtin_export_template(database)
-    _bootstrap_builtin_inbound_template(database)
+    bootstrap_builtin_templates(database)
 
     app = FastAPI(title="供应链交货处理系统", version="1.0.0")
 
@@ -889,78 +740,9 @@ def create_app(
         ).all()
         return [version_json(version) for version in versions]
 
-    @app.get("/api/admin/integrations/gerpgo")
-    def get_gerpgo_config(
-        _admin: Annotated[User, Depends(admin_user)],
-    ):
-        try:
-            return gerpgo_config_json(load_gerpgo_settings(storage))
-        except GerpgoError:
-            return {
-                "configured": False,
-                "base_url": os.getenv(
-                    "GERPGO_API_BASE_URL",
-                    "https://open.gerpgo.com/api/open",
-                ).strip(),
-                "app_id_hint": "",
-                "has_app_id": False,
-                "has_app_key": False,
-                "source": "environment",
-            }
 
-    @app.put("/api/admin/integrations/gerpgo")
-    def update_gerpgo_config(
-        payload: GerpgoConfigPayload,
-        admin: Annotated[User, Depends(admin_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        try:
-            current = load_gerpgo_settings(storage)
-        except GerpgoError:
-            current = None
 
-        base_url = payload.base_url.strip().rstrip("/")
-        app_id = payload.app_id.strip() or (current.app_id if current else "")
-        app_key = payload.app_key.strip() or (current.app_key if current else "")
-        if not base_url.startswith(("http://", "https://")):
-            raise HTTPException(
-                status_code=400, detail="API 地址必须使用 HTTP 或 HTTPS"
-            )
-        if not app_id or not app_key:
-            raise HTTPException(status_code=400, detail="请填写 App ID 和 App Key")
-
-        settings = GerpgoSettings(
-            base_url=base_url,
-            app_id=app_id,
-            app_key=app_key,
-            source="managed",
-        )
-        try:
-            GerpgoClient(base_url, app_id, app_key).authenticate()
-        except GerpgoError as error:
-            raise HTTPException(
-                status_code=400,
-                detail=f"积加连接验证失败：{error}",
-            ) from error
-        try:
-            save_gerpgo_settings(storage, settings)
-        except OSError as error:
-            raise HTTPException(status_code=500, detail="积加配置保存失败") from error
-
-        _audit(
-            session,
-            admin.id,
-            "update_gerpgo_config",
-            "integration_config",
-            "gerpgo",
-            details={
-                "base_url": base_url,
-                "app_id_changed": bool(payload.app_id.strip()),
-                "app_key_changed": bool(payload.app_key.strip()),
-            },
-        )
-        session.commit()
-        return gerpgo_config_json(settings)
+    register_gerpgo_routes(app, dependencies, storage, _audit)
 
     register_sync_routes(
         app=app,

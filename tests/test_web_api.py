@@ -17,6 +17,8 @@ from sqlalchemy import delete, event, select
 from sqlalchemy.orm import Session
 
 import delivery_note.input_inspection as input_inspection_module
+import delivery_note.web.gerpgo_routes as gerpgo_routes_module
+from delivery_note.gerpgo import GerpgoError, load_gerpgo_settings
 from delivery_note.pipeline import IMPORT_COLUMNS
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from delivery_note.web.auth import hash_token
@@ -1045,7 +1047,7 @@ class WebApiTests(unittest.TestCase):
         }
 
         with patch.object(
-            web_api_module.GerpgoClient,
+            gerpgo_routes_module.GerpgoClient,
             "authenticate",
         ) as authenticate:
             updated = self.client.put(
@@ -1076,7 +1078,7 @@ class WebApiTests(unittest.TestCase):
         )
         self.assertTrue(purchase_status.json()["configured"])
 
-        settings = web_api_module.load_gerpgo_settings(
+        settings = load_gerpgo_settings(
             self.app.state.storage_root,
         )
         self.assertEqual(settings.app_id, "app-001")
@@ -1131,9 +1133,9 @@ class WebApiTests(unittest.TestCase):
     def test_failed_gerpgo_connection_does_not_save_config(self):
         admin_headers = self.login("admin", "admin-pass")
         with patch.object(
-            web_api_module.GerpgoClient,
+            gerpgo_routes_module.GerpgoClient,
             "authenticate",
-            side_effect=web_api_module.GerpgoError("凭证无效"),
+            side_effect=GerpgoError("凭证无效"),
         ):
             response = self.client.put(
                 "/api/admin/integrations/gerpgo",
