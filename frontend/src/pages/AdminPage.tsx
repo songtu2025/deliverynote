@@ -109,9 +109,9 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
     }
   }, []);
 
-  const loadVersions = useCallback(async (background = false) => {
+  const loadVersions = useCallback(async (background = false, afterWrite = false) => {
     const requestId = ++versionsRequestRef.current;
-    if (!mountedRef.current) return;
+    if (!mountedRef.current) return false;
 
     if (!background) setLoading((current) => ({ ...current, versions: true }));
     setErrors((current) => ({ ...current, versions: null }));
@@ -119,15 +119,21 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
       const nextVersions = await api<InputVersion[]>("/api/input-versions");
       if (mountedRef.current && versionsRequestRef.current === requestId) {
         setVersions(nextVersions);
+        return true;
       }
+      return false;
     } catch (error) {
-      if (error instanceof ApiError && error.status === 401) return;
+      if (error instanceof ApiError && error.status === 401) {
+        if (afterWrite) throw error;
+        return false;
+      }
       if (mountedRef.current && versionsRequestRef.current === requestId) {
         setErrors((current) => ({
           ...current,
-          versions: errorMessage(error, "读取基础资料失败")
+          versions: `${afterWrite ? "变更已保存，但读取基础资料失败：" : ""}${errorMessage(error, "读取基础资料失败")}`
         }));
       }
+      return false;
     } finally {
       if (mountedRef.current && versionsRequestRef.current === requestId) {
         versionsLoadedRef.current = true;
@@ -278,7 +284,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
                       <InputDataPanel
                         versions={versions}
                         loading={loading.versions}
-                        onVersionsChanged={refreshVersions}
+                        onVersionsChanged={() => loadVersions(true, true)}
                         onOpenPositionDraft={openPosition}
                       />
                     </div>

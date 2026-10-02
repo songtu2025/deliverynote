@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Form, Input, Skeleton, Space, Spin, Tag, Typography } from "antd";
 import {
   CheckCircleFilled,
@@ -8,7 +8,7 @@ import {
   WarningFilled
 } from "@ant-design/icons";
 
-import { api } from "../../api";
+import { api, ApiError } from "../../api";
 
 interface GerpgoConfigStatus {
   configured: boolean;
@@ -31,32 +31,49 @@ export function IntegrationConfigPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const mountedRef = useRef(false);
+  const requestRef = useRef(0);
+  const loadedRef = useRef(false);
+  const initialReadFinishedRef = useRef(false);
 
-  const sourceLabel = config?.source === "managed" ? "管理员配置" : "服务环境";
+  const sourceLabel = config === null ? "未确认" : config.source === "managed" ? "管理员配置" : "服务环境";
 
   const loadConfig = useCallback(async () => {
+    const requestId = ++requestRef.current;
     setLoading(true);
     setError("");
+    setNotice("");
     try {
       const next = await api<GerpgoConfigStatus>("/api/admin/integrations/gerpgo");
+      if (!mountedRef.current || requestId !== requestRef.current) return;
       setConfig(next);
-      form.setFieldsValue({
-        base_url: next.base_url,
-        app_id: "",
-        app_key: ""
-      });
+      if (!loadedRef.current && !form.isFieldTouched("base_url")) {
+        form.setFieldsValue({ base_url: next.base_url });
+      }
+      loadedRef.current = true;
     } catch (requestError) {
+      if (!mountedRef.current || requestId !== requestRef.current) return;
+      if (requestError instanceof ApiError && requestError.status === 401) return;
       setError(requestError instanceof Error ? requestError.message : "读取接口配置失败");
     } finally {
-      setLoading(false);
+      if (mountedRef.current && requestId === requestRef.current) {
+        initialReadFinishedRef.current = true;
+        setLoading(false);
+      }
     }
   }, [form]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void loadConfig();
+    return () => {
+      mountedRef.current = false;
+      requestRef.current += 1;
+    };
   }, [loadConfig]);
 
   const saveConfig = async () => {
+    if (loading || saving) return;
     let values: GerpgoConfigForm;
     try {
       values = await form.validateFields();
@@ -64,6 +81,8 @@ export function IntegrationConfigPanel() {
       return;
     }
 
+    if (!mountedRef.current) return;
+    const requestId = ++requestRef.current;
     setSaving(true);
     setError("");
     setNotice("");
@@ -72,7 +91,9 @@ export function IntegrationConfigPanel() {
         method: "PUT",
         body: JSON.stringify(values)
       });
+      if (!mountedRef.current || requestId !== requestRef.current) return;
       setConfig(next);
+      loadedRef.current = true;
       form.setFieldsValue({
         base_url: next.base_url,
         app_id: "",
@@ -80,13 +101,15 @@ export function IntegrationConfigPanel() {
       });
       setNotice("连接验证通过，配置已保存");
     } catch (requestError) {
+      if (!mountedRef.current || requestId !== requestRef.current) return;
+      if (requestError instanceof ApiError && requestError.status === 401) return;
       setError(requestError instanceof Error ? requestError.message : "验证或保存失败");
     } finally {
-      setSaving(false);
+      if (mountedRef.current && requestId === requestRef.current) setSaving(false);
     }
   };
 
-  if (loading && config === null && !error) {
+  if (loading && !initialReadFinishedRef.current) {
     return (
       <Card className="admin-panel-card integration-config-panel" aria-busy="true" aria-label="正在读取接口配置">
         <Form form={form} component={false} />
@@ -100,7 +123,7 @@ export function IntegrationConfigPanel() {
       title="接口配置"
       extra={
         <Tag color={config === null ? undefined : config.configured ? "success" : "warning"}>
-          {config === null ? "读取中" : config.configured ? "已配置" : "未配置"}
+          {config === null ? "状态未知" : config.configured ? "已配置" : "未配置"}
         </Tag>
       }
     >
@@ -124,13 +147,17 @@ export function IntegrationConfigPanel() {
                 <WarningFilled className="is-warning" aria-hidden />
               )}
               <div>
-                <Typography.Text strong>{config?.configured ? "配置可用" : "尚未配置"}</Typography.Text>
+                <Typography.Text strong>
+                  {config === null ? "配置状态未知" : config.configured ? "配置可用" : "尚未配置"}
+                </Typography.Text>
                 <Typography.Text type="secondary">
-                  {config?.configured
-                    ? config.source === "managed"
-                      ? "使用管理员配置。"
-                      : "使用服务环境配置；保存后改用管理员配置。"
-                    : "填写凭证，连接成功后保存。"}
+                  {config === null
+                    ? "请重新读取配置。"
+                    : config.configured
+                      ? config.source === "managed"
+                        ? "使用管理员配置。"
+                        : "使用服务环境配置；保存后改用管理员配置。"
+                      : "填写凭证，连接成功后保存。"}
                 </Typography.Text>
               </div>
             </div>
@@ -165,7 +192,14 @@ export function IntegrationConfigPanel() {
             {error && <Alert type="error" showIcon title="操作失败" description={error} />}
             {notice && <Alert type="success" showIcon title={notice} />}
 
-            <Form className="integration-config-form" form={form} layout="vertical" requiredMark="optional">
+            <Form
+              className="integration-config-form"
+              form={form}
+              layout="vertical"
+              requiredMark="optional"
+              disabled={loading || saving}
+              onValuesChange={() => setNotice("")}
+            >
               <Form.Item
                 label="API 地址"
                 name="base_url"

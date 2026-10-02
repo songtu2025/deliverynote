@@ -3,7 +3,7 @@ import { Alert, App as AntApp, Button, Form, Space, Tabs, Tag, Typography } from
 import { CheckCircleFilled, DownloadOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
 import type { UploadFile, UploadProps } from "antd";
 
-import { api, download } from "../../api";
+import { api, ApiError, download } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { InputVersion, InputVersionInspection, PositionIssue } from "../../types";
 import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS } from "./adminConstants";
@@ -16,7 +16,7 @@ import { InputVersionUploadDrawer } from "./InputVersionUploadDrawer";
 interface InputDataPanelProps {
   versions: InputVersion[];
   loading: boolean;
-  onVersionsChanged: () => void | Promise<void>;
+  onVersionsChanged: () => void | boolean | Promise<void | boolean>;
   onOpenPositionDraft: () => void;
 }
 
@@ -120,7 +120,7 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     setInspectionLoading(true);
     void request
       .catch((error: unknown) => {
-        if (cancelled) return;
+        if (cancelled || (error instanceof ApiError && error.status === 401)) return;
         setInspectionError({
           versionId,
           message: error instanceof Error ? error.message : "读取当前版本失败"
@@ -144,14 +144,19 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     if (mutationBusy) return;
     const kind = selectedKind;
     setUploadError(null);
+    let values: { name: string };
     try {
-      const values = await uploadForm.validateFields();
-      const file = pendingFiles[0]?.originFileObj;
-      if (!file) {
-        setUploadError({ kind, message: "请选择要上传的 Excel 文件" });
-        return;
-      }
-      setMutation({ kind, action: "upload" });
+      values = await uploadForm.validateFields();
+    } catch {
+      return;
+    }
+    const file = pendingFiles[0]?.originFileObj;
+    if (!file) {
+      setUploadError({ kind, message: "请选择要上传的 Excel 文件" });
+      return;
+    }
+    setMutation({ kind, action: "upload" });
+    try {
       const formData = new FormData();
       formData.append("name", values.name);
       formData.append("activate", "true");
@@ -162,10 +167,12 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
       });
       uploadForm.resetFields();
       setPendingFiles([]);
-      await onVersionsChanged();
       setMaintenanceOpen(false);
-      message.success(`${INPUT_KIND_BY_VALUE[kind].label}已上传并启用，将用于新批次`);
+      if ((await onVersionsChanged()) !== false) {
+        message.success(`${INPUT_KIND_BY_VALUE[kind].label}已上传并启用，将用于新批次`);
+      }
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return;
       const errorMessage = error instanceof Error ? error.message : "上传失败";
       setUploadError({ kind, message: errorMessage });
       message.error("上传失败，请检查页面提示");
@@ -180,6 +187,7 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     try {
       await download(`/api/input-versions/${activeVersion.id}/download`, activeVersion.original_name);
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return;
       setActionError({
         kind: selectedKind,
         message: error instanceof Error ? error.message : "下载失败"
@@ -195,9 +203,11 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     void (async () => {
       try {
         await api<InputVersion>(`/api/input-versions/${version.id}/activate`, { method: "POST" });
-        await onVersionsChanged();
-        message.success(`${version.name} 已启用，将用于新批次`);
+        if ((await onVersionsChanged()) !== false) {
+          message.success(`${version.name} 已启用，将用于新批次`);
+        }
       } catch (error) {
+        if (error instanceof ApiError && error.status === 401) return;
         setActionError({
           kind,
           message: error instanceof Error ? error.message : "启用失败"

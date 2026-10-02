@@ -592,6 +592,48 @@ describe("AdminPage", () => {
     expect(onDataChanged).toHaveBeenCalledOnce();
   });
 
+  it.each([500, 401])("distinguishes saved input activation from a failed refresh (%s)", async (status) => {
+    versions = [{ ...positionVersion, kind: "product", active: false }];
+    await apiModule.api("/api/auth/me");
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    let saved = false;
+    let failRefresh = true;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/input-versions/31/activate")) {
+        saved = true;
+        versions = versions.map((version) => ({ ...version, active: true }));
+        return Promise.resolve(jsonResponse(versions[0]));
+      }
+      if (url.endsWith("/api/input-versions") && saved && failRefresh) {
+        return Promise.resolve(jsonResponse({ detail: "合成刷新失败" }, status));
+      }
+      return originalFetch(input, init);
+    });
+    render(<AdminPage currentUser={admin} />);
+    await screen.findByText("商品信息尚无启用版本");
+    fireEvent.click(screen.getByText(/版本记录/, { selector: ".ant-tabs-tab-btn > span" }));
+    fireEvent.click(
+      within(screen.getByText("position-current").closest("tr")!).getByText("启用", { selector: "button > span" })
+    );
+    fireEvent.click(await screen.findByText("确认启用", { selector: "button > span" }));
+    if (status === 500) {
+      await screen.findByText("变更已保存，但读取基础资料失败：合成刷新失败");
+      failRefresh = false;
+      fireEvent.click(screen.getByText("重新加载", { selector: "button > span" }));
+      await waitFor(() => expect(screen.queryByText("无法读取基础资料")).not.toBeInTheDocument());
+      expect(requestCount("GET", "/api/input-versions")).toBe(3);
+    } else {
+      await waitFor(() => expect(requestCount("GET", "/api/input-versions")).toBe(2));
+      await waitFor(() =>
+        expect(screen.getByText("上传首个版本", { selector: "button > span" }).closest("button")).toBeEnabled()
+      );
+      expect(screen.queryByText("合成刷新失败")).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("position-current 已启用，将用于新批次")).not.toBeInTheDocument();
+    expect(requestCount("POST", "/api/input-versions/31/activate")).toBe(1);
+  });
+
   it("resets an operator password through the existing password endpoint", async () => {
     const onDataChanged = vi.fn();
     render(

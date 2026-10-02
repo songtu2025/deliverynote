@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { download } from "../../api";
+import { api, ApiError, AUTH_EXPIRED_EVENT, download } from "../../api";
 import type { InputVersion } from "../../types";
 import { InputDataPanel } from "./InputDataPanel";
 
@@ -131,6 +131,14 @@ const getCatalogButton = (label: string) =>
   screen.getByRole("button", {
     name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
   });
+
+async function confirmHistoryActivation() {
+  fireEvent.click(screen.getByText(/版本记录/, { selector: ".ant-tabs-tab-btn > span" }));
+  fireEvent.click(
+    within(screen.getByText("product-old").closest("tr")!).getByText("启用", { selector: "button > span" })
+  );
+  fireEvent.click(await screen.findByText("确认启用", { selector: "button > span" }));
+}
 
 describe("InputDataPanel", () => {
   beforeEach(() => {
@@ -848,6 +856,7 @@ describe("InputDataPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "校验并启用新版本" }));
     expect(await screen.findByText(hasName ? "请选择要上传的 Excel 文件" : "请输入版本名称")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+    expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();
     if (hasName) expect(screen.getByLabelText("新版本名称")).toHaveValue("synthetic-no-file");
   });
 
@@ -861,6 +870,95 @@ describe("InputDataPanel", () => {
       expect(download).toHaveBeenCalledWith("/api/input-versions/7/download", "product.xlsx");
     });
   });
+
+  it.each(["upload", "activate"])(
+    "does not report %s success when the saved list cannot refresh",
+    async (operation) => {
+      const onVersionsChanged = vi.fn().mockResolvedValue(false);
+      render(
+        <InputDataPanel
+          versions={versions}
+          loading={false}
+          onVersionsChanged={onVersionsChanged}
+          onOpenPositionDraft={vi.fn()}
+        />
+      );
+      await screen.findByText("PRODUCT-SKU");
+      if (operation === "upload") {
+        fireEvent.click(screen.getByText("更新资料", { selector: "button > span" }));
+        fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: "saved-version" } });
+        fireEvent.change(document.querySelector('input[type="file"]')!, {
+          target: { files: [new File(["synthetic"], "saved.xlsx")] }
+        });
+        await screen.findByText("saved.xlsx");
+        fireEvent.click(screen.getByText("校验并启用新版本", { selector: "button > span" }));
+      } else {
+        await confirmHistoryActivation();
+      }
+      await waitFor(() => expect(onVersionsChanged).toHaveBeenCalledOnce());
+      await waitFor(() => expect(getCatalogButton("供应商资料")).toBeEnabled());
+      expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();
+      expect(screen.queryByText("上传失败")).not.toBeInTheDocument();
+      if (operation === "upload") {
+        expect(screen.queryByLabelText("新版本名称")).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText("更新资料", { selector: "button > span" }));
+        expect(screen.getByLabelText("新版本名称")).toHaveValue("");
+        expect(screen.queryByText("saved.xlsx")).not.toBeInTheDocument();
+      }
+      expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+    }
+  );
+
+  it.each(["inspection", "upload", "activate", "download"])(
+    "does not append local feedback for %s 401",
+    async (operation) => {
+      vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ id: 1 }));
+      await api("/api/auth/me");
+      const expired = vi.fn();
+      window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+      const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation((input, init) => {
+        if (operation === "inspection" || init?.method === "POST")
+          return Promise.resolve(jsonResponse({ detail: "合成未登录" }, 401));
+        return originalFetch(input, init);
+      });
+      vi.mocked(download).mockRejectedValue(new ApiError(401, "合成未登录"));
+      const onVersionsChanged = vi.fn();
+      try {
+        render(
+          <InputDataPanel
+            versions={versions}
+            loading={false}
+            onVersionsChanged={onVersionsChanged}
+            onOpenPositionDraft={vi.fn()}
+          />
+        );
+        if (operation !== "inspection") await screen.findByText("PRODUCT-SKU");
+        if (operation === "upload") {
+          fireEvent.click(screen.getByText("更新资料", { selector: "button > span" }));
+          fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: "retry-version" } });
+          fireEvent.change(document.querySelector('input[type="file"]')!, {
+            target: { files: [new File(["synthetic"], "retry.xlsx")] }
+          });
+          await screen.findByText("retry.xlsx");
+          fireEvent.click(screen.getByText("校验并启用新版本", { selector: "button > span" }));
+        } else if (operation === "activate") {
+          await confirmHistoryActivation();
+        } else if (operation === "download") {
+          fireEvent.click(screen.getByText("下载当前文件", { selector: "button > span" }));
+          await waitFor(() => expect(download).toHaveBeenCalledOnce());
+        }
+        if (operation !== "download") await waitFor(() => expect(expired).toHaveBeenCalledOnce());
+        await waitFor(() => expect(getCatalogButton("供应商资料")).toBeEnabled());
+        expect(screen.queryByText("合成未登录")).not.toBeInTheDocument();
+        expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();
+        expect(onVersionsChanged).not.toHaveBeenCalled();
+        if (operation === "upload") expect(screen.getByLabelText("新版本名称")).toHaveValue("retry-version");
+      } finally {
+        window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
+      }
+    }
+  );
 
   it("surfaces inspection and upload failures", async () => {
     failInspection = true;
