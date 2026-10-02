@@ -30,7 +30,7 @@ import {
 } from "@ant-design/icons";
 import type { TableProps, UploadFile, UploadProps } from "antd";
 
-import { api, download } from "../api";
+import { api, ApiError, download } from "../api";
 import { beijingDateTimeParts, formatBeijingDateTime } from "../dateTime";
 import { useDebouncedValue } from "../useDebouncedValue";
 import PurchaseSyncPanel from "./PurchaseSyncPanel";
@@ -239,7 +239,7 @@ export default function BatchesPage({
           setOverreceiptRules(overreceiptRuleRows as OverreceiptRuleVersion[]);
         }
       } catch (error) {
-        if (request === loadRequestRef.current) {
+        if (request === loadRequestRef.current && !(error instanceof ApiError && error.status === 401)) {
           message.error(error instanceof Error ? error.message : "读取批次失败");
         }
       } finally {

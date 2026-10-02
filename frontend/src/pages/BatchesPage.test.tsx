@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { message } from "antd";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import BatchesPage from "./BatchesPage";
@@ -11,6 +12,18 @@ const jsonResponse = (payload: unknown) =>
 
 let inboundSyncStatus: Record<string, unknown>;
 let batchRows: Array<Record<string, unknown>>;
+
+function rejectBatchList(status: number, detail: string) {
+  const initialFetch = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes("/api/batches?")
+        ? Promise.resolve(new Response(JSON.stringify({ detail }), { status }))
+        : initialFetch(input, init)
+    )
+  );
+}
 
 function setFourteenBatches() {
   batchRows = Array.from({ length: 14 }, (_, index) => ({
@@ -203,7 +216,30 @@ describe("BatchesPage", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["delivery", "self_operated_inbound"] as const)(
+    "leaves unauthorized %s list errors to the shared authentication handler",
+    async (workflow) => {
+      const errorMessage = vi.spyOn(message, "error");
+      rejectBatchList(401, "未登录");
+      render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />);
+
+      await waitFor(() => expect(screen.getByRole("button", { name: /新建批次/ })).toBeInTheDocument());
+      expect(errorMessage).not.toHaveBeenCalled();
+      expect(screen.queryByText("未登录")).not.toBeInTheDocument();
+    }
+  );
+
+  it.each([403, 500])("still displays batch list errors with status %i", async (status) => {
+    const errorMessage = vi.spyOn(message, "error");
+    rejectBatchList(status, "批次读取测试错误");
+    render(<BatchesPage onOpen={vi.fn()} />);
+
+    expect(await screen.findByText("批次读取测试错误")).toBeInTheDocument();
+    expect(errorMessage).toHaveBeenCalledWith("批次读取测试错误");
   });
 
   it("does not render action buttons before initial data is ready", async () => {
