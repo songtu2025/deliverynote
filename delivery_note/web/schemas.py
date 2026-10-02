@@ -105,3 +105,9 @@ class PositionImportForm:
 
     revision: Annotated[int, Form(ge=1)]
     file: UploadFile = File(...)
+
+
+@dataclass
+class DeliveryBatchForm:
+    name: Annotated[str, Form()]
+    files: list[UploadFile] = File(...)

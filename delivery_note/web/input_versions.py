@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -218,3 +218,21 @@ def activate_input_version_record(
             detail="输入版本发生并发冲突，请刷新后重试",
         ) from error
     return version
+
+
+def require_active_versions(
+    session: Session, kinds: Sequence[str]
+) -> dict[str, InputVersion]:
+    active_versions = {
+        version.kind: version
+        for version in session.scalars(
+            select(InputVersion).where(InputVersion.active.is_(True))
+        )
+    }
+    missing = [kind for kind in kinds if kind not in active_versions]
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"缺少启用的输入版本：{', '.join(missing)}",
+        )
+    return active_versions

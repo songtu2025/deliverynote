@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from ..excel_io import (
-    read_delivery_workbook,
     read_self_operated_delivery_workbook,
     read_self_operated_inbound_workbook,
 )
@@ -35,6 +34,8 @@ from .dependencies import build_request_dependencies
 from .health_routes import register_health_routes
 from .auth import hash_password
 from .job_routes import build_job_queue, register_job_routes
+from .batch_creation import DeliveryBatchCreator
+from .batch_creation_routes import register_batch_creation_routes
 from .batch_file_edits import BatchFileEditor
 from .batch_file_uploads import BatchFileUploader
 from .batch_file_routes import register_batch_file_routes
@@ -42,7 +43,6 @@ from .batch_export_routes import register_batch_export_routes
 from .batch_read_routes import register_batch_read_routes
 from .batch_maintenance import BatchMaintenance
 from .batch_maintenance_routes import register_batch_maintenance_routes
-from .batch_queries import VERSION_FIELDS
 from .batch_views import (
     batch_json, batch_list_json, merged_export_path, merged_export_ready,
 )
@@ -60,7 +60,7 @@ from .position_import_candidates import PositionImportCandidates
 from .overreceipt_routes import register_overreceipt_routes
 from .self_operated_rule_routes import register_self_operated_rule_routes
 from .input_version_routes import register_input_version_routes
-from .input_versions import INPUT_KINDS, SELF_OPERATED_INPUT_KINDS
+from .input_versions import SELF_OPERATED_INPUT_KINDS
 from .input_versions import bootstrap_builtin_templates
 from .uploads import _safe_filename, _save_upload
 from .gerpgo_routes import register_gerpgo_routes
@@ -74,17 +74,12 @@ from .models import (
     AuditLog,
     Batch,
     BatchFile,
-    BatchOverreceiptRule,
     InputVersion,
-    OverreceiptRuleVersion,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
     User,
 )
 from .sync_routes import register_sync_routes
-from .schemas import (
-    BatchPayload,
-)
 from .caches import (
     InputInspectionCache,
     PositionFrameCache,
@@ -405,6 +400,10 @@ def create_app(
 
 
 
+    register_batch_creation_routes(
+        app, dependencies,
+        DeliveryBatchCreator(app, storage, _audit, parse_uploaded_workbook),
+    )
     register_batch_file_routes(
         app, dependencies,
         BatchFileUploader(app, dependencies, storage, _audit, parse_uploaded_workbook),
@@ -414,199 +413,7 @@ def create_app(
         app, dependencies, BatchMaintenance(storage, _audit)
     )
 
-    @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
-    def create_batch(
-        payload: BatchPayload,
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-    ):
-        active_versions = {
-            version.kind: version
-            for version in session.scalars(
-                select(InputVersion).where(InputVersion.active.is_(True))
-            )
-        }
-        missing = [kind for kind in INPUT_KINDS if kind not in active_versions]
-        if missing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"缺少启用的输入版本：{', '.join(missing)}",
-            )
-        active_overreceipt_rule = session.scalar(
-            select(OverreceiptRuleVersion).where(
-                OverreceiptRuleVersion.active.is_(True)
-            )
-        )
-        batch = Batch(
-            name=payload.name,
-            created_by=user.id,
-            **{VERSION_FIELDS[kind]: active_versions[kind].id for kind in INPUT_KINDS},
-        )
-        session.add(batch)
-        session.flush()
-        if active_overreceipt_rule is not None:
-            session.add(
-                BatchOverreceiptRule(
-                    batch_id=batch.id,
-                    rule_version_id=active_overreceipt_rule.id,
-                )
-            )
-        _audit(
-            session,
-            user.id,
-            "create_batch",
-            "batch",
-            batch.id,
-            {
-                "overreceipt_rule_version_id": (
-                    active_overreceipt_rule.id
-                    if active_overreceipt_rule is not None
-                    else None
-                )
-            },
-        )
-        session.commit()
-        return batch_json(batch, session)
 
-    @app.post(
-        "/api/batches/with-files",
-        status_code=status.HTTP_201_CREATED,
-    )
-    async def create_batch_with_files(
-        name: Annotated[str, Form()],
-        user: Annotated[User, Depends(current_user)],
-        session: Annotated[Session, Depends(get_session)],
-        files: list[UploadFile] = File(...),
-    ):
-        batch_name = name.strip()
-        if not batch_name:
-            raise HTTPException(status_code=400, detail="批次名称不能为空")
-        if len(batch_name) > 200:
-            raise HTTPException(status_code=400, detail="批次名称不能超过 200 个字符")
-        if not files:
-            raise HTTPException(status_code=400, detail="请至少上传一份交货文件")
-        if len(files) > app.state.max_batch_upload_files:
-            for upload in files:
-                await upload.close()
-            raise HTTPException(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                detail=f"单批次最多上传 {app.state.max_batch_upload_files} 份交货文件",
-            )
-
-        active_versions = {
-            version.kind: version
-            for version in session.scalars(
-                select(InputVersion).where(InputVersion.active.is_(True))
-            )
-        }
-        missing = [kind for kind in INPUT_KINDS if kind not in active_versions]
-        if missing:
-            raise HTTPException(
-                status_code=409,
-                detail=f"缺少启用的输入版本：{', '.join(missing)}",
-            )
-        original_names = [_safe_filename(file.filename or "") for file in files]
-        if any(
-            Path(original_name).suffix.lower() not in {".xls", ".xlsx"}
-            for original_name in original_names
-        ):
-            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
-        if len(original_names) != len(set(original_names)):
-            raise HTTPException(status_code=400, detail="同一批次不可上传同名文件")
-
-        temporary_root = storage / "temporary" / "delivery-batches"
-        token = uuid4().hex
-        temporary_paths = [
-            temporary_root / f"{token}_{index}_{original_name}"
-            for index, original_name in enumerate(original_names, start=1)
-        ]
-        created_paths: list[Path] = []
-        active_overreceipt_rule = session.scalar(
-            select(OverreceiptRuleVersion).where(
-                OverreceiptRuleVersion.active.is_(True)
-            )
-        )
-        try:
-            for file, temporary_path in zip(files, temporary_paths):
-                await _save_upload(
-                    file,
-                    temporary_path,
-                    app.state.max_upload_bytes,
-                )
-                await parse_uploaded_workbook(
-                    read_delivery_workbook,
-                    temporary_path,
-                )
-
-            batch = Batch(
-                name=batch_name,
-                created_by=user.id,
-                **{
-                    VERSION_FIELDS[kind]: active_versions[kind].id
-                    for kind in INPUT_KINDS
-                },
-            )
-            session.add(batch)
-            session.flush()
-            input_root = storage / "batches" / str(batch.id) / "inputs"
-            await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
-            for file_order, (original_name, temporary_path) in enumerate(
-                zip(original_names, temporary_paths),
-                start=1,
-            ):
-                destination = input_root / f"{uuid4().hex}_{original_name}"
-                await run_in_threadpool(os.replace, temporary_path, destination)
-                created_paths.append(destination)
-                session.add(
-                    BatchFile(
-                        batch_id=batch.id,
-                        original_name=original_name,
-                        storage_path=str(destination),
-                        file_order=file_order,
-                    )
-                )
-            if active_overreceipt_rule is not None:
-                session.add(
-                    BatchOverreceiptRule(
-                        batch_id=batch.id,
-                        rule_version_id=active_overreceipt_rule.id,
-                    )
-                )
-            _audit(
-                session,
-                user.id,
-                "create_batch_with_files",
-                "batch",
-                batch.id,
-                {
-                    "file_count": len(original_names),
-                    "overreceipt_rule_version_id": (
-                        active_overreceipt_rule.id
-                        if active_overreceipt_rule is not None
-                        else None
-                    ),
-                },
-            )
-            session.commit()
-        except HTTPException:
-            session.rollback()
-            for path in created_paths:
-                await run_in_threadpool(path.unlink, missing_ok=True)
-            raise
-        except Exception as error:
-            session.rollback()
-            for path in created_paths:
-                await run_in_threadpool(path.unlink, missing_ok=True)
-            if isinstance(error, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"交货文件校验失败：{error}",
-                ) from error
-            raise
-        finally:
-            for temporary_path in temporary_paths:
-                await run_in_threadpool(temporary_path.unlink, missing_ok=True)
-        return batch_json(batch, session)
 
     @app.post(
         "/api/self-operated-batches",
