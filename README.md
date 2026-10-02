@@ -302,6 +302,10 @@ python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python -m ruff check delivery_note tests scripts
+python -m scripts.check_code_health
+python -m ruff format --check scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
+python -m mypy --strict scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
+python -m vulture delivery_note scripts --min-confidence 100
 python -m unittest discover -s tests -v
 python -m pip check
 ```
@@ -316,6 +320,10 @@ npm ci
 npm run format:check
 npm run typecheck
 npm run test:quality
+npm run lint:tools
+npm run check:duplicates
+npm run check:unused
+npm run check:imports
 npm run test
 npm run build
 ```
@@ -324,7 +332,11 @@ npm run build
 
 `format:check` 检查相对 `HEAD` 的前端已暂存、未暂存及未跟踪文件；提交后复查某个范围使用 `npm run format:check -- --base <起始提交>`。CI 使用 PR 的目标分支提交或本次推送前的提交作为起点，检查范围内所有提交的最终变更。锁文件和非前端文件不参与格式检查。
 
-`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题会返回非零状态。当前采用增量门禁，不批量格式化历史源码。TypeScript 保留现有 7.0.2；ESLint 尚未配置，待 TypeScript 检查插件的官方兼容性确认后再接入，因此这里不是完整的 Seekway 前端质量门禁。
+`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题会返回非零状态。当前采用增量门禁，不批量格式化历史源码。TypeScript 保留现有 7.0.2；`lint:tools` 只检查工程 JavaScript 脚本，TypeScript/React 的 ESLint 仍待兼容性确认。Python 类型与格式门禁目前覆盖新增的检查工具，不代表存量业务代码已经完成治理。
+
+本轮代码治理参考 SEEKWAY V2.0.0 草案，来源为 `songtu2025/seekway-codex-standards` 主分支提交 `96bfb207c2d9a88e3731df06569173a541386e37`（2026-10-03 核验），未复制规范文档或变更现有技术栈。`python -m scripts.check_code_health` 检查相对 HEAD 的已暂存、未暂存和未跟踪代码；CI 使用 `--base <起始提交>` 检查提交范围。新增文件及原本不超过 300 行的文件不得超过 300 个物理行，存量超长文件继续报告提醒。新增 Python 文件执行 Ruff 复杂度检查；存量函数仍需按职责人工审查。
+
+重复代码扫描使用实际源码目录 `frontend/src` 和 `delivery_note`，不设历史重复清零门禁；扫描结果须在阶段验收中审查。本轮初始扫描为 100 处重复片段、3.49% 重复行。Knip 和 Vulture 检查死代码，前端通过 Oxc 解析器与模块解析器检查静态导入循环，后端通过 Python AST 检查包内静态导入循环；动态导入和运行时插件关系仍需人工核对。
 
 部署配置：
 
