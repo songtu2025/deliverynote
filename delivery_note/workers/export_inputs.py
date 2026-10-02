@@ -7,7 +7,14 @@ from sqlalchemy import select
 
 from ..application import SplitPart
 from ..web.database import Database
-from ..web.models import Batch, BatchFile, ExceptionRecord, SplitRecord
+from ..web.models import (
+    Batch,
+    BatchFile,
+    ExceptionRecord,
+    InputVersion,
+    SelfOperatedBatch,
+    SplitRecord,
+)
 from ..workers.compute_inputs import _version_paths
 from .export_rows import _exception_dict
 
@@ -102,3 +109,42 @@ def _load_export_inputs(
                 }
             )
     return version_paths, payloads, previous_export_paths
+
+
+def _load_inbound_export_inputs(
+    database: Database, batch_id: int
+) -> tuple[Path, list[dict[str, Any]], list[str]]:
+    with database.session() as session:
+        batch = session.get(Batch, batch_id)
+        profile = session.get(SelfOperatedBatch, batch_id)
+        if batch is None or batch.status != "succeeded" or profile is None:
+            raise RuntimeError("自营仓入库批次尚未计算成功")
+        template = session.get(InputVersion, profile.template_version_id)
+        if template is None or not Path(template.storage_path).is_file():
+            raise FileNotFoundError("批次锁定的积加入库模板不存在")
+        sources = session.scalars(
+            select(BatchFile)
+            .where(BatchFile.batch_id == batch.id)
+            .order_by(BatchFile.file_order)
+        ).all()
+        if not sources:
+            raise RuntimeError("自营仓入库批次没有质检交货单")
+        source_data = [
+            {
+                "id": source.id,
+                "original_name": source.original_name,
+                "import_total": source.import_total,
+                "import_rows": source.import_rows or [],
+            }
+            for source in sources
+        ]
+        previous_export_paths = [
+            path
+            for path in [
+                batch.zip_path,
+                *(source.result_path for source in sources),
+            ]
+            if path
+        ]
+        template_path = Path(template.storage_path)
+    return template_path, source_data, previous_export_paths

@@ -8,20 +8,13 @@ import logging
 import os
 from pathlib import Path
 import signal
-import shutil
 from threading import Event, Thread
-from uuid import uuid4
-from zipfile import ZIP_DEFLATED, ZipFile
 
-import pandas as pd
 from sqlalchemy import select
 
 from .excel_io import (
-    read_position_workbook,
     read_purchase_workbook,
     read_self_operated_inbound_workbook,
-    write_delivery_workbook,
-    write_self_operated_inbound_workbook,
 )
 from .gerpgo import GerpgoClient
 from .purchase_detail_cache import (
@@ -35,18 +28,11 @@ from .purchase_detail_cache import (
     purchase_detail_cache_path,
     write_purchase_detail_cache,
 )
-from .pipeline import (
-    EXCEPTION_COLUMNS,
-    BatchResult,
-)
 from .purchase_sync import (
     compare_purchase_frames,
     map_purchase_orders,
     purchase_frame,
     write_purchase_workbook,
-)
-from .self_operated_inbound import (
-    INBOUND_TEMPLATE_COLUMNS,
 )
 from .self_operated_inbound_sync import (
     compare_self_operated_inbound_frames,
@@ -58,22 +44,16 @@ from .web.database import Database
 from .web.models import (
     AuditLog,
     Batch,
-    BatchFile,
     InputVersion,
     Job,
     PurchaseSyncJob,
-    SelfOperatedBatch,
     SelfOperatedInboundSyncJob,
 )
-from .workers.export_rows import _consolidate_self_operated_rows, _prepare_export_result
-from .workers.export_inputs import _load_export_inputs
-from .workers.export_files import (
-    _cleanup_previous_export_directories,
-    _published_is_registered,
-)
+from .workers.export_delivery import _execute_export
 from .workers.compute_delivery import _execute_compute
 from .workers.leases import (
     WORKER_QUEUES,
+    JobContext,
     LeaseKeeper,
     LostJobLeaseError,
     _claim_job,
@@ -90,317 +70,6 @@ from .workers.recovery import recover_stale_jobs as recover_stale_jobs
 PURCHASE_DETAIL_WORKERS = 8
 PURCHASE_SYNC_MODES = {"full", "shadow", "incremental"}
 LOGGER = logging.getLogger(__name__)
-
-
-def _execute_self_operated_export(
-    database: Database,
-    job_id: int,
-    batch_id: int,
-    claim_token: str,
-    storage_root: Path,
-    before_finalize: Callable[[], None],
-) -> None:
-    with database.session() as session:
-        batch = session.get(Batch, batch_id)
-        profile = session.get(SelfOperatedBatch, batch_id)
-        if batch is None or batch.status != "succeeded" or profile is None:
-            raise RuntimeError("自营仓入库批次尚未计算成功")
-        template = session.get(InputVersion, profile.template_version_id)
-        if template is None or not Path(template.storage_path).is_file():
-            raise FileNotFoundError("批次锁定的积加入库模板不存在")
-        sources = session.scalars(
-            select(BatchFile)
-            .where(BatchFile.batch_id == batch.id)
-            .order_by(BatchFile.file_order)
-        ).all()
-        if not sources:
-            raise RuntimeError("自营仓入库批次没有质检交货单")
-        source_data = [
-            {
-                "id": source.id,
-                "original_name": source.original_name,
-                "import_total": source.import_total,
-                "import_rows": source.import_rows or [],
-            }
-            for source in sources
-        ]
-        previous_export_paths = [
-            path
-            for path in [
-                batch.zip_path,
-                *(source.result_path for source in sources),
-            ]
-            if path
-        ]
-        template_path = Path(template.storage_path)
-
-    _heartbeat(database, job_id, claim_token)
-    export_root = storage_root / "batches" / str(batch_id) / "exports"
-    export_token = uuid4().hex
-    temporary = export_root / f".tmp-{export_token}"
-    published = export_root / f"export-{export_token}"
-    temporary.mkdir(parents=True, exist_ok=False)
-    output_names: dict[int, str] = {}
-    used_names: set[str] = set()
-    merged_frames: list[pd.DataFrame] = []
-    archive_name = f"batch-{batch_id}.zip"
-    merged_name = f"batch-{batch_id}-merged.xlsx"
-    registered_path = published / (
-        archive_name
-        if len(source_data) > 1
-        else f"{Path(source_data[0]['original_name']).stem}_积加入库.xlsx"
-    )
-    try:
-        for source in source_data:
-            _heartbeat(database, job_id, claim_token)
-            output_name = f"{Path(source['original_name']).stem}_积加入库.xlsx"
-            if output_name in used_names:
-                raise RuntimeError(f"导出文件名重复：{output_name}")
-            used_names.add(output_name)
-            allocation_rows = (
-                pd.DataFrame(source["import_rows"])
-                if source["import_rows"]
-                else pd.DataFrame(columns=INBOUND_TEMPLATE_COLUMNS)
-            )
-            if "最大可收货" not in allocation_rows.columns:
-                allocation_rows["最大可收货"] = pd.NA
-            exported_total = (
-                int(allocation_rows["本次入库"].sum())
-                if not allocation_rows.empty
-                else 0
-            )
-            if exported_total != source["import_total"]:
-                raise RuntimeError("自营仓单文件导出数量不守恒")
-            write_self_operated_inbound_workbook(
-                template_path,
-                temporary / output_name,
-                allocation_rows,
-            )
-            output_names[source["id"]] = output_name
-            merged_frames.append(allocation_rows)
-
-        if len(source_data) > 1:
-            merged_rows = pd.concat(merged_frames, ignore_index=True)
-            merged_rows = _consolidate_self_operated_rows(merged_rows)
-            merged_total = (
-                int(merged_rows["本次入库"].sum()) if not merged_rows.empty else 0
-            )
-            if merged_total != sum(source["import_total"] for source in source_data):
-                raise RuntimeError("自营仓合并导出数量不守恒")
-            write_self_operated_inbound_workbook(
-                template_path,
-                temporary / merged_name,
-                merged_rows,
-            )
-            with ZipFile(temporary / archive_name, "w", ZIP_DEFLATED) as archive:
-                for source in source_data:
-                    output_name = output_names[source["id"]]
-                    archive.write(temporary / output_name, arcname=output_name)
-
-        _heartbeat(database, job_id, claim_token)
-        before_finalize()
-        os.replace(temporary, published)
-
-        with database.session() as session:
-            job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-            batch = session.get(Batch, batch_id)
-            if (
-                job is None
-                or batch is None
-                or job.status != "running"
-                or job.claim_token != claim_token
-            ):
-                raise LostJobLeaseError("导出任务租约已失效")
-            for source_id, output_name in output_names.items():
-                source = session.get(BatchFile, source_id)
-                if source is None or source.batch_id != batch.id:
-                    raise RuntimeError("批次来源文件已变化")
-                source.result_path = str(published / output_name)
-            batch.zip_path = str(registered_path)
-            batch.error_message = None
-            job.status = "succeeded"
-            job.finished_at = datetime.utcnow()
-            job.heartbeat_at = job.finished_at
-            job.error_message = None
-            job.claim_token = None
-            job.output_path = str(registered_path)
-            session.add(
-                AuditLog(
-                    user_id=None,
-                    action="worker_self_operated_export_succeeded",
-                    entity_type="batch",
-                    entity_id=str(batch.id),
-                    details={
-                        "file_count": len(source_data),
-                        "merged_workbook": len(source_data) > 1,
-                    },
-                )
-            )
-            session.commit()
-        _cleanup_previous_export_directories(
-            database,
-            export_root,
-            published,
-            previous_export_paths,
-        )
-    except Exception:
-        if temporary.exists():
-            shutil.rmtree(temporary)
-        if published.exists() and not _published_is_registered(
-            database,
-            job_id,
-            registered_path,
-        ):
-            shutil.rmtree(published)
-        raise
-
-
-def _execute_export(
-    database: Database,
-    job_id: int,
-    batch_id: int,
-    claim_token: str,
-    storage_root: Path,
-    before_finalize: Callable[[], None],
-) -> None:
-    with database.session() as session:
-        self_operated = session.get(SelfOperatedBatch, batch_id)
-    if self_operated is not None:
-        _execute_self_operated_export(
-            database,
-            job_id,
-            batch_id,
-            claim_token,
-            storage_root,
-            before_finalize,
-        )
-        return
-    _heartbeat(database, job_id, claim_token)
-    version_paths, sources, previous_export_paths = _load_export_inputs(
-        database,
-        batch_id,
-    )
-    position_rows = read_position_workbook(version_paths["position"])
-    _heartbeat(database, job_id, claim_token)
-    export_root = storage_root / "batches" / str(batch_id) / "exports"
-    export_token = uuid4().hex
-    temporary = export_root / f".tmp-{export_token}"
-    published = export_root / f"export-{export_token}"
-    temporary.mkdir(parents=True, exist_ok=False)
-    output_names: dict[int, str] = {}
-    used_names: set[str] = set()
-    merged_import_frames: list[pd.DataFrame] = []
-    merged_pending_frames: list[pd.DataFrame] = []
-    try:
-        for source in sources:
-            _heartbeat(database, job_id, claim_token)
-            result, import_rows, pending_rows = _prepare_export_result(
-                source, position_rows
-            )
-            merged_import_frames.append(import_rows)
-            merged_pending_frames.append(pending_rows)
-            output_name = f"{Path(source['original_name']).stem}_交货处理.xlsx"
-            if output_name in used_names:
-                raise RuntimeError(f"导出文件名重复：{output_name}")
-            used_names.add(output_name)
-            output_path = temporary / output_name
-            write_delivery_workbook(
-                version_paths["template"],
-                output_path,
-                result,
-                import_rows,
-                pending_rows,
-            )
-            output_names[source["id"]] = output_name
-
-        if len(sources) > 1:
-            merged_import_rows = pd.concat(
-                merged_import_frames,
-                ignore_index=True,
-            )
-            merged_pending_rows = pd.concat(
-                merged_pending_frames,
-                ignore_index=True,
-            )
-            delivery_total = sum(source["delivery_total"] for source in sources)
-            import_total = int(merged_import_rows["*本次交货量"].sum())
-            pending_total = int(merged_pending_rows["*本次交货量"].sum())
-            if delivery_total != import_total + pending_total:
-                raise RuntimeError("合并导出数量不守恒")
-            merged_result = BatchResult(
-                import_rows=merged_import_rows,
-                exception_rows=pd.DataFrame(columns=EXCEPTION_COLUMNS),
-                delivery_total=delivery_total,
-                import_total=import_total,
-                manual_total=pending_total,
-            )
-            write_delivery_workbook(
-                version_paths["template"],
-                temporary / f"batch-{batch_id}-merged.xlsx",
-                merged_result,
-                merged_import_rows,
-                merged_pending_rows,
-            )
-
-        archive_path = temporary / f"batch-{batch_id}.zip"
-        with ZipFile(archive_path, "w", ZIP_DEFLATED) as archive:
-            for source in sources:
-                output_name = output_names[source["id"]]
-                archive.write(temporary / output_name, arcname=output_name)
-        _heartbeat(database, job_id, claim_token)
-        before_finalize()
-        os.replace(temporary, published)
-
-        with database.session() as session:
-            job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-            batch = session.get(Batch, batch_id)
-            if (
-                job is None
-                or batch is None
-                or job.status != "running"
-                or job.claim_token != claim_token
-            ):
-                raise LostJobLeaseError("导出任务租约已失效")
-            for source_id, output_name in output_names.items():
-                source = session.get(BatchFile, source_id)
-                if source is None or source.batch_id != batch.id:
-                    raise RuntimeError("批次来源文件已变化")
-                source.result_path = str(published / output_name)
-            batch.zip_path = str(published / f"batch-{batch_id}.zip")
-            job.status = "succeeded"
-            job.finished_at = datetime.utcnow()
-            job.heartbeat_at = job.finished_at
-            job.error_message = None
-            job.claim_token = None
-            job.output_path = batch.zip_path
-            session.add(
-                AuditLog(
-                    user_id=None,
-                    action="worker_export_succeeded",
-                    entity_type="batch",
-                    entity_id=str(batch.id),
-                    details={
-                        "file_count": len(sources),
-                        "merged_workbook": len(sources) > 1,
-                    },
-                )
-            )
-            session.commit()
-        _cleanup_previous_export_directories(
-            database,
-            export_root,
-            published,
-            previous_export_paths,
-        )
-    except Exception:
-        if temporary.exists():
-            shutil.rmtree(temporary)
-        registered_archive = published / f"batch-{batch_id}.zip"
-        if published.exists() and not _published_is_registered(
-            database, job_id, registered_archive
-        ):
-            shutil.rmtree(published)
-        raise
 
 
 def _fetch_purchase_order_details(
@@ -1035,12 +704,9 @@ def _run_batch_job(
                 )
             elif kind == "export":
                 _execute_export(
-                    database,
-                    job_id,
+                    JobContext(database, job_id, claim_token, lease_keeper.stop),
                     batch_id,
-                    claim_token,
                     Path(storage_root),
-                    lease_keeper.stop,
                 )
             else:
                 raise RuntimeError(f"未知任务类型：{kind}")

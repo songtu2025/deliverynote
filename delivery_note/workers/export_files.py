@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
+from uuid import uuid4
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from sqlalchemy import select
 
 from ..web.database import Database
-from ..web.models import Batch, BatchFile, Job
+from ..web.models import AuditLog, Batch, BatchFile, Job
+from .leases import JobContext, LostJobLeaseError
 
 LOGGER = logging.getLogger("delivery_note.worker")
 
@@ -17,7 +23,7 @@ def _cleanup_previous_export_directories(
     database: Database,
     export_root: Path,
     current_published: Path,
-    previous_paths: list[str | Path],
+    previous_paths: Sequence[str | Path],
 ) -> None:
     """尽力清理已失去数据库引用的上一代导出目录。"""
     try:
@@ -87,3 +93,98 @@ def _published_is_registered(
     except Exception:
         # 数据库状态无法确认时保留文件，避免删除已成功提交的正式结果。
         return True
+
+
+@dataclass(frozen=True)
+class ExportPublication:
+    """本次生成的目录、来源文件和对外下载入口。"""
+
+    directory: Path
+    source_names: dict[int, str]
+    registered_path: Path
+    self_operated: bool = False
+
+
+def _export_workspace(storage_root: Path, batch_id: int) -> tuple[Path, Path, Path]:
+    """创建独立临时目录，发布成功后再清理上一代结果。"""
+    export_root = storage_root / "batches" / str(batch_id) / "exports"
+    export_token = uuid4().hex
+    temporary = export_root / f".tmp-{export_token}"
+    published = export_root / f"export-{export_token}"
+    temporary.mkdir(parents=True, exist_ok=False)
+    return export_root, temporary, published
+
+
+def _write_export_archive(
+    temporary: Path,
+    archive_name: str,
+    sources: list[dict[str, Any]],
+    output_names: dict[int, str],
+) -> None:
+    with ZipFile(temporary / archive_name, "w", ZIP_DEFLATED) as archive:
+        for source in sources:
+            output_name = output_names[source["id"]]
+            archive.write(temporary / output_name, arcname=output_name)
+
+
+def _register_export(
+    context: JobContext, batch_id: int, publication: ExportPublication
+) -> None:
+    """持有有效租约时，原子登记全部导出路径和任务完成状态。"""
+    with context.database.session() as session:
+        job = session.scalar(
+            select(Job).where(Job.id == context.job_id).with_for_update()
+        )
+        batch = session.get(Batch, batch_id)
+        if (
+            job is None
+            or batch is None
+            or job.status != "running"
+            or job.claim_token != context.claim_token
+        ):
+            raise LostJobLeaseError("导出任务租约已失效")
+        for source_id, output_name in publication.source_names.items():
+            stored_source = session.get(BatchFile, source_id)
+            if stored_source is None or stored_source.batch_id != batch.id:
+                raise RuntimeError("批次来源文件已变化")
+            stored_source.result_path = str(publication.directory / output_name)
+        batch.zip_path = str(publication.registered_path)
+        if publication.self_operated:
+            batch.error_message = None
+        job.status = "succeeded"
+        job.finished_at = datetime.utcnow()
+        job.heartbeat_at = job.finished_at
+        job.error_message = None
+        job.claim_token = None
+        job.output_path = str(publication.registered_path)
+        session.add(
+            AuditLog(
+                user_id=None,
+                action="worker_self_operated_export_succeeded"
+                if publication.self_operated
+                else "worker_export_succeeded",
+                entity_type="batch",
+                entity_id=str(batch.id),
+                details={
+                    "file_count": len(publication.source_names),
+                    "merged_workbook": len(publication.source_names) > 1,
+                },
+            )
+        )
+        session.commit()
+
+
+def _discard_failed_export(
+    database: Database,
+    job_id: int,
+    temporary: Path,
+    published: Path,
+    registered_path: Path,
+) -> None:
+    """只删除当前尝试尚未登记的结果，保留已经发布的下载文件。"""
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    if published.exists() and not _published_is_registered(
+        database, job_id, registered_path
+    ):
+        shutil.rmtree(published)

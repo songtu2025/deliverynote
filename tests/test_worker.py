@@ -691,7 +691,7 @@ class WorkerIntegrationTests(unittest.TestCase):
         self.assertEqual(retried.json()["status"], "queued")
         with (
             patch.object(
-                worker_module.shutil,
+                export_files_module.shutil,
                 "rmtree",
                 side_effect=PermissionError("denied"),
             ),
