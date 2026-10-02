@@ -111,3 +111,10 @@ class PositionImportForm:
 class DeliveryBatchForm:
     name: Annotated[str, Form()]
     files: list[UploadFile] = File(...)
+
+
+@dataclass
+class SelfOperatedBatchForm:
+    name: Annotated[str | None, Form()] = None
+    delivery_file: list[UploadFile] | None = File(None)
+    inbound_file: UploadFile | None = File(None)
