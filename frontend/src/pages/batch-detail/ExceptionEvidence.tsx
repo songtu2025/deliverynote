@@ -1,4 +1,5 @@
 import { Tag, Tooltip } from "antd";
+import { candidateSites } from "./reviewDraft";
 import type { DeliveryException } from "../../types";
 
 const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
@@ -17,17 +18,6 @@ export function ExceptionReason({ reason }: { reason: string }) {
     <div className="exception-reason-cell">
       <strong>{reason}</strong>
     </div>
-  );
-}
-
-export function candidateSites(fullSite: string): string[] {
-  return Array.from(
-    new Set(
-      fullSite
-        .split("、")
-        .map((site) => site.trim())
-        .filter(Boolean)
-    )
   );
 }
 

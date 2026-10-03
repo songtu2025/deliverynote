@@ -5,18 +5,12 @@ import {
   Button,
   Card,
   Descriptions,
-  Drawer,
   Empty,
-  Form,
-  Input,
-  InputNumber,
   Popconfirm,
-  Radio,
   Space,
   Spin,
   Steps,
   Table,
-  Tag,
   Tooltip,
   Typography,
   Upload
@@ -26,25 +20,23 @@ import {
   ArrowDownOutlined,
   ArrowLeftOutlined,
   ArrowUpOutlined,
-  CheckCircleFilled,
   CloudUploadOutlined,
   DeleteOutlined,
   DownloadOutlined,
   ExportOutlined,
   LockOutlined,
   PlayCircleOutlined,
-  PlusOutlined,
   ReloadOutlined,
   SafetyCertificateOutlined
 } from "@ant-design/icons";
 
 import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
-import type { Batch, BatchFile, DeliveryException, InputVersion, Job, SplitPart } from "../types";
+import type { Batch, BatchFile, DeliveryException, InputVersion, Job } from "../types";
 import StatusTag from "../BatchStatusTag";
-import { ExceptionStatusTag, candidateSites, PositionValue } from "./batch-detail/ExceptionEvidence";
 import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
-import ReasonGuidance from "./batch-detail/ReasonGuidance";
+import ExceptionReviewDrawer from "./batch-detail/ExceptionReviewDrawer";
+import { useExceptionEditor } from "./batch-detail/useExceptionEditor";
 import { useExceptionReview } from "./useExceptionReview";
 
 const VERSION_LABELS: Record<string, string> = {
@@ -55,8 +47,6 @@ const VERSION_LABELS: Record<string, string> = {
   template: "导出模板",
   inbound_template: "积加入库模板"
 };
-
-type SplitFormValues = { parts: SplitPart[] };
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
@@ -83,25 +73,12 @@ export default function BatchDetail({
   const [action, setAction] = useState<string | null>(null);
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
-  const [reviewDirty, setReviewDirty] = useState(false);
-  const [splitForm] = Form.useForm<SplitFormValues>();
-  const splitParts = Form.useWatch("parts", splitForm) ?? [];
   const pollingJob = useRef<number | null>(null);
   const announcedJobs = useRef(new Set<number>());
   const reviewSection = useRef<HTMLDivElement | null>(null);
   const loadRequestRef = useRef(0);
   const review = useExceptionReview(batchId, batch?.status);
-  const {
-    exceptions,
-    exceptionTotal,
-    reviewPage,
-    setReviewPage,
-    setExceptionsLoading,
-    fetchExceptionPage,
-    applyExceptionPage,
-    queueReviewDirection,
-    replaceException
-  } = review;
+  const { setExceptionsLoading, fetchExceptionPage, applyExceptionPage } = review;
 
   const load = useCallback(
     async (silent = false) => {
@@ -164,27 +141,6 @@ export default function BatchDetail({
     if (isActiveJob(jobs?.export)) return jobs.export;
     return undefined;
   }, [batch?.jobs]);
-
-  useEffect(() => {
-    if (!splitTarget) return;
-    splitForm.resetFields();
-    setReviewDirty(false);
-    splitForm.setFieldsValue({
-      parts: splitTarget.parts.length
-        ? splitTarget.parts
-        : [
-            {
-              quantity: splitTarget.manual_quantity,
-              destination: splitTarget.destination,
-              site: splitTarget.full_site.includes("、") ? "" : splitTarget.full_site,
-              supplier_code: "",
-              sku: splitTarget.sku,
-              delivery_note: splitTarget.reason,
-              resolved: false
-            }
-          ]
-    });
-  }, [splitForm, splitTarget]);
 
   const refreshAfterJob = useEffectEvent(() => load(true));
   const activeJobId = activeJob?.id;
@@ -342,83 +298,8 @@ export default function BatchDetail({
     setSplitTarget(record);
   };
 
-  const currentReviewIndex = splitTarget ? exceptions.findIndex((item) => item.id === splitTarget.id) : -1;
-  const previousReviewTarget = currentReviewIndex > 0 ? exceptions[currentReviewIndex - 1] : undefined;
-  const nextReviewTarget = currentReviewIndex >= 0 ? exceptions[currentReviewIndex + 1] : undefined;
-  const canReviewPrevious = Boolean(previousReviewTarget || reviewPage > 1);
-  const canReviewNext = Boolean(nextReviewTarget || reviewPage * 10 < exceptionTotal);
-  const navigateReview = (direction: "previous" | "next") => {
-    const withinPage = direction === "previous" ? previousReviewTarget : nextReviewTarget;
-    if (withinPage) {
-      openSplit(withinPage);
-      return;
-    }
-    queueReviewDirection(direction === "previous" ? "last" : "first");
-    setReviewPage((current) => current + (direction === "previous" ? -1 : 1));
-  };
-  const reviewNavigationLocked = reviewDirty;
-
-  const splitTotal = splitParts.reduce((sum, part) => sum + Number(part?.quantity ?? 0), 0);
-  const splitRemaining = (splitTarget?.manual_quantity ?? 0) - splitTotal;
-  const splitCandidateSites =
-    splitTarget?.reason_code === "ambiguous_product_site" ? candidateSites(splitTarget.full_site) : [];
   const selfOperated = batch?.workflow === "self_operated_inbound";
-  const selfOperatedSiteSelection = Boolean(selfOperated && splitTarget?.allowed_actions.includes("resolve_site"));
-  const selectedSelfOperatedSite = String(splitParts[0]?.site ?? "").trim();
-  const selfOperatedSiteValid = splitCandidateSites.includes(selectedSelfOperatedSite);
-  const splitValid = Boolean(
-    splitTarget &&
-    splitParts.length &&
-    splitRemaining === 0 &&
-    splitParts.every((part) => Number(part?.quantity ?? 0) > 0)
-  );
-
-  const saveSplit = async (advance: boolean) => {
-    if (!splitTarget || !splitValid) return;
-    const savedId = splitTarget.id;
-    const savedIndex = currentReviewIndex;
-    const values = await splitForm.validateFields();
-    await runAction("split", async () => {
-      const updated = await api<DeliveryException>(`/api/exceptions/${splitTarget.id}/split`, {
-        method: "PUT",
-        body: JSON.stringify(values)
-      });
-      replaceException(updated);
-      const refreshed = await load(true);
-      const savedStillVisible = refreshed?.items.findIndex((item) => item.id === savedId) ?? -1;
-      const nextIndex = savedStillVisible >= 0 ? savedStillVisible + 1 : savedIndex;
-      const next = advance ? refreshed?.items[nextIndex] : undefined;
-      if (next) {
-        openSplit(next);
-      } else if (advance && refreshed && reviewPage * 10 < refreshed.total) {
-        queueReviewDirection("first");
-        setReviewPage(reviewPage + 1);
-      } else {
-        setSplitTarget(null);
-        splitForm.resetFields();
-      }
-      message.success(
-        advance && (next || (refreshed && reviewPage * 10 < refreshed.total))
-          ? "当前记录已保存，已打开下一条未完成记录"
-          : "处理结果已保存，批次数量保持守恒"
-      );
-    });
-  };
-
-  const saveSelfOperatedSite = async () => {
-    if (!splitTarget || !selfOperatedSiteValid) return;
-    await splitForm.validateFields([["parts", 0, "site"]]);
-    await runAction("site-resolution", async () => {
-      await api<Job>(`/api/exceptions/${splitTarget.id}/self-operated-site`, {
-        method: "PUT",
-        body: JSON.stringify({ full_site: selectedSelfOperatedSite })
-      });
-      setSplitTarget(null);
-      splitForm.resetFields();
-      await load(true);
-      message.info("站点已保存，系统正在按新站点重新计算整个批次");
-    });
-  };
+  const editor = useExceptionEditor({ splitTarget, setSplitTarget, review, selfOperated, runAction, load });
 
   const loadFailure = loadError && (
     <Alert
@@ -873,256 +754,7 @@ export default function BatchDetail({
         />
       )}
 
-      <Drawer
-        title={
-          <div className="review-drawer-title">
-            <strong>审校处理 · {splitTarget?.sku ?? ""}</strong>
-            {currentReviewIndex >= 0 && (
-              <span>
-                第 {(reviewPage - 1) * 10 + currentReviewIndex + 1} / {exceptionTotal} 条
-              </span>
-            )}
-          </div>
-        }
-        size={520}
-        open={splitTarget !== null}
-        onClose={() => setSplitTarget(null)}
-        extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
-        footer={
-          <div className="drawer-footer">
-            {!selfOperatedSiteSelection && exceptionTotal > 1 && (
-              <div className="drawer-review-navigation">
-                <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
-                  <span>
-                    <Button
-                      disabled={!canReviewPrevious || reviewNavigationLocked}
-                      onClick={() => navigateReview("previous")}
-                    >
-                      上一条
-                    </Button>
-                  </span>
-                </Tooltip>
-                <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
-                  <span>
-                    <Button disabled={!canReviewNext || reviewNavigationLocked} onClick={() => navigateReview("next")}>
-                      下一条
-                    </Button>
-                  </span>
-                </Tooltip>
-              </div>
-            )}
-            <div className="drawer-review-actions">
-              <Button aria-label="取消" onClick={() => setSplitTarget(null)}>
-                取消
-              </Button>
-              {selfOperatedSiteSelection ? (
-                <Tooltip title={selfOperatedSiteValid ? "" : "请选择一个候选站点"}>
-                  <Button
-                    type="primary"
-                    disabled={!selfOperatedSiteValid}
-                    loading={action === "site-resolution"}
-                    onClick={() => void saveSelfOperatedSite()}
-                  >
-                    保存并重新计算
-                  </Button>
-                </Tooltip>
-              ) : (
-                <>
-                  {canReviewNext && (
-                    <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
-                      <Button
-                        aria-label="保存"
-                        disabled={!splitValid}
-                        loading={action === "split"}
-                        onClick={() => void saveSplit(false)}
-                      >
-                        保存
-                      </Button>
-                    </Tooltip>
-                  )}
-                  <Tooltip title={splitValid ? "" : "拆分数量必须为正数，且合计必须等于原待处理量"}>
-                    <Button
-                      aria-label={canReviewNext ? "保存并下一条" : "保存"}
-                      type="primary"
-                      disabled={!splitValid}
-                      loading={action === "split"}
-                      onClick={() => void saveSplit(canReviewNext)}
-                    >
-                      {canReviewNext ? "保存并下一条" : "保存"}
-                    </Button>
-                  </Tooltip>
-                </>
-              )}
-            </div>
-          </div>
-        }
-      >
-        {splitTarget && (
-          <>
-            <Descriptions className="split-source" size="small" column={1}>
-              <Descriptions.Item label="来源文件">
-                {fileById[splitTarget.batch_file_id]?.original_name}
-              </Descriptions.Item>
-              <Descriptions.Item label="站点">{splitTarget.full_site || "—"}</Descriptions.Item>
-              <Descriptions.Item label="目的仓">{splitTarget.destination || "—"}</Descriptions.Item>
-              <Descriptions.Item label="规模定位">
-                <PositionValue value={splitTarget.scale_position} />
-              </Descriptions.Item>
-              <Descriptions.Item label="备货定位">
-                <PositionValue value={splitTarget.stocking_position} />
-              </Descriptions.Item>
-              <Descriptions.Item label="异常原因">
-                <Tag color="warning">{splitTarget.reason}</Tag>
-              </Descriptions.Item>
-            </Descriptions>
-
-            <ReasonGuidance
-              exception={splitTarget}
-              hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
-              selfOperated={selfOperated}
-            />
-
-            {selfOperatedSiteSelection ? (
-              <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
-                <Form.Item
-                  name={["parts", 0, "site"]}
-                  label="选择正确的完整站点"
-                  rules={[{ required: true, message: "请选择一个候选站点" }]}
-                >
-                  <Radio.Group className="candidate-site-options">
-                    {splitCandidateSites.map((site) => (
-                      <Radio key={site} value={site}>
-                        {site}
-                      </Radio>
-                    ))}
-                  </Radio.Group>
-                </Form.Item>
-              </Form>
-            ) : (
-              <>
-                <div className={`split-conservation ${splitValid ? "valid" : "invalid"}`}>
-                  <div>
-                    <span>原待处理</span>
-                    <strong>{splitTarget.manual_quantity}</strong>
-                  </div>
-                  <div>
-                    <span>已拆分</span>
-                    <strong>{splitTotal}</strong>
-                  </div>
-                  <div>
-                    <span>剩余</span>
-                    <strong>{splitRemaining}</strong>
-                  </div>
-                  {splitValid && <CheckCircleFilled aria-label="数量守恒通过" />}
-                </div>
-
-                <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
-                  <Form.List name="parts">
-                    {(fields, { add, remove }) => (
-                      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
-                        {fields.map((field, index) => (
-                          <div className="split-part" key={field.key}>
-                            <div className="split-part-heading">
-                              <strong>拆分 {index + 1}</strong>
-                              {fields.length > 1 && (
-                                <Button danger type="link" size="small" onClick={() => remove(field.name)}>
-                                  删除
-                                </Button>
-                              )}
-                            </div>
-                            <div className="split-fields-row split-primary-fields">
-                              <Form.Item
-                                name={[field.name, "quantity"]}
-                                label="数量"
-                                rules={[{ required: true, type: "number", min: 1, message: "数量必须大于 0" }]}
-                              >
-                                <InputNumber min={1} precision={0} style={{ width: 130 }} />
-                              </Form.Item>
-                              <Form.Item name={[field.name, "resolved"]} label="处理结果">
-                                <Radio.Group className="resolution-choice">
-                                  <Radio.Button value={true}>可正式导入</Radio.Button>
-                                  <Radio.Button value={false}>继续保留待处理</Radio.Button>
-                                </Radio.Group>
-                              </Form.Item>
-                            </div>
-                            <Form.Item
-                              name={[field.name, "destination"]}
-                              label="目的仓"
-                              rules={[
-                                {
-                                  validator: (_, value) =>
-                                    splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
-                                      ? Promise.reject(new Error("可正式导入部分必须填写目的仓"))
-                                      : Promise.resolve()
-                                }
-                              ]}
-                            >
-                              <Input />
-                            </Form.Item>
-                            <Form.Item
-                              name={[field.name, "site"]}
-                              label="完整站点"
-                              rules={[
-                                {
-                                  validator: (_, value) =>
-                                    splitForm.getFieldValue(["parts", field.name, "resolved"]) && !value
-                                      ? Promise.reject(new Error("可正式导入部分必须填写完整站点"))
-                                      : Promise.resolve()
-                                }
-                              ]}
-                            >
-                              {splitCandidateSites.length > 1 ? (
-                                <Radio.Group className="candidate-site-options">
-                                  {splitCandidateSites.map((site) => (
-                                    <Radio key={site} value={site}>
-                                      {site}
-                                    </Radio>
-                                  ))}
-                                </Radio.Group>
-                              ) : (
-                                <Input />
-                              )}
-                            </Form.Item>
-                            <div className="split-fields-row">
-                              <Form.Item name={[field.name, "sku"]} label="SKU">
-                                <Input />
-                              </Form.Item>
-                              <Form.Item name={[field.name, "supplier_code"]} label="供应商编码">
-                                <Input placeholder="默认沿用来源文件" />
-                              </Form.Item>
-                            </div>
-                            <Form.Item name={[field.name, "delivery_note"]} label="交货备注">
-                              <Input />
-                            </Form.Item>
-                          </div>
-                        ))}
-                        <Button
-                          block
-                          type="dashed"
-                          icon={<PlusOutlined />}
-                          onClick={() =>
-                            add({
-                              quantity: splitRemaining > 0 ? splitRemaining : 1,
-                              destination: splitTarget.destination,
-                              site: splitTarget.full_site.includes("、") ? "" : splitTarget.full_site,
-                              supplier_code: "",
-                              sku: splitTarget.sku,
-                              delivery_note: splitTarget.reason,
-                              resolved: false
-                            })
-                          }
-                        >
-                          添加拆分{splitRemaining > 0 ? `（剩余 ${splitRemaining}）` : ""}
-                        </Button>
-                      </Space>
-                    )}
-                  </Form.List>
-                </Form>
-              </>
-            )}
-          </>
-        )}
-      </Drawer>
+      <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
     </div>
   );
 }

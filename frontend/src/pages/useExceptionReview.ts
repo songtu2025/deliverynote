@@ -8,7 +8,7 @@ type ReviewScope = "unfinished" | "resolved" | "all";
 type FilterField = "site" | "scale" | "stocking" | "reason";
 type FilterValues = Partial<Record<FilterField, string>>;
 
-type ExceptionPage = {
+export type ExceptionPage = {
   items: DeliveryException[];
   total: number;
   stats: {
