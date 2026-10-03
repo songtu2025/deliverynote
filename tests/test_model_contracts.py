@@ -96,6 +96,12 @@ class ModelContractTests(unittest.TestCase):
             "sorted(Base.metadata.tables)",
         )
 
+    def test_base_module_import_alone_registers_all_tables(self) -> None:
+        self.assert_fresh_registration(
+            "from delivery_note.web.models.base import Base",
+            "sorted(Base.metadata.tables)",
+        )
+
     def test_database_import_alone_creates_all_tables(self) -> None:
         self.assert_fresh_registration(
             "from delivery_note.web.database import Database\n"
