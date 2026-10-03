@@ -39,6 +39,38 @@ class TemplateTests(unittest.TestCase):
             workbook.save(path)
             validate_template_workbook(path)
 
+    def test_import_template_rejects_missing_and_sparse_empty_example(self) -> None:
+        for mode in ("missing", "sparse"):
+            with self.subTest(mode=mode), TemporaryDirectory() as directory:
+                path = Path(directory) / "template.xlsx"
+                workbook = make_import_template()
+                sheet = workbook.worksheets[0]
+                sheet.delete_rows(3)
+                if mode == "sparse":
+                    sheet["A4"] = "示例行之外的内容"
+                workbook.save(path)
+                with self.assertRaisesRegex(ValueError, "官方模板缺少第 3 行示例格式"):
+                    validate_template_workbook(path)
+
+    def test_import_template_accepts_value_or_style_in_any_column(self) -> None:
+        for column in range(1, 8):
+            for mode in ("value", "style"):
+                with (
+                    self.subTest(column=column, mode=mode),
+                    TemporaryDirectory() as directory,
+                ):
+                    path = Path(directory) / "template.xlsx"
+                    workbook = make_import_template()
+                    sheet = workbook.worksheets[0]
+                    for cell in sheet[3]:
+                        cell.value = None
+                    if mode == "value":
+                        sheet.cell(row=3, column=column).value = "有效示例"
+                    else:
+                        sheet.cell(row=3, column=column).font = Font(bold=True)
+                    workbook.save(path)
+                    validate_template_workbook(path)
+
     def test_inbound_template_requires_headers_and_example_row(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "template.xlsx"

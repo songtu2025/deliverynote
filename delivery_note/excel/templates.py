@@ -38,7 +38,10 @@ def validate_template_workbook(path: Path) -> None:
             sheet, IMPORT_COLUMNS, row=2, message="官方模板表头与预期字段不一致"
         )
         example_cells = [sheet.cell(row=3, column=column) for column in range(1, 8)]
-        if not any(cell.value is not None or cell.has_style for cell in example_cells):
+        if not any(
+            cell.value is not None or getattr(cell, "has_style", False)
+            for cell in example_cells
+        ):
             raise ValueError("官方模板缺少第 3 行示例格式")
     finally:
         workbook.close()

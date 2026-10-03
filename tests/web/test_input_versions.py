@@ -1,8 +1,46 @@
 from tests.support.web_api import WebApiCase
 from io import BytesIO
 
+from tests.support.excel import make_import_template
+
 
 class WebApiTests(WebApiCase):
+    def test_template_upload_rejects_empty_example_without_changing_versions(
+        self,
+    ) -> None:
+        admin_headers = self.login("admin", "admin-pass")
+        before = self.client.get("/api/input-versions", headers=admin_headers).json()
+        for mode in ("missing", "sparse", "empty"):
+            with self.subTest(mode=mode):
+                workbook = make_import_template()
+                sheet = workbook.worksheets[0]
+                if mode == "empty":
+                    for cell in sheet[3]:
+                        cell.value = ""
+                else:
+                    sheet.delete_rows(3)
+                    if mode == "sparse":
+                        sheet["A4"] = "示例行之外的内容"
+                payload = BytesIO()
+                workbook.save(payload)
+                response = self.client.post(
+                    "/api/input-versions/template",
+                    headers=admin_headers,
+                    data={"name": f"empty-template-{mode}", "activate": "true"},
+                    files={"file": ("template.xlsx", BytesIO(payload.getvalue()))},
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(
+                    response.json()["detail"],
+                    "输入版本校验失败：官方模板缺少第 3 行示例格式",
+                )
+                after = self.client.get(
+                    "/api/input-versions", headers=admin_headers
+                ).json()
+                self.assertEqual(after, before)
+                uploaded = self.app.state.storage_root / "master" / "template"
+                self.assertEqual(list(uploaded.glob("*")), [])
+
     def test_input_version_activation_keeps_one_active_version(self):
         admin_headers = self.login("admin", "admin-pass")
         created_ids = []
