@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from delivery_note.input_inspection import write_position_workbook
+from delivery_note.inspection.workbooks import write_position_workbook
 from delivery_note.processing.models import POSITION_SOURCE_COLUMNS
 from delivery_note.web.database import Database, sqlite_url
 from delivery_note.web.models import (

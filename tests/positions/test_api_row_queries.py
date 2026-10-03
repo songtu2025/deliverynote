@@ -7,7 +7,7 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 import delivery_note.web.position_draft_read as draft_read_module
-from delivery_note.input_inspection import write_position_workbook
+from delivery_note.inspection.workbooks import write_position_workbook
 from delivery_note.processing.models import POSITION_SOURCE_COLUMNS
 from delivery_note.web.models import (
     InputVersion,

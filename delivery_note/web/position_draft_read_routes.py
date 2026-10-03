@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
-from ..input_inspection import write_position_workbook
+from ..inspection.workbooks import write_position_workbook
 from .caches import DraftAnalysisCache
 from .dependencies import RequestDependencies
 from .models import InputDraft, User

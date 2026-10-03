@@ -5,9 +5,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..input_inspection import (
-    write_position_workbook,
-)
+from ..inspection.workbooks import write_position_workbook
 from .models import InputDraft, InputVersion, PositionDraftRow
 from .position_draft_files import stage_publication_files, validate_publication_target
 from .position_draft_state import (

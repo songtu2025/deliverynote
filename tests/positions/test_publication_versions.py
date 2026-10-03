@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 
 from delivery_note.excel_io import read_position_workbook
-from delivery_note.input_inspection import write_position_workbook
+from delivery_note.inspection.workbooks import write_position_workbook
 from delivery_note.web.models import (
     AuditLog,
     InputDraft,

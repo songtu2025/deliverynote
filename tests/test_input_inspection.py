@@ -21,8 +21,8 @@ from delivery_note.input_inspection import (
     preview_input_version,
     preview_input_version_page,
     validate_position_frame,
-    write_position_workbook,
 )
+from delivery_note.inspection.workbooks import write_position_workbook
 from delivery_note.processing.models import (IMPORT_COLUMNS, POSITION_SOURCE_COLUMNS)
 
 
@@ -75,7 +75,7 @@ class InputInspectionTests(unittest.TestCase):
         write_position_workbook(self.path, self.frame)
 
         with patch(
-            "delivery_note.input_inspection.read_position_workbook",
+            "delivery_note.inspection.workbooks.read_position_workbook",
             wraps=read_position_workbook,
         ) as read_workbook:
             result = inspect_input_version_with_preview(
@@ -108,7 +108,7 @@ class InputInspectionTests(unittest.TestCase):
         workbook.save(path)
 
         with patch(
-            "delivery_note.input_inspection.read_product_workbook",
+            "delivery_note.inspection.workbooks.read_product_workbook",
             side_effect=AssertionError("产品预览不应全量读取 DataFrame"),
         ):
             result = inspect_input_version_with_preview(

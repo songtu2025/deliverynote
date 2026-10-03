@@ -1,22 +1,17 @@
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pandas as pd
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
 
 from .excel_io import (
     PRODUCT_COLUMNS,
     PURCHASE_COLUMNS,
-    read_position_workbook,
-    read_product_workbook,
-    read_purchase_workbook,
-    read_supplier_workbook,
-    validate_self_operated_template_workbook,
-    validate_template_workbook,
 )
+from .inspection import workbooks
 from .config import supplier_aliases, validate_supplier_frame
-from .processing.models import (POSITION_SOURCE_COLUMNS)
+from .processing.models import POSITION_SOURCE_COLUMNS
 
 
 POSITION_KEY = ["店铺-站点", "积加SKU", "MSKU"]
@@ -28,32 +23,6 @@ _STREAMING_COLUMNS = {
     "product": PRODUCT_COLUMNS,
     "purchase": PURCHASE_COLUMNS,
 }
-
-
-def _read_template_workbook(path: Path) -> pd.DataFrame:
-    validate_template_workbook(path)
-    return pd.read_excel(path, header=1, usecols="A:G")
-
-
-def _read_self_operated_template_workbook(path: Path) -> pd.DataFrame:
-    validate_self_operated_template_workbook(path)
-    return pd.read_excel(path, header=0, usecols="A:T")
-
-
-def _read_frame(kind: str, path: Path) -> pd.DataFrame:
-    readers: dict[str, Callable[[Path], pd.DataFrame]] = {
-        "purchase": read_purchase_workbook,
-        "product": read_product_workbook,
-        "supplier": read_supplier_workbook,
-        "position": read_position_workbook,
-        "template": _read_template_workbook,
-        "inbound_template": _read_self_operated_template_workbook,
-    }
-    try:
-        reader = readers[kind]
-    except KeyError as error:
-        raise ValueError(f"不支持的输入资料类型：{kind}") from error
-    return reader(Path(path))
 
 
 def _json_safe(value: Any) -> Any:
@@ -216,9 +185,7 @@ def _stream_selected_columns(
     header_names = ["" if value is None else str(value) for value in header]
     expected_set = set(expected_columns)
     selected_columns = [
-        (index, name)
-        for index, name in enumerate(header_names)
-        if name in expected_set
+        (index, name) for index, name in enumerate(header_names) if name in expected_set
     ]
     found = {name for _index, name in selected_columns}
     missing = [column for column in expected_columns if column not in found]
@@ -282,7 +249,7 @@ def _stream_xlsx_preview(
 
 
 def inspect_input_version(kind: str, path: Path) -> dict:
-    return _inspect_frame(kind, _read_frame(kind, path))
+    return _inspect_frame(kind, workbooks._read_frame(kind, path))
 
 
 def inspect_input_version_with_preview(
@@ -296,7 +263,7 @@ def inspect_input_version_with_preview(
     path = Path(path)
     if kind in _STREAMING_COLUMNS and path.suffix.lower() in {".xlsx", ".xlsm"}:
         return _stream_xlsx_inspection(kind, path, offset, limit)
-    frame = _read_frame(kind, path)
+    frame = workbooks._read_frame(kind, path)
     return {
         "summary": _inspect_frame(kind, frame),
         "preview": _preview_frame(kind, frame, offset, limit),
@@ -315,7 +282,7 @@ def preview_input_version_page(
     path = Path(path)
     if kind in _STREAMING_COLUMNS and path.suffix.lower() in {".xlsx", ".xlsm"}:
         return _stream_xlsx_preview(kind, path, offset, limit, summary)
-    return _preview_frame(kind, _read_frame(kind, path), offset, limit)
+    return _preview_frame(kind, workbooks._read_frame(kind, path), offset, limit)
 
 
 def preview_input_version(
@@ -532,14 +499,3 @@ def position_change_warnings(
             }
         )
     return warnings
-
-
-def write_position_workbook(path: Path, frame: pd.DataFrame) -> None:
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = "MSKU_视图"
-    sheet.append(POSITION_SOURCE_COLUMNS)
-    for values in frame[POSITION_SOURCE_COLUMNS].itertuples(index=False, name=None):
-        sheet.append([None if pd.isna(value) else value for value in values])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    workbook.save(path)
