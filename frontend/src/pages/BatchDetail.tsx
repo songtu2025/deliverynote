@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import {
   Alert,
   App as AntApp,
@@ -44,6 +44,15 @@ import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
 import type { Batch, BatchFile, DeliveryException, InputVersion, Job, SplitPart } from "../types";
 import StatusTag from "../BatchStatusTag";
+import {
+  ExceptionStatusTag,
+  ExceptionReason,
+  ExceptionEvidence,
+  candidateSites,
+  formatPositionValue,
+  PositionValue
+} from "./batch-detail/ExceptionEvidence";
+import ReasonGuidance from "./batch-detail/ReasonGuidance";
 import { useExceptionReview } from "./useExceptionReview";
 
 const VERSION_LABELS: Record<string, string> = {
@@ -53,12 +62,6 @@ const VERSION_LABELS: Record<string, string> = {
   position: "MSKU定位",
   template: "导出模板",
   inbound_template: "积加入库模板"
-};
-
-const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "未处理", color: "warning" },
-  partial: { label: "部分处理", color: "processing" },
-  resolved: { label: "已处理", color: "success" }
 };
 
 type SplitFormValues = { parts: SplitPart[] };
@@ -71,234 +74,10 @@ function isActiveJob(job: Job | undefined): job is Job {
   return Boolean(job && (job.status === "queued" || job.status === "running"));
 }
 
-function ExceptionStatusTag({ status }: { status: string }) {
-  const item = EXCEPTION_STATUS[status] ?? { label: status, color: "default" };
-  return <Tag color={item.color}>{item.label}</Tag>;
-}
-
-function ExceptionReason({ reason }: { reason: string }) {
-  return (
-    <div className="exception-reason-cell">
-      <strong>{reason}</strong>
-    </div>
-  );
-}
-
-function candidateSites(fullSite: string): string[] {
-  return Array.from(
-    new Set(
-      fullSite
-        .split("、")
-        .map((site) => site.trim())
-        .filter(Boolean)
-    )
-  );
-}
-
-function EvidenceMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <span className="exception-evidence-metric" aria-label={`${label} ${value}`}>
-      <span>{label} </span>
-      <strong>{value}</strong>
-    </span>
-  );
-}
-
-function ExceptionEvidence({
-  exception,
-  hasOverreceiptRule
-}: {
-  exception: DeliveryException;
-  hasOverreceiptRule: boolean;
-}) {
-  if (exception.reason_code === "purchase_not_found") {
-    return (
-      <div className="exception-evidence-cell exception-evidence-check">
-        <strong>需核对 </strong>
-        <span>供应商、SKU、站点、目的仓</span>
-      </div>
-    );
-  }
-
-  if (exception.reason_code === "purchase_balance_exceeded") {
-    return (
-      <div className="exception-evidence-cell">
-        <EvidenceMetric label="已分配" value={exception.allocated_quantity} />
-        <EvidenceMetric label="超出" value={exception.manual_quantity} />
-        <span className="exception-evidence-state">
-          {hasOverreceiptRule ? "未命中超收规则" : "本批次未启用超收规则"}
-        </span>
-      </div>
-    );
-  }
-
-  if (exception.reason_code === "ambiguous_product_site") {
-    return (
-      <div className="exception-evidence-cell">
-        <strong className="exception-evidence-label">候选站点</strong>
-        <div className="exception-evidence-sites">
-          {candidateSites(exception.full_site).map((site) => (
-            <span className="exception-evidence-site" key={site}>
-              {site}
-            </span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (exception.reason_code === "overreceipt_limit_exceeded") {
-    const hasExactBreakdown =
-      exception.purchase_allocated_quantity !== null &&
-      exception.overreceipt_allocated_quantity !== null &&
-      exception.overreceipt_remaining_quantity !== null;
-    if (!hasExactBreakdown) {
-      return (
-        <div className="exception-evidence-cell">
-          <span className="exception-evidence-state">历史批次暂无额度明细</span>
-        </div>
-      );
-    }
-    return (
-      <div className="exception-evidence-cell">
-        <EvidenceMetric label="正常采购" value={exception.purchase_allocated_quantity!} />
-        <EvidenceMetric label="使用超收" value={exception.overreceipt_allocated_quantity!} />
-        <EvidenceMetric label="剩余" value={exception.overreceipt_remaining_quantity!} />
-      </div>
-    );
-  }
-
-  return <span className="muted">查看异常原因后处理</span>;
-}
-
-function formatPositionValue(value: string | number): string {
-  const text = String(value ?? "").trim();
-  if (!text) return "—";
-  if (!text.startsWith("{")) return text;
-  try {
-    const mapping = JSON.parse(text) as Record<string, unknown>;
-    if (!mapping || Array.isArray(mapping) || typeof mapping !== "object") return text;
-    return Object.entries(mapping)
-      .map(([msku, item]) => `${msku}：${String(item ?? "").trim() || "—"}`)
-      .join("；");
-  } catch {
-    return text;
-  }
-}
-
 function filterOptions(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))
     .sort((left, right) => left.localeCompare(right, "zh-CN"))
     .map((value) => ({ value, label: value }));
-}
-
-function PositionValue({ value }: { value: string | number }) {
-  const display = formatPositionValue(value);
-  return (
-    <Tooltip title={display === "—" ? "未匹配到当前批次锁定的库位资料" : display}>
-      <span className={display === "—" ? "muted" : "position-reference-value"}>{display}</span>
-    </Tooltip>
-  );
-}
-
-function GuidanceMetric({ label, value }: { label: string; value: number | null }) {
-  return (
-    <div className="review-guidance-metric">
-      <span>{label}</span>
-      <strong>{value ?? "—"}</strong>
-    </div>
-  );
-}
-
-function ReasonGuidance({
-  exception,
-  hasOverreceiptRule,
-  selfOperated = false
-}: {
-  exception: DeliveryException;
-  hasOverreceiptRule: boolean;
-  selfOperated?: boolean;
-}) {
-  if (exception.reason_code === "purchase_not_found") {
-    return (
-      <div className="review-guidance">
-        <Alert
-          showIcon
-          type="warning"
-          title="核对锁定采购版本"
-          description="请核对本批次锁定采购版本中的供应商、SKU、站点和目的仓，并确认对应采购需求仍有可交货未交量。"
-        />
-      </div>
-    );
-  }
-
-  if (exception.reason_code === "purchase_balance_exceeded") {
-    return (
-      <section className="review-guidance" aria-label="原因指导">
-        <strong className="review-guidance-title">采购量与超出量</strong>
-        <div className="review-guidance-metrics">
-          <GuidanceMetric label="已分配量" value={exception.allocated_quantity} />
-          <GuidanceMetric label="超出量" value={exception.manual_quantity} />
-        </div>
-        <Alert
-          showIcon
-          type={hasOverreceiptRule ? "warning" : "info"}
-          title={hasOverreceiptRule ? "未命中本批次超收规则" : "本批次未启用超收规则"}
-          description={
-            hasOverreceiptRule
-              ? "请核对该 SKU 的规模定位、规则额度和允许超收仓库；未命中的数量继续保留为待处理。"
-              : "本批次按正常采购未交量分配，超出部分继续保留为待处理。"
-          }
-        />
-      </section>
-    );
-  }
-
-  if (exception.reason_code === "ambiguous_product_site") {
-    return (
-      <div className="review-guidance">
-        <Alert
-          showIcon
-          type="warning"
-          title="选择候选站点"
-          description={
-            selfOperated
-              ? "请在下方候选项中选择正确的完整站点。保存后系统会按所选站点重新计算整个批次。"
-              : "请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
-          }
-        />
-      </div>
-    );
-  }
-
-  if (exception.reason_code === "overreceipt_limit_exceeded") {
-    const hasExactBreakdown =
-      exception.purchase_allocated_quantity !== null &&
-      exception.overreceipt_allocated_quantity !== null &&
-      exception.overreceipt_remaining_quantity !== null;
-    return (
-      <section className="review-guidance" aria-label="原因指导">
-        <strong className="review-guidance-title">超收额度使用情况</strong>
-        <div className="review-guidance-metrics review-guidance-metrics-three">
-          <GuidanceMetric label="正常采购分配" value={exception.purchase_allocated_quantity} />
-          <GuidanceMetric label="本条使用超收额度" value={exception.overreceipt_allocated_quantity} />
-          <GuidanceMetric label="剩余额度" value={exception.overreceipt_remaining_quantity} />
-        </div>
-        <Alert
-          showIcon
-          type="warning"
-          title={hasExactBreakdown ? "本批次共享超收额度已用尽" : "历史批次暂无额度明细"}
-          description={
-            hasExactBreakdown
-              ? "超收额度按供应商 + SKU + 站点在本批次内共享，前序文件可能已使用部分额度；超过剩余额度的数量继续保留为待处理。"
-              : "该记录生成时尚未保存正常采购与超收额度的分配构成，页面不会用规则上限倒推。"
-          }
-        />
-      </section>
-    );
-  }
-
-  return null;
 }
 
 export default function BatchDetail({
@@ -340,7 +119,6 @@ export default function BatchDetail({
     scaleFilter,
     stockingFilter,
     reasonFilter,
-    debouncedQuery,
     fetchExceptionPage,
     applyExceptionPage,
     changeScope,
@@ -350,65 +128,60 @@ export default function BatchDetail({
     replaceException
   } = useExceptionReview(batchId, batch?.status);
 
-  const load = async (silent = false) => {
-    const request = ++loadRequestRef.current;
-    if (!silent) {
-      setLoading(true);
-      setLoadError(null);
-    }
-    setExceptionsLoading(true);
-    try {
-      const batchRequest = api<Batch>(`/api/batches/${batchId}`).then((result) => {
-        if (request !== loadRequestRef.current) return;
-        setBatch(result);
-        if (!silent) setLoading(false);
-      });
-      const exceptionsRequest = fetchExceptionPage().then((result) => {
-        if (request !== loadRequestRef.current) return result;
-        const pendingTarget = applyExceptionPage(result);
-        if (pendingTarget !== undefined) setSplitTarget(pendingTarget);
-        return result;
-      });
-      const versionsRequest = canRefreshSupplierVersion
-        ? api<InputVersion[]>("/api/input-versions").then((versions) => {
-            if (request !== loadRequestRef.current) return;
-            setActiveSupplierVersion(versions.find((version) => version.kind === "supplier" && version.active) ?? null);
-          })
-        : Promise.resolve();
-      const [, loadedPage] = await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
-      if (request === loadRequestRef.current) setLoadError(null);
-      return request === loadRequestRef.current ? loadedPage : null;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        // 刷新遇到会话过期时终止后续成功提示，认证提示由应用统一处理。
-        if (silent) throw error;
+  const load = useCallback(
+    async (silent = false) => {
+      const request = ++loadRequestRef.current;
+      if (!silent) {
+        setLoading(true);
+        setLoadError(null);
+      }
+      setExceptionsLoading(true);
+      try {
+        const batchRequest = api<Batch>(`/api/batches/${batchId}`).then((result) => {
+          if (request !== loadRequestRef.current) return;
+          setBatch(result);
+          if (!silent) setLoading(false);
+        });
+        const exceptionsRequest = fetchExceptionPage().then((result) => {
+          if (request !== loadRequestRef.current) return result;
+          const pendingTarget = applyExceptionPage(result);
+          if (pendingTarget !== undefined) setSplitTarget(pendingTarget);
+          return result;
+        });
+        const versionsRequest = canRefreshSupplierVersion
+          ? api<InputVersion[]>("/api/input-versions").then((versions) => {
+              if (request !== loadRequestRef.current) return;
+              setActiveSupplierVersion(
+                versions.find((version) => version.kind === "supplier" && version.active) ?? null
+              );
+            })
+          : Promise.resolve();
+        const [, loadedPage] = await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
+        if (request === loadRequestRef.current) setLoadError(null);
+        return request === loadRequestRef.current ? loadedPage : null;
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          // 刷新遇到会话过期时终止后续成功提示，认证提示由应用统一处理。
+          if (silent) throw error;
+          return null;
+        }
+        if (request === loadRequestRef.current) {
+          setLoadError(error instanceof Error ? error.message : "读取批次失败");
+        }
         return null;
+      } finally {
+        if (request === loadRequestRef.current) {
+          if (!silent) setLoading(false);
+          setExceptionsLoading(false);
+        }
       }
-      if (request === loadRequestRef.current) {
-        setLoadError(error instanceof Error ? error.message : "读取批次失败");
-      }
-      return null;
-    } finally {
-      if (request === loadRequestRef.current) {
-        if (!silent) setLoading(false);
-        setExceptionsLoading(false);
-      }
-    }
-  };
+    },
+    [batchId, canRefreshSupplierVersion, fetchExceptionPage, applyExceptionPage, setExceptionsLoading]
+  );
 
   useEffect(() => {
     void load();
-  }, [
-    batchId,
-    canRefreshSupplierVersion,
-    reviewPage,
-    reviewScope,
-    debouncedQuery,
-    siteFilter,
-    scaleFilter,
-    stockingFilter,
-    reasonFilter
-  ]);
+  }, [load]);
 
   const activeJob = useMemo(() => {
     const jobs = batch?.jobs;
@@ -438,18 +211,21 @@ export default function BatchDetail({
     });
   }, [splitForm, splitTarget]);
 
+  const refreshAfterJob = useEffectEvent(() => load(true));
+  const activeJobId = activeJob?.id;
+  const activeJobStatus = activeJob?.status;
   useEffect(() => {
-    if (!activeJob || pollingJob.current === activeJob.id) return;
+    if (!activeJobId || pollingJob.current === activeJobId) return;
     let cancelled = false;
-    pollingJob.current = activeJob.id;
+    pollingJob.current = activeJobId;
 
     const poll = async () => {
       try {
-        const job = await api<Job>(`/api/jobs/${activeJob.id}`);
+        const job = await api<Job>(`/api/jobs/${activeJobId}`);
         if (cancelled) return;
         if (job.status === "succeeded" || job.status === "failed") {
           pollingJob.current = null;
-          await load(true);
+          await refreshAfterJob();
           if (!announcedJobs.current.has(job.id)) {
             announcedJobs.current.add(job.id);
             if (job.status === "succeeded") {
@@ -473,9 +249,9 @@ export default function BatchDetail({
     void poll();
     return () => {
       cancelled = true;
-      if (pollingJob.current === activeJob.id) pollingJob.current = null;
+      if (pollingJob.current === activeJobId) pollingJob.current = null;
     };
-  }, [activeJob?.id, activeJob?.status]);
+  }, [activeJobId, activeJobStatus, message]);
 
   const totals = useMemo(
     () =>
@@ -488,7 +264,7 @@ export default function BatchDetail({
     [batch]
   );
 
-  const files = batch?.files ?? [];
+  const files = useMemo(() => batch?.files ?? [], [batch?.files]);
   const fileById = useMemo(() => Object.fromEntries(files.map((file) => [file.id, file])), [files]);
   const reasonOptions = filterOptions(exceptionFilters.reasons);
   const siteOptions = filterOptions(exceptionFilters.sites);
