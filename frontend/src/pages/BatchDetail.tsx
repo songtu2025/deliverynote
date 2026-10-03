@@ -12,7 +12,6 @@ import {
   InputNumber,
   Popconfirm,
   Radio,
-  Select,
   Space,
   Spin,
   Steps,
@@ -36,22 +35,15 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   ReloadOutlined,
-  SafetyCertificateOutlined,
-  SearchOutlined
+  SafetyCertificateOutlined
 } from "@ant-design/icons";
 
 import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
 import type { Batch, BatchFile, DeliveryException, InputVersion, Job, SplitPart } from "../types";
 import StatusTag from "../BatchStatusTag";
-import {
-  ExceptionStatusTag,
-  ExceptionReason,
-  ExceptionEvidence,
-  candidateSites,
-  formatPositionValue,
-  PositionValue
-} from "./batch-detail/ExceptionEvidence";
+import { ExceptionStatusTag, candidateSites, PositionValue } from "./batch-detail/ExceptionEvidence";
+import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
 import ReasonGuidance from "./batch-detail/ReasonGuidance";
 import { useExceptionReview } from "./useExceptionReview";
 
@@ -72,12 +64,6 @@ function wait(milliseconds: number) {
 
 function isActiveJob(job: Job | undefined): job is Job {
   return Boolean(job && (job.status === "queued" || job.status === "running"));
-}
-
-function filterOptions(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)))
-    .sort((left, right) => left.localeCompare(right, "zh-CN"))
-    .map((value) => ({ value, label: value }));
 }
 
 export default function BatchDetail({
@@ -104,29 +90,18 @@ export default function BatchDetail({
   const announcedJobs = useRef(new Set<number>());
   const reviewSection = useRef<HTMLDivElement | null>(null);
   const loadRequestRef = useRef(0);
+  const review = useExceptionReview(batchId, batch?.status);
   const {
     exceptions,
     exceptionTotal,
     reviewPage,
     setReviewPage,
-    reviewStats,
-    exceptionFilters,
-    exceptionsLoading,
     setExceptionsLoading,
-    query,
-    reviewScope,
-    siteFilter,
-    scaleFilter,
-    stockingFilter,
-    reasonFilter,
     fetchExceptionPage,
     applyExceptionPage,
-    changeScope,
-    changeQuery,
-    changeFilter,
     queueReviewDirection,
     replaceException
-  } = useExceptionReview(batchId, batch?.status);
+  } = review;
 
   const load = useCallback(
     async (silent = false) => {
@@ -266,10 +241,6 @@ export default function BatchDetail({
 
   const files = useMemo(() => batch?.files ?? [], [batch?.files]);
   const fileById = useMemo(() => Object.fromEntries(files.map((file) => [file.id, file])), [files]);
-  const reasonOptions = filterOptions(exceptionFilters.reasons);
-  const siteOptions = filterOptions(exceptionFilters.sites);
-  const scaleOptions = filterOptions(exceptionFilters.scales);
-  const stockingOptions = filterOptions(exceptionFilters.stocking);
 
   const runAction = async (name: string, operation: () => Promise<void>) => {
     setAction(name);
@@ -892,258 +863,14 @@ export default function BatchDetail({
       </Card>
 
       {computed && (
-        <div ref={reviewSection} tabIndex={-1} className="review-section-anchor">
-          <Card
-            title={`待处理审校（共 ${reviewStats.totalCount} 条）`}
-            extra={<span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
-            className="section-card exception-review-card"
-            loading={exceptionsLoading}
-          >
-            <section className="review-overview" aria-label="审校概览">
-              <div className="review-overview-copy">
-                <strong>审校进度</strong>
-                <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
-              </div>
-              <div className="review-scope-options">
-                <button
-                  type="button"
-                  className="review-scope-card"
-                  aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
-                  aria-pressed={reviewScope === "unfinished"}
-                  onClick={() => {
-                    changeScope("unfinished");
-                    setSplitTarget(null);
-                  }}
-                >
-                  <span>未完成</span>
-                  <strong>{reviewStats.unfinishedCount} 条</strong>
-                  <small>待处理 {reviewStats.unfinishedQuantity} 件</small>
-                </button>
-                <button
-                  type="button"
-                  className="review-scope-card"
-                  aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
-                  aria-pressed={reviewScope === "resolved"}
-                  onClick={() => {
-                    changeScope("resolved");
-                    setSplitTarget(null);
-                  }}
-                >
-                  <span>已处理</span>
-                  <strong>{reviewStats.resolvedCount} 条</strong>
-                  <small>查看已完成记录</small>
-                </button>
-                <button
-                  type="button"
-                  className="review-scope-card"
-                  aria-label={`全部 ${reviewStats.totalCount} 条`}
-                  aria-pressed={reviewScope === "all"}
-                  onClick={() => {
-                    changeScope("all");
-                    setSplitTarget(null);
-                  }}
-                >
-                  <span>全部</span>
-                  <strong>{reviewStats.totalCount} 条</strong>
-                  <small>查看完整审校队列</small>
-                </button>
-              </div>
-            </section>
-            <div className="table-toolbar exception-toolbar">
-              <div className="exception-filter-field exception-search-field">
-                <label htmlFor="exception-search">搜索</label>
-                <Input
-                  id="exception-search"
-                  aria-label="搜索待处理记录"
-                  allowClear
-                  prefix={<SearchOutlined />}
-                  placeholder="搜索来源、SKU、站点或目的仓"
-                  value={query}
-                  onChange={(event) => {
-                    changeQuery(event.target.value);
-                    setSplitTarget(null);
-                  }}
-                />
-              </div>
-              <div className="exception-filter-field">
-                <label htmlFor="exception-site-filter">站点</label>
-                <Select
-                  id="exception-site-filter"
-                  aria-label="站点筛选"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="全部站点"
-                  options={siteOptions}
-                  value={siteFilter}
-                  onChange={(value) => {
-                    changeFilter("site", value);
-                    setSplitTarget(null);
-                  }}
-                />
-              </div>
-              <div className="exception-filter-field">
-                <label htmlFor="exception-scale-filter">规模定位</label>
-                <Select
-                  id="exception-scale-filter"
-                  aria-label="规模定位筛选"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="全部规模定位"
-                  options={scaleOptions}
-                  value={scaleFilter}
-                  onChange={(value) => {
-                    changeFilter("scale", value);
-                    setSplitTarget(null);
-                  }}
-                />
-              </div>
-              <div className="exception-filter-field">
-                <label htmlFor="exception-stocking-filter">备货定位</label>
-                <Select
-                  id="exception-stocking-filter"
-                  aria-label="备货定位筛选"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="全部备货定位"
-                  options={stockingOptions}
-                  value={stockingFilter}
-                  onChange={(value) => {
-                    changeFilter("stocking", value);
-                    setSplitTarget(null);
-                  }}
-                />
-              </div>
-              <div className="exception-filter-field">
-                <label htmlFor="exception-reason-filter">原因</label>
-                <Select
-                  id="exception-reason-filter"
-                  aria-label="原因筛选"
-                  allowClear
-                  placeholder="全部原因"
-                  options={reasonOptions}
-                  value={reasonFilter}
-                  onChange={(value) => {
-                    changeFilter("reason", value);
-                    setSplitTarget(null);
-                  }}
-                />
-              </div>
-            </div>
-            <Table<DeliveryException>
-              rowKey="id"
-              dataSource={exceptions}
-              pagination={
-                exceptionTotal > 10
-                  ? {
-                      current: reviewPage,
-                      pageSize: 10,
-                      total: exceptionTotal,
-                      showSizeChanger: false,
-                      onChange: setReviewPage
-                    }
-                  : false
-              }
-              scroll={{ x: 1260 }}
-              locale={{
-                emptyText: (
-                  <Empty
-                    description={
-                      reviewStats.totalCount
-                        ? reviewScope === "unfinished"
-                          ? "当前没有未完成记录"
-                          : "没有匹配的审校记录"
-                        : "本批次没有待处理记录"
-                    }
-                  />
-                )
-              }}
-              columns={[
-                {
-                  title: "来源文件",
-                  dataIndex: "batch_file_id",
-                  width: 130,
-                  ellipsis: true,
-                  render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
-                },
-                {
-                  title: "SKU",
-                  dataIndex: "sku",
-                  width: 130,
-                  render: (value: string) => (
-                    <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
-                  )
-                },
-                {
-                  title: "站点",
-                  dataIndex: "full_site",
-                  width: 190,
-                  render: (value: string) => (
-                    <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
-                  )
-                },
-                { title: "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
-                {
-                  title: "规模定位",
-                  dataIndex: "scale_position",
-                  width: 85,
-                  ellipsis: true,
-                  render: (value: string | number, record) => (
-                    <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
-                      <span>
-                        <PositionValue value={value} />
-                      </span>
-                    </Tooltip>
-                  )
-                },
-                {
-                  title: "待处理量",
-                  dataIndex: "manual_quantity",
-                  width: 75,
-                  render: (value: number) => <strong className="pending-value">{value}</strong>
-                },
-                {
-                  title: "异常原因",
-                  dataIndex: "reason",
-                  width: 130,
-                  render: (reason: string) => <ExceptionReason reason={reason} />
-                },
-                {
-                  title: "审校依据",
-                  width: 250,
-                  render: (_, record) => (
-                    <ExceptionEvidence
-                      exception={record}
-                      hasOverreceiptRule={Boolean(
-                        selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule
-                      )}
-                    />
-                  )
-                },
-                {
-                  title: "状态",
-                  dataIndex: "status",
-                  width: 70,
-                  render: (value: string) => <ExceptionStatusTag status={value} />
-                },
-                {
-                  title: "操作",
-                  width: 100,
-                  render: (_, record) =>
-                    record.allowed_actions.length === 0 ? (
-                      <Typography.Text type="secondary">待处理</Typography.Text>
-                    ) : (
-                      <Button type="link" onClick={() => openSplit(record)}>
-                        查看并处理
-                      </Button>
-                    )
-                }
-              ]}
-            />
-          </Card>
-        </div>
+        <ExceptionReviewTable
+          review={review}
+          fileById={fileById}
+          hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
+          onOpen={openSplit}
+          onReset={() => setSplitTarget(null)}
+          sectionRef={reviewSection}
+        />
       )}
 
       <Drawer

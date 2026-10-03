@@ -136,3 +136,5 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
     replaceException
   };
 }
+
+export type ExceptionReview = ReturnType<typeof useExceptionReview>;
