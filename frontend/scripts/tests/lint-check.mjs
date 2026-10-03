@@ -1,0 +1,70 @@
+import assert from "node:assert/strict";
+import { afterEach, beforeEach, test } from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createCheckRepository } from "./frontend-check-support.mjs";
+
+let repository;
+beforeEach(() => {
+  repository = createCheckRepository("check-lint.mjs", "export const legacy: any = 1;\n");
+});
+afterEach(() => repository.dispose());
+
+test("unchanged legacy errors are visible only in the requested full scan", () => {
+  assert.equal(repository.check().status, 0);
+  const result = repository.check("--all");
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stderr, /no-explicit-any/);
+});
+
+for (const [name, source, rule] of [
+  ["类型", "export const quantity: any = 1;", "no-explicit-any"],
+  [
+    "Hook",
+    'import { useState } from "react"; export function Example({ enabled }: { enabled: boolean }) { if (enabled) useState(0); return null; }',
+    "rules-of-hooks"
+  ],
+  [
+    "依赖",
+    'import { useEffect } from "react"; export function Example({ value }: { value: number }) { useEffect(() => { console.log(value); }, []); return null; }',
+    "exhaustive-deps"
+  ],
+  [
+    "参数",
+    "export function example(a: number, b: number, c: number, d: number, e: number, f: number) { return a+b+c+d+e+f; }",
+    "max-params"
+  ],
+  [
+    "复杂度",
+    "export function example(value: number) { " +
+      Array.from({ length: 10 }, (_, index) => `if (value === ${index}) return ${index};`).join(" ") +
+      " return -1; }",
+    "complexity"
+  ]
+]) {
+  test(`incremental checks reject ${name} errors without rewriting Chinese paths`, () => {
+    const file = `frontend/src/pages/batch-detail/新增 ${name}.tsx`;
+    repository.write(file, source);
+    const result = repository.check();
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, new RegExp(rule));
+    assert.equal(readFileSync(join(repository.root, file), "utf8"), source);
+    repository.write(file, "export const quantity: number = 1;\n");
+    const valid = repository.check();
+    assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+  });
+}
+
+test("CI ranges check all commits and reject invalid references", () => {
+  const base = repository.git("rev-parse", "HEAD");
+  repository.write("frontend/src/first.ts", "export const quantity: any = 1;\n");
+  repository.git("add", ".");
+  repository.git("commit", "--quiet", "-m", "first");
+  repository.write("frontend/src/second.ts", "export const quantity: number = 2;\n");
+  repository.git("add", ".");
+  repository.git("commit", "--quiet", "-m", "second");
+  const result = repository.check("--base", base);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /first\.ts/);
+  assert.notEqual(repository.check("--base", "missing-ref").status, 0);
+});

@@ -321,6 +321,7 @@ npm run format:check
 npm run typecheck
 npm run test:quality
 npm run lint:tools
+npm run lint
 npm run check:duplicates
 npm run check:unused
 npm run check:imports
@@ -332,7 +333,7 @@ npm run build
 
 `format:check` 检查相对 `HEAD` 的前端已暂存、未暂存及未跟踪文件；提交后复查某个范围使用 `npm run format:check -- --base <起始提交>`。CI 使用 PR 的目标分支提交或本次推送前的提交作为起点，检查范围内所有提交的最终变更。锁文件和非前端文件不参与格式检查。
 
-`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题会返回非零状态。当前采用增量门禁，不批量格式化历史源码。TypeScript 保留现有 7.0.2；`lint:tools` 只检查工程 JavaScript 脚本，TypeScript/React 的 ESLint 仍待兼容性确认。Python 类型与格式门禁目前覆盖新增的检查工具，不代表存量业务代码已经完成治理。
+`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题会返回非零状态。当前采用增量门禁，不批量格式化历史源码。TypeScript 锁定 6.0.3，与 typescript-eslint 8.71.0 的官方支持范围一致。`lint:tools` 检查工程 JavaScript 脚本，`lint` 检查相对 HEAD 的新增和修改 TS/TSX 文件；提交范围使用 `npm run lint -- --base <起始提交>`，全量只读报告使用 `npm run lint:all`。React Hooks 调用和依赖检查覆盖受检业务文件，复杂度门禁先覆盖专项治理的批次详情新模块；其余存量函数继续人工审查。Python 类型与格式门禁目前覆盖新增的检查工具，不代表存量业务代码已经完成治理。
 
 本轮代码治理参考 SEEKWAY V2.0.0 草案，来源为 `songtu2025/seekway-codex-standards` 主分支提交 `96bfb207c2d9a88e3731df06569173a541386e37`（2026-10-03 核验），未复制规范文档或变更现有技术栈。`python -m scripts.check_code_health` 检查相对 HEAD 的已暂存、未暂存和未跟踪代码；CI 使用 `--base <起始提交>` 检查提交范围。新增文件及原本不超过 300 行的文件不得超过 300 个物理行，存量超长文件继续报告提醒。新增 Python 文件执行 Ruff 复杂度检查；存量函数仍需按职责人工审查。
 

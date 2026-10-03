@@ -1,45 +1,19 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
 import { afterEach, beforeEach, test } from "node:test";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createCheckRepository } from "./frontend-check-support.mjs";
 
-const frontend = fileURLToPath(new URL("../../", import.meta.url));
-const script = join(frontend, "scripts/check-format.mjs");
+let repository;
 let root;
-
-function git(...args) {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
-
-function write(relativePath, content) {
-  const path = join(root, relativePath);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, content);
-}
-
-function check(...args) {
-  return spawnSync(process.execPath, [script, ...args], { cwd: join(root, "frontend"), encoding: "utf8" });
-}
-
+let git;
+let write;
+let check;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "deliverynote format "));
-  git("init", "--quiet");
-  git("config", "user.name", "Format Check");
-  git("config", "user.email", "format-check@example.invalid");
-  git("config", "core.autocrlf", "false");
-  write("frontend/src/legacy.ts", "export const legacy=1\n");
-  copyFileSync(join(frontend, ".prettierrc.json"), join(root, "frontend/.prettierrc.json"));
-  git("add", ".");
-  git("commit", "--quiet", "-m", "fixture");
+  repository = createCheckRepository("check-format.mjs", "export const legacy=1\n");
+  ({ root, git, write, check } = repository);
 });
-
-afterEach(() => {
-  // 只清理本测试通过 mkdtemp 创建的独立合成仓库。
-  rmSync(root, { recursive: true, force: true });
-});
+afterEach(() => repository.dispose());
 
 test("unchanged legacy files do not block incremental checks but appear in a full scan", () => {
   assert.equal(check().status, 0);
