@@ -3,6 +3,26 @@ import type { Batch, BatchFile, DeliveryException, Job, SplitPart } from "./type
 
 export const REVIEW_PAGE_SIZE = 10;
 
+export function getBatchDetail(batchId: number) {
+  return api<Batch>(`/api/batches/${batchId}`);
+}
+
+export function getBatchJob(jobId: number) {
+  return api<Job>(`/api/jobs/${jobId}`);
+}
+
+export function preflightBatch(batchId: number) {
+  return api<Batch>(`/api/batches/${batchId}/preflight`, { method: "POST" });
+}
+
+export function adoptSupplierVersion(batchId: number) {
+  return api<Batch>(`/api/batches/${batchId}/refresh-supplier-version`, { method: "POST" });
+}
+
+export function startBatchJob(batchId: number, kind: "compute" | "export") {
+  return api<Job>(`/api/batches/${batchId}/${kind}`, { method: "POST" });
+}
+
 export function uploadBatchFile(batchId: number, file: File, kind: "delivery" | "inbound" = "delivery") {
   const body = new FormData();
   body.append("file", file);

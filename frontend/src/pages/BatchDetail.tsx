@@ -1,17 +1,5 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Card,
-  Descriptions,
-  Space,
-  Spin,
-  Steps,
-  Tooltip,
-  Typography,
-  Upload
-} from "antd";
+import { useMemo, useRef, useState } from "react";
+import { Alert, Button, Card, Descriptions, Space, Spin, Steps, Tooltip, Typography, Upload } from "antd";
 import {
   ArrowLeftOutlined,
   CloudUploadOutlined,
@@ -23,9 +11,8 @@ import {
   SafetyCertificateOutlined
 } from "@ant-design/icons";
 
-import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
-import type { Batch, DeliveryException, InputVersion, Job } from "../types";
+import type { DeliveryException } from "../types";
 import StatusTag from "../BatchStatusTag";
 import BatchFileTable from "./batch-detail/BatchFileTable";
 import { useBatchFiles } from "./batch-detail/useBatchFiles";
@@ -33,7 +20,9 @@ import { useBatchAction } from "./batch-detail/useBatchAction";
 import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
 import ExceptionReviewDrawer from "./batch-detail/ExceptionReviewDrawer";
 import { useExceptionEditor } from "./batch-detail/useExceptionEditor";
-import { useExceptionReview } from "./useExceptionReview";
+import { useBatchDetailData } from "./batch-detail/useBatchDetailData";
+import { useBatchJob } from "./batch-detail/useBatchJob";
+import { useBatchTasks } from "./batch-detail/useBatchTasks";
 
 const VERSION_LABELS: Record<string, string> = {
   purchase: "采购需求",
@@ -44,14 +33,6 @@ const VERSION_LABELS: Record<string, string> = {
   inbound_template: "积加入库模板"
 };
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
-function isActiveJob(job: Job | undefined): job is Job {
-  return Boolean(job && (job.status === "queued" || job.status === "running"));
-}
-
 export default function BatchDetail({
   batchId,
   onBack,
@@ -61,124 +42,13 @@ export default function BatchDetail({
   onBack: () => void;
   canRefreshSupplierVersion?: boolean;
 }) {
-  const { message } = AntApp.useApp();
-  const [batch, setBatch] = useState<Batch | null>(null);
-  const [activeSupplierVersion, setActiveSupplierVersion] = useState<InputVersion | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const { action, runAction } = useBatchAction();
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
-  const pollingJob = useRef<number | null>(null);
-  const announcedJobs = useRef(new Set<number>());
   const reviewSection = useRef<HTMLDivElement | null>(null);
-  const loadRequestRef = useRef(0);
-  const review = useExceptionReview(batchId, batch?.status);
-  const { setExceptionsLoading, fetchExceptionPage, applyExceptionPage } = review;
-
-  const load = useCallback(
-    async (silent = false) => {
-      const request = ++loadRequestRef.current;
-      if (!silent) {
-        setLoading(true);
-        setLoadError(null);
-      }
-      setExceptionsLoading(true);
-      try {
-        const batchRequest = api<Batch>(`/api/batches/${batchId}`).then((result) => {
-          if (request !== loadRequestRef.current) return;
-          setBatch(result);
-          if (!silent) setLoading(false);
-        });
-        const exceptionsRequest = fetchExceptionPage().then((result) => {
-          if (request !== loadRequestRef.current) return result;
-          const pendingTarget = applyExceptionPage(result);
-          if (pendingTarget !== undefined) setSplitTarget(pendingTarget);
-          return result;
-        });
-        const versionsRequest = canRefreshSupplierVersion
-          ? api<InputVersion[]>("/api/input-versions").then((versions) => {
-              if (request !== loadRequestRef.current) return;
-              setActiveSupplierVersion(
-                versions.find((version) => version.kind === "supplier" && version.active) ?? null
-              );
-            })
-          : Promise.resolve();
-        const [, loadedPage] = await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
-        if (request === loadRequestRef.current) setLoadError(null);
-        return request === loadRequestRef.current ? loadedPage : null;
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 401) {
-          // 刷新遇到会话过期时终止后续成功提示，认证提示由应用统一处理。
-          if (silent) throw error;
-          return null;
-        }
-        if (request === loadRequestRef.current) {
-          setLoadError(error instanceof Error ? error.message : "读取批次失败");
-        }
-        return null;
-      } finally {
-        if (request === loadRequestRef.current) {
-          if (!silent) setLoading(false);
-          setExceptionsLoading(false);
-        }
-      }
-    },
-    [batchId, canRefreshSupplierVersion, fetchExceptionPage, applyExceptionPage, setExceptionsLoading]
-  );
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const activeJob = useMemo(() => {
-    const jobs = batch?.jobs;
-    if (isActiveJob(jobs?.compute)) return jobs.compute;
-    if (isActiveJob(jobs?.export)) return jobs.export;
-    return undefined;
-  }, [batch?.jobs]);
-
-  const refreshAfterJob = useEffectEvent(() => load(true));
-  const activeJobId = activeJob?.id;
-  const activeJobStatus = activeJob?.status;
-  useEffect(() => {
-    if (!activeJobId || pollingJob.current === activeJobId) return;
-    let cancelled = false;
-    pollingJob.current = activeJobId;
-
-    const poll = async () => {
-      try {
-        const job = await api<Job>(`/api/jobs/${activeJobId}`);
-        if (cancelled) return;
-        if (job.status === "succeeded" || job.status === "failed") {
-          pollingJob.current = null;
-          await refreshAfterJob();
-          if (!announcedJobs.current.has(job.id)) {
-            announcedJobs.current.add(job.id);
-            if (job.status === "succeeded") {
-              message.success(job.kind === "compute" ? "批次计算完成" : "导出文件已生成");
-            } else {
-              message.error(job.error_message ?? "后台任务失败");
-            }
-          }
-          return;
-        }
-        await wait(1500);
-        if (!cancelled) void poll();
-      } catch (error) {
-        pollingJob.current = null;
-        if (!cancelled && !(error instanceof ApiError && error.status === 401)) {
-          message.error(error instanceof Error ? error.message : "读取任务状态失败");
-        }
-      }
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (pollingJob.current === activeJobId) pollingJob.current = null;
-    };
-  }, [activeJobId, activeJobStatus, message]);
+  const data = useBatchDetailData(batchId, canRefreshSupplierVersion, setSplitTarget);
+  const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
+  const activeJob = useBatchJob(batch, load);
 
   const totals = useMemo(
     () =>
@@ -198,36 +68,8 @@ export default function BatchDetail({
   const fileActions = useBatchFiles({ batchId, files, selfOperated, runAction, load });
   const { uploadFile, uploadInboundFile } = fileActions;
 
-  const preflight = () =>
-    runAction("preflight", async () => {
-      await api<Batch>(`/api/batches/${batchId}/preflight`, { method: "POST" });
-      await load(true);
-      message.success("所有基础资料和交货文件均已通过预检");
-    });
-
-  const refreshSupplierVersion = () =>
-    runAction("refresh-supplier-version", async () => {
-      const updated = await api<Batch>(`/api/batches/${batchId}/refresh-supplier-version`, { method: "POST" });
-      setBatch(updated);
-      await load(true);
-      message.success("批次已采用当前供应商资料");
-    });
-
-  const compute = () =>
-    runAction("compute", async () => {
-      await api<Job>(`/api/batches/${batchId}/compute`, { method: "POST" });
-      await load(true);
-      message.info("计算任务已提交，可以离开页面，返回后状态会自动恢复");
-    });
-
-  const startExport = () =>
-    runAction("export", async () => {
-      await api<Job>(`/api/batches/${batchId}/export`, { method: "POST" });
-      await load(true);
-      message.info("正在生成导出文件");
-    });
-
-  const downloadResult = (path: string, filename: string) => runAction("download", () => download(path, filename));
+  const tasks = useBatchTasks(batchId, data, runAction);
+  const { preflight, refreshSupplierVersion, compute, startExport, downloadResult } = tasks;
 
   const openSplit = (record: DeliveryException) => {
     setSplitTarget(record);
