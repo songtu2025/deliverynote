@@ -167,12 +167,8 @@ def resume_services(
         service for service in RESUMED_SERVICES if service not in service_containers
     ]
     if missing_containers:
-        raise BackupError(
-            "缺少维护前容器标识：" + ", ".join(missing_containers)
-        )
-    container_ids = [
-        service_containers[service] for service in RESUMED_SERVICES
-    ]
+        raise BackupError("缺少维护前容器标识：" + ", ".join(missing_containers))
+    container_ids = [service_containers[service] for service in RESUMED_SERVICES]
     # 直接启动维护前解析出的容器，避免新版 Compose 的依赖图或尚未构建镜像
     # 阻断旧生产版本在备份窗口后的恢复。
     runner.run(
@@ -186,9 +182,7 @@ def resume_services(
             service_containers["api"],
             "python",
             "-c",
-            API_READINESS_PROBE.format(
-                timeout=config.service_wait_timeout_seconds
-            ),
+            API_READINESS_PROBE.format(timeout=config.service_wait_timeout_seconds),
         ],
         timeout_seconds=config.service_wait_timeout_seconds + 10,
     )
