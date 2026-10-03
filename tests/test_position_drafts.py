@@ -1,3 +1,5 @@
+from tests.support.position_drafts import PositionDraftCase
+from tests.support.position_api import PositionApiCase
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -21,7 +23,7 @@ from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
 from delivery_note.processing.models import (POSITION_SOURCE_COLUMNS)
 from delivery_note.web.api import create_app
-from delivery_note.web.database import Database, sqlite_url
+from delivery_note.web.database import sqlite_url
 from delivery_note.web.models import (
     AuditLog,
     Batch,
@@ -42,114 +44,11 @@ from delivery_note.web.position_draft_replacement import replace_draft_from_fram
 from tests.asgi_client import SyncASGIClient
 
 
-class PositionDraftTests(unittest.TestCase):
-    def setUp(self):
-        self.temporary_directory = TemporaryDirectory()
-        self.root = Path(self.temporary_directory.name)
-        self.database = Database(sqlite_url(self.root / "test.db"))
-        self.database.create_schema()
-        self.base_path = self.root / "position-v1.xlsx"
-        self.base_frame = pd.DataFrame(
-            [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货"]],
-            columns=POSITION_SOURCE_COLUMNS,
-        )
-        write_position_workbook(self.base_path, self.base_frame)
-        with self.database.session() as session:
-            admin = User(
-                username="admin",
-                password_hash="unused",
-                role="admin",
-            )
-            session.add(admin)
-            session.flush()
-            version = InputVersion(
-                kind="position",
-                name="position-v1",
-                original_name="position-v1.xlsx",
-                storage_path=str(self.base_path),
-                active=True,
-                created_by=admin.id,
-            )
-            session.add(version)
-            session.commit()
-            self.admin_id = admin.id
-            self.version_id = version.id
-        self.valid_row = {
-            "store_site": "SEEKWAY:CA",
-            "jiaji_sku": "SKU-B",
-            "msku": "MSKU-B",
-            "scale_position": "中尾",
-            "stocking_position": "备货",
-        }
+class PositionDraftTests(PositionDraftCase):
 
-    def tearDown(self):
-        self.database.dispose()
-        self.temporary_directory.cleanup()
 
-    def _version(self, session):
-        return session.get(InputVersion, self.version_id)
 
-    def _modify_original(self, session, draft, stocking_position="不备货"):
-        original = list_draft_rows(session, draft.id)[0]
-        values = {
-            "store_site": original.store_site,
-            "jiaji_sku": original.jiaji_sku,
-            "msku": original.msku,
-            "scale_position": original.scale_position,
-            "stocking_position": stocking_position,
-        }
-        mutate_draft_row(
-            session,
-            draft,
-            draft.revision,
-            self.admin_id,
-            values,
-            row_id=original.id,
-        )
-        return original
 
-    def _assert_nested_publish_rejected(
-        self,
-        *,
-        name: str,
-        commit_savepoint: bool,
-        commit_outer: bool,
-    ):
-        published_path = self.root / f"{name}.xlsx"
-        session = self.database.SessionLocal()
-        try:
-            draft = create_or_resume_draft(
-                session, self._version(session), self.admin_id
-            )
-            nested = session.begin_nested()
-            with self.assertRaisesRegex(ValueError, "不能在嵌套事务中发布"):
-                publish_draft(
-                    session,
-                    draft,
-                    draft.revision,
-                    self.admin_id,
-                    name=name,
-                    storage_path=published_path,
-                )
-            if commit_savepoint:
-                nested.commit()
-            else:
-                nested.rollback()
-            if commit_outer:
-                session.commit()
-            else:
-                session.rollback()
-        finally:
-            session.close()
-
-        self.assertFalse(published_path.exists())
-        self.assertEqual(list(self.root.glob(".*.tmp.xlsx")), [])
-        with self.database.session() as verification_session:
-            versions = verification_session.query(InputVersion).all()
-            self.assertEqual(
-                [(version.id, version.active) for version in versions],
-                [(self.version_id, True)],
-            )
 
     def test_create_or_resume_copies_active_version_once(self):
         with self.database.session() as session:
@@ -1146,96 +1045,13 @@ class PositionDraftTests(unittest.TestCase):
                 )
 
 
-class PositionDraftApiTests(unittest.TestCase):
-    def setUp(self):
-        self.temporary_directory = TemporaryDirectory()
-        self.root = Path(self.temporary_directory.name)
-        self.storage = self.root / "storage"
-        self.app = create_app(
-            database_url=sqlite_url(self.root / "api.db"),
-            storage_root=self.storage,
-            bootstrap_admin=("admin", "admin-pass"),
-        )
-        self.client = SyncASGIClient(self.app)
-        self.admin_headers = self.login("admin", "admin-pass")
-        operator = self.client.post(
-            "/api/users",
-            headers=self.admin_headers,
-            json={
-                "username": "operator",
-                "password": "operator-pass",
-                "role": "operator",
-            },
-        )
-        self.assertEqual(operator.status_code, 201, operator.text)
-        self.operator_headers = self.login("operator", "operator-pass")
-        self.version = self.upload_position()
-        self.valid_row = {
-            "store_site": "SEEKWAY:CA",
-            "jiaji_sku": "SKU-B",
-            "msku": "MSKU-B",
-            "scale_position": "中尾",
-            "stocking_position": "备货",
-        }
+class PositionDraftApiTests(PositionApiCase):
 
-    def tearDown(self):
-        self.client.close()
-        self.app.state.database.dispose()
-        self.temporary_directory.cleanup()
 
-    def login(self, username: str, password: str) -> dict[str, str]:
-        response = self.client.post(
-            "/api/auth/login",
-            json={"username": username, "password": password},
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        return {"Authorization": f"Bearer {response.json()['token']}"}
 
-    @staticmethod
-    def position_bytes(rows: list[list] | None = None) -> bytes:
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.title = "MSKU_视图"
-        sheet.append(POSITION_SOURCE_COLUMNS)
-        if rows is None:
-            rows = [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]]
-        for row in rows:
-            sheet.append(row)
-        output = BytesIO()
-        workbook.save(output)
-        return output.getvalue()
 
-    def upload_position(self, name: str = "position-v1") -> dict:
-        response = self.client.post(
-            "/api/input-versions/position",
-            headers=self.admin_headers,
-            data={"name": name, "activate": "true"},
-            files={
-                "file": (
-                    f"{name}.xlsx",
-                    BytesIO(self.position_bytes()),
-                )
-            },
-        )
-        self.assertEqual(response.status_code, 201, response.text)
-        return response.json()
 
-    def create_draft(self) -> dict:
-        response = self.client.post(
-            "/api/input-drafts/position",
-            headers=self.admin_headers,
-        )
-        self.assertIn(response.status_code, {200, 201}, response.text)
-        return response.json()
 
-    def list_rows(self, draft_id: int, **params) -> dict:
-        response = self.client.get(
-            f"/api/input-drafts/{draft_id}/rows",
-            headers=self.admin_headers,
-            params=params,
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        return response.json()
 
     def test_version_summary_preview_and_download(self):
         version_id = self.version["id"]
