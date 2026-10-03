@@ -1,109 +1,55 @@
+"""Excel 读取、模板校验和导出的统一入口。"""
+
 from copy import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from openpyxl import load_workbook
-from openpyxl.styles import Alignment, Font, PatternFill, Protection
+from openpyxl.styles import Alignment, Protection
+from openpyxl.worksheet.worksheet import Worksheet
 
+from .excel.readers import (
+    PRODUCT_COLUMNS,
+    PURCHASE_COLUMNS,
+    read_delivery_workbook,
+    read_position_workbook,
+    read_product_workbook,
+    read_purchase_workbook,
+    read_self_operated_delivery_workbook,
+    read_self_operated_inbound_workbook,
+    read_supplier_workbook,
+)
+from .excel.styles import _StyledCell
+from .excel.templates import (
+    _validate_template_headers,
+    validate_self_operated_template_workbook,
+    validate_template_workbook,
+)
+from .inbound.models import INBOUND_TEMPLATE_COLUMNS
 from .processing.models import (
-    BatchResult,
-    EXCEPTION_COLUMNS,
     IMPORT_COLUMNS,
     PENDING_COLUMNS,
-    POSITION_SOURCE_COLUMNS,
     POSITION_VALUE_COLUMNS,
+    BatchResult,
 )
-from .processing.delivery_sites import (normalize_delivery_sheet)
-from .inbound.models import (
-    INBOUND_COLUMNS as SELF_OPERATED_INBOUND_COLUMNS,
-    INBOUND_TEMPLATE_COLUMNS,
-    SelfOperatedDeliverySource,
-)
-from .inbound.normalization import normalize_self_operated_delivery_sheet
 
-
-PURCHASE_COLUMNS = ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"]
-PRODUCT_COLUMNS = ["SKU", "店铺/站点", "品类A", "锁仓MKSU"]
-SUPPLIER_REQUIRED_COLUMNS = ["供应商编号", "供应商名称", "状态"]
-SUPPLIER_COLUMNS = [*SUPPLIER_REQUIRED_COLUMNS, "供应商别名"]
-
-
-def read_delivery_workbook(path: Path) -> pd.DataFrame:
-    with pd.ExcelFile(path) as workbook:
-        if "明细" not in workbook.sheet_names:
-            raise ValueError("交货单缺少“明细”工作表")
-        sheet = pd.read_excel(workbook, sheet_name="明细", header=3)
-    return normalize_delivery_sheet(sheet)
-
-
-def read_self_operated_delivery_workbook(
-    path: Path,
-) -> SelfOperatedDeliverySource:
-    sheet = pd.read_excel(path, sheet_name="明细", header=3)
-    return normalize_self_operated_delivery_sheet(sheet)
-
-
-def read_self_operated_inbound_workbook(path: Path) -> pd.DataFrame:
-    rows = pd.read_excel(path)
-    missing = sorted(SELF_OPERATED_INBOUND_COLUMNS - set(rows.columns))
-    if missing:
-        raise ValueError(f"自营仓收货入库单缺少必要字段：{', '.join(missing)}")
-    return rows
-
-
-def read_product_workbook(path: Path) -> pd.DataFrame:
-    return pd.read_excel(path, usecols=PRODUCT_COLUMNS)
-
-
-def read_purchase_workbook(path: Path) -> pd.DataFrame:
-    return pd.read_excel(path, usecols=PURCHASE_COLUMNS)
-
-
-def read_supplier_workbook(path: Path) -> pd.DataFrame:
-    rows = pd.read_excel(path)
-    missing = [column for column in SUPPLIER_REQUIRED_COLUMNS if column not in rows]
-    if missing:
-        raise ValueError(f"供应商资料缺少必要字段：{', '.join(missing)}")
-    if "供应商别名" not in rows:
-        rows["供应商别名"] = ""
-    return rows[SUPPLIER_COLUMNS]
-
-
-def read_position_workbook(path: Path) -> pd.DataFrame:
-    return pd.read_excel(path, sheet_name="MSKU_视图", usecols=POSITION_SOURCE_COLUMNS)
-
-
-def validate_template_workbook(path: Path) -> None:
-    """只读校验官方模板的 A:G 表头和示例格式行。"""
-    workbook = load_workbook(path, read_only=True, data_only=False)
-    try:
-        sheet = workbook.active
-        headers = [sheet.cell(row=2, column=column).value for column in range(1, 8)]
-        if headers != IMPORT_COLUMNS:
-            raise ValueError("官方模板表头与预期字段不一致")
-        example_cells = [sheet.cell(row=3, column=column) for column in range(1, 8)]
-        if not any(cell.value is not None or cell.has_style for cell in example_cells):
-            raise ValueError("官方模板缺少第 3 行示例格式")
-    finally:
-        workbook.close()
-
-
-def validate_self_operated_template_workbook(path: Path) -> None:
-    """只读校验积加入库模板表头和样式示例行。"""
-    workbook = load_workbook(path, read_only=True, data_only=False)
-    try:
-        sheet = workbook.active
-        headers = [
-            sheet.cell(row=1, column=column).value
-            for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
-        ]
-        if headers != INBOUND_TEMPLATE_COLUMNS:
-            raise ValueError("积加入库模板表头与预期字段不一致")
-        if sheet.max_row < 2:
-            raise ValueError("积加入库模板缺少第 2 行示例格式")
-    finally:
-        workbook.close()
+__all__ = [
+    "PRODUCT_COLUMNS",
+    "PURCHASE_COLUMNS",
+    "read_delivery_workbook",
+    "read_self_operated_delivery_workbook",
+    "read_self_operated_inbound_workbook",
+    "read_product_workbook",
+    "read_purchase_workbook",
+    "read_supplier_workbook",
+    "read_position_workbook",
+    "validate_template_workbook",
+    "validate_self_operated_template_workbook",
+    "write_import_workbook",
+    "write_delivery_workbook",
+    "write_self_operated_inbound_workbook",
+]
 
 
 def _excel_value(value: Any) -> Any:
@@ -113,23 +59,26 @@ def _excel_value(value: Any) -> Any:
 
 
 def _populate_import_sheet(
-    sheet,
+    sheet: Worksheet,
     import_rows: pd.DataFrame,
     *,
     preserve_example_row: bool = False,
 ) -> None:
+    """沿用模板示例样式填充数据，保持两种交货起始行规则。"""
+
     if list(import_rows.columns) != IMPORT_COLUMNS:
         raise ValueError("正式导入数据字段与官方模板不一致")
 
-    template_headers = [
-        sheet.cell(row=2, column=column).value for column in range(1, 8)
-    ]
-    if template_headers != IMPORT_COLUMNS:
-        raise ValueError("官方模板表头与预期字段不一致")
+    _validate_template_headers(
+        sheet, IMPORT_COLUMNS, row=2, message="官方模板表头与预期字段不一致"
+    )
     if sheet.max_row < 3:
         raise ValueError("官方模板缺少第 3 行示例格式")
 
-    styles = [copy(sheet.cell(row=3, column=column)._style) for column in range(1, 8)]
+    styles = [
+        copy(cast(_StyledCell, sheet.cell(row=3, column=column))._style)
+        for column in range(1, 8)
+    ]
     row_height = sheet.row_dimensions[3].height
     if sheet.max_row > 3:
         sheet.delete_rows(4, sheet.max_row - 3)
@@ -144,7 +93,7 @@ def _populate_import_sheet(
             sheet.row_dimensions[row_number].height = row_height
         for column, value in enumerate(values, start=1):
             cell = sheet.cell(row=row_number, column=column)
-            cell._style = copy(styles[column - 1])
+            cast(_StyledCell, cell)._style = copy(styles[column - 1])
             cell.value = _excel_value(value)
     for row_number in range(first_data_row, first_data_row + len(import_rows)):
         sheet.cell(row=row_number, column=4).number_format = "0"
@@ -157,7 +106,7 @@ def write_import_workbook(
 ) -> None:
     """复制官方模板，在第 3 行起写入可导入数据。"""
     workbook = load_workbook(template_path)
-    _populate_import_sheet(workbook.active, import_rows)
+    _populate_import_sheet(cast(Worksheet, workbook.active), import_rows)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
@@ -178,18 +127,18 @@ def write_self_operated_inbound_workbook(
         raise ValueError(f"积加入库数据缺少字段：{', '.join(missing)}")
 
     workbook = load_workbook(template_path)
-    sheet = workbook.active
-    headers = [
-        sheet.cell(row=1, column=column).value
-        for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
-    ]
-    if headers != INBOUND_TEMPLATE_COLUMNS:
-        raise ValueError("积加入库模板表头与预期字段不一致")
+    sheet = cast(Worksheet, workbook.active)
+    _validate_template_headers(
+        sheet,
+        INBOUND_TEMPLATE_COLUMNS,
+        row=1,
+        message="积加入库模板表头与预期字段不一致",
+    )
     if sheet.max_row < 2:
         raise ValueError("积加入库模板缺少第 2 行示例格式")
 
     styles = [
-        copy(sheet.cell(row=2, column=column)._style)
+        copy(cast(_StyledCell, sheet.cell(row=2, column=column))._style)
         for column in range(1, len(INBOUND_TEMPLATE_COLUMNS) + 1)
     ]
     row_height = sheet.row_dimensions[2].height
@@ -202,76 +151,8 @@ def write_self_operated_inbound_workbook(
         sheet.row_dimensions[row_offset].height = row_height
         for column, value in enumerate(values, start=1):
             cell = sheet.cell(row=row_offset, column=column)
-            cell._style = copy(styles[column - 1])
+            cast(_StyledCell, cell)._style = copy(styles[column - 1])
             cell.value = _excel_value(value)
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    workbook.save(output_path)
-
-
-def _style_table_header(cells) -> None:
-    fill = PatternFill("solid", fgColor="1F4E78")
-    for cell in cells:
-        cell.fill = fill
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-
-def _fit_columns(sheet, maximum_width: int = 50) -> None:
-    for column_cells in sheet.columns:
-        values = [str(cell.value) for cell in column_cells if cell.value is not None]
-        width = min(max((len(value) for value in values), default=8) + 2, maximum_width)
-        sheet.column_dimensions[column_cells[0].column_letter].width = max(width, 10)
-
-
-def write_exception_workbook(
-    template_path: Path,
-    output_path: Path,
-    result: BatchResult,
-    metadata: dict[str, Any],
-    pending_rows: pd.DataFrame,
-) -> None:
-    """输出运行汇总、异常明细和可二次导入数据。"""
-    workbook = load_workbook(template_path)
-    pending_sheet = workbook.active
-    pending_sheet.title = "待处理导入"
-    _populate_import_sheet(pending_sheet, pending_rows)
-
-    summary = workbook.create_sheet("运行汇总", 0)
-    summary_rows = [
-        *metadata.items(),
-        ("交货总量", result.delivery_total),
-        ("自动导入量", result.import_total),
-        ("人工处理量", result.manual_total),
-    ]
-    for label, value in summary_rows:
-        summary.append([label, _excel_value(value)])
-    label_fill = PatternFill("solid", fgColor="D9EAF7")
-    for cell in summary["A"]:
-        cell.fill = label_fill
-        cell.font = Font(bold=True, color="1F1F1F")
-    summary.column_dimensions["A"].width = 18
-    summary.column_dimensions["B"].width = 48
-    for row in range(1, summary.max_row + 1):
-        summary.cell(row=row, column=2).alignment = Alignment(
-            vertical="top", wrap_text=True
-        )
-
-    details = workbook.create_sheet("异常明细", 1)
-    details.append(EXCEPTION_COLUMNS)
-    _style_table_header(details[1])
-    for values in result.exception_rows[EXCEPTION_COLUMNS].itertuples(
-        index=False,
-        name=None,
-    ):
-        details.append([_excel_value(value) for value in values])
-    details.freeze_panes = "A2"
-    details.auto_filter.ref = f"A1:H{max(details.max_row, 1)}"
-    for column in (5, 6, 7):
-        for row in range(2, details.max_row + 1):
-            details.cell(row=row, column=column).number_format = "#,##0"
-    _fit_columns(details)
-    workbook.active = 0
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)
@@ -349,9 +230,9 @@ def write_delivery_workbook(
     import_rows: pd.DataFrame,
     pending_rows: pd.DataFrame,
 ) -> None:
-    """输出交货导入、异常明细和可编辑的待处理导入数据。"""
+    """输出交货导入和可编辑的待处理数据，保持表头保护。"""
     workbook = load_workbook(template_path)
-    import_sheet = workbook.active
+    import_sheet = cast(Worksheet, workbook.active)
     import_sheet.title = "交货导入"
     pending_sheet = workbook.copy_worksheet(import_sheet)
     pending_sheet.title = "待处理导入"

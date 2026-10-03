@@ -13,7 +13,6 @@ try:
         read_supplier_workbook,
         write_self_operated_inbound_workbook,
         write_delivery_workbook,
-        write_exception_workbook,
         write_import_workbook,
     )
     from delivery_note.processing.models import (
@@ -28,7 +27,6 @@ except ImportError:
     read_position_workbook = None
     read_supplier_workbook = None
     write_delivery_workbook = None
-    write_exception_workbook = None
     write_import_workbook = None
     write_self_operated_inbound_workbook = None
     BatchResult = None
