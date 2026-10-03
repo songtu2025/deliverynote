@@ -1,4 +1,5 @@
 import unittest
+from typing import Any
 
 import pandas as pd
 
@@ -7,18 +8,20 @@ from delivery_note.processing.overreceipt import build_overreceipt_allowances
 
 
 class AllocationCase(unittest.TestCase):
-    @staticmethod
-    def delivery(quantity=100):
-        return pd.DataFrame([{"SKU": "SKU-A", "原始站点": "US", "交货量": quantity}])
+    product_site = "SEEKWAY:US"
 
     @staticmethod
-    def products(rows=None):
+    def delivery(quantity: int = 100) -> pd.DataFrame:
+        return pd.DataFrame([{"SKU": "SKU-A", "原始站点": "US", "交货量": quantity}])
+
+    @classmethod
+    def products(cls, rows: list[dict[str, Any]] | None = None) -> pd.DataFrame:
         return pd.DataFrame(
             rows
             or [
                 {
                     "SKU": "SKU-A",
-                    "店铺/站点": "SEEKWAY:US",
+                    "店铺/站点": cls.product_site,
                     "品类A": "水鞋",
                     "锁仓MKSU": "锁",
                 }
