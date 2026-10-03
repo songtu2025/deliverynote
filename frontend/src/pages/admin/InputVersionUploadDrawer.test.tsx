@@ -74,6 +74,19 @@ describe("InputVersionUploadDrawer", () => {
     expect(props.onSubmit).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    ["purchase", ".xls,.xlsx", "仅支持 .xls、.xlsx 文件"],
+    ["product", ".xls,.xlsx", "仅支持 .xls、.xlsx 文件"],
+    ["supplier", ".xls,.xlsx", "仅支持 .xls、.xlsx 文件"],
+    ["position", ".xls,.xlsx", "仅支持 .xls、.xlsx 文件"],
+    ["template", ".xlsx", "导出模板仅支持 .xlsx 文件"],
+    ["inbound_template", ".xlsx", "积加入库模板仅支持 .xlsx 文件"]
+  ] as const)("uses the supported formats and hint for %s", (kind, accept, hint) => {
+    const { container } = render(<DrawerView {...drawerProps()} kind={kind} />);
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute("accept", accept);
+    expect(screen.getByText(`${hint}；选择后不会立即生效`)).toBeInTheDocument();
+  });
+
   it("reflects parent-owned files and errors without clearing the name", () => {
     const props = drawerProps();
     props.files = [{ uid: "first", name: "first.xlsx" }];

@@ -2,7 +2,7 @@ import { Alert, Button, Drawer, Form, Input, Typography, Upload } from "antd";
 import { InboxOutlined, UploadOutlined } from "@ant-design/icons";
 import type { FormInstance, UploadFile, UploadProps } from "antd";
 
-import { INPUT_KIND_BY_VALUE } from "./adminConstants";
+import { INPUT_KIND_BY_VALUE, inputUploadFormatMessage } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
 
 interface InputVersionUploadDrawerProps {
@@ -102,7 +102,7 @@ export function InputVersionUploadDrawer({
           <Upload.Dragger
             className="input-data-uploader"
             disabled={busy}
-            accept=".xls,.xlsx"
+            accept={definition.uploadExtensions.join(",")}
             maxCount={1}
             multiple={false}
             beforeUpload={() => false}
@@ -113,7 +113,7 @@ export function InputVersionUploadDrawer({
               <InboxOutlined />
             </p>
             <p className="ant-upload-text">拖放 Excel 到这里，或点击选择</p>
-            <p className="ant-upload-hint">支持 .xls、.xlsx；选择后不会立即生效</p>
+            <p className="ant-upload-hint">{inputUploadFormatMessage(kind)}；选择后不会立即生效</p>
           </Upload.Dragger>
           <Button
             className="input-data-upload-submit"

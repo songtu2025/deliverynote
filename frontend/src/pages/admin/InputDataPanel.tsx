@@ -6,7 +6,7 @@ import type { UploadFile, UploadProps } from "antd";
 import { api, ApiError, download } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { InputVersion, InputVersionInspection, PositionIssue } from "../../types";
-import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS } from "./adminConstants";
+import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS, inputUploadFormatMessage } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
 import { InputVersionHistoryPanel } from "./InputVersionHistoryPanel";
 import { InputVersionPreviewPanel } from "./InputVersionPreviewPanel";
@@ -153,6 +153,12 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     const file = pendingFiles[0]?.originFileObj;
     if (!file) {
       setUploadError({ kind, message: "请选择要上传的 Excel 文件" });
+      return;
+    }
+    const dotIndex = file.name.lastIndexOf(".");
+    const extension = dotIndex > 0 ? file.name.slice(dotIndex).toLowerCase() : "";
+    if (!INPUT_KIND_BY_VALUE[kind].uploadExtensions.includes(extension)) {
+      setUploadError({ kind, message: inputUploadFormatMessage(kind) });
       return;
     }
     setMutation({ kind, action: "upload" });

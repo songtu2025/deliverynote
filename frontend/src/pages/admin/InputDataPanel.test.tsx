@@ -661,6 +661,64 @@ describe("InputDataPanel", () => {
     expect(requestedUrls.some((url) => url.includes("/5/"))).toBe(false);
   });
 
+  it.each([
+    ["template", "导出模板", "unsupported.XLS", "valid.XLSX", "导出模板仅支持 .xlsx 文件"],
+    ["inbound_template", "积加入库模板", "unsupported.xls", "valid.xlsx", "积加入库模板仅支持 .xlsx 文件"],
+    ["product", "商品信息", "unsupported.csv", "valid.XLS", "仅支持 .xls、.xlsx 文件"],
+    ["supplier", "供应商资料", "unsupported.xlsm", "valid.xls", "仅支持 .xls、.xlsx 文件"],
+    ["position", "MSKU定位", "unsupported", "valid.XLSX", "仅支持 .xls、.xlsx 文件"]
+  ] as const)(
+    "rejects unsupported %s files and retains the name when corrected",
+    async (kind, label, invalidName, validName, error) => {
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (String(input).endsWith(`/api/input-versions/${kind}`) && init?.method === "POST") {
+          return jsonResponse({ ...versions[6], id: 9, kind }, 201);
+        }
+        throw new Error(`Unexpected request: ${String(input)}`);
+      });
+      const onVersionsChanged = vi.fn();
+      render(
+        <InputDataPanel
+          versions={[]}
+          loading={false}
+          onVersionsChanged={onVersionsChanged}
+          onOpenPositionDraft={vi.fn()}
+        />
+      );
+      fireEvent.click(getCatalogButton(label));
+      fireEvent.click(screen.getByRole("button", { name: "上传首个版本" }));
+      const name = `${kind}-version`;
+      fireEvent.change(screen.getByLabelText("新版本名称"), { target: { value: name } });
+      fireEvent.drop(screen.getByRole("button", { name: /拖放 Excel 到这里/ }), {
+        dataTransfer: { files: [new File(["合成数据"], invalidName)] }
+      });
+      await screen.findByText(invalidName);
+      const submit = screen.getByRole("button", { name: "校验并启用新版本" });
+      fireEvent.click(submit);
+      expect(await screen.findByText(error)).toBeInTheDocument();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(onVersionsChanged).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("新版本名称")).toHaveValue(name);
+      expect(screen.getByText(invalidName)).toBeInTheDocument();
+      expect(submit).toBeEnabled();
+      const valid = new File(["合成数据"], validName);
+      fireEvent.change(document.querySelector<HTMLInputElement>('input[type="file"]')!, {
+        target: { files: [valid] }
+      });
+      await screen.findByText(validName);
+      expect(screen.queryByText(error)).not.toBeInTheDocument();
+      expect(screen.getByLabelText("新版本名称")).toHaveValue(name);
+      expect(fetch).not.toHaveBeenCalled();
+      fireEvent.click(submit);
+      await waitFor(() => expect(onVersionsChanged).toHaveBeenCalledOnce());
+      expect(fetch).toHaveBeenCalledOnce();
+      const body = vi.mocked(fetch).mock.calls[0][1]?.body as FormData;
+      expect(body.get("name")).toBe(name);
+      expect(body.get("activate")).toBe("true");
+      expect(body.get("file")).toBe(valid);
+    }
+  );
+
   it("uploads a replacement only after explicit confirmation", async () => {
     const onVersionsChanged = vi.fn();
     render(
