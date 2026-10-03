@@ -45,11 +45,11 @@ from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
 from .input_version_read_routes import register_input_version_read_routes
 from .models import AuditLog
-from .sync_routes import register_sync_routes
+from .sync.commands import SyncCommands
+from .sync.purchase_routes import register_purchase_routes
+from .sync.inbound_routes import register_inbound_routes
 from .caches import InputInspectionCache
 from .serializers import (
-    utc_isoformat,
-    version_json,
     job_json,
 )
 
@@ -132,15 +132,9 @@ def create_app(
     )
     register_self_operated_rule_routes(app, dependencies, overreceipt_rule_lock, _audit)
 
-    register_sync_routes(
-        app=app,
-        storage=storage,
-        get_session=get_session,
-        current_user=current_user,
-        audit=_audit,
-        version_json=version_json,
-        utc_isoformat=utc_isoformat,
-    )
+    sync_commands = SyncCommands(storage, _audit)
+    register_purchase_routes(app, dependencies, sync_commands)
+    register_inbound_routes(app, dependencies, sync_commands)
     register_batch_read_routes(
         app=app,
         get_session=get_session,
