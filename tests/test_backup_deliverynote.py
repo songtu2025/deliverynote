@@ -11,15 +11,14 @@ from pathlib import Path
 from typing import BinaryIO, Sequence
 
 from scripts.backup_deliverynote import (
-    BackupConfig,
-    BackupError,
     CRITICAL_TABLES,
     RESTORE_DATABASE_PATTERN,
-    SubprocessRunner,
     _validate_data_archive,
     create_backup,
-    inspect_environment,
 )
+
+from scripts.backup.runtime import BackupConfig, BackupError, SubprocessRunner
+from scripts.backup.services import inspect_environment
 
 
 class FakeRunner:

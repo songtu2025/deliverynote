@@ -1,28 +1,33 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
 import hashlib
 import json
-import os
 import re
 import secrets
 import shutil
-import subprocess
 import sys
 import tarfile
 import tempfile
 import time
-from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO, Callable, Iterator, Protocol, Sequence
+from typing import Callable, Sequence
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.backup.runtime import (  # noqa: E402
+    BackupConfig, BackupError, Runner, SubprocessRunner, compose,
+    exclusive_lock, restricted_umask,
+)
+from scripts.backup.services import (  # noqa: E402
+    WORKER_SERVICES, active_job_count, inspect_environment,
+    resume_services, wait_for_jobs_to_drain,
+)
 
 
 BACKUP_NAME_PATTERN = re.compile(r"^\d{8}-\d{6}$")
-PROJECT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-DOCKER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 RESTORE_DATABASE_PATTERN = re.compile(
     r"^delivery_note_restore_[0-9a-f]{16}$"
 )
@@ -30,125 +35,6 @@ CRITICAL_TABLES = ("users", "input_versions", "batches", "batch_files", "jobs")
 CRITICAL_TABLE_COUNTS_SQL = "\nUNION ALL\n".join(
     f"SELECT '{table}', count(*) FROM public.{table}" for table in CRITICAL_TABLES
 )
-WORKER_SERVICES = ("worker", "purchase-sync-worker", "inbound-sync-worker")
-RESUMED_SERVICES = ("api", *WORKER_SERVICES, "web")
-REQUIRED_SERVICES = frozenset({"db", "api", "web", *WORKER_SERVICES})
-API_READINESS_PROBE = """\
-import time
-import urllib.request
-
-deadline = time.monotonic() + {timeout}
-while True:
-    try:
-        with urllib.request.urlopen(
-            "http://127.0.0.1:8000/health", timeout=5
-        ) as response:
-            if response.status == 200:
-                break
-    except Exception:
-        if time.monotonic() >= deadline:
-            raise
-        time.sleep(1)
-"""
-
-
-class BackupError(RuntimeError):
-    pass
-
-
-class Runner(Protocol):
-    def run(
-        self,
-        arguments: Sequence[str],
-        *,
-        stdin: BinaryIO | None = None,
-        stdout: BinaryIO | None = None,
-        timeout_seconds: int = 300,
-    ) -> str: ...
-
-
-class SubprocessRunner:
-    def run(
-        self,
-        arguments: Sequence[str],
-        *,
-        stdin: BinaryIO | None = None,
-        stdout: BinaryIO | None = None,
-        timeout_seconds: int = 300,
-    ) -> str:
-        try:
-            completed = subprocess.run(
-                list(arguments),
-                check=False,
-                stdin=stdin,
-                stdout=stdout if stdout is not None else subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=stdout is None,
-                timeout=timeout_seconds,
-            )
-        except subprocess.TimeoutExpired as error:
-            raise BackupError(
-                f"命令执行超过 {timeout_seconds} 秒：{' '.join(arguments)}"
-            ) from error
-        if completed.returncode != 0:
-            stderr = completed.stderr
-            if isinstance(stderr, bytes):
-                stderr = stderr.decode("utf-8", errors="replace")
-            detail = (stderr or "命令执行失败").strip()
-            raise BackupError(
-                f"命令失败（{completed.returncode}）：{' '.join(arguments)}\n{detail}"
-            )
-        return "" if stdout is not None else str(completed.stdout or "")
-
-
-@dataclass(frozen=True)
-class BackupConfig:
-    compose_file: Path
-    env_file: Path
-    project_name: str
-    destination: Path
-    lock_file: Path
-    stop_timeout_seconds: int = 60
-    job_drain_timeout_seconds: int = 1800
-    job_poll_seconds: int = 5
-    service_wait_timeout_seconds: int = 120
-    snapshot_timeout_seconds: int = 3600
-    retention_count: int = 0
-
-    def validate(self) -> None:
-        if not self.compose_file.is_file():
-            raise BackupError(f"Compose 文件不存在：{self.compose_file}")
-        if not self.env_file.is_file():
-            raise BackupError(f"环境文件不存在：{self.env_file}")
-        if not PROJECT_NAME_PATTERN.fullmatch(self.project_name):
-            raise BackupError("Compose 项目名只能包含小写字母、数字、下划线和连字符")
-        if self.destination.resolve() == Path("/"):
-            raise BackupError("备份目标不能是文件系统根目录")
-        for value, label in (
-            (self.stop_timeout_seconds, "停止超时"),
-            (self.job_drain_timeout_seconds, "任务排空超时"),
-            (self.job_poll_seconds, "任务轮询间隔"),
-            (self.service_wait_timeout_seconds, "服务恢复超时"),
-            (self.snapshot_timeout_seconds, "快照命令超时"),
-        ):
-            if value <= 0:
-                raise BackupError(f"{label}必须大于 0")
-        if self.retention_count < 0:
-            raise BackupError("保留数量不能小于 0")
-
-
-def _compose(config: BackupConfig, *arguments: str) -> list[str]:
-    return [
-        "docker",
-        "compose",
-        "--file",
-        str(config.compose_file),
-        "--env-file",
-        str(config.env_file),
-        "--project-name",
-        config.project_name,
-        *arguments,
-    ]
 
 
 def _sha256(path: Path) -> str:
@@ -164,55 +50,6 @@ def _write_private_text(path: Path, content: str) -> None:
     path.chmod(0o600)
 
 
-@contextmanager
-def _exclusive_lock(path: Path) -> Iterator[None]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as lock:
-        os.fchmod(lock.fileno(), 0o600)
-        try:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise BackupError(f"已有备份任务正在运行：{path}") from error
-        yield
-
-
-@contextmanager
-def _restricted_umask(mask: int) -> Iterator[None]:
-    previous = os.umask(mask)
-    try:
-        yield
-    finally:
-        os.umask(previous)
-
-
-def _running_services(config: BackupConfig, runner: Runner) -> set[str]:
-    output = runner.run(_compose(config, "ps", "--status", "running", "--services"))
-    return {line.strip() for line in output.splitlines() if line.strip()}
-
-
-def _active_job_count(config: BackupConfig, runner: Runner) -> int:
-    output = runner.run(
-        _compose(
-            config,
-            "exec",
-            "-T",
-            "db",
-            "psql",
-            "-U",
-            "delivery_note",
-            "-d",
-            "delivery_note",
-            "-Atq",
-            "-c",
-            "SELECT count(*) FROM jobs WHERE status IN ('queued','running');",
-        )
-    ).strip()
-    try:
-        return int(output)
-    except ValueError as error:
-        raise BackupError(f"无法解析活动任务数量：{output!r}") from error
-
-
 def _critical_table_counts(
     config: BackupConfig,
     runner: Runner,
@@ -223,7 +60,7 @@ def _critical_table_counts(
     ):
         raise BackupError("临时恢复数据库名称不安全")
     output = runner.run(
-        _compose(
+        compose(
             config,
             "exec",
             "-T",
@@ -260,91 +97,6 @@ def _critical_table_counts(
     return counts
 
 
-def _single_output_line(output: str, label: str) -> str:
-    values = [line.strip() for line in output.splitlines() if line.strip()]
-    if len(values) != 1 or not DOCKER_NAME_PATTERN.fullmatch(values[0]):
-        raise BackupError(f"无法唯一确定{label}：{values}")
-    return values[0]
-
-
-def _resolve_volume(config: BackupConfig, runner: Runner) -> str:
-    output = runner.run(
-        [
-            "docker",
-            "volume",
-            "ls",
-            "--quiet",
-            "--filter",
-            f"label=com.docker.compose.project={config.project_name}",
-            "--filter",
-            "label=com.docker.compose.volume=delivery_data",
-        ]
-    )
-    return _single_output_line(output, "delivery_data 卷")
-
-
-def _resolve_image(config: BackupConfig, runner: Runner, service: str) -> str:
-    output = runner.run(_compose(config, "images", "--quiet", service))
-    return _single_output_line(output, f"{service} 镜像")
-
-
-def _resolve_service_containers(
-    config: BackupConfig,
-    runner: Runner,
-) -> dict[str, str]:
-    containers = {}
-    for service in RESUMED_SERVICES:
-        output = runner.run(_compose(config, "ps", "--quiet", service))
-        containers[service] = _single_output_line(output, f"{service} 容器")
-    return containers
-
-
-def inspect_environment(config: BackupConfig, runner: Runner) -> dict:
-    config.validate()
-    runner.run(_compose(config, "config", "--quiet"))
-    running = _running_services(config, runner)
-    missing = sorted(REQUIRED_SERVICES - running)
-    if missing:
-        raise BackupError(f"以下服务未运行，拒绝开始备份：{', '.join(missing)}")
-    runner.run(
-        _compose(
-            config,
-            "exec",
-            "-T",
-            "db",
-            "pg_isready",
-            "-U",
-            "delivery_note",
-            "-d",
-            "delivery_note",
-        )
-    )
-    return {
-        "running_services": sorted(running),
-        "active_jobs": _active_job_count(config, runner),
-        "data_volume": _resolve_volume(config, runner),
-        "api_image": _resolve_image(config, runner, "api"),
-        "service_containers": _resolve_service_containers(config, runner),
-    }
-
-
-def _wait_for_jobs_to_drain(
-    config: BackupConfig,
-    runner: Runner,
-    *,
-    sleep: Callable[[float], None],
-    monotonic: Callable[[], float],
-) -> None:
-    deadline = monotonic() + config.job_drain_timeout_seconds
-    while True:
-        active_jobs = _active_job_count(config, runner)
-        if active_jobs == 0:
-            return
-        if monotonic() >= deadline:
-            raise BackupError(f"等待活动任务排空超时，仍有 {active_jobs} 个任务")
-        sleep(config.job_poll_seconds)
-
-
 def _create_database_dump(
     config: BackupConfig,
     runner: Runner,
@@ -352,7 +104,7 @@ def _create_database_dump(
 ) -> None:
     with target.open("xb") as output:
         runner.run(
-            _compose(
+            compose(
                 config,
                 "exec",
                 "-T",
@@ -430,7 +182,7 @@ def _validate_database_restore(
     restored_counts: dict[str, int] = {}
     try:
         runner.run(
-            _compose(
+            compose(
                 config,
                 "exec",
                 "-T",
@@ -445,7 +197,7 @@ def _validate_database_restore(
         )
         with database_path.open("rb") as source:
             runner.run(
-                _compose(
+                compose(
                     config,
                     "exec",
                     "-T",
@@ -475,7 +227,7 @@ def _validate_database_restore(
     finally:
         try:
             runner.run(
-                _compose(
+                compose(
                     config,
                     "exec",
                     "-T",
@@ -529,45 +281,6 @@ def _validate_data_archive(path: Path) -> tuple[int, int]:
     return entries, files
 
 
-def _resume_services(
-    config: BackupConfig,
-    runner: Runner,
-    service_containers: dict[str, str],
-) -> None:
-    missing_containers = [
-        service for service in RESUMED_SERVICES if service not in service_containers
-    ]
-    if missing_containers:
-        raise BackupError(
-            "缺少维护前容器标识：" + ", ".join(missing_containers)
-        )
-    container_ids = [
-        service_containers[service] for service in RESUMED_SERVICES
-    ]
-    # 直接启动维护前解析出的容器，避免新版 Compose 的依赖图或尚未构建镜像
-    # 阻断旧生产版本在备份窗口后的恢复。
-    runner.run(
-        ["docker", "start", *container_ids],
-        timeout_seconds=config.service_wait_timeout_seconds + 60,
-    )
-    runner.run(
-        [
-            "docker",
-            "exec",
-            service_containers["api"],
-            "python",
-            "-c",
-            API_READINESS_PROBE.format(
-                timeout=config.service_wait_timeout_seconds
-            ),
-        ],
-        timeout_seconds=config.service_wait_timeout_seconds + 10,
-    )
-    missing = sorted(REQUIRED_SERVICES - _running_services(config, runner))
-    if missing:
-        raise BackupError(f"备份后服务未全部恢复：{', '.join(missing)}")
-
-
 def _prune_completed_backups(destination: Path, retention_count: int) -> list[str]:
     if retention_count == 0:
         return []
@@ -608,7 +321,7 @@ def create_backup(
     now = now or (lambda: datetime.now().astimezone())
     config.validate()
 
-    with _restricted_umask(0o077), _exclusive_lock(config.lock_file):
+    with restricted_umask(0o077), exclusive_lock(config.lock_file):
         environment = inspect_environment(config, runner)
         config.destination.mkdir(parents=True, exist_ok=True, mode=0o700)
         config.destination.chmod(0o700)
@@ -636,7 +349,7 @@ def create_backup(
         try:
             maintenance_started = True
             runner.run(
-                _compose(
+                compose(
                     config,
                     "stop",
                     "--timeout",
@@ -646,14 +359,14 @@ def create_backup(
                 ),
                 timeout_seconds=config.stop_timeout_seconds + 60,
             )
-            _wait_for_jobs_to_drain(
+            wait_for_jobs_to_drain(
                 config,
                 runner,
                 sleep=sleep,
                 monotonic=monotonic,
             )
             runner.run(
-                _compose(
+                compose(
                     config,
                     "stop",
                     "--timeout",
@@ -662,7 +375,7 @@ def create_backup(
                 ),
                 timeout_seconds=config.stop_timeout_seconds + 60,
             )
-            if _active_job_count(config, runner) != 0:
+            if active_job_count(config, runner) != 0:
                 raise BackupError("Worker 停止后仍存在活动任务")
 
             source_counts = _critical_table_counts(
@@ -683,7 +396,7 @@ def create_backup(
         finally:
             if maintenance_started:
                 try:
-                    _resume_services(
+                    resume_services(
                         config,
                         runner,
                         environment["service_containers"],
