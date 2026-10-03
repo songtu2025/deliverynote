@@ -1,11 +1,8 @@
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Callable
 
-import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -13,165 +10,13 @@ from sqlalchemy.orm import Session
 from ..excel_io import read_purchase_workbook, read_self_operated_inbound_workbook
 from ..gerpgo import GerpgoClient, GerpgoError
 from .models import InputVersion, PurchaseSyncJob, SelfOperatedInboundSyncJob, User
-
-
-def _purchase_sync_job_json(
-    job: PurchaseSyncJob,
-    utc_isoformat: Callable[[datetime], str],
-) -> dict:
-    findings = job.issues or []
-    warning_count = sum(finding.get("severity") == "warning" for finding in findings)
-    return {
-        "id": job.id,
-        "status": job.status,
-        "base_version_id": job.base_version_id,
-        "product_version_id": job.product_version_id,
-        "supplier_version_id": job.supplier_version_id,
-        "candidate_version_id": job.candidate_version_id,
-        "total_orders": job.total_orders,
-        "processed_orders": job.processed_orders,
-        "raw_detail_count": job.raw_detail_count,
-        "eligible_detail_count": job.eligible_detail_count,
-        "filtered_detail_count": job.filtered_detail_count,
-        "current_order": job.current_order,
-        "issue_count": len(findings) - warning_count,
-        "warning_count": warning_count,
-        "diff": job.diff or {},
-        "error_message": job.error_message,
-        "created_at": utc_isoformat(job.created_at),
-        "claimed_at": (utc_isoformat(job.claimed_at) if job.claimed_at else None),
-        "heartbeat_at": (
-            utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None
-        ),
-        "finished_at": (utc_isoformat(job.finished_at) if job.finished_at else None),
-    }
-
-
-def _self_operated_inbound_sync_job_json(
-    job: SelfOperatedInboundSyncJob,
-    utc_isoformat: Callable[[datetime], str],
-) -> dict:
-    findings = job.issues or []
-    warning_count = sum(finding.get("severity") == "warning" for finding in findings)
-    return {
-        "id": job.id,
-        "status": job.status,
-        "base_version_id": job.base_version_id,
-        "candidate_version_id": job.candidate_version_id,
-        "total_orders": job.total_orders,
-        "raw_detail_count": job.raw_detail_count,
-        "eligible_detail_count": job.eligible_detail_count,
-        "filtered_detail_count": job.filtered_detail_count,
-        "issue_count": len(findings) - warning_count,
-        "warning_count": warning_count,
-        "diff": job.diff or {},
-        "error_message": job.error_message,
-        "created_at": utc_isoformat(job.created_at),
-        "claimed_at": (utc_isoformat(job.claimed_at) if job.claimed_at else None),
-        "heartbeat_at": (
-            utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None
-        ),
-        "finished_at": (utc_isoformat(job.finished_at) if job.finished_at else None),
-    }
-
-
-def _self_operated_inbound_sync_issues(
-    session: Session,
-    job: SelfOperatedInboundSyncJob,
-) -> list[dict]:
-    issues = [dict(issue) for issue in (job.issues or [])]
-    detail_fields = {
-        "warehouse",
-        "remaining_quantity",
-        "purchase_code",
-        "related_code",
-    }
-    if (
-        not issues
-        or all(detail_fields.issubset(issue) for issue in issues)
-        or job.candidate_version_id is None
-    ):
-        return issues
-
-    version = session.get(InputVersion, job.candidate_version_id)
-    if version is None:
-        return issues
-    try:
-        frame = read_self_operated_inbound_workbook(Path(version.storage_path))
-    except (OSError, ValueError):
-        return issues
-
-    def key_value(value) -> str:
-        return "" if pd.isna(value) else str(value).strip()
-
-    candidates: dict[tuple[str, str, str], list[dict]] = {}
-    for record in frame.to_dict("records"):
-        key = (
-            key_value(record.get("入库单号")),
-            key_value(record.get("SKU")),
-            key_value(record.get("接口站点", record.get("平台站点"))),
-        )
-        candidates.setdefault(key, []).append(record)
-
-    offsets: dict[tuple[str, str, str], int] = {}
-    for issue in issues:
-        if detail_fields.issubset(issue):
-            continue
-        key = (
-            key_value(issue.get("order_no")),
-            key_value(issue.get("sku")),
-            key_value(issue.get("source_site")),
-        )
-        matches = candidates.get(key, [])
-        offset = offsets.get(key, 0)
-        if offset >= len(matches):
-            continue
-        record = matches[offset]
-        offsets[key] = offset + 1
-        quantity = record.get("应收货")
-        issue.setdefault("warehouse", key_value(record.get("入库仓")))
-        issue.setdefault(
-            "remaining_quantity",
-            None
-            if pd.isna(quantity)
-            else quantity.item()
-            if hasattr(quantity, "item")
-            else quantity,
-        )
-        issue.setdefault("purchase_code", key_value(record.get("关联采购单")))
-        issue.setdefault(
-            "related_code",
-            key_value(record.get("关联交货单/调拨单")),
-        )
-    return issues
-
-
-def _sync_preview_json(frame: pd.DataFrame, limit: int) -> dict:
-    preview = frame.head(limit)
-    rows = [
-        {
-            "_row_number": row_number,
-            **{
-                column: (
-                    None
-                    if pd.isna(value)
-                    else value.item()
-                    if hasattr(value, "item")
-                    else value
-                )
-                for column, value in record.items()
-            },
-        }
-        for row_number, record in enumerate(
-            preview.to_dict("records"),
-            start=1,
-        )
-    ]
-    return {
-        "columns": list(frame.columns),
-        "rows": rows,
-        "total": len(frame),
-    }
+from .sync.views import sync_job_json
+from .sync.queries import get_sync_job, candidate_preview
+from .sync.issues import (
+    download_purchase_sync_issues as purchase_issues_download,
+    download_self_operated_inbound_sync_issues as inbound_issues_download,
+    _self_operated_inbound_sync_issues,
+)
 
 
 def register_sync_routes(
@@ -199,7 +44,7 @@ def register_sync_routes(
         )
         return {
             "configured": configured,
-            "job": _purchase_sync_job_json(job, utc_isoformat) if job else None,
+            "job": sync_job_json(job, utc_isoformat) if job else None,
         }
 
     @app.post(
@@ -260,7 +105,7 @@ def register_sync_routes(
                 status_code=409,
                 detail="已有采购同步正在运行",
             ) from error
-        return _purchase_sync_job_json(job, utc_isoformat)
+        return sync_job_json(job, utc_isoformat)
 
     @app.get("/api/purchase-sync/{job_id}/issues/download")
     def download_purchase_sync_issues(
@@ -268,50 +113,7 @@ def register_sync_routes(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        job = session.get(PurchaseSyncJob, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="采购同步任务不存在")
-        if not job.issues:
-            raise HTTPException(status_code=404, detail="当前任务没有待处理问题")
-        columns = [
-            "severity",
-            "message",
-            "po_code",
-            "sku",
-            "warehouse",
-            "quantity",
-            "source_site",
-            "supplier_code",
-            "supplier_name",
-            "code",
-        ]
-        output = BytesIO()
-        pd.DataFrame(job.issues, columns=columns).rename(
-            columns={
-                "severity": "级别",
-                "message": "问题",
-                "po_code": "采购单号",
-                "sku": "SKU",
-                "warehouse": "目的仓",
-                "quantity": "未交量",
-                "source_site": "接口站点",
-                "supplier_code": "接口供应商编号",
-                "supplier_name": "接口供应商名称",
-                "code": "问题类型",
-            }
-        ).to_excel(output, index=False)
-        output.seek(0)
-        return StreamingResponse(
-            output,
-            media_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="purchase_sync_issues_{job.id}.xlsx"'
-                )
-            },
-        )
+        return purchase_issues_download(job_id, session)
 
     @app.get("/api/purchase-sync/{job_id}/issues")
     def list_purchase_sync_issues(
@@ -331,24 +133,8 @@ def register_sync_routes(
         session: Annotated[Session, Depends(get_session)],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
-        job = session.get(PurchaseSyncJob, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="采购同步任务不存在")
-        version = (
-            session.get(InputVersion, job.candidate_version_id)
-            if job.candidate_version_id is not None
-            else None
-        )
-        if version is None:
-            raise HTTPException(status_code=409, detail="候选版本尚未生成")
-        try:
-            frame = read_purchase_workbook(Path(version.storage_path))
-        except (OSError, ValueError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail=f"候选版本无法读取：{error}",
-            ) from error
-        return _sync_preview_json(frame, limit)
+        job = get_sync_job(session, PurchaseSyncJob, job_id)
+        return candidate_preview(session, job, limit, read_purchase_workbook)
 
     @app.get("/api/self-operated-inbound-sync")
     def self_operated_inbound_sync_status(
@@ -376,11 +162,7 @@ def register_sync_routes(
             "active_version": (
                 version_json(active_version) if active_version else None
             ),
-            "job": (
-                _self_operated_inbound_sync_job_json(job, utc_isoformat)
-                if job
-                else None
-            ),
+            "job": (sync_job_json(job, utc_isoformat) if job else None),
         }
 
     @app.post(
@@ -431,7 +213,7 @@ def register_sync_routes(
                 status_code=409,
                 detail="已有待入库同步正在运行",
             ) from error
-        return _self_operated_inbound_sync_job_json(job, utc_isoformat)
+        return sync_job_json(job, utc_isoformat)
 
     @app.get("/api/self-operated-inbound-sync/{job_id}/issues/download")
     def download_self_operated_inbound_sync_issues(
@@ -439,55 +221,7 @@ def register_sync_routes(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        job = session.get(SelfOperatedInboundSyncJob, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="待入库同步任务不存在")
-        issues = _self_operated_inbound_sync_issues(session, job)
-        if not issues:
-            raise HTTPException(status_code=404, detail="当前任务没有异常数据")
-        columns = [
-            "severity",
-            "message",
-            "order_no",
-            "sku",
-            "warehouse",
-            "remaining_quantity",
-            "purchase_code",
-            "related_code",
-            "source_site",
-            "supplier_code",
-            "supplier_name",
-            "code",
-        ]
-        output = BytesIO()
-        pd.DataFrame(issues, columns=columns).rename(
-            columns={
-                "severity": "级别",
-                "message": "问题",
-                "order_no": "入库单号",
-                "sku": "SKU",
-                "warehouse": "入库仓",
-                "remaining_quantity": "剩余应收货",
-                "purchase_code": "关联采购单",
-                "related_code": "关联交货单/调拨单",
-                "source_site": "接口站点",
-                "supplier_code": "接口供应商编号",
-                "supplier_name": "接口供应商名称",
-                "code": "问题类型",
-            }
-        ).to_excel(output, index=False)
-        output.seek(0)
-        return StreamingResponse(
-            output,
-            media_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
-            headers={
-                "Content-Disposition": (
-                    f'attachment; filename="self_operated_inbound_issues_{job.id}.xlsx"'
-                )
-            },
-        )
+        return inbound_issues_download(job_id, session)
 
     @app.get("/api/self-operated-inbound-sync/{job_id}/issues")
     def list_self_operated_inbound_sync_issues(
@@ -507,24 +241,10 @@ def register_sync_routes(
         session: Annotated[Session, Depends(get_session)],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
-        job = session.get(SelfOperatedInboundSyncJob, job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail="待入库同步任务不存在")
-        version = (
-            session.get(InputVersion, job.candidate_version_id)
-            if job.candidate_version_id is not None
-            else None
+        job = get_sync_job(session, SelfOperatedInboundSyncJob, job_id)
+        return candidate_preview(
+            session, job, limit, read_self_operated_inbound_workbook
         )
-        if version is None:
-            raise HTTPException(status_code=409, detail="候选版本尚未生成")
-        try:
-            frame = read_self_operated_inbound_workbook(Path(version.storage_path))
-        except (OSError, ValueError) as error:
-            raise HTTPException(
-                status_code=409,
-                detail=f"候选版本无法读取：{error}",
-            ) from error
-        return _sync_preview_json(frame, limit)
 
     @app.post("/api/self-operated-inbound-sync/{job_id}/activate")
     def activate_self_operated_inbound_sync(
