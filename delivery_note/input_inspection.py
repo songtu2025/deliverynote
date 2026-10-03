@@ -1,4 +1,3 @@
-from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +8,7 @@ from .excel_io import (
     PRODUCT_COLUMNS,
     PURCHASE_COLUMNS,
 )
-from .inspection import workbooks
+from .inspection import frames, workbooks
 from .config import supplier_aliases, validate_supplier_frame
 from .processing.models import POSITION_SOURCE_COLUMNS
 
@@ -23,24 +22,6 @@ _STREAMING_COLUMNS = {
     "product": PRODUCT_COLUMNS,
     "purchase": PURCHASE_COLUMNS,
 }
-
-
-def _json_safe(value: Any) -> Any:
-    if value is None or bool(pd.isna(value)):
-        return None
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if hasattr(value, "item"):
-        return _json_safe(value.item())
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
-
-
-def _stream_json_safe(value: Any) -> Any:
-    if value == "":
-        return None
-    return _json_safe(value)
 
 
 def _inspect_frame(kind: str, frame: pd.DataFrame) -> dict:
@@ -59,7 +40,7 @@ def _inspect_frame(kind: str, frame: pd.DataFrame) -> dict:
         }
         result["issues"] = validate_position_frame(frame)
     elif kind == "purchase":
-        result["issues"] = validate_purchase_frame(frame)
+        result["issues"] = frames.validate_purchase_frame(frame)
     elif kind == "supplier":
         aliases = frame["供应商别名"].map(supplier_aliases)
         result["metrics"] = {
@@ -68,28 +49,6 @@ def _inspect_frame(kind: str, frame: pd.DataFrame) -> dict:
         }
         result["issues"] = validate_supplier_frame(frame)
     return result
-
-
-def _preview_frame(
-    kind: str,
-    frame: pd.DataFrame,
-    offset: int,
-    limit: int,
-) -> dict:
-    page = frame.iloc[offset : offset + limit]
-    columns = [str(column) for column in frame.columns]
-    rows = [
-        {str(column): _json_safe(value) for column, value in zip(frame.columns, values)}
-        for values in page.itertuples(index=False, name=None)
-    ]
-    return {
-        "kind": kind,
-        "columns": columns,
-        "rows": rows,
-        "total": len(frame),
-        "offset": offset,
-        "limit": limit,
-    }
 
 
 def _stream_xlsx_inspection(
@@ -136,7 +95,7 @@ def _stream_xlsx_inspection(
                     (
                         row_offset,
                         {
-                            name: _stream_json_safe(value)
+                            name: frames._stream_json_safe(value)
                             for (_index, name), value in zip(
                                 selected_columns,
                                 selected_values,
@@ -160,18 +119,7 @@ def _stream_xlsx_inspection(
             "row_count": total,
             "columns": columns,
             "metrics": {},
-            "issues": (
-                [
-                    {
-                        "severity": "warning",
-                        "code": "shared_site",
-                        "message": "共享站点数据不能参与正常交货匹配",
-                        "row_numbers": shared_site_rows,
-                    }
-                ]
-                if shared_site_rows
-                else []
-            ),
+            "issues": (frames.shared_site_warning(shared_site_rows)),
         }
         return {"summary": summary, "preview": preview}
     finally:
@@ -234,7 +182,7 @@ def _stream_xlsx_preview(
             ]
             preview["rows"].append(
                 {
-                    name: _stream_json_safe(value)
+                    name: frames._stream_json_safe(value)
                     for (_index, name), value in zip(
                         selected_columns,
                         selected_values,
@@ -266,7 +214,7 @@ def inspect_input_version_with_preview(
     frame = workbooks._read_frame(kind, path)
     return {
         "summary": _inspect_frame(kind, frame),
-        "preview": _preview_frame(kind, frame, offset, limit),
+        "preview": frames._preview_frame(kind, frame, offset, limit),
     }
 
 
@@ -282,7 +230,7 @@ def preview_input_version_page(
     path = Path(path)
     if kind in _STREAMING_COLUMNS and path.suffix.lower() in {".xlsx", ".xlsm"}:
         return _stream_xlsx_preview(kind, path, offset, limit, summary)
-    return _preview_frame(kind, workbooks._read_frame(kind, path), offset, limit)
+    return frames._preview_frame(kind, workbooks._read_frame(kind, path), offset, limit)
 
 
 def preview_input_version(
@@ -299,16 +247,8 @@ def preview_input_version(
     )["preview"]
 
 
-def _text_values(frame: pd.DataFrame, column: str) -> pd.Series:
-    return frame[column].fillna("").astype(str).str.strip()
-
-
 def _identity_values(frame: pd.DataFrame, column: str) -> pd.Series:
-    return _text_values(frame, column).str.upper()
-
-
-def _row_numbers(mask: pd.Series) -> list[int]:
-    return [position + 2 for position, selected in enumerate(mask) if bool(selected)]
+    return frames._text_values(frame, column).str.upper()
 
 
 def _append_issue(
@@ -319,7 +259,7 @@ def _append_issue(
     message: str,
     mask: pd.Series,
 ) -> None:
-    row_numbers = _row_numbers(mask)
+    row_numbers = frames._row_numbers(mask)
     if row_numbers:
         issues.append(
             {
@@ -329,18 +269,6 @@ def _append_issue(
                 "row_numbers": row_numbers,
             }
         )
-
-
-def validate_purchase_frame(frame: pd.DataFrame) -> list[dict]:
-    issues: list[dict] = []
-    _append_issue(
-        issues,
-        severity="warning",
-        code="shared_site",
-        message="共享站点数据不能参与正常交货匹配",
-        mask=_text_values(frame, "平台站点").eq("共享"),
-    )
-    return issues
 
 
 def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
@@ -358,8 +286,8 @@ def validate_position_frame(frame: pd.DataFrame) -> list[dict]:
     )
     duplicate_msku = duplicate_full_key | (multiple_rows & msku.eq(""))
 
-    scale = _text_values(frame, "规模定位")
-    stocking = _text_values(frame, "备货定位")
+    scale = frames._text_values(frame, "规模定位")
+    stocking = frames._text_values(frame, "备货定位")
     unknown_scale = ~scale.isin(_KNOWN_SCALES)
 
     issues: list[dict] = []
@@ -419,7 +347,7 @@ def _position_records(
 
 
 def _position_comparison_text(value: Any) -> str:
-    safe_value = _json_safe(value)
+    safe_value = frames._json_safe(value)
     if safe_value is None:
         return ""
     if isinstance(safe_value, float) and safe_value.is_integer():
