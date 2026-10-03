@@ -5,23 +5,16 @@ import {
   Button,
   Card,
   Descriptions,
-  Empty,
-  Popconfirm,
   Space,
   Spin,
   Steps,
-  Table,
   Tooltip,
   Typography,
   Upload
 } from "antd";
-import type { UploadProps } from "antd";
 import {
-  ArrowDownOutlined,
   ArrowLeftOutlined,
-  ArrowUpOutlined,
   CloudUploadOutlined,
-  DeleteOutlined,
   DownloadOutlined,
   ExportOutlined,
   LockOutlined,
@@ -32,8 +25,11 @@ import {
 
 import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
-import type { Batch, BatchFile, DeliveryException, InputVersion, Job } from "../types";
+import type { Batch, DeliveryException, InputVersion, Job } from "../types";
 import StatusTag from "../BatchStatusTag";
+import BatchFileTable from "./batch-detail/BatchFileTable";
+import { useBatchFiles } from "./batch-detail/useBatchFiles";
+import { useBatchAction } from "./batch-detail/useBatchAction";
 import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
 import ExceptionReviewDrawer from "./batch-detail/ExceptionReviewDrawer";
 import { useExceptionEditor } from "./batch-detail/useExceptionEditor";
@@ -70,7 +66,7 @@ export default function BatchDetail({
   const [activeSupplierVersion, setActiveSupplierVersion] = useState<InputVersion | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [action, setAction] = useState<string | null>(null);
+  const { action, runAction } = useBatchAction();
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
   const pollingJob = useRef<number | null>(null);
@@ -198,70 +194,9 @@ export default function BatchDetail({
   const files = useMemo(() => batch?.files ?? [], [batch?.files]);
   const fileById = useMemo(() => Object.fromEntries(files.map((file) => [file.id, file])), [files]);
 
-  const runAction = async (name: string, operation: () => Promise<void>) => {
-    setAction(name);
-    try {
-      await operation();
-    } catch (error) {
-      if (!(error instanceof ApiError && error.status === 401)) {
-        message.error(error instanceof Error ? error.message : "操作失败");
-      }
-    } finally {
-      setAction(null);
-    }
-  };
-
-  const uploadFile: NonNullable<UploadProps["customRequest"]> = async (options) => {
-    await runAction("upload", async () => {
-      const formData = new FormData();
-      formData.append("file", options.file as File);
-      await api<BatchFile>(`/api/batches/${batchId}/files`, {
-        method: "POST",
-        body: formData
-      });
-      options.onSuccess?.({});
-      await load(true);
-      message.success(`${selfOperated ? "质检交货单" : "交货文件"}已上传，预检状态已更新`);
-    });
-  };
-
-  const uploadInboundFile: NonNullable<UploadProps["customRequest"]> = async (options) => {
-    await runAction("upload-inbound", async () => {
-      const formData = new FormData();
-      formData.append("file", options.file as File);
-      await api<Batch>(`/api/self-operated-batches/${batchId}/inbound-file`, {
-        method: "POST",
-        body: formData
-      });
-      options.onSuccess?.({});
-      await load(true);
-      message.success("自营仓入库单已上传，预检状态已更新");
-    });
-  };
-
-  const removeFile = async (file: BatchFile) => {
-    await runAction("delete", async () => {
-      await api<Batch>(`/api/batches/${batchId}/files/${file.id}`, { method: "DELETE" });
-      await load(true);
-      message.success(`${file.original_name} 已删除，其余文件已自动重排`);
-    });
-  };
-
-  const move = async (fileId: number, offset: number) => {
-    const ids = files.map((file) => file.id);
-    const index = ids.indexOf(fileId);
-    const next = index + offset;
-    if (index < 0 || next < 0 || next >= ids.length) return;
-    [ids[index], ids[next]] = [ids[next], ids[index]];
-    await runAction("order", async () => {
-      await api<Batch>(`/api/batches/${batchId}/files/order`, {
-        method: "PUT",
-        body: JSON.stringify({ file_ids: ids })
-      });
-      await load(true);
-      message.info("处理顺序已更新，需要重新预检");
-    });
-  };
+  const selfOperated = batch?.workflow === "self_operated_inbound";
+  const fileActions = useBatchFiles({ batchId, files, selfOperated, runAction, load });
+  const { uploadFile, uploadInboundFile } = fileActions;
 
   const preflight = () =>
     runAction("preflight", async () => {
@@ -298,7 +233,6 @@ export default function BatchDetail({
     setSplitTarget(record);
   };
 
-  const selfOperated = batch?.workflow === "self_operated_inbound";
   const editor = useExceptionEditor({ splitTarget, setSplitTarget, review, selfOperated, runAction, load });
 
   const loadFailure = loadError && (
@@ -335,7 +269,6 @@ export default function BatchDetail({
   );
   const computed = batch.status === "succeeded" || batch.download_ready;
   const exportJob = batch.jobs?.export;
-  const showFileActions = canEditFiles || files.some((file) => file.download_ready);
   const needsReview = computed && totals.manual_total > 0;
   const hasMultipleFiles = files.length > 1;
   const mergedDownloadReady = hasMultipleFiles && batch.merged_download_ready;
@@ -535,151 +468,15 @@ export default function BatchDetail({
         </div>
       </div>
 
-      <Card
-        title={selfOperated ? "本批次业务文件" : "来源文件与处理顺序"}
-        className="section-card file-order-card"
-        extra={
-          <span className="order-hint">
-            {selfOperated ? "序号越小，越先扣减待入库余额和超收额度" : "序号越小，越先扣减采购余额"}
-          </span>
-        }
-      >
-        {selfOperated && (
-          <Alert
-            className="inline-alert"
-            type={batch.inbound_file?.uploaded ? "success" : "warning"}
-            showIcon
-            title={
-              batch.inbound_file?.uploaded
-                ? `自营仓入库单：${batch.inbound_file.original_name}`
-                : "尚未上传自营仓入库单"
-            }
-            description="提供交货单、PO、SKU、站点和应收货数据；每个批次一份。"
-          />
-        )}
-        {canEditFiles && files.length > 1 && (
-          <Alert
-            className="inline-alert"
-            type="info"
-            showIcon
-            title={
-              selfOperated
-                ? "调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
-                : "调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
-            }
-          />
-        )}
-        <Table<BatchFile>
-          rowKey="id"
-          loading={loading}
-          dataSource={files}
-          pagination={false}
-          scroll={{ x: 900 }}
-          locale={{
-            emptyText: (
-              <Empty description={selfOperated ? "请先上传一份或多份质检交货单" : "请先上传一个或多个交货 Excel"} />
-            )
-          }}
-          columns={[
-            {
-              title: "顺序",
-              dataIndex: "file_order",
-              width: 80,
-              render: (value: number) => <span className="file-order">{String(value).padStart(2, "0")}</span>
-            },
-            { title: "来源文件", dataIndex: "original_name", ellipsis: true },
-            {
-              title: "供应商",
-              dataIndex: "supplier_name",
-              width: 150,
-              render: (value: string) => value || <span className="muted">预检后识别</span>
-            },
-            {
-              title: "交货",
-              dataIndex: "delivery_total",
-              width: 90,
-              render: (value: number) => (computed ? value : "—")
-            },
-            {
-              title: "可导入",
-              dataIndex: "import_total",
-              width: 90,
-              render: (value: number) => (computed ? <span className="import-value">{value}</span> : "—")
-            },
-            {
-              title: "待处理",
-              dataIndex: "manual_total",
-              width: 100,
-              render: (value: number) =>
-                computed ? <span className={value ? "pending-value" : ""}>{value}</span> : "—"
-            },
-            ...(showFileActions
-              ? [
-                  {
-                    title: "操作",
-                    width: canEditFiles ? 250 : 170,
-                    fixed: "right" as const,
-                    render: (_: unknown, file: BatchFile, index: number) => (
-                      <Space>
-                        {canEditFiles && (
-                          <>
-                            <Tooltip title={selfOperated ? "上移，提前扣减待入库余额" : "上移，提前扣减采购余额"}>
-                              <Button
-                                aria-label={`上移 ${file.original_name}`}
-                                size="small"
-                                icon={<ArrowUpOutlined />}
-                                disabled={index === 0}
-                                onClick={() => void move(file.id, -1)}
-                              />
-                            </Tooltip>
-                            <Tooltip title={selfOperated ? "下移，延后扣减待入库余额" : "下移，延后扣减采购余额"}>
-                              <Button
-                                aria-label={`下移 ${file.original_name}`}
-                                size="small"
-                                icon={<ArrowDownOutlined />}
-                                disabled={index === files.length - 1}
-                                onClick={() => void move(file.id, 1)}
-                              />
-                            </Tooltip>
-                            <Popconfirm
-                              title="删除此交货文件？"
-                              description="其余文件会自动重新编号。"
-                              onConfirm={() => void removeFile(file)}
-                            >
-                              <Tooltip title="删除错传文件">
-                                <Button
-                                  aria-label={`删除 ${file.original_name}`}
-                                  danger
-                                  size="small"
-                                  icon={<DeleteOutlined />}
-                                />
-                              </Tooltip>
-                            </Popconfirm>
-                          </>
-                        )}
-                        {file.download_ready && (
-                          <Button
-                            aria-label="下载单文件结果"
-                            size="small"
-                            icon={<DownloadOutlined />}
-                            onClick={() =>
-                              void downloadResult(
-                                `/api/batch-files/${file.id}/download`,
-                                `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
-                              )
-                            }
-                          >
-                            下载单文件结果
-                          </Button>
-                        )}
-                      </Space>
-                    )
-                  }
-                ]
-              : [])
-          ]}
-        />
-      </Card>
+      <BatchFileTable
+        batch={batch}
+        files={files}
+        loading={loading}
+        computed={computed}
+        canEditFiles={canEditFiles}
+        actions={fileActions}
+        downloadResult={downloadResult}
+      />
 
       <Card
         title={

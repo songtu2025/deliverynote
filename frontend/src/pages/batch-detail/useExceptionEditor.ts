@@ -1,3 +1,4 @@
+import type { BatchAction } from "./useBatchAction";
 import { useEffect, useState } from "react";
 import { App as AntApp, Form } from "antd";
 import type { DeliveryException, SplitPart } from "../../types";
@@ -19,7 +20,7 @@ export function useExceptionEditor({
   setSplitTarget: (target: DeliveryException | null) => void;
   review: ExceptionReview;
   selfOperated: boolean;
-  runAction: (name: string, operation: () => Promise<void>) => Promise<void>;
+  runAction: BatchAction;
   load: (silent?: boolean) => Promise<ExceptionPage | null>;
 }) {
   const { message } = AntApp.useApp();
