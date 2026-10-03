@@ -53,8 +53,15 @@ for (const [name, source, rule] of [
   });
 }
 
-for (const path of ["App.tsx", "app/Workspace.tsx"]) {
-  test(`app entry complexity gate rejects ${path}`, () => {
+for (const path of [
+  "App.tsx",
+  "app/Workspace.tsx",
+  "pages/AdminPage.tsx",
+  "pages/admin/useAdminData.ts",
+  "pages/admin/AdminInputWorkspace.tsx",
+  "pages/admin/AdminPanelFallback.tsx"
+]) {
+  test(`entry complexity gate rejects ${path}`, () => {
     repository.write(`frontend/src/${path}`, complexFunction);
     const result = repository.check();
     assert.equal(result.status, 1, result.stdout + result.stderr);
@@ -62,11 +69,13 @@ for (const path of ["App.tsx", "app/Workspace.tsx"]) {
   });
 }
 
-test("app test support stays outside production complexity rules", () => {
-  repository.write("frontend/src/app/appTestSupport.ts", complexFunction);
-  const result = repository.check();
-  assert.equal(result.status, 0, result.stdout + result.stderr);
-});
+for (const path of ["app/appTestSupport.ts", "pages/admin/adminPageTestSupport.tsx"]) {
+  test(`${path} stays outside production complexity rules`, () => {
+    repository.write(`frontend/src/${path}`, complexFunction);
+    const result = repository.check();
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
+}
 
 test("CI ranges check all commits and reject invalid references", () => {
   const base = repository.git("rev-parse", "HEAD");

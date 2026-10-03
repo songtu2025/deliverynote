@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { api, ApiError } from "../../api";
 import type { AuditLog, InputVersion, User } from "../../types";
 import { errorMessage } from "./positionDraftApi";
@@ -19,6 +20,12 @@ interface LoadingState {
 
 const EMPTY_ERRORS: LoadErrors = { users: null, versions: null, audit: null };
 const INITIAL_LOADING: LoadingState = { users: true, versions: true, audit: true };
+
+function handleReadUnauthorized(error: unknown, afterWrite: boolean): boolean {
+  if (!(error instanceof ApiError && error.status === 401)) return false;
+  if (afterWrite) throw error;
+  return true;
+}
 
 export function useAdminData(active: boolean, activeTab: AdminTab) {
   const [users, setUsers] = useState<User[]>([]);
@@ -45,41 +52,46 @@ export function useAdminData(active: boolean, activeTab: AdminTab) {
 
   const auditLoadedRef = useRef(false);
 
-  const loadUsers = useCallback(async (background = false, afterWrite = false) => {
-    const requestId = ++usersRequestRef.current;
-    if (!mountedRef.current) return false;
+  const isLatestRequest = useCallback(
+    (requestRef: RefObject<number>, requestId: number) => mountedRef.current && requestRef.current === requestId,
+    []
+  );
 
-    if (!background) setLoading((current) => ({ ...current, users: true }));
-    setErrors((current) => ({ ...current, users: null }));
-    try {
-      const nextUsers = await api<User[]>("/api/users");
-      if (mountedRef.current && usersRequestRef.current === requestId) {
-        setUsers(nextUsers);
-        return true;
-      }
-      return false;
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        if (afterWrite) throw error;
+  const loadUsers = useCallback(
+    async (background = false, afterWrite = false) => {
+      const requestId = ++usersRequestRef.current;
+      if (!mountedRef.current) return false;
+
+      if (!background) setLoading((current) => ({ ...current, users: true }));
+      setErrors((current) => ({ ...current, users: null }));
+      try {
+        const nextUsers = await api<User[]>("/api/users");
+        if (isLatestRequest(usersRequestRef, requestId)) {
+          setUsers(nextUsers);
+          return true;
+        }
         return false;
+      } catch (error) {
+        if (handleReadUnauthorized(error, afterWrite)) return false;
+        if (isLatestRequest(usersRequestRef, requestId)) {
+          setErrors((current) => ({
+            ...current,
+            users: `${afterWrite ? "变更已保存，但读取用户账号失败：" : ""}${errorMessage(error, "读取用户账号失败")}`
+          }));
+        }
+        return false;
+      } finally {
+        if (isLatestRequest(usersRequestRef, requestId)) {
+          usersLoadedRef.current = true;
+          setLoading((current) => ({ ...current, users: false }));
+        }
       }
-      if (mountedRef.current && usersRequestRef.current === requestId) {
-        setErrors((current) => ({
-          ...current,
-          users: `${afterWrite ? "变更已保存，但读取用户账号失败：" : ""}${errorMessage(error, "读取用户账号失败")}`
-        }));
-      }
-      return false;
-    } finally {
-      if (mountedRef.current && usersRequestRef.current === requestId) {
-        usersLoadedRef.current = true;
-        setLoading((current) => ({ ...current, users: false }));
-      }
-    }
-  }, []);
+    },
+    [isLatestRequest]
+  );
 
   const loadVersions = useCallback(
-    async (background = false, afterWrite = false, savedMessage = "变更已保存，但读取基础资料失败：") => {
+    async (background = false, afterWrite = false, savedMessage?: string) => {
       const requestId = ++versionsRequestRef.current;
       if (!mountedRef.current) return false;
 
@@ -87,59 +99,59 @@ export function useAdminData(active: boolean, activeTab: AdminTab) {
       setErrors((current) => ({ ...current, versions: null }));
       try {
         const nextVersions = await api<InputVersion[]>("/api/input-versions");
-        if (mountedRef.current && versionsRequestRef.current === requestId) {
+        if (isLatestRequest(versionsRequestRef, requestId)) {
           setVersions(nextVersions);
           return true;
         }
         return false;
       } catch (error) {
-        if (error instanceof ApiError && error.status === 401) {
-          if (afterWrite) throw error;
-          return false;
-        }
-        if (mountedRef.current && versionsRequestRef.current === requestId) {
+        if (handleReadUnauthorized(error, afterWrite)) return false;
+        if (isLatestRequest(versionsRequestRef, requestId)) {
           setErrors((current) => ({
             ...current,
-            versions: `${afterWrite ? savedMessage : ""}${errorMessage(error, "读取基础资料失败")}`
+            versions: `${afterWrite ? (savedMessage ?? "变更已保存，但读取基础资料失败：") : ""}${errorMessage(error, "读取基础资料失败")}`
           }));
         }
         return false;
       } finally {
-        if (mountedRef.current && versionsRequestRef.current === requestId) {
+        if (isLatestRequest(versionsRequestRef, requestId)) {
           versionsLoadedRef.current = true;
           setLoading((current) => ({ ...current, versions: false }));
         }
       }
     },
-    []
+    [isLatestRequest]
   );
 
-  const loadAudit = useCallback(async (background = false) => {
-    const requestId = ++auditRequestRef.current;
-    if (!mountedRef.current) return;
+  const loadAudit = useCallback(
+    async (background = false) => {
+      const requestId = ++auditRequestRef.current;
+      if (!mountedRef.current) return;
 
-    if (!background) setLoading((current) => ({ ...current, audit: true }));
-    setErrors((current) => ({ ...current, audit: null }));
-    try {
-      const nextAuditLogs = await api<AuditLog[]>("/api/audit-logs");
-      if (mountedRef.current && auditRequestRef.current === requestId) {
-        setAuditLogs(nextAuditLogs);
+      if (!background) setLoading((current) => ({ ...current, audit: true }));
+      setErrors((current) => ({ ...current, audit: null }));
+      try {
+        const nextAuditLogs = await api<AuditLog[]>("/api/audit-logs");
+        if (isLatestRequest(auditRequestRef, requestId)) {
+          setAuditLogs(nextAuditLogs);
+        }
+      } catch (error) {
+        if (handleReadUnauthorized(error, false)) return;
+        if (isLatestRequest(auditRequestRef, requestId)) {
+          setErrors((current) => ({
+            ...current,
+            audit: errorMessage(error, "读取操作记录失败")
+          }));
+        }
+      } finally {
+        if (isLatestRequest(auditRequestRef, requestId)) {
+          auditLoadedRef.current = true;
+          setLoading((current) => ({ ...current, audit: false }));
+        }
       }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) return;
-      if (mountedRef.current && auditRequestRef.current === requestId) {
-        setErrors((current) => ({
-          ...current,
-          audit: errorMessage(error, "读取操作记录失败")
-        }));
-      }
-    } finally {
-      if (mountedRef.current && auditRequestRef.current === requestId) {
-        auditLoadedRef.current = true;
-        setLoading((current) => ({ ...current, audit: false }));
-      }
-    }
-  }, []);
+    },
+    [isLatestRequest]
+  );
 
   const refreshVersions = useCallback(() => loadVersions(false), [loadVersions]);
 

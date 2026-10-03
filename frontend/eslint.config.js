@@ -19,6 +19,10 @@ export default [
     files: [
       "**/src/App.tsx",
       "**/src/app/**/*.{ts,tsx}",
+      "**/src/pages/AdminPage.tsx",
+      "**/src/pages/admin/useAdminData.ts",
+      "**/src/pages/admin/AdminInputWorkspace.tsx",
+      "**/src/pages/admin/AdminPanelFallback.tsx",
       "**/src/pages/batch-detail/**/*.{ts,tsx}",
       "**/src/batchDetailApi.ts",
       "**/src/pages/BatchDetail.tsx",
