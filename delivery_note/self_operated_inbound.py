@@ -3,13 +3,17 @@ from typing import Iterable, Mapping, MutableMapping, Sequence
 import pandas as pd
 
 from .exception_reasons import ExceptionReason
-from .inbound.normalization import _text
-from .processing.models import OverreceiptAllowance, OverreceiptKey, _require_columns
-from .processing.keys import _normalize_position_text, make_overreceipt_key
+from .inbound.candidates import (
+    _resolve_inbound_candidate_sites,
+    _apply_site_overrides,
+    prepare_inbound_candidates,
+    select_inbound_candidates,
+)
+from .processing.models import OverreceiptAllowance, OverreceiptKey
+from .processing.keys import make_overreceipt_key
 from .processing.delivery_sites import resolve_delivery_sites
 from .inbound.models import (
     ALLOCATION_COLUMNS,
-    INBOUND_COLUMNS,
     PENDING_COLUMNS,
     SelfOperatedInboundBatchResult,
     SelfOperatedInboundItemResult,
@@ -64,85 +68,6 @@ def _new_allocation_record(
     return record
 
 
-def _resolve_inbound_candidate_sites(
-    resolved: pd.DataFrame,
-    inbound: pd.DataFrame,
-) -> pd.DataFrame:
-    """使用已筛选自营仓候选消除产品信息中的站点歧义。"""
-    site_candidates: dict[tuple[str, str], set[str]] = {}
-    for _, row in inbound[["_sku_key", "_site_key"]].drop_duplicates().iterrows():
-        site = row["_site_key"]
-        country = site.rsplit(":", 1)[-1]
-        site_candidates.setdefault((row["_sku_key"], country), set()).add(site)
-
-    result = resolved.copy()
-    ambiguous = result["异常原因"].eq(ExceptionReason.AMBIGUOUS_PRODUCT_SITE)
-    for index, row in result[ambiguous].iterrows():
-        candidates = site_candidates.get(
-            (
-                _normalize_position_text(row["SKU"]),
-                _normalize_position_text(row["原始站点"]),
-            ),
-            set(),
-        )
-        product_sites = [
-            site.strip() for site in str(row["完整站点"]).split("、") if site.strip()
-        ]
-        matches = [
-            site
-            for site in product_sites
-            if _normalize_position_text(site) in candidates
-        ]
-        if len(matches) == 1:
-            result.at[index, "完整站点"] = matches[0]
-            result.at[index, "异常原因"] = ""
-        elif matches:
-            result.at[index, "完整站点"] = "、".join(matches)
-        else:
-            result.at[index, "完整站点"] = ""
-            result.at[index, "异常原因"] = ExceptionReason.INBOUND_ORDER_NOT_FOUND
-    return result
-
-
-def _apply_site_overrides(
-    resolved: pd.DataFrame,
-    site_overrides: Mapping[tuple[str, str], str] | None,
-) -> pd.DataFrame:
-    """应用操作员对仍有歧义的完整站点选择。"""
-    if not site_overrides:
-        return resolved
-
-    normalized_overrides = {
-        (_normalize_position_text(sku), _normalize_position_text(site)): _text(
-            full_site
-        )
-        for (sku, site), full_site in site_overrides.items()
-    }
-    result = resolved.copy()
-    ambiguous = result["异常原因"].eq(ExceptionReason.AMBIGUOUS_PRODUCT_SITE)
-    for index, row in result[ambiguous].iterrows():
-        selected = normalized_overrides.get(
-            (
-                _normalize_position_text(row["SKU"]),
-                _normalize_position_text(row["原始站点"]),
-            )
-        )
-        if not selected:
-            continue
-        candidates = {
-            _normalize_position_text(site)
-            for site in str(row["完整站点"]).split("、")
-            if site.strip()
-        }
-        if _normalize_position_text(selected) not in candidates:
-            raise ValueError(
-                f"人工选择站点不在候选范围：{row['SKU']} / {row['原始站点']}"
-            )
-        result.at[index, "完整站点"] = selected
-        result.at[index, "异常原因"] = ""
-    return result
-
-
 def process_self_operated_inbound(
     delivery_lines: pd.DataFrame,
     delivery_numbers: Sequence[str],
@@ -159,36 +84,8 @@ def process_self_operated_inbound(
     """按 PO 单号升序分配自营仓实收数量。"""
     if overreceipt_limit is not None and overreceipt_limit < 0:
         raise ValueError("允许超收数量必须为非负整数")
-    _require_columns(inbound_rows, INBOUND_COLUMNS, "自营仓收货入库单")
-    normalized_numbers = tuple(
-        sorted(
-            {
-                _normalize_position_text(value)
-                for value in delivery_numbers
-                if _text(value)
-            }
-        )
-    )
-    if not normalized_numbers:
-        raise ValueError("没有可用于筛选的交货单号")
-
     source_columns = list(inbound_rows.columns)
-    inbound = inbound_rows.copy().reset_index(drop=True)
-    inbound["_source_order"] = inbound.index
-    inbound["_sku_key"] = inbound["SKU"].map(_normalize_position_text)
-    inbound["_site_key"] = inbound["平台站点"].map(_normalize_position_text)
-    inbound["_delivery_key"] = inbound["关联交货单/调拨单"].map(
-        _normalize_position_text
-    )
-    inbound["_po_key"] = inbound["关联采购单"].map(_normalize_position_text)
-    inbound["_supplier_key"] = inbound["供应商"].map(_normalize_position_text)
-    inbound["_receivable"] = pd.to_numeric(inbound["应收货"], errors="coerce")
-
-    available_numbers = set(inbound["_delivery_key"])
-    missing_numbers = sorted(set(normalized_numbers) - available_numbers)
-    if missing_numbers:
-        raise ValueError(f"自营仓导出缺少交货单号：{', '.join(missing_numbers)}")
-    inbound = inbound[inbound["_delivery_key"].isin(normalized_numbers)].copy()
+    inbound = prepare_inbound_candidates(inbound_rows, delivery_numbers)
 
     resolved = resolve_delivery_sites(delivery_lines, product_info)
     resolved = _resolve_inbound_candidate_sites(resolved, inbound)
@@ -222,18 +119,14 @@ def process_self_operated_inbound(
         )
     )
     allocation_records: dict[int, dict] = {}
-    supplier_key = _normalize_position_text(supplier_name)
     generated_allowances: dict[OverreceiptKey, OverreceiptAllowance] = {}
 
     for _, delivery in resolved_groups.iterrows():
         sku = delivery["SKU"]
         full_site = delivery["完整站点"]
         quantity = int(delivery["交货量"])
-        candidates = inbound[
-            inbound["_sku_key"].eq(_normalize_position_text(sku))
-            & inbound["_site_key"].eq(_normalize_position_text(full_site))
-        ].copy()
-        if candidates.empty:
+        candidates, reason = select_inbound_candidates(inbound, delivery, supplier_name)
+        if reason:
             pending_records.append(
                 _pending_row(
                     supplier=supplier_name,
@@ -244,71 +137,11 @@ def process_self_operated_inbound(
                     normal=0,
                     overreceipt=0,
                     pending=quantity,
-                    reason=ExceptionReason.INBOUND_ORDER_NOT_FOUND,
+                    reason=reason,
                 )
             )
             continue
 
-        candidates = candidates[candidates["_supplier_key"].eq(supplier_key)].copy()
-        if candidates.empty:
-            pending_records.append(
-                _pending_row(
-                    supplier=supplier_name,
-                    sku=sku,
-                    original_site=delivery["原始站点"],
-                    full_site=full_site,
-                    quantity=quantity,
-                    normal=0,
-                    overreceipt=0,
-                    pending=quantity,
-                    reason=ExceptionReason.SUPPLIER_MISMATCH,
-                )
-            )
-            continue
-
-        candidates = candidates[candidates["_po_key"].ne("")].copy()
-        if candidates.empty:
-            pending_records.append(
-                _pending_row(
-                    supplier=supplier_name,
-                    sku=sku,
-                    original_site=delivery["原始站点"],
-                    full_site=full_site,
-                    quantity=quantity,
-                    normal=0,
-                    overreceipt=0,
-                    pending=quantity,
-                    reason=ExceptionReason.PO_NAME_MISSING,
-                )
-            )
-            continue
-
-        valid_receivable = (
-            candidates["_receivable"].notna()
-            & candidates["_receivable"].ge(0)
-            & candidates["_receivable"].mod(1).eq(0)
-        )
-        candidates = candidates[valid_receivable].copy()
-        if candidates.empty:
-            pending_records.append(
-                _pending_row(
-                    supplier=supplier_name,
-                    sku=sku,
-                    original_site=delivery["原始站点"],
-                    full_site=full_site,
-                    quantity=quantity,
-                    normal=0,
-                    overreceipt=0,
-                    pending=quantity,
-                    reason=ExceptionReason.RECEIVABLE_INVALID,
-                )
-            )
-            continue
-
-        candidates = candidates.sort_values(
-            ["_po_key", "_source_order"],
-            kind="stable",
-        )
         remaining = quantity
         normal_total = 0
         for index, candidate in candidates.iterrows():
