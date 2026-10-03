@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from openpyxl import Workbook
 
-import delivery_note.input_inspection as input_inspection_module
+import delivery_note.inspection.streaming as streaming_module
 
 import delivery_note.web.caches as cache_module
 
@@ -37,14 +37,14 @@ class WebApiTests(WebApiCase):
 
         with (
             patch.object(
-                input_inspection_module,
+                streaming_module,
                 "_stream_xlsx_inspection",
-                wraps=input_inspection_module._stream_xlsx_inspection,
+                wraps=streaming_module._stream_xlsx_inspection,
             ) as inspect_full,
             patch.object(
-                input_inspection_module,
+                streaming_module,
                 "_stream_xlsx_preview",
-                wraps=input_inspection_module._stream_xlsx_preview,
+                wraps=streaming_module._stream_xlsx_preview,
             ) as inspect_page,
         ):
             summary = self.client.get(

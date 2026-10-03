@@ -163,7 +163,7 @@ class InputInspectionTests(unittest.TestCase):
         }
 
         with patch(
-            "delivery_note.input_inspection.load_workbook",
+            "delivery_note.inspection.streaming.load_workbook",
             return_value=workbook,
         ):
             preview = preview_input_version_page(
