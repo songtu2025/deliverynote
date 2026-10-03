@@ -1,75 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  App as AntApp,
-  Button,
-  Drawer,
-  Form,
-  Input,
-  InputNumber,
-  Modal,
-  Select,
-  Space,
-  Tag,
-  Typography
-} from "antd";
+import { Alert, App as AntApp, Button, Form, Modal, Typography } from "antd";
 import { LockOutlined, ReloadOutlined } from "@ant-design/icons";
+
+import { RulePublishDrawer } from "./overreceipt-rules/RulePublishDrawer";
+import { RuleRenameModal } from "./overreceipt-rules/RuleRenameModal";
+import { DeliveryPublishSummary, SelfOperatedPublishSummary } from "./overreceipt-rules/RulePublishConfirmation";
 
 import { api, ApiError } from "../api";
 import { RuleScopeSwitcher, CurrentSelfOperatedRule, CurrentDeliveryRule } from "./overreceipt-rules/RuleOverview";
 import { RuleHistory } from "./overreceipt-rules/RuleHistory";
-import type { RenameRuleTarget, RuleScope } from "./overreceipt-rules/ruleTypes";
+import type {
+  RuleForm,
+  SelfOperatedRuleForm,
+  RenameRuleForm,
+  RenameRuleTarget,
+  RuleScope
+} from "./overreceipt-rules/ruleTypes";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../types";
-
-type RuleForm = {
-  name: string;
-  short_tail_limit: number;
-  medium_tail_limit: number;
-  long_tail_limit: number;
-  allowed_warehouses: string[];
-};
-
-type SelfOperatedRuleForm = {
-  name: string;
-  allowance: number;
-};
-
-type RenameRuleForm = {
-  name: string;
-};
-
-const DEFAULT_LIMITS = {
-  short_tail_limit: 50,
-  medium_tail_limit: 20,
-  long_tail_limit: 10
-};
-
-const SELF_OPERATED_IMPACT_ITEMS = [
-  ["匹配键", "供应商 + SKU + 完整站点"],
-  ["额度共享", "额度按每个匹配键共享"],
-  ["分配位置", "规则内超收挂到最后一个 PO 单"],
-  ["业务边界", "不会改变上游交货量或采购量"]
-];
-
-const DELIVERY_IMPACT_ITEMS = [
-  ["共享维度", "供应商 + SKU + 完整站点"],
-  ["定位判断", "短尾 / 中尾 / 长尾分别配置"],
-  ["仓库范围", "只允许精确命中白名单的仓库"],
-  ["业务边界", "不会改变上游交货量或采购量"]
-];
-
-function ImpactPreview({ items }: { items: string[][] }) {
-  return (
-    <div className="overreceipt-impact-preview">
-      {items.map(([label, value]) => (
-        <div className="overreceipt-impact-row" key={label}>
-          <span>{label}</span>
-          <strong>{value}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export default function OverreceiptRulesPage({ active = true }: { active?: boolean }) {
   const { message } = AntApp.useApp();
@@ -212,29 +159,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
   const confirmPublish = async (values: RuleForm) => {
     await modal.confirm({
       title: "确认发布不可变版本？",
-      content: (
-        <div className="overreceipt-confirm-summary">
-          <Typography.Text strong>{values.name}</Typography.Text>
-          <Space wrap>
-            <Tag color="green">短尾 +{values.short_tail_limit} 件</Tag>
-            <Tag color="blue">中尾 +{values.medium_tail_limit} 件</Tag>
-            <Tag>长尾 +{values.long_tail_limit} 件</Tag>
-          </Space>
-          <div className="overreceipt-confirm-warehouses">
-            <Typography.Text type="secondary">允许超收仓库（精确匹配）</Typography.Text>
-            {values.allowed_warehouses.length ? (
-              <Space wrap>
-                {values.allowed_warehouses.map((warehouse) => (
-                  <Tag key={warehouse}>{warehouse}</Tag>
-                ))}
-              </Space>
-            ) : (
-              <Typography.Text type="warning">未开放任何仓库（不会自动超收）</Typography.Text>
-            )}
-          </div>
-          <Typography.Text type="secondary">参数发布后不可修改；新版本仅用于新批次。</Typography.Text>
-        </div>
-      ),
+      content: <DeliveryPublishSummary values={values} />,
       okText: "确认发布",
       cancelText: "返回修改",
       onOk: () => publish(values)
@@ -263,15 +188,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
   const confirmSelfOperatedPublish = async (values: SelfOperatedRuleForm) => {
     await modal.confirm({
       title: "确认发布自营仓超收规则？",
-      content: (
-        <div className="overreceipt-confirm-summary">
-          <Typography.Text strong>{values.name}</Typography.Text>
-          <Typography.Text>每个“供应商 + SKU + 完整站点”在新批次内共享 {values.allowance} 件超收额度。</Typography.Text>
-          <Typography.Text type="secondary">
-            规则内超收数量挂到最后一个 PO 单，且不会改变上游交货量或采购量。
-          </Typography.Text>
-        </div>
-      ),
+      content: <SelfOperatedPublishSummary values={values} />,
       okText: "确认发布",
       cancelText: "返回修改",
       onOk: () => publishSelfOperated(values)
@@ -306,8 +223,6 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
       setSelfOperatedActivatingId(undefined);
     }
   };
-
-  const drawerIsSelfOperated = publishScope === "self_operated";
 
   return (
     <div className="page-shell overreceipt-page">
@@ -381,144 +296,28 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         onRename={openRename}
       />
 
-      <Modal
-        title="修改版本名称"
-        open={renameTarget !== undefined}
-        okText="保存"
-        cancelText="取消"
-        confirmLoading={renaming}
-        onOk={() => renameForm.submit()}
-        onCancel={closeRename}
-        destroyOnHidden
-      >
-        <Alert
-          className="overreceipt-drawer-notice"
-          type="info"
-          showIcon
-          title="只修改名称，不影响规则参数或历史批次"
-        />
-        <Form<RenameRuleForm> form={renameForm} layout="vertical" onFinish={(values) => void renameRule(values)}>
-          <Form.Item
-            label="版本名称"
-            name="name"
-            rules={[{ required: true, whitespace: true, message: "请输入版本名称" }]}
-          >
-            <Input maxLength={200} autoFocus />
-          </Form.Item>
-        </Form>
-      </Modal>
+      <RuleRenameModal
+        renameTarget={renameTarget}
+        renameForm={renameForm}
+        renaming={renaming}
+        closeRename={closeRename}
+        renameRule={renameRule}
+      />
 
-      <Drawer
-        className="overreceipt-publish-drawer"
-        title={drawerIsSelfOperated ? "发布自营仓新版本" : "发布普通交货新版本"}
-        open={publishScope !== undefined}
-        size={460}
-        onClose={() => setPublishScope(undefined)}
-        footer={
-          <div className="overreceipt-drawer-actions">
-            <Button onClick={() => setPublishScope(undefined)}>取消</Button>
-            <Button
-              type="primary"
-              htmlType="submit"
-              form={drawerIsSelfOperated ? "self-operated-overreceipt-form" : "delivery-overreceipt-form"}
-              loading={drawerIsSelfOperated ? selfOperatedSubmitting : submitting}
-            >
-              确认
-            </Button>
-          </div>
-        }
-      >
-        <Alert
-          className="overreceipt-drawer-notice"
-          type="info"
-          showIcon
-          title="规则参数发布后不可修改"
-          description="版本名称可以调整；新版本仅用于新批次。"
-        />
-
-        {drawerIsSelfOperated ? (
-          <Form<SelfOperatedRuleForm>
-            id="self-operated-overreceipt-form"
-            form={selfOperatedForm}
-            layout="vertical"
-            requiredMark
-            initialValues={{ allowance: 5 }}
-            onFinish={(values) => void confirmSelfOperatedPublish(values)}
-          >
-            <Form.Item
-              label="规则版本名称"
-              name="name"
-              rules={[{ required: true, whitespace: true, message: "请输入规则版本名称" }]}
-            >
-              <Input placeholder="例如：2026-08 自营仓超收规则" />
-            </Form.Item>
-            <Form.Item
-              label="每个匹配键允许超收"
-              name="allowance"
-              extra={
-                activeSelfOperatedRule
-                  ? `当前启用版本为每键 +${activeSelfOperatedRule.allowance} 件`
-                  : "当前尚未启用自营仓超收规则"
-              }
-              rules={[{ required: true, message: "请输入允许超收数量" }]}
-            >
-              <InputNumber min={0} precision={0} suffix="件" />
-            </Form.Item>
-            <Typography.Title className="overreceipt-impact-title" level={5}>
-              发布影响预览
-            </Typography.Title>
-            <ImpactPreview items={SELF_OPERATED_IMPACT_ITEMS} />
-          </Form>
-        ) : (
-          <Form<RuleForm>
-            id="delivery-overreceipt-form"
-            form={form}
-            layout="vertical"
-            requiredMark
-            initialValues={{ ...DEFAULT_LIMITS, allowed_warehouses: [] }}
-            onFinish={(values) => void confirmPublish(values)}
-          >
-            <Form.Item
-              label="规则版本名称"
-              name="name"
-              rules={[{ required: true, whitespace: true, message: "请输入规则版本名称" }]}
-            >
-              <Input placeholder="例如：2026-08 普通交货超收规则" />
-            </Form.Item>
-            <div className="overreceipt-limit-grid">
-              <Form.Item label="短尾允许超收" name="short_tail_limit" rules={[{ required: true }]}>
-                <InputNumber min={0} precision={0} suffix="件" />
-              </Form.Item>
-              <Form.Item label="中尾允许超收" name="medium_tail_limit" rules={[{ required: true }]}>
-                <InputNumber min={0} precision={0} suffix="件" />
-              </Form.Item>
-              <Form.Item label="长尾允许超收" name="long_tail_limit" rules={[{ required: true }]}>
-                <InputNumber min={0} precision={0} suffix="件" />
-              </Form.Item>
-            </div>
-            <Form.Item
-              label="允许超收仓库"
-              name="allowed_warehouses"
-              extra="仓库留空表示不允许自动超收；通常不要选择供应商成品本地仓。"
-            >
-              <Select
-                mode="multiple"
-                allowClear
-                loading={warehousesLoading}
-                placeholder="选择允许超收的目的仓"
-                options={warehouses.map((warehouse) => ({ value: warehouse, label: warehouse }))}
-                onOpenChange={(open) => {
-                  if (open) void loadWarehouses();
-                }}
-              />
-            </Form.Item>
-            <Typography.Title className="overreceipt-impact-title" level={5}>
-              发布影响预览
-            </Typography.Title>
-            <ImpactPreview items={DELIVERY_IMPACT_ITEMS} />
-          </Form>
-        )}
-      </Drawer>
+      <RulePublishDrawer
+        publishScope={publishScope}
+        setPublishScope={setPublishScope}
+        form={form}
+        selfOperatedForm={selfOperatedForm}
+        submitting={submitting}
+        selfOperatedSubmitting={selfOperatedSubmitting}
+        activeSelfOperatedRule={activeSelfOperatedRule}
+        warehouses={warehouses}
+        warehousesLoading={warehousesLoading}
+        loadWarehouses={loadWarehouses}
+        confirmPublish={confirmPublish}
+        confirmSelfOperatedPublish={confirmSelfOperatedPublish}
+      />
     </div>
   );
 }
