@@ -95,6 +95,7 @@ export function RulePublishDrawer({
 
       {drawerIsSelfOperated ? (
         <Form<SelfOperatedRuleForm>
+          key="self_operated"
           id="self-operated-overreceipt-form"
           form={selfOperatedForm}
           layout="vertical"
@@ -128,6 +129,7 @@ export function RulePublishDrawer({
         </Form>
       ) : (
         <Form<RuleForm>
+          key="delivery"
           id="delivery-overreceipt-form"
           form={form}
           layout="vertical"
