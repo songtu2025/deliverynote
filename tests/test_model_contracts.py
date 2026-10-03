@@ -1,10 +1,11 @@
 """保护模型注册、数据库约束和默认值的公开契约。"""
 
 import json
-from pathlib import Path
 import subprocess
 import sys
 import unittest
+from importlib import import_module
+from pathlib import Path
 
 from sqlalchemy import (
     CheckConstraint,
@@ -16,7 +17,6 @@ from sqlalchemy import (
 from sqlalchemy.dialects import postgresql, sqlite
 
 from delivery_note.web import models
-
 
 MODEL_TABLES = {
     "User": "users",
@@ -41,6 +41,40 @@ MODEL_TABLES = {
 
 
 class ModelContractTests(unittest.TestCase):
+    def test_package_exports_the_original_model_objects(self) -> None:
+        groups = {
+            "accounts": ("User", "AuthSession", "AuditLog"),
+            "inputs": ("InputVersion", "InputDraft", "PositionDraftRow"),
+            "batches": (
+                "Batch",
+                "SelfOperatedBatch",
+                "SelfOperatedSiteResolution",
+                "BatchFile",
+                "ExceptionRecord",
+                "SplitRecord",
+            ),
+            "rules": (
+                "OverreceiptRuleVersion",
+                "SelfOperatedOverreceiptRuleVersion",
+                "BatchOverreceiptRule",
+            ),
+            "jobs": ("Job", "PurchaseSyncJob", "SelfOperatedInboundSyncJob"),
+            "base": ("Base", "utcnow"),
+        }
+        for group, names in groups.items():
+            provider = import_module(f"delivery_note.web.models.{group}")
+            for name in names:
+                with self.subTest(group=group, symbol=name):
+                    self.assertIs(getattr(models, name), getattr(provider, name))
+        self.assertEqual(
+            set(models.__all__),
+            set(MODEL_TABLES) | {"Base", "utcnow", "POSITION_DRAFT_PAGE_INDEX_NAME"},
+        )
+        inputs = import_module("delivery_note.web.models.inputs")
+        self.assertEqual(
+            models.POSITION_DRAFT_PAGE_INDEX_NAME, inputs.POSITION_DRAFT_PAGE_INDEX_NAME
+        )
+
     def assert_fresh_registration(self, setup: str, expression: str) -> None:
         # 独立进程避免其他测试提前导入 API，掩盖模型注册遗漏。
         result = subprocess.run(
