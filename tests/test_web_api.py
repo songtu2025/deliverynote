@@ -1,4 +1,4 @@
-from tests.support.web_api import WebApiCase
+from tests.support.web_api import INPUT_KINDS, WebApiCase
 import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -47,8 +47,6 @@ from delivery_note.web.models import (
     User,
 )
 
-
-INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
 
 
 class WebApiTests(WebApiCase):
