@@ -43,7 +43,7 @@ import {
 import { api, ApiError, download } from "../api";
 import { formatBeijingDateTime } from "../dateTime";
 import type { Batch, BatchFile, DeliveryException, InputVersion, Job, SplitPart } from "../types";
-import { StatusTag } from "./BatchesPage";
+import StatusTag from "../BatchStatusTag";
 import { useExceptionReview } from "./useExceptionReview";
 
 const VERSION_LABELS: Record<string, string> = {

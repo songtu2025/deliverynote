@@ -1,30 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App as AntApp, Button, Drawer, Popconfirm, Space, Skeleton, Table, Tag, Typography } from "antd";
-import { CheckCircleFilled, DownloadOutlined, EyeOutlined, SyncOutlined } from "@ant-design/icons";
-import type { TableProps } from "antd";
-
-import { api, download } from "../api";
-import { activateInputVersion } from "../inputVersionApi";
+import { useState } from "react";
+import { Alert, Button, Popconfirm, Space, Skeleton, Tag, Typography } from "antd";
+import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../dateTime";
-import type { InputVersion, PurchaseSyncIssue, PurchaseSyncPreview, PurchaseSyncStatus } from "../types";
-
-type SyncIssueFilter = "all" | "warning" | "error";
-type PurchasePreviewRow = PurchaseSyncPreview["rows"][number];
-
-const previewColumns: NonNullable<TableProps<PurchasePreviewRow>["columns"]> = [
-  { title: "单据状态", dataIndex: "单据状态", width: 90 },
-  { title: "供应商", dataIndex: "供应商", width: 140, ellipsis: true },
-  { title: "SKU", dataIndex: "SKU", width: 160, ellipsis: true },
-  {
-    title: "平台站点",
-    dataIndex: "平台站点",
-    width: 200,
-    ellipsis: true,
-    render: (value: string | null) => (value === "共享" ? <Tag color="warning">共享 · 不可自动匹配</Tag> : value || "—")
-  },
-  { title: "目的仓", dataIndex: "目的仓", width: 150, ellipsis: true },
-  { title: "未交量", dataIndex: "未交量", width: 90, align: "right" }
-];
+import { getPurchaseSyncPreview, getPurchaseSyncIssues } from "../syncApi";
+import type { InputVersion } from "../types";
+import { usePurchaseSync } from "./batches/usePurchaseSync";
+import { useSyncInspection } from "./batches/useSyncInspection";
+import SyncInspectionDrawers from "./batches/SyncInspectionDrawers";
+import { purchasePreviewColumns, purchaseIssueColumns } from "./batches/purchaseSyncColumns";
 
 interface PurchaseSyncPanelProps {
   versions: InputVersion[];
@@ -39,174 +22,28 @@ export default function PurchaseSyncPanel({
   refreshVersions,
   compact = false
 }: PurchaseSyncPanelProps) {
-  const { message } = AntApp.useApp();
-  const [syncStatus, setSyncStatus] = useState<PurchaseSyncStatus | null>(null);
-  const [syncError, setSyncError] = useState("");
-  const [syncStarting, setSyncStarting] = useState(false);
-  const [syncActivating, setSyncActivating] = useState(false);
-  const [syncAttempt, setSyncAttempt] = useState(0);
-  const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState("");
-  const [preview, setPreview] = useState<PurchaseSyncPreview | null>(null);
-  const [issuesOpen, setIssuesOpen] = useState(false);
-  const [issuesLoading, setIssuesLoading] = useState(false);
-  const [issuesError, setIssuesError] = useState("");
-  const [issues, setIssues] = useState<PurchaseSyncIssue[]>([]);
-  const [issueFilter, setIssueFilter] = useState<SyncIssueFilter>("warning");
+  const {
+    syncStatus,
+    syncError,
+    syncStarting,
+    syncActivating,
+    syncJob,
+    syncCandidate,
+    running,
+    configured,
+    progress,
+    startSync,
+    activateCandidate,
+    downloadIssues
+  } = usePurchaseSync(versions, canActivate, refreshVersions);
   const [detailsOpen, setDetailsOpen] = useState(!compact);
-  const refreshedCandidateRef = useRef<number | null>(null);
-  const versionsRef = useRef(versions);
-  versionsRef.current = versions;
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    const loadStatus = async () => {
-      try {
-        const next = await api<PurchaseSyncStatus>("/api/purchase-sync");
-        if (cancelled) return;
-        setSyncStatus(next);
-        setSyncError("");
-        const candidateId = next.job?.candidate_version_id ?? null;
-        if (
-          next.job?.status === "succeeded" &&
-          candidateId &&
-          !versionsRef.current.some((version) => version.id === candidateId) &&
-          refreshedCandidateRef.current !== candidateId
-        ) {
-          refreshedCandidateRef.current = candidateId;
-          await refreshVersions();
-        }
-        if (next.job?.status === "queued" || next.job?.status === "running") {
-          timer = setTimeout(() => void loadStatus(), 2000);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setSyncError(error instanceof Error ? error.message : "读取同步状态失败");
-        }
-      }
-    };
-
-    void loadStatus();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [refreshVersions, syncAttempt]);
-
-  const syncJob = syncStatus?.job ?? null;
-  const syncCandidate = syncJob?.candidate_version_id
-    ? (versions.find((version) => version.id === syncJob.candidate_version_id) ?? null)
-    : null;
-  const running = syncJob?.status === "queued" || syncJob?.status === "running";
-  const configured = syncStatus?.configured ?? true;
-  const progress = syncJob?.total_orders ? Math.round((syncJob.processed_orders / syncJob.total_orders) * 100) : 0;
-  const filteredIssues = issues.filter((issue) => issueFilter === "all" || issue.severity === issueFilter);
-  const issueColumns = useMemo<NonNullable<TableProps<PurchaseSyncIssue>["columns"]>>(
-    () => [
-      {
-        title: "级别",
-        dataIndex: "severity",
-        width: 88,
-        render: (severity: PurchaseSyncIssue["severity"]) => (
-          <Tag color={severity === "error" ? "error" : "warning"}>{severity === "error" ? "错误" : "提醒"}</Tag>
-        )
-      },
-      { title: "问题", dataIndex: "message", width: 260 },
-      { title: "采购单号", dataIndex: "po_code", width: 128 },
-      { title: "SKU", dataIndex: "sku", width: 150 },
-      {
-        title: "目的仓",
-        dataIndex: "warehouse",
-        width: 150,
-        render: (value: string | undefined) => value || "—"
-      },
-      {
-        title: "未交量",
-        dataIndex: "quantity",
-        width: 100,
-        align: "right",
-        render: (value: number | undefined) => value ?? "—"
-      },
-      { title: "接口站点", dataIndex: "source_site", width: 160 },
-      { title: "供应商编号", dataIndex: "supplier_code", width: 145 },
-      { title: "供应商名称", dataIndex: "supplier_name", width: 170 },
-      { title: "问题类型", dataIndex: "code", width: 140 }
-    ],
-    []
-  );
-
-  const startSync = async () => {
-    if (syncStarting || running) return;
-    setSyncStarting(true);
-    setSyncError("");
-    try {
-      await api("/api/purchase-sync", { method: "POST" });
-      setSyncAttempt((value) => value + 1);
-      message.success("采购数据同步已进入后台队列");
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : "启动同步失败");
-    } finally {
-      setSyncStarting(false);
-    }
-  };
-
-  const activateCandidate = async () => {
-    if (!syncCandidate || !canActivate || syncActivating) return;
-    setSyncActivating(true);
-    setSyncError("");
-    try {
-      await activateInputVersion(syncCandidate.id);
-      await refreshVersions();
-      message.success(`${syncCandidate.name} 已启用，将用于新批次`);
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : "启用失败");
-    } finally {
-      setSyncActivating(false);
-    }
-  };
-
-  const downloadIssues = async () => {
-    if (!syncJob) return;
-    try {
-      await download(`/api/purchase-sync/${syncJob.id}/issues/download`, `采购同步问题_${syncJob.id}.xlsx`);
-    } catch (error) {
-      setSyncError(error instanceof Error ? error.message : "下载问题清单失败");
-    }
-  };
-
-  const openPreview = async () => {
-    if (!syncJob?.candidate_version_id) return;
-    setPreviewOpen(true);
-    setPreviewLoading(true);
-    setPreviewError("");
-    setPreview(null);
-    try {
-      setPreview(await api<PurchaseSyncPreview>(`/api/purchase-sync/${syncJob.id}/preview?limit=100`));
-    } catch (error) {
-      setPreviewError(error instanceof Error ? error.message : "读取候选数据失败");
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
-  const openIssues = async (filter: SyncIssueFilter) => {
-    if (!syncJob) return;
-    setIssueFilter(filter);
-    setIssuesOpen(true);
-    setIssuesError("");
-    setIssuesLoading(true);
-    try {
-      setIssues(await api<PurchaseSyncIssue[]>(`/api/purchase-sync/${syncJob.id}/issues`));
-    } catch (error) {
-      setIssuesError(error instanceof Error ? error.message : "读取异常数据失败");
-    } finally {
-      setIssuesLoading(false);
-    }
-  };
-
+  const inspection = useSyncInspection({
+    jobId: syncJob?.id,
+    hasCandidate: Boolean(syncJob?.candidate_version_id),
+    readPreview: getPurchaseSyncPreview,
+    readIssues: getPurchaseSyncIssues
+  });
+  const { openPreview, openIssues } = inspection;
   if (syncStatus === null && !syncError) {
     return (
       <section
@@ -373,90 +210,22 @@ export default function PurchaseSyncPanel({
         )}
       </section>
 
-      <Drawer
-        rootClassName="purchase-sync-issues-drawer"
-        title="采购候选数据预览"
-        size={980}
-        open={previewOpen}
-        destroyOnHidden
-        onClose={() => setPreviewOpen(false)}
-      >
-        {previewError ? (
-          <Alert type="error" showIcon title="无法读取候选数据" description={previewError} />
-        ) : (
-          <>
-            <Typography.Paragraph type="secondary">
-              共 {preview?.total ?? 0} 行，当前展示前 {Math.min(preview?.total ?? 0, 100)} 行。
-            </Typography.Paragraph>
-            <Table<PurchasePreviewRow>
-              size="small"
-              loading={previewLoading}
-              columns={previewColumns}
-              dataSource={preview?.rows ?? []}
-              rowKey={(row) => String(row._row_number)}
-              pagination={false}
-              scroll={{ x: 830, y: 520 }}
-              locale={{ emptyText: "当前候选版本没有可预览数据" }}
-            />
-          </>
-        )}
-      </Drawer>
-
-      <Drawer
-        rootClassName="purchase-sync-issues-drawer"
-        title="采购同步异常数据"
-        size={980}
-        open={issuesOpen}
-        destroyOnHidden
-        extra={
-          <Button size="small" icon={<DownloadOutlined />} onClick={() => void downloadIssues()}>
-            下载完整清单
-          </Button>
-        }
-        onClose={() => setIssuesOpen(false)}
-      >
-        <div className="purchase-sync-issues-toolbar">
-          <Typography.Text type="secondary">
-            共 {issues.length} 条，显示 {filteredIssues.length} 条。
-          </Typography.Text>
-          <Space size={6} wrap>
-            <Typography.Text type="secondary">筛选：</Typography.Text>
-            {(
-              [
-                ["warning", "共享站点提醒"],
-                ["error", "映射错误"],
-                ["all", "全部"]
-              ] as Array<[SyncIssueFilter, string]>
-            ).map(([value, label]) => (
-              <Button
-                key={value}
-                size="small"
-                type={issueFilter === value ? "primary" : "default"}
-                onClick={() => setIssueFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
-          </Space>
-        </div>
-        {issuesError ? (
-          <Alert type="error" showIcon title="无法读取异常数据" description={issuesError} />
-        ) : (
-          <Table<PurchaseSyncIssue>
-            className="purchase-sync-issues-table"
-            rowKey={(issue) =>
-              `${issue.code}-${issue.po_code}-${issue.sku}-${issue.source_site}-${issue.supplier_code}`
-            }
-            size="small"
-            loading={issuesLoading}
-            columns={issueColumns}
-            dataSource={filteredIssues}
-            pagination={filteredIssues.length > 10 ? { pageSize: 10, showSizeChanger: false } : false}
-            scroll={{ x: "max-content" }}
-            locale={{ emptyText: "当前筛选条件下没有异常数据" }}
-          />
-        )}
-      </Drawer>
+      <SyncInspectionDrawers
+        inspection={inspection}
+        previewConfig={{
+          title: "采购候选数据预览",
+          width: 980,
+          columns: purchasePreviewColumns,
+          scroll: { x: 830, y: 520 }
+        }}
+        issuesConfig={{
+          title: "采购同步异常数据",
+          width: 980,
+          columns: purchaseIssueColumns,
+          rowKey: (issue) => `${issue.code}-${issue.po_code}-${issue.sku}-${issue.source_site}-${issue.supplier_code}`
+        }}
+        onDownload={downloadIssues}
+      />
     </>
   );
 }
