@@ -16,7 +16,7 @@ try:
         write_exception_workbook,
         write_import_workbook,
     )
-    from delivery_note.pipeline import (
+    from delivery_note.processing.models import (
         BatchResult,
         EXCEPTION_COLUMNS,
         IMPORT_COLUMNS,

@@ -10,7 +10,7 @@ from ..input_inspection import (
     position_diff,
     validate_position_frame,
 )
-from ..pipeline import POSITION_SOURCE_COLUMNS
+from ..processing.models import (POSITION_SOURCE_COLUMNS)
 from .caches import DraftAnalysisCache
 from .models import InputDraft, InputVersion, PositionDraftRow
 from .position_draft_state import FIELD_TO_COLUMN, ROW_FIELDS, load_base_frame

@@ -19,7 +19,7 @@ import delivery_note.web.caches as cache_module
 import delivery_note.web.position_draft_state as position_drafts_module
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
-from delivery_note.pipeline import POSITION_SOURCE_COLUMNS
+from delivery_note.processing.models import (POSITION_SOURCE_COLUMNS)
 from delivery_note.web.api import create_app
 from delivery_note.web.database import Database, sqlite_url
 from delivery_note.web.models import (

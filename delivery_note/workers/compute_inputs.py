@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..pipeline import OverreceiptPolicy
+from ..processing.models import (OverreceiptPolicy)
 from ..web.database import Database
 from ..web.models import (
     Batch,

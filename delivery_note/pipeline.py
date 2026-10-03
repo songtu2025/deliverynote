@@ -1,5 +1,4 @@
 import json
-from dataclasses import dataclass
 from typing import MutableMapping
 
 import pandas as pd
@@ -8,182 +7,23 @@ from .config import PURCHASE_STATUSES, warehouse_sort_key
 from .exception_reasons import ExceptionReason
 
 
-IMPORT_COLUMNS = [
-    "*目的仓",
-    "*供应商编码",
-    "*SKU",
-    "*本次交货量",
-    "*站点",
-    "单据备注",
-    "交货备注",
-]
-
-POSITION_VALUE_COLUMNS = [
-    "规模定位",
-    "备货定位",
-]
-POSITION_SOURCE_COLUMNS = [
-    "店铺-站点",
-    "积加SKU",
-    "MSKU",
-    *POSITION_VALUE_COLUMNS,
-]
-PENDING_COLUMNS = [*IMPORT_COLUMNS, *POSITION_VALUE_COLUMNS]
-
-EXCEPTION_COLUMNS = [
-    "SKU",
-    "原始站点",
-    "完整站点",
-    "目的仓",
-    "交货量",
-    "已自动分配量",
-    "人工处理量",
-    "异常原因",
-]
-EXCEPTION_GUIDANCE_COLUMNS = [
-    "正常采购分配量",
-    "超收规则分配量",
-    "超收剩余额度",
-]
-RESULT_EXCEPTION_COLUMNS = [*EXCEPTION_COLUMNS, *EXCEPTION_GUIDANCE_COLUMNS]
-
-OVERRECEIPT_NOTE_PREFIX = "规则允许超收"
-OverreceiptKey = tuple[str, str, str]
-
-
-@dataclass(frozen=True)
-class BatchResult:
-    import_rows: pd.DataFrame
-    exception_rows: pd.DataFrame
-    delivery_total: int
-    import_total: int
-    manual_total: int
-
-
-@dataclass(frozen=True)
-class OverreceiptPolicy:
-    short_tail_limit: int
-    medium_tail_limit: int
-    long_tail_limit: int
-    allowed_warehouses: frozenset[str]
-
-    def __post_init__(self) -> None:
-        limits = (
-            self.short_tail_limit,
-            self.medium_tail_limit,
-            self.long_tail_limit,
-        )
-        if any(
-            isinstance(limit, bool) or not isinstance(limit, int) for limit in limits
-        ):
-            raise ValueError("超收数量必须是整数")
-        if any(limit < 0 for limit in limits):
-            raise ValueError("超收数量不能小于 0")
-        warehouses = frozenset(
-            str(warehouse).strip()
-            for warehouse in self.allowed_warehouses
-            if str(warehouse).strip()
-        )
-        object.__setattr__(self, "allowed_warehouses", warehouses)
-
-    def limit_for(self, scale: str) -> int:
-        return {
-            "短尾": self.short_tail_limit,
-            "中尾": self.medium_tail_limit,
-            "长尾": self.long_tail_limit,
-        }.get(scale, 0)
-
-
-@dataclass
-class OverreceiptAllowance:
-    remaining: int
-    destination_warehouse: str
-
-
-@dataclass
-class _PurchaseBalance:
-    destination_warehouse: object
-    remaining: int | float
-
-
-@dataclass
-class PurchaseBalanceLedger:
-    """保存单批次内按匹配键聚合且可扣减的采购余额。"""
-
-    balances: dict[
-        tuple[object, object, object],
-        tuple[_PurchaseBalance, ...],
-    ]
-
-    def active_candidates(
-        self,
-        supplier: object,
-        sku: object,
-        site: object,
-    ) -> tuple[_PurchaseBalance, ...]:
-        """返回当前仍有余额的候选仓，并保持既定仓库顺序。"""
-
-        return tuple(
-            balance
-            for balance in self.balances.get((supplier, sku, site), ())
-            if balance.remaining > 0
-        )
-
-
-def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> None:
-    missing = sorted(required - set(frame.columns))
-    if missing:
-        raise ValueError(f"{source}缺少必要字段：{', '.join(missing)}")
-
-
-def build_purchase_balance_ledger(
-    purchase_rows: pd.DataFrame,
-) -> PurchaseBalanceLedger:
-    """从不可变采购输入一次构建批次作用域的聚合余额账本。"""
-
-    _require_columns(
-        purchase_rows,
-        {"单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"},
-        "采购需求",
-    )
-    purchases = purchase_rows.loc[
-        purchase_rows["单据状态"].isin(PURCHASE_STATUSES),
-        ["SKU", "供应商", "平台站点", "目的仓", "未交量"],
-    ].copy()
-    purchases["未交量"] = pd.to_numeric(
-        purchases["未交量"],
-        errors="coerce",
-    ).fillna(0)
-    purchases = purchases[purchases["未交量"] > 0]
-    needs = (
-        purchases.groupby(
-            ["SKU", "供应商", "平台站点", "目的仓"],
-            as_index=False,
-        )["未交量"]
-        .sum()
-        .reset_index(drop=True)
-    )
-
-    grouped: dict[
-        tuple[object, object, object],
-        list[_PurchaseBalance],
-    ] = {}
-    for sku, supplier, site, destination, quantity in needs.itertuples(
-        index=False,
-        name=None,
-    ):
-        grouped.setdefault((supplier, sku, site), []).append(
-            _PurchaseBalance(destination, quantity)
-        )
-    for balances in grouped.values():
-        balances.sort(
-            key=lambda balance: warehouse_sort_key(
-                str(balance.destination_warehouse)
-            )
-        )
-    return PurchaseBalanceLedger(
-        {key: tuple(balances) for key, balances in grouped.items()}
-    )
+from .processing.models import (
+    IMPORT_COLUMNS,
+    POSITION_VALUE_COLUMNS,
+    POSITION_SOURCE_COLUMNS,
+    PENDING_COLUMNS,
+    EXCEPTION_COLUMNS,
+    RESULT_EXCEPTION_COLUMNS,
+    OVERRECEIPT_NOTE_PREFIX,
+    BatchResult,
+    OverreceiptPolicy,
+    OverreceiptAllowance,
+    OverreceiptKey,
+    _require_columns,
+)
+from .processing.purchase_balances import (
+    _PurchaseBalance, PurchaseBalanceLedger, build_purchase_balance_ledger,
+)
 
 
 def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:

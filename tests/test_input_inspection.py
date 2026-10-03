@@ -23,7 +23,7 @@ from delivery_note.input_inspection import (
     validate_position_frame,
     write_position_workbook,
 )
-from delivery_note.pipeline import IMPORT_COLUMNS, POSITION_SOURCE_COLUMNS
+from delivery_note.processing.models import (IMPORT_COLUMNS, POSITION_SOURCE_COLUMNS)
 
 
 class InputInspectionTests(unittest.TestCase):

@@ -7,7 +7,7 @@ import delivery_note.application as application_module
 import delivery_note.pipeline as pipeline_module
 
 try:
-    from delivery_note.pipeline import OverreceiptPolicy
+    from delivery_note.processing.models import (OverreceiptPolicy)
 except ImportError:
     OverreceiptPolicy = None
 

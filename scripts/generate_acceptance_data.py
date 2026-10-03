@@ -10,7 +10,7 @@ if __package__ in {None, ""}:
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from delivery_note.pipeline import IMPORT_COLUMNS, POSITION_SOURCE_COLUMNS
+from delivery_note.processing.models import (IMPORT_COLUMNS, POSITION_SOURCE_COLUMNS)
 
 
 def _write_table(path: Path, headers: list[str], row: list[object]) -> None:

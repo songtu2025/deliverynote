@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from ..excel_io import read_position_workbook, write_delivery_workbook
-from ..pipeline import EXCEPTION_COLUMNS, BatchResult
+from ..processing.models import (EXCEPTION_COLUMNS, BatchResult)
 from ..web.models import SelfOperatedBatch
 from ..workers.export_files import _cleanup_previous_export_directories
 from ..workers.export_inputs import _load_export_inputs

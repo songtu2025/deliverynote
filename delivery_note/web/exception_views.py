@@ -9,11 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..exception_reasons import exception_reason_code
-from ..pipeline import (
-    IMPORT_COLUMNS,
-    POSITION_VALUE_COLUMNS,
-    enrich_pending_import_rows,
-)
+from ..processing.models import (IMPORT_COLUMNS, POSITION_VALUE_COLUMNS)
+from ..pipeline import (enrich_pending_import_rows)
 from .caches import PositionFrameCache
 from .models import Batch, ExceptionRecord, InputVersion, SplitRecord
 

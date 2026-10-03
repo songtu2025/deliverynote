@@ -10,7 +10,7 @@ from openpyxl import Workbook, load_workbook
 
 try:
     from delivery_note.cli import BEIJING_TIMEZONE, main, run_batch
-    from delivery_note.pipeline import IMPORT_COLUMNS
+    from delivery_note.processing.models import (IMPORT_COLUMNS)
 except ImportError:
     main = None
     run_batch = None

@@ -16,7 +16,7 @@ from .excel_io import (
     validate_template_workbook,
 )
 from .config import supplier_aliases, validate_supplier_frame
-from .pipeline import POSITION_SOURCE_COLUMNS
+from .processing.models import (POSITION_SOURCE_COLUMNS)
 
 
 POSITION_KEY = ["店铺-站点", "积加SKU", "MSKU"]

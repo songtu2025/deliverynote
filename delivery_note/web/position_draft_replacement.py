@@ -5,7 +5,7 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from ..input_inspection import position_diff
-from ..pipeline import POSITION_SOURCE_COLUMNS
+from ..processing.models import (POSITION_SOURCE_COLUMNS)
 from .models import InputDraft, PositionDraftRow
 from .position_draft_state import list_draft_rows
 from .position_draft_state import (

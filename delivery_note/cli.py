@@ -13,8 +13,8 @@ from .excel_io import (
     read_supplier_workbook,
     write_delivery_workbook,
 )
+from .processing.models import (BatchResult)
 from .pipeline import (
-    BatchResult,
     build_manual_import_rows,
     enrich_pending_import_rows,
     process_data,

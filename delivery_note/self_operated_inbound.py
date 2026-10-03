@@ -5,12 +5,8 @@ from typing import Iterable, Mapping, MutableMapping, Sequence
 import pandas as pd
 
 from .exception_reasons import ExceptionReason
-from .pipeline import (
-    OverreceiptAllowance,
-    OverreceiptKey,
-    make_overreceipt_key,
-    resolve_delivery_sites,
-)
+from .processing.models import (OverreceiptAllowance, OverreceiptKey)
+from .pipeline import (make_overreceipt_key, resolve_delivery_sites)
 
 
 SOURCE_COLUMNS = {"积加SKU", "实收数量", "站点", "交货单号"}

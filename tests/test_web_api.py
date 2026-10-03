@@ -24,7 +24,7 @@ import delivery_note.web.gerpgo_routes as gerpgo_routes_module
 import delivery_note.web.input_version_routes as input_version_routes_module
 import delivery_note.web.rule_versions as rule_versions_module
 from delivery_note.gerpgo import GerpgoError, load_gerpgo_settings
-from delivery_note.pipeline import IMPORT_COLUMNS
+from delivery_note.processing.models import (IMPORT_COLUMNS)
 from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from delivery_note.web.auth import hash_token
 from tests.asgi_client import SyncASGIClient

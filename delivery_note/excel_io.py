@@ -6,15 +6,15 @@ import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Protection
 
-from .pipeline import (
+from .processing.models import (
     BatchResult,
     EXCEPTION_COLUMNS,
     IMPORT_COLUMNS,
     PENDING_COLUMNS,
     POSITION_SOURCE_COLUMNS,
     POSITION_VALUE_COLUMNS,
-    normalize_delivery_sheet,
 )
+from .pipeline import (normalize_delivery_sheet)
 from .self_operated_inbound import (
     INBOUND_COLUMNS as SELF_OPERATED_INBOUND_COLUMNS,
     INBOUND_TEMPLATE_COLUMNS,

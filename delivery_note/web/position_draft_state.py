@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from ..excel_io import read_position_workbook
-from ..pipeline import POSITION_SOURCE_COLUMNS
+from ..processing.models import (POSITION_SOURCE_COLUMNS)
 from ..input_inspection import position_change_warnings, validate_position_frame
 from .models import AuditLog, InputDraft, InputVersion, PositionDraftRow, utcnow
 

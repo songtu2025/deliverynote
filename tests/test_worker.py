@@ -15,7 +15,7 @@ from openpyxl import Workbook, load_workbook
 import pandas as pd
 from sqlalchemy import select
 
-from delivery_note.pipeline import IMPORT_COLUMNS
+from delivery_note.processing.models import (IMPORT_COLUMNS)
 from delivery_note.workers.purchase_details import (
     _fetch_purchase_order_details,
     _fetch_incremental_purchase_order_details,

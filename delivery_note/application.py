@@ -12,15 +12,13 @@ from .config import (
     SupplierIdentity,
     build_ordered_document_note,
 )
+from .processing.models import (IMPORT_COLUMNS, BatchResult, OverreceiptPolicy)
 from .pipeline import (
-    IMPORT_COLUMNS,
-    BatchResult,
-    OverreceiptPolicy,
     build_manual_import_rows,
     build_overreceipt_allowances,
-    build_purchase_balance_ledger,
     process_data,
 )
+from .processing.purchase_balances import (build_purchase_balance_ledger)
 
 
 @dataclass(frozen=True)
