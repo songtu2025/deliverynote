@@ -13,7 +13,7 @@ from ..input_inspection import (
 from ..pipeline import POSITION_SOURCE_COLUMNS
 from .caches import DraftAnalysisCache
 from .models import InputDraft, InputVersion, PositionDraftRow
-from .position_drafts import FIELD_TO_COLUMN, ROW_FIELDS, load_base_frame
+from .position_draft_state import FIELD_TO_COLUMN, ROW_FIELDS, load_base_frame
 from .serializers import utc_isoformat
 from .schemas import PositionRowFilters
 

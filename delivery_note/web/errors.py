@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .position_drafts import DRAFT_REVISION_CONFLICT_CODE, DraftConflictError
+from .position_draft_state import (DRAFT_REVISION_CONFLICT_CODE, DraftConflictError)
 
 
 class CodedHTTPException(HTTPException):

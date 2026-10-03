@@ -14,7 +14,7 @@ from .errors import (
     rollback_draft_conflict,
 )
 from .models import InputDraft
-from .position_drafts import DraftConflictError, require_revision
+from .position_draft_state import (DraftConflictError, require_revision)
 from .schemas import ImportApplyPayload
 
 

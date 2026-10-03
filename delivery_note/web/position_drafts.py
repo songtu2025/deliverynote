@@ -1,327 +1,33 @@
-from collections import defaultdict, deque
-import os
 from pathlib import Path
 from typing import Any, Mapping
 from uuid import uuid4
 
-import pandas as pd
-from sqlalchemy import delete, event, func, insert, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.exc import StaleDataError
 
-from delivery_note.excel_io import read_position_workbook
-from delivery_note.input_inspection import (
-    position_change_warnings,
-    position_diff,
-    validate_position_frame,
+from ..input_inspection import (
     write_position_workbook,
 )
-from delivery_note.pipeline import POSITION_SOURCE_COLUMNS
-
-from .models import (
-    AuditLog,
-    InputDraft,
-    InputVersion,
-    PositionDraftRow,
-    utcnow,
+from .models import InputDraft, InputVersion, PositionDraftRow
+from .position_draft_files import stage_publication_files, validate_publication_target
+from .position_draft_state import (
+    list_draft_rows,
+    BASE_VERSION_CHANGED_DETAIL,
+    DRAFT_BASE_VERSION_CHANGED_CODE,
+    DraftConflictError,
+    ROW_FIELDS,
+    _audit,
+    _flush_revision,
+    _make_row,
+    _record_values,
+    _row_values,
+    _signature,
+    _text,
+    load_base_frame,
+    position_frame,
+    require_revision,
+    touch_draft,
 )
-
-
-ROW_FIELDS = (
-    "store_site",
-    "jiaji_sku",
-    "msku",
-    "scale_position",
-    "stocking_position",
-)
-FIELD_TO_COLUMN = dict(zip(ROW_FIELDS, POSITION_SOURCE_COLUMNS))
-IDENTITY_FIELDS = ROW_FIELDS[:3]
-_PENDING_PUBLISH_KEY = "position_draft_pending_publish"
-POSITION_FRAME_CACHE_SESSION_KEY = "position_frame_cache"
-BASE_VERSION_CHANGED_DETAIL = "当前启用的库位版本已变化，请放弃当前草稿后重新开始"
-DRAFT_REVISION_CONFLICT_CODE = "draft_revision_conflict"
-DRAFT_BASE_VERSION_CHANGED_CODE = "draft_base_version_changed"
-
-
-class DraftConflictError(Exception):
-    def __init__(
-        self,
-        message: str = "",
-        *,
-        code: str = DRAFT_REVISION_CONFLICT_CODE,
-    ) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-class DuplicateInputVersionNameError(ValueError):
-    pass
-
-
-def require_revision(draft: InputDraft, expected_revision: int) -> None:
-    if draft.status != "editing" or draft.revision != expected_revision:
-        raise DraftConflictError
-
-
-def touch_draft(draft: InputDraft, user_id: int) -> None:
-    draft.revision += 1
-    draft.updated_by = user_id
-    draft.updated_at = utcnow()
-
-
-def _flush_revision(session: Session) -> None:
-    try:
-        session.flush()
-    except StaleDataError as error:
-        raise DraftConflictError from error
-
-
-def _remove_pending_publish_files(state: dict, *, remove_target: bool) -> None:
-    Path(state["temporary_path"]).unlink(missing_ok=True)
-    if remove_target and state.get("promoted"):
-        Path(state["target_path"]).unlink(missing_ok=True)
-
-
-@event.listens_for(Session, "before_commit")
-def _promote_pending_publish_file(session: Session) -> None:
-    state = session.info.get(_PENDING_PUBLISH_KEY)
-    if state is None or session.in_nested_transaction():
-        return
-    state["root_commit_started"] = True
-    target_path = Path(state["target_path"])
-    if target_path.exists() or target_path.is_symlink():
-        raise ValueError("发布目标文件已存在")
-    os.link(state["temporary_path"], target_path)
-    state["promoted"] = True
-    Path(state["temporary_path"]).unlink()
-
-
-@event.listens_for(Session, "after_commit")
-def _mark_root_publish_commit_succeeded(session: Session) -> None:
-    state = session.info.get(_PENDING_PUBLISH_KEY)
-    if (
-        state is not None
-        and state.get("root_commit_started")
-        and not session.in_nested_transaction()
-    ):
-        state["root_commit_succeeded"] = True
-
-
-@event.listens_for(Session, "after_transaction_end")
-def _finish_pending_publish_file(session: Session, transaction) -> None:
-    if transaction.parent is not None:
-        return
-    state = session.info.pop(_PENDING_PUBLISH_KEY, None)
-    if state is not None:
-        _remove_pending_publish_files(
-            state,
-            remove_target=not state.get("root_commit_succeeded", False),
-        )
-
-
-def _audit(
-    session: Session,
-    user_id: int,
-    action: str,
-    draft_id: int,
-    details: dict | None = None,
-) -> None:
-    session.add(
-        AuditLog(
-            user_id=user_id,
-            action=action,
-            entity_type="input_draft",
-            entity_id=str(draft_id),
-            details=details or {},
-        )
-    )
-
-
-def _text(value: Any) -> str:
-    if value is None or bool(pd.isna(value)):
-        return ""
-    if hasattr(value, "item"):
-        value = value.item()
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
-
-
-def _record_values(record: Mapping[str, Any]) -> dict[str, str]:
-    return {
-        field: _text(record.get(column, ""))
-        for field, column in FIELD_TO_COLUMN.items()
-    }
-
-
-def _row_values(row: PositionDraftRow) -> dict[str, str]:
-    return {field: _text(getattr(row, field)) for field in ROW_FIELDS}
-
-
-def _identity(values: Mapping[str, str]) -> tuple[str, str, str]:
-    return tuple(_text(values[field]).strip().upper() for field in IDENTITY_FIELDS)
-
-
-def _signature(values: Mapping[str, str]) -> tuple[str, ...]:
-    identity = _identity(values)
-    other_values = tuple(_text(values[field]) for field in ROW_FIELDS[3:])
-    return (*identity, *other_values)
-
-
-def _version_frame(session: Session, version: InputVersion) -> pd.DataFrame:
-    cache = session.info.get(POSITION_FRAME_CACHE_SESSION_KEY)
-    path = Path(version.storage_path)
-    if cache is None:
-        return read_position_workbook(path)
-    return cache.get(version.id, path, loader=read_position_workbook)
-
-
-def load_base_frame(session: Session, draft: InputDraft) -> pd.DataFrame:
-    """读取草稿锁定的不可变基础版本，并复用当前应用的有界缓存。"""
-
-    version = session.get(InputVersion, draft.base_version_id)
-    if version is None:
-        raise ValueError("草稿的基础版本不存在")
-    return _version_frame(session, version)
-
-
-def position_frame(rows: list[PositionDraftRow]) -> pd.DataFrame:
-    """将未删除的草稿行转换为统一的库位资料字段。"""
-    records = [
-        {FIELD_TO_COLUMN[field]: getattr(row, field) for field in ROW_FIELDS}
-        for row in rows
-        if not row.deleted
-    ]
-    return pd.DataFrame(records, columns=POSITION_SOURCE_COLUMNS)
-
-
-def _make_row(
-    *,
-    draft_id: int,
-    row_order: int,
-    values: Mapping[str, str],
-    base_row_number: int | None,
-    change_type: str,
-    deleted: bool = False,
-) -> PositionDraftRow:
-    return PositionDraftRow(
-        draft_id=draft_id,
-        row_order=row_order,
-        base_row_number=base_row_number,
-        change_type=change_type,
-        deleted=deleted,
-        **{field: _text(values.get(field, "")) for field in ROW_FIELDS},
-    )
-
-
-def create_or_resume_draft(
-    session: Session,
-    version: InputVersion,
-    user_id: int,
-) -> InputDraft:
-    if version.kind != "position":
-        raise ValueError("只能从当前启用的库位版本创建草稿")
-    list(
-        session.scalars(
-            select(InputVersion.id)
-            .where(InputVersion.kind == "position")
-            .order_by(InputVersion.id)
-            .with_for_update()
-        )
-    )
-    existing = session.scalar(
-        select(InputDraft)
-        .where(
-            InputDraft.kind == "position",
-            InputDraft.status == "editing",
-        )
-        .with_for_update()
-    )
-    if existing is not None:
-        return existing
-    active_version_id = session.scalar(
-        select(InputVersion.id).where(
-            InputVersion.kind == "position",
-            InputVersion.active.is_(True),
-        )
-    )
-    if active_version_id is None:
-        raise ValueError("只能从当前启用的库位版本创建草稿")
-    version = session.get(
-        InputVersion,
-        active_version_id,
-        populate_existing=True,
-    )
-    if version is None:
-        raise ValueError("只能从当前启用的库位版本创建草稿")
-
-    try:
-        with session.begin_nested():
-            draft = InputDraft(
-                kind="position",
-                base_version_id=version.id,
-                created_by=user_id,
-                updated_by=user_id,
-            )
-            session.add(draft)
-            session.flush()
-
-            frame = _version_frame(session, version)
-            row_mappings = []
-            for row_order, record in enumerate(frame.to_dict("records"), start=1):
-                values = _record_values(record)
-                row_mappings.append(
-                    {
-                        "draft_id": draft.id,
-                        "row_order": row_order,
-                        "base_row_number": row_order + 1,
-                        "change_type": "unchanged",
-                        "deleted": False,
-                        **values,
-                    }
-                )
-            if row_mappings:
-                session.execute(insert(PositionDraftRow), row_mappings)
-            _audit(
-                session,
-                user_id,
-                "create_input_draft",
-                draft.id,
-                {"base_version_id": version.id},
-            )
-            session.flush()
-    except IntegrityError as error:
-        winner = session.scalar(
-            select(InputDraft).where(
-                InputDraft.kind == "position",
-                InputDraft.status == "editing",
-            )
-        )
-        if winner is None:
-            raise DraftConflictError from error
-        return winner
-    return draft
-
-
-def list_draft_rows(session: Session, draft_id: int) -> list[PositionDraftRow]:
-    return list(
-        session.scalars(
-            select(PositionDraftRow)
-            .where(PositionDraftRow.draft_id == draft_id)
-            .order_by(PositionDraftRow.row_order, PositionDraftRow.id)
-        )
-    )
-
-
-def load_draft_frames(
-    session: Session,
-    draft: InputDraft,
-) -> tuple[list[PositionDraftRow], pd.DataFrame, pd.DataFrame]:
-    """一次加载草稿行、基础版本和当前数据。"""
-
-    rows = list_draft_rows(session, draft.id)
-    return rows, load_base_frame(session, draft), position_frame(rows)
 
 
 def _base_values_for_row(
@@ -368,9 +74,10 @@ def mutate_draft_row(
         session.add(row)
         session.flush()
     else:
-        row = session.get(PositionDraftRow, row_id)
-        if row is None or row.draft_id != draft.id:
+        existing_row = session.get(PositionDraftRow, row_id)
+        if existing_row is None or existing_row.draft_id != draft.id:
             raise ValueError("草稿行不存在")
+        row = existing_row
         if delete:
             if row.base_row_number is None:
                 session.delete(row)
@@ -419,93 +126,6 @@ def delete_draft_rows(
     _flush_revision(session)
 
 
-def replace_draft_from_frame(
-    session: Session,
-    draft: InputDraft,
-    expected_revision: int,
-    user_id: int,
-    frame: pd.DataFrame,
-) -> dict[str, int]:
-    require_revision(draft, expected_revision)
-    candidate = frame[POSITION_SOURCE_COLUMNS].copy()
-    current = position_frame(list_draft_rows(session, draft.id))
-    base = load_base_frame(session, draft)
-    diff = position_diff(current, candidate)
-
-    base_rows: dict[tuple[str, str, str], deque[tuple[int, dict[str, str]]]] = (
-        defaultdict(deque)
-    )
-    for offset, record in enumerate(base.to_dict("records"), start=2):
-        values = _record_values(record)
-        base_rows[_identity(values)].append((offset, values))
-
-    replacement_rows: list[PositionDraftRow] = []
-    for row_order, record in enumerate(candidate.to_dict("records"), start=1):
-        values = _record_values(record)
-        matches = base_rows[_identity(values)]
-        if matches:
-            base_row_number, base_values = matches.popleft()
-            change_type = (
-                "unchanged"
-                if _signature(values) == _signature(base_values)
-                else "modified"
-            )
-        else:
-            base_row_number = None
-            change_type = "added"
-        replacement_rows.append(
-            _make_row(
-                draft_id=draft.id,
-                row_order=row_order,
-                values=values,
-                base_row_number=base_row_number,
-                change_type=change_type,
-            )
-        )
-
-    next_order = len(replacement_rows) + 1
-    deleted_base_rows = sorted(
-        (item for matches in base_rows.values() for item in matches),
-        key=lambda item: item[0],
-    )
-    for base_row_number, values in deleted_base_rows:
-        replacement_rows.append(
-            _make_row(
-                draft_id=draft.id,
-                row_order=next_order,
-                values=values,
-                base_row_number=base_row_number,
-                change_type="deleted",
-                deleted=True,
-            )
-        )
-        next_order += 1
-
-    session.execute(
-        delete(PositionDraftRow).where(PositionDraftRow.draft_id == draft.id)
-    )
-    session.add_all(replacement_rows)
-    touch_draft(draft, user_id)
-    _audit(session, user_id, "import_input_draft", draft.id, {"diff": diff})
-    _flush_revision(session)
-    return diff
-
-
-def draft_diff(session: Session, draft: InputDraft) -> dict[str, int]:
-    return position_diff(
-        load_base_frame(session, draft),
-        position_frame(list_draft_rows(session, draft.id)),
-    )
-
-
-def validate_draft(session: Session, draft: InputDraft) -> list[dict]:
-    frame = position_frame(list_draft_rows(session, draft.id))
-    return [
-        *validate_position_frame(frame),
-        *position_change_warnings(load_base_frame(session, draft), frame),
-    ]
-
-
 def publish_draft(
     session: Session,
     draft: InputDraft,
@@ -520,34 +140,9 @@ def publish_draft(
     if session.in_nested_transaction():
         raise ValueError("不能在嵌套事务中发布")
     require_revision(draft, expected_revision)
-    issues = validate_draft(session, draft)
-    if any(issue["severity"] == "error" for issue in issues):
-        raise ValueError("草稿仍有错误，不能发布")
-    if not confirm_warnings and any(issue["severity"] == "warning" for issue in issues):
-        raise ValueError("草稿仍有警告，请确认警告后发布")
-    if (
-        session.scalar(
-            select(InputVersion.id).where(
-                InputVersion.kind == "position",
-                InputVersion.name == name,
-            )
-        )
-        is not None
-    ):
-        raise DuplicateInputVersionNameError("版本名称已存在")
-
-    path = Path(storage_path)
-    resolved_path = path.resolve()
-    registered_paths = {
-        Path(registered_path).resolve()
-        for registered_path in session.scalars(select(InputVersion.storage_path))
-    }
-    if resolved_path in registered_paths:
-        raise ValueError("发布目标不能使用已注册的正式版本文件")
-    if path.exists() or path.is_symlink():
-        raise ValueError("发布目标文件已存在")
-    if session.info.get(_PENDING_PUBLISH_KEY) is not None:
-        raise ValueError("当前事务已有待提交的发布文件")
+    path = validate_publication_target(
+        session, draft, name, storage_path, confirm_warnings
+    )
 
     temporary_path = path.with_name(f".{path.name}.{uuid4().hex}.tmp.xlsx")
     try:
@@ -594,13 +189,7 @@ def publish_draft(
             {"version_id": version.id},
         )
         _flush_revision(session)
-        session.info[_PENDING_PUBLISH_KEY] = {
-            "temporary_path": str(temporary_path),
-            "target_path": str(path),
-            "promoted": False,
-            "root_commit_started": False,
-            "root_commit_succeeded": False,
-        }
+        stage_publication_files(session, temporary_path, path)
         return version
     except Exception:
         temporary_path.unlink(missing_ok=True)

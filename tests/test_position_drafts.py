@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 import delivery_note.web.position_draft_read as draft_read_module
 import delivery_note.web.caches as cache_module
-import delivery_note.web.position_drafts as position_drafts_module
+import delivery_note.web.position_draft_state as position_drafts_module
 from delivery_note.excel_io import read_position_workbook
 from delivery_note.input_inspection import write_position_workbook
 from delivery_note.pipeline import POSITION_SOURCE_COLUMNS
@@ -30,16 +30,15 @@ from delivery_note.web.models import (
     PositionDraftRow,
     User,
 )
+from delivery_note.web.position_draft_state import DraftConflictError
+from delivery_note.web.position_draft_creation import create_or_resume_draft
+from delivery_note.web.position_draft_state import list_draft_rows, validate_draft
 from delivery_note.web.position_drafts import (
-    DraftConflictError,
-    create_or_resume_draft,
     discard_draft,
-    list_draft_rows,
     mutate_draft_row,
     publish_draft,
-    replace_draft_from_frame,
-    validate_draft,
 )
+from delivery_note.web.position_draft_replacement import replace_draft_from_frame
 from tests.asgi_client import SyncASGIClient
 
 

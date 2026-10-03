@@ -22,13 +22,9 @@ from ..input_inspection import (
 from .errors import commit_once, rollback_draft_conflict, rollback_integrity_conflict
 from .models import InputDraft
 from .position_draft_read import summarize_issues
-from .position_drafts import (
-    DraftConflictError,
-    require_revision,
-    position_frame,
-    list_draft_rows,
-    replace_draft_from_frame,
-)
+from .position_draft_state import DraftConflictError, require_revision, position_frame
+from .position_draft_state import list_draft_rows
+from .position_draft_replacement import replace_draft_from_frame
 from .position_import_candidates import PositionImportCandidates
 from .schemas import ImportApplyPayload, PositionImportForm
 from .uploads import _safe_filename, _save_upload

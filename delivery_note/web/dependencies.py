@@ -12,7 +12,7 @@ from .auth import SESSION_COOKIE_NAME, _deleted_session_cookie_header, hash_toke
 from .caches import PositionFrameCache
 from .database import Database
 from .models import AuthSession, Batch, InputDraft, User
-from .position_drafts import POSITION_FRAME_CACHE_SESSION_KEY
+from .position_draft_state import (POSITION_FRAME_CACHE_SESSION_KEY)
 
 
 class BatchLookup(Protocol):
