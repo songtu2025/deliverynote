@@ -3,23 +3,22 @@ import {
   Alert,
   App as AntApp,
   Button,
-  Card,
   Drawer,
-  Empty,
   Form,
   Input,
   InputNumber,
   Modal,
   Select,
   Space,
-  Table,
   Tag,
   Typography
 } from "antd";
-import { CheckCircleFilled, EditOutlined, LockOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { LockOutlined, ReloadOutlined } from "@ant-design/icons";
 
 import { api, ApiError } from "../api";
-import { formatBeijingDate, formatBeijingTime } from "../dateTime";
+import { RuleScopeSwitcher, CurrentSelfOperatedRule, CurrentDeliveryRule } from "./overreceipt-rules/RuleOverview";
+import { RuleHistory } from "./overreceipt-rules/RuleHistory";
+import type { RenameRuleTarget, RuleScope } from "./overreceipt-rules/ruleTypes";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../types";
 
 type RuleForm = {
@@ -34,12 +33,6 @@ type SelfOperatedRuleForm = {
   name: string;
   allowance: number;
 };
-
-type RuleScope = "delivery" | "self_operated";
-
-type RenameRuleTarget =
-  | { scope: "delivery"; rule: OverreceiptRuleVersion }
-  | { scope: "self_operated"; rule: SelfOperatedOverreceiptRuleVersion };
 
 type RenameRuleForm = {
   name: string;
@@ -65,16 +58,6 @@ const DELIVERY_IMPACT_ITEMS = [
   ["业务边界", "不会改变上游交货量或采购量"]
 ];
 
-function RuleLimits({ rule }: { rule: OverreceiptRuleVersion }) {
-  return (
-    <Space className="rule-limit-list" wrap>
-      <Tag color="green">短尾 +{rule.short_tail_limit}</Tag>
-      <Tag color="blue">中尾 +{rule.medium_tail_limit}</Tag>
-      <Tag>长尾 +{rule.long_tail_limit}</Tag>
-    </Space>
-  );
-}
-
 function ImpactPreview({ items }: { items: string[][] }) {
   return (
     <div className="overreceipt-impact-preview">
@@ -85,370 +68,6 @@ function ImpactPreview({ items }: { items: string[][] }) {
         </div>
       ))}
     </div>
-  );
-}
-
-function RuleScopeSwitcher({
-  scope,
-  activeDeliveryRuleName,
-  activeSelfOperatedAllowance,
-  onChange
-}: {
-  scope: RuleScope;
-  activeDeliveryRuleName?: string;
-  activeSelfOperatedAllowance?: number;
-  onChange: (scope: RuleScope) => void;
-}) {
-  return (
-    <div className="overreceipt-scope-switcher" aria-label="超收规则范围">
-      <button
-        type="button"
-        className={scope === "delivery" ? "is-active" : ""}
-        aria-pressed={scope === "delivery"}
-        onClick={() => onChange("delivery")}
-      >
-        <span className="overreceipt-scope-copy">
-          <strong>交货超收</strong>
-        </span>
-        <span className={`overreceipt-scope-badge ${activeDeliveryRuleName ? "" : "is-disabled"}`}>
-          {activeDeliveryRuleName ? `当前版本 ${activeDeliveryRuleName}` : "未启用"}
-        </span>
-      </button>
-      <button
-        type="button"
-        className={scope === "self_operated" ? "is-active" : ""}
-        aria-pressed={scope === "self_operated"}
-        onClick={() => onChange("self_operated")}
-      >
-        <span className="overreceipt-scope-copy">
-          <strong>自营仓入库</strong>
-        </span>
-        <span className={`overreceipt-scope-badge ${activeSelfOperatedAllowance !== undefined ? "" : "is-disabled"}`}>
-          {activeSelfOperatedAllowance !== undefined ? `每键 +${activeSelfOperatedAllowance} 件` : "未启用"}
-        </span>
-      </button>
-    </div>
-  );
-}
-
-function CurrentSelfOperatedRule({
-  rule,
-  loading,
-  onPublish,
-  onRename
-}: {
-  rule?: SelfOperatedOverreceiptRuleVersion;
-  loading: boolean;
-  onPublish: () => void;
-  onRename: (rule: SelfOperatedOverreceiptRuleVersion) => void;
-}) {
-  return (
-    <Card className="section-card overreceipt-current-card" loading={loading}>
-      <div className="overreceipt-current-heading">
-        <div>
-          <Typography.Text className="overreceipt-eyebrow">当前启用规则</Typography.Text>
-          {rule ? (
-            <div className="overreceipt-current-title">
-              <Typography.Title level={4}>{rule.name}</Typography.Title>
-              <Tag color="success" icon={<CheckCircleFilled />}>
-                用于新批次
-              </Tag>
-            </div>
-          ) : (
-            <Typography.Title level={4}>尚未启用自营仓超收规则</Typography.Title>
-          )}
-        </div>
-        <Space>
-          {rule ? (
-            <Button icon={<EditOutlined />} aria-label={`重命名 ${rule.name}`} onClick={() => onRename(rule)}>
-              重命名
-            </Button>
-          ) : null}
-          <Button type="primary" icon={<PlusOutlined />} onClick={onPublish}>
-            发布新版本
-          </Button>
-        </Space>
-      </div>
-      {rule ? (
-        <div className="overreceipt-metric-grid">
-          <div className="overreceipt-metric is-accent">
-            <span>超收额度</span>
-            <strong>+{rule.allowance} 件</strong>
-            <small>每个匹配键</small>
-          </div>
-          <div className="overreceipt-metric">
-            <span>额度共享范围</span>
-            <strong>供应商 + SKU + 完整站点</strong>
-            <small>同一批次共用额度</small>
-          </div>
-        </div>
-      ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="新建批次允许超收数量为 0" />
-      )}
-    </Card>
-  );
-}
-
-function CurrentDeliveryRule({
-  rule,
-  loading,
-  onPublish,
-  onRename
-}: {
-  rule?: OverreceiptRuleVersion;
-  loading: boolean;
-  onPublish: () => void;
-  onRename: (rule: OverreceiptRuleVersion) => void;
-}) {
-  return (
-    <Card className="section-card overreceipt-current-card" loading={loading}>
-      <div className="overreceipt-current-heading">
-        <div>
-          <Typography.Text className="overreceipt-eyebrow">当前启用规则</Typography.Text>
-          {rule ? (
-            <div className="overreceipt-current-title">
-              <Typography.Title level={4}>{rule.name}</Typography.Title>
-              <Tag color="success" icon={<CheckCircleFilled />}>
-                用于新批次
-              </Tag>
-            </div>
-          ) : (
-            <Typography.Title level={4}>尚未启用普通交货超收规则</Typography.Title>
-          )}
-        </div>
-        <Space>
-          {rule ? (
-            <Button icon={<EditOutlined />} aria-label={`重命名 ${rule.name}`} onClick={() => onRename(rule)}>
-              重命名
-            </Button>
-          ) : null}
-          <Button type="primary" icon={<PlusOutlined />} onClick={onPublish}>
-            发布新版本
-          </Button>
-        </Space>
-      </div>
-      {rule ? (
-        <div className="overreceipt-metric-grid">
-          <div className="overreceipt-metric is-accent">
-            <span>规模定位额度</span>
-            <RuleLimits rule={rule} />
-            <small>分别控制短尾、中尾和长尾</small>
-          </div>
-          <div className="overreceipt-metric">
-            <span>允许超收仓库</span>
-            <strong>{rule.allowed_warehouses.length ? rule.allowed_warehouses.join("、") : "未开放任何仓库"}</strong>
-            <small>目的仓名称必须精确匹配</small>
-          </div>
-        </div>
-      ) : (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="新批次不会自动超收" />
-      )}
-    </Card>
-  );
-}
-
-function HistoryCard({
-  scope,
-  rules,
-  selfOperatedRules,
-  loading,
-  activatingId,
-  selfOperatedActivatingId,
-  onActivate,
-  onActivateSelfOperated,
-  onRename
-}: {
-  scope: RuleScope;
-  rules: OverreceiptRuleVersion[];
-  selfOperatedRules: SelfOperatedOverreceiptRuleVersion[];
-  loading: boolean;
-  activatingId?: number;
-  selfOperatedActivatingId?: number;
-  onActivate: (rule: OverreceiptRuleVersion) => void;
-  onActivateSelfOperated: (rule: SelfOperatedOverreceiptRuleVersion) => void;
-  onRename: (target: RenameRuleTarget) => void;
-}) {
-  const isSelfOperated = scope === "self_operated";
-  const historicalRules = rules.filter((rule) => !rule.active);
-  const historicalSelfOperatedRules = selfOperatedRules.filter((rule) => !rule.active);
-  const count = isSelfOperated ? historicalSelfOperatedRules.length : historicalRules.length;
-  const emptyText = (
-    <div className="overreceipt-history-empty">
-      <strong>暂无历史版本</strong>
-      <span>发布新版本后，原版本会移到这里。</span>
-    </div>
-  );
-
-  return (
-    <Card
-      className="section-card overreceipt-history-card"
-      title={
-        <div className="overreceipt-history-heading">
-          <strong>历史版本</strong>
-          <small>可重新启用于新批次。</small>
-        </div>
-      }
-      extra={<Typography.Text type="secondary">{count} 个历史版本</Typography.Text>}
-    >
-      {isSelfOperated ? (
-        loading || historicalSelfOperatedRules.length > 0 ? (
-          <Table<SelfOperatedOverreceiptRuleVersion>
-            className="overreceipt-history-table"
-            rowKey="id"
-            loading={loading}
-            dataSource={historicalSelfOperatedRules}
-            pagination={false}
-            locale={{ emptyText }}
-            tableLayout="fixed"
-            components={{
-              table: (props) => <table {...props} aria-label="自营仓超收规则历史版本" />
-            }}
-            columns={[
-              {
-                title: "版本",
-                dataIndex: "name",
-                render: (name: string) => <Typography.Text strong>{name}</Typography.Text>
-              },
-              {
-                title: "允许超收",
-                dataIndex: "allowance",
-                width: 118,
-                render: (value: number) => <strong className="overreceipt-allowance-value">+{value} 件</strong>
-              },
-              {
-                title: "共享范围",
-                width: 250,
-                render: () => (
-                  <span className="overreceipt-table-stack">
-                    供应商 + SKU + 完整站点
-                    <small>批次内共享</small>
-                  </span>
-                )
-              },
-              {
-                title: "发布人",
-                dataIndex: "created_by",
-                width: 100,
-                render: (value: number) => `用户 #${value}`
-              },
-              {
-                title: "发布时间",
-                dataIndex: "created_at",
-                width: 150,
-                render: (value: string) => (
-                  <span className="overreceipt-published-at">
-                    {formatBeijingDate(value)}
-                    <small>{formatBeijingTime(value)}</small>
-                  </span>
-                )
-              },
-              {
-                title: "操作",
-                width: 174,
-                render: (_, rule) => (
-                  <Space size={0}>
-                    <Button
-                      type="link"
-                      aria-label={`重命名 ${rule.name}`}
-                      onClick={() => onRename({ scope: "self_operated", rule })}
-                    >
-                      重命名
-                    </Button>
-                    <Button
-                      type="link"
-                      aria-label={`重新启用 ${rule.name}`}
-                      loading={selfOperatedActivatingId === rule.id}
-                      onClick={() => onActivateSelfOperated(rule)}
-                    >
-                      重新启用
-                    </Button>
-                  </Space>
-                )
-              }
-            ]}
-          />
-        ) : (
-          emptyText
-        )
-      ) : loading || historicalRules.length > 0 ? (
-        <Table<OverreceiptRuleVersion>
-          className="overreceipt-history-table"
-          rowKey="id"
-          loading={loading}
-          dataSource={historicalRules}
-          pagination={false}
-          locale={{ emptyText }}
-          tableLayout="fixed"
-          components={{
-            table: (props) => <table {...props} aria-label="超收规则不可变版本" />
-          }}
-          columns={[
-            {
-              title: "版本",
-              dataIndex: "name",
-              width: 190,
-              render: (name: string) => <Typography.Text strong>{name}</Typography.Text>
-            },
-            {
-              title: "额度",
-              width: 200,
-              render: (_, rule) => <RuleLimits rule={rule} />
-            },
-            {
-              title: "允许仓库",
-              render: (_, rule) =>
-                rule.allowed_warehouses.length ? (
-                  rule.allowed_warehouses.join("、")
-                ) : (
-                  <Typography.Text type="secondary">未开放任何仓库</Typography.Text>
-                )
-            },
-            {
-              title: "发布人",
-              dataIndex: "created_by",
-              width: 100,
-              render: (value: number) => `用户 #${value}`
-            },
-            {
-              title: "发布时间",
-              dataIndex: "created_at",
-              width: 150,
-              render: (value: string) => (
-                <span className="overreceipt-published-at">
-                  {formatBeijingDate(value)}
-                  <small>{formatBeijingTime(value)}</small>
-                </span>
-              )
-            },
-            {
-              title: "操作",
-              width: 174,
-              render: (_, rule) => (
-                <Space size={0}>
-                  <Button
-                    type="link"
-                    aria-label={`重命名 ${rule.name}`}
-                    onClick={() => onRename({ scope: "delivery", rule })}
-                  >
-                    重命名
-                  </Button>
-                  <Button
-                    type="link"
-                    aria-label={`重新启用 ${rule.name}`}
-                    loading={activatingId === rule.id}
-                    onClick={() => onActivate(rule)}
-                  >
-                    重新启用
-                  </Button>
-                </Space>
-              )
-            }
-          ]}
-        />
-      ) : (
-        emptyText
-      )}
-    </Card>
   );
 }
 
@@ -750,7 +369,7 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         />
       )}
 
-      <HistoryCard
+      <RuleHistory
         scope={scope}
         rules={rules}
         selfOperatedRules={selfOperatedRules}
