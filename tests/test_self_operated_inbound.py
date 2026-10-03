@@ -14,8 +14,8 @@ from delivery_note.processing.keys import (make_overreceipt_key)
 from delivery_note.inbound.models import (
     SelfOperatedInboundRequest,
 )
+from delivery_note.inbound.normalization import normalize_self_operated_delivery_sheet
 from delivery_note.self_operated_inbound import (
-    normalize_self_operated_delivery_sheet,
     process_self_operated_inbound,
     process_self_operated_inbound_batch,
 )

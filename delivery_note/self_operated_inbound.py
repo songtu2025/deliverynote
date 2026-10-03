@@ -1,92 +1,21 @@
-import re
 from typing import Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
 
 from .exception_reasons import ExceptionReason
-from .processing.models import (OverreceiptAllowance, OverreceiptKey)
-from .processing.keys import (make_overreceipt_key)
-from .processing.delivery_sites import (resolve_delivery_sites)
+from .inbound.normalization import _text
+from .processing.models import OverreceiptAllowance, OverreceiptKey, _require_columns
+from .processing.keys import _normalize_position_text, make_overreceipt_key
+from .processing.delivery_sites import resolve_delivery_sites
 from .inbound.models import (
     ALLOCATION_COLUMNS,
     INBOUND_COLUMNS,
     PENDING_COLUMNS,
-    SOURCE_COLUMNS,
-    SelfOperatedDeliverySource,
     SelfOperatedInboundBatchResult,
     SelfOperatedInboundItemResult,
     SelfOperatedInboundRequest,
     SelfOperatedInboundResult,
 )
-
-
-def _require_columns(frame: pd.DataFrame, required: set[str], source: str) -> None:
-    missing = sorted(required - set(frame.columns))
-    if missing:
-        raise ValueError(f"{source}缺少必要字段：{', '.join(missing)}")
-
-
-def _text(value) -> str:
-    if pd.isna(value):
-        return ""
-    return str(value).strip()
-
-
-def _normalized_text(value) -> str:
-    return _text(value).upper()
-
-
-def normalize_self_operated_delivery_sheet(
-    sheet: pd.DataFrame,
-) -> SelfOperatedDeliverySource:
-    """读取明细表，独立提取交货单号并汇总质检合格数量。"""
-    _require_columns(sheet, SOURCE_COLUMNS, "自营仓交货单明细")
-
-    data = sheet.copy()
-    data["积加SKU"] = data["积加SKU"].map(_text)
-    data["站点"] = data["站点"].map(_text)
-    data = data[data["积加SKU"].ne("") & data["站点"].ne("")].copy()
-    data = data[
-        ~data["积加SKU"].str.fullmatch(r"合计|总计|Grand Total", case=False)
-    ].copy()
-    if data.empty:
-        raise ValueError("自营仓交货单明细没有有效商品数据")
-
-    raw_quantities = data["实收数量"]
-    quantities = pd.to_numeric(raw_quantities, errors="coerce")
-    blank_quantities = raw_quantities.map(_text).eq("")
-    if (blank_quantities | quantities.isna()).any():
-        raise ValueError("自营仓交货单实收数量存在空值或无效值")
-    if ((quantities < 0) | (quantities % 1 != 0)).any():
-        raise ValueError("自营仓交货单实收数量必须为非负整数")
-
-    valid_numbers: set[str] = set()
-    invalid_values: list[str] = []
-    for value in data["交货单号"]:
-        delivery_number = _text(value)
-        if not delivery_number:
-            continue
-        if re.fullmatch(r"LN\d+", delivery_number, flags=re.IGNORECASE):
-            valid_numbers.add(delivery_number.upper())
-        elif delivery_number not in invalid_values:
-            invalid_values.append(delivery_number)
-    if not valid_numbers:
-        raise ValueError("自营仓交货单未提取到有效交货单号")
-
-    data["交货量"] = quantities.astype(int)
-    data["SKU"] = data["积加SKU"]
-    data["原始站点"] = data["站点"].str.removesuffix("站")
-    delivery_lines = (
-        data.groupby(["SKU", "原始站点"], as_index=False, sort=True)["交货量"]
-        .sum()
-        .sort_values(["SKU", "原始站点"], kind="stable")
-        .reset_index(drop=True)
-    )
-    return SelfOperatedDeliverySource(
-        delivery_lines=delivery_lines,
-        delivery_numbers=tuple(sorted(valid_numbers)),
-        invalid_delivery_values=tuple(invalid_values),
-    )
 
 
 def _pending_row(
@@ -151,8 +80,8 @@ def _resolve_inbound_candidate_sites(
     for index, row in result[ambiguous].iterrows():
         candidates = site_candidates.get(
             (
-                _normalized_text(row["SKU"]),
-                _normalized_text(row["原始站点"]),
+                _normalize_position_text(row["SKU"]),
+                _normalize_position_text(row["原始站点"]),
             ),
             set(),
         )
@@ -160,7 +89,9 @@ def _resolve_inbound_candidate_sites(
             site.strip() for site in str(row["完整站点"]).split("、") if site.strip()
         ]
         matches = [
-            site for site in product_sites if _normalized_text(site) in candidates
+            site
+            for site in product_sites
+            if _normalize_position_text(site) in candidates
         ]
         if len(matches) == 1:
             result.at[index, "完整站点"] = matches[0]
@@ -182,7 +113,9 @@ def _apply_site_overrides(
         return resolved
 
     normalized_overrides = {
-        (_normalized_text(sku), _normalized_text(site)): _text(full_site)
+        (_normalize_position_text(sku), _normalize_position_text(site)): _text(
+            full_site
+        )
         for (sku, site), full_site in site_overrides.items()
     }
     result = resolved.copy()
@@ -190,18 +123,18 @@ def _apply_site_overrides(
     for index, row in result[ambiguous].iterrows():
         selected = normalized_overrides.get(
             (
-                _normalized_text(row["SKU"]),
-                _normalized_text(row["原始站点"]),
+                _normalize_position_text(row["SKU"]),
+                _normalize_position_text(row["原始站点"]),
             )
         )
         if not selected:
             continue
         candidates = {
-            _normalized_text(site)
+            _normalize_position_text(site)
             for site in str(row["完整站点"]).split("、")
             if site.strip()
         }
-        if _normalized_text(selected) not in candidates:
+        if _normalize_position_text(selected) not in candidates:
             raise ValueError(
                 f"人工选择站点不在候选范围：{row['SKU']} / {row['原始站点']}"
             )
@@ -228,7 +161,13 @@ def process_self_operated_inbound(
         raise ValueError("允许超收数量必须为非负整数")
     _require_columns(inbound_rows, INBOUND_COLUMNS, "自营仓收货入库单")
     normalized_numbers = tuple(
-        sorted({_normalized_text(value) for value in delivery_numbers if _text(value)})
+        sorted(
+            {
+                _normalize_position_text(value)
+                for value in delivery_numbers
+                if _text(value)
+            }
+        )
     )
     if not normalized_numbers:
         raise ValueError("没有可用于筛选的交货单号")
@@ -236,11 +175,13 @@ def process_self_operated_inbound(
     source_columns = list(inbound_rows.columns)
     inbound = inbound_rows.copy().reset_index(drop=True)
     inbound["_source_order"] = inbound.index
-    inbound["_sku_key"] = inbound["SKU"].map(_normalized_text)
-    inbound["_site_key"] = inbound["平台站点"].map(_normalized_text)
-    inbound["_delivery_key"] = inbound["关联交货单/调拨单"].map(_normalized_text)
-    inbound["_po_key"] = inbound["关联采购单"].map(_normalized_text)
-    inbound["_supplier_key"] = inbound["供应商"].map(_normalized_text)
+    inbound["_sku_key"] = inbound["SKU"].map(_normalize_position_text)
+    inbound["_site_key"] = inbound["平台站点"].map(_normalize_position_text)
+    inbound["_delivery_key"] = inbound["关联交货单/调拨单"].map(
+        _normalize_position_text
+    )
+    inbound["_po_key"] = inbound["关联采购单"].map(_normalize_position_text)
+    inbound["_supplier_key"] = inbound["供应商"].map(_normalize_position_text)
     inbound["_receivable"] = pd.to_numeric(inbound["应收货"], errors="coerce")
 
     available_numbers = set(inbound["_delivery_key"])
@@ -281,7 +222,7 @@ def process_self_operated_inbound(
         )
     )
     allocation_records: dict[int, dict] = {}
-    supplier_key = _normalized_text(supplier_name)
+    supplier_key = _normalize_position_text(supplier_name)
     generated_allowances: dict[OverreceiptKey, OverreceiptAllowance] = {}
 
     for _, delivery in resolved_groups.iterrows():
@@ -289,8 +230,8 @@ def process_self_operated_inbound(
         full_site = delivery["完整站点"]
         quantity = int(delivery["交货量"])
         candidates = inbound[
-            inbound["_sku_key"].eq(_normalized_text(sku))
-            & inbound["_site_key"].eq(_normalized_text(full_site))
+            inbound["_sku_key"].eq(_normalize_position_text(sku))
+            & inbound["_site_key"].eq(_normalize_position_text(full_site))
         ].copy()
         if candidates.empty:
             pending_records.append(

@@ -20,9 +20,7 @@ from .inbound.models import (
     INBOUND_TEMPLATE_COLUMNS,
     SelfOperatedDeliverySource,
 )
-from .self_operated_inbound import (
-    normalize_self_operated_delivery_sheet,
-)
+from .inbound.normalization import normalize_self_operated_delivery_sheet
 
 
 PURCHASE_COLUMNS = ["单据状态", "供应商", "SKU", "平台站点", "目的仓", "未交量"]
