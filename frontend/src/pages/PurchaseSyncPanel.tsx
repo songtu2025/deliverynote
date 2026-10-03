@@ -4,6 +4,7 @@ import { CheckCircleFilled, DownloadOutlined, EyeOutlined, SyncOutlined } from "
 import type { TableProps } from "antd";
 
 import { api, download } from "../api";
+import { activateInputVersion } from "../inputVersionApi";
 import { formatBeijingDateTime } from "../dateTime";
 import type { InputVersion, PurchaseSyncIssue, PurchaseSyncPreview, PurchaseSyncStatus } from "../types";
 
@@ -157,7 +158,7 @@ export default function PurchaseSyncPanel({
     setSyncActivating(true);
     setSyncError("");
     try {
-      await api<InputVersion>(`/api/input-versions/${syncCandidate.id}/activate`, { method: "POST" });
+      await activateInputVersion(syncCandidate.id);
       await refreshVersions();
       message.success(`${syncCandidate.name} 已启用，将用于新批次`);
     } catch (error) {

@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App as AntApp, Button, Form, Space, Tabs, Tag, Typography } from "antd";
-import { CheckCircleFilled, DownloadOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
-import type { UploadFile, UploadProps } from "antd";
+import { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Space, Tabs, Tag, Typography } from "antd";
+import { DownloadOutlined, ToolOutlined, UploadOutlined } from "@ant-design/icons";
 
-import { api, ApiError, download } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
-import type { InputVersion, InputVersionInspection, PositionIssue } from "../../types";
-import { INPUT_KIND_BY_VALUE, INPUT_KIND_DEFINITIONS, inputUploadFormatMessage } from "./adminConstants";
+import type { InputVersion } from "../../types";
+import { INPUT_KIND_BY_VALUE } from "./adminConstants";
 import type { InputKind } from "./adminConstants";
+import { InputDataKindSwitcher } from "./InputDataKindSwitcher";
 import { InputVersionHistoryPanel } from "./InputVersionHistoryPanel";
 import { InputVersionPreviewPanel } from "./InputVersionPreviewPanel";
 import { InputVersionQualityPanel } from "./InputVersionQualityPanel";
 import { InputVersionUploadDrawer } from "./InputVersionUploadDrawer";
+import { useInputVersionActions } from "./useInputVersionActions";
+import { useInputVersionInspection } from "./useInputVersionInspection";
 
 interface InputDataPanelProps {
   versions: InputVersion[];
@@ -20,46 +21,27 @@ interface InputDataPanelProps {
   onOpenPositionDraft: () => void;
 }
 
-interface MutationState {
-  kind: InputKind;
-  action: "upload" | "activate";
-  versionId?: number;
-}
-
-interface KindError {
-  kind: InputKind;
-  message: string;
-}
-
 type WorkspaceTab = "preview" | "history" | "quality";
 
-const MAINTAINABLE_INPUT_KIND_DEFINITIONS = INPUT_KIND_DEFINITIONS.filter(
-  (definition) => definition.value !== "purchase"
-);
-
-function issueCount(issues: PositionIssue[], severity: PositionIssue["severity"]): number {
-  return issues.reduce(
-    (total, issue) => total + (issue.severity === severity ? Math.max(1, issue.row_numbers.length) : 0),
-    0
-  );
-}
-
 export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPositionDraft }: InputDataPanelProps) {
-  const { message } = AntApp.useApp();
   const [selectedKind, setSelectedKind] = useState<InputKind>("product");
-  const [inspections, setInspections] = useState(() => new Map<number, InputVersionInspection>());
-  const inspectionRequests = useRef(new Map<number, Promise<InputVersionInspection>>());
-  const [inspectionLoading, setInspectionLoading] = useState(false);
-  const [inspectionError, setInspectionError] = useState<{ versionId: number; message: string } | null>(null);
-  const [inspectionAttempt, setInspectionAttempt] = useState(0);
-  const [uploadError, setUploadError] = useState<KindError | null>(null);
-  const [actionError, setActionError] = useState<KindError | null>(null);
-  const [mutation, setMutation] = useState<MutationState | null>(null);
-  const [pendingFiles, setPendingFiles] = useState<UploadFile[]>([]);
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>("preview");
   const [contextOpen, setContextOpen] = useState(false);
-  const [maintenanceOpen, setMaintenanceOpen] = useState(false);
-  const [uploadForm] = Form.useForm<{ name: string }>();
+  const {
+    uploadError,
+    actionError,
+    mutation,
+    mutationBusy,
+    uploading,
+    pendingFiles,
+    maintenanceOpen,
+    setMaintenanceOpen,
+    uploadForm,
+    selectUploadFile,
+    uploadVersion,
+    downloadCurrent,
+    activateVersion
+  } = useInputVersionActions(selectedKind, onVersionsChanged);
 
   const selectedDefinition = INPUT_KIND_BY_VALUE[selectedKind];
   const selectedVersions = useMemo(
@@ -70,203 +52,30 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
     [selectedKind, versions]
   );
   const activeVersion = selectedVersions.find((version) => version.active) ?? null;
-  const activeInspection = activeVersion ? (inspections.get(activeVersion.id) ?? null) : null;
+  const {
+    inspection: activeInspection,
+    inspectionLoading,
+    inspectionError,
+    retryInspection,
+    errors,
+    warnings
+  } = useInputVersionInspection(activeVersion?.id, loading);
   const summary = activeInspection?.summary ?? null;
   const preview = activeInspection?.preview ?? null;
-  const mutationBusy = mutation !== null;
-  const uploading = mutation?.action === "upload";
 
   useEffect(() => {
-    setPendingFiles([]);
     setWorkspaceTab("preview");
     setContextOpen(false);
-    setMaintenanceOpen(false);
-  }, [selectedKind, uploadForm]);
-
-  useEffect(() => {
-    setInspectionError(null);
-    if (loading || !activeVersion) {
-      setInspectionLoading(false);
-      return undefined;
-    }
-
-    let cancelled = false;
-    const versionId = activeVersion.id;
-    if (inspections.has(versionId)) {
-      setInspectionLoading(false);
-      return undefined;
-    }
-
-    let request = inspectionRequests.current.get(versionId);
-    if (!request) {
-      request = api<InputVersionInspection>(`/api/input-versions/${versionId}/inspection`).then(
-        (inspection) => {
-          setInspections((current) => {
-            const next = new Map(current);
-            next.set(versionId, inspection);
-            return next;
-          });
-          inspectionRequests.current.delete(versionId);
-          return inspection;
-        },
-        (error: unknown) => {
-          inspectionRequests.current.delete(versionId);
-          throw error;
-        }
-      );
-      inspectionRequests.current.set(versionId, request);
-    }
-
-    setInspectionLoading(true);
-    void request
-      .catch((error: unknown) => {
-        if (cancelled || (error instanceof ApiError && error.status === 401)) return;
-        setInspectionError({
-          versionId,
-          message: error instanceof Error ? error.message : "读取当前版本失败"
-        });
-      })
-      .finally(() => {
-        if (!cancelled) setInspectionLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeVersion?.id, inspectionAttempt, loading]);
-
-  const selectUploadFile: NonNullable<UploadProps["onChange"]> = ({ fileList }) => {
-    setPendingFiles(fileList.slice(-1));
-    setUploadError(null);
-  };
-
-  const uploadVersion = async () => {
-    if (mutationBusy) return;
-    const kind = selectedKind;
-    setUploadError(null);
-    let values: { name: string };
-    try {
-      values = await uploadForm.validateFields();
-    } catch {
-      return;
-    }
-    const file = pendingFiles[0]?.originFileObj;
-    if (!file) {
-      setUploadError({ kind, message: "请选择要上传的 Excel 文件" });
-      return;
-    }
-    const dotIndex = file.name.lastIndexOf(".");
-    const extension = dotIndex > 0 ? file.name.slice(dotIndex).toLowerCase() : "";
-    if (!INPUT_KIND_BY_VALUE[kind].uploadExtensions.includes(extension)) {
-      setUploadError({ kind, message: inputUploadFormatMessage(kind) });
-      return;
-    }
-    setMutation({ kind, action: "upload" });
-    try {
-      const formData = new FormData();
-      formData.append("name", values.name);
-      formData.append("activate", "true");
-      formData.append("file", file);
-      await api<InputVersion>(`/api/input-versions/${kind}`, {
-        method: "POST",
-        body: formData
-      });
-      uploadForm.resetFields();
-      setPendingFiles([]);
-      setMaintenanceOpen(false);
-      if ((await onVersionsChanged()) !== false) {
-        message.success(`${INPUT_KIND_BY_VALUE[kind].label}已上传并启用，将用于新批次`);
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) return;
-      const errorMessage = error instanceof Error ? error.message : "上传失败";
-      setUploadError({ kind, message: errorMessage });
-      message.error("上传失败，请检查页面提示");
-    } finally {
-      setMutation(null);
-    }
-  };
-
-  const downloadCurrent = async () => {
-    if (!activeVersion) return;
-    setActionError(null);
-    try {
-      await download(`/api/input-versions/${activeVersion.id}/download`, activeVersion.original_name);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) return;
-      setActionError({
-        kind: selectedKind,
-        message: error instanceof Error ? error.message : "下载失败"
-      });
-    }
-  };
-
-  const activateVersion = (version: InputVersion) => {
-    if (mutationBusy) return;
-    const kind = selectedKind;
-    setActionError(null);
-    setMutation({ kind, action: "activate", versionId: version.id });
-    void (async () => {
-      try {
-        await api<InputVersion>(`/api/input-versions/${version.id}/activate`, { method: "POST" });
-        if ((await onVersionsChanged()) !== false) {
-          message.success(`${version.name} 已启用，将用于新批次`);
-        }
-      } catch (error) {
-        if (error instanceof ApiError && error.status === 401) return;
-        setActionError({
-          kind,
-          message: error instanceof Error ? error.message : "启用失败"
-        });
-      } finally {
-        setMutation(null);
-      }
-    })();
-  };
-
-  const errors = summary ? issueCount(summary.issues, "error") : 0;
-  const warnings = summary ? issueCount(summary.issues, "warning") : 0;
-  const readyKindCount = MAINTAINABLE_INPUT_KIND_DEFINITIONS.filter((definition) =>
-    versions.some((version) => version.kind === definition.value && version.active)
-  ).length;
+  }, [selectedKind]);
 
   return (
     <div className="input-data-panel">
-      <section className="input-data-kind-switcher" aria-label="基础资料类型">
-        <div className="input-data-kind-switcher-heading">
-          <Typography.Text strong>资料类型</Typography.Text>
-          <Typography.Text type="secondary">
-            {readyKindCount}/{MAINTAINABLE_INPUT_KIND_DEFINITIONS.length} 已启用
-          </Typography.Text>
-        </div>
-        <div className="input-data-kind-list">
-          {MAINTAINABLE_INPUT_KIND_DEFINITIONS.map((definition) => {
-            const current = versions.find((version) => version.kind === definition.value && version.active);
-            const selected = definition.value === selectedKind;
-            return (
-              <Button
-                key={definition.value}
-                className={`input-data-kind-button${selected ? " is-selected" : ""}`}
-                aria-label={
-                  current
-                    ? `${definition.label}，已就绪，当前版本 ${current.name}`
-                    : `${definition.label}，未启用，等待上传`
-                }
-                aria-pressed={selected}
-                disabled={mutationBusy}
-                onClick={() => setSelectedKind(definition.value)}
-              >
-                <span>{definition.label}</span>
-                {current ? (
-                  <CheckCircleFilled aria-label="已就绪" />
-                ) : (
-                  <span className="input-data-kind-pending">未启用</span>
-                )}
-              </Button>
-            );
-          })}
-        </div>
-      </section>
+      <InputDataKindSwitcher
+        versions={versions}
+        selectedKind={selectedKind}
+        busy={mutationBusy}
+        onChange={setSelectedKind}
+      />
 
       <main className="input-data-detail">
         <section
@@ -324,7 +133,7 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
               aria-label="下载当前文件"
               icon={<DownloadOutlined />}
               disabled={!activeVersion}
-              onClick={() => void downloadCurrent()}
+              onClick={() => void downloadCurrent(activeVersion)}
             >
               下载当前文件
             </Button>
@@ -395,7 +204,7 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
                       loading={loading}
                       inspectionLoading={inspectionLoading}
                       inspectionError={inspectionError}
-                      onRetry={() => setInspectionAttempt((value) => value + 1)}
+                      onRetry={retryInspection}
                     />
                   </section>
                 )
