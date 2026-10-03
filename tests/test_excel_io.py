@@ -149,7 +149,7 @@ class ExcelOutputTests(unittest.TestCase):
         if write_self_operated_inbound_workbook is None:
             return
 
-        from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+        from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
 
         with TemporaryDirectory() as directory:
             template_path = Path(directory) / "批量入库模板.xlsx"

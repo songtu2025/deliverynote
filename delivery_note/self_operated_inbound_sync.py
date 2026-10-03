@@ -6,7 +6,9 @@ from typing import Any
 
 import pandas as pd
 
-from .self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+from .inbound.models import (
+    INBOUND_TEMPLATE_COLUMNS,
+)
 
 
 INBOUND_SYNC_COLUMNS = [

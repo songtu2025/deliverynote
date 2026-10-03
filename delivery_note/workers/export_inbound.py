@@ -7,7 +7,9 @@ from typing import Any
 import pandas as pd
 
 from ..excel_io import write_self_operated_inbound_workbook
-from ..self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+from ..inbound.models import (
+    INBOUND_TEMPLATE_COLUMNS,
+)
 from ..workers.export_files import _cleanup_previous_export_directories
 from ..workers.export_rows import _consolidate_self_operated_rows
 from ..workers.leases import _heartbeat

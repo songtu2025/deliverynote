@@ -15,10 +15,12 @@ from .processing.models import (
     POSITION_VALUE_COLUMNS,
 )
 from .processing.delivery_sites import (normalize_delivery_sheet)
-from .self_operated_inbound import (
+from .inbound.models import (
     INBOUND_COLUMNS as SELF_OPERATED_INBOUND_COLUMNS,
     INBOUND_TEMPLATE_COLUMNS,
     SelfOperatedDeliverySource,
+)
+from .self_operated_inbound import (
     normalize_self_operated_delivery_sheet,
 )
 

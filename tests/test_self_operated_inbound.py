@@ -11,8 +11,10 @@ from delivery_note.excel_io import (
 )
 from delivery_note.processing.models import (OverreceiptAllowance)
 from delivery_note.processing.keys import (make_overreceipt_key)
-from delivery_note.self_operated_inbound import (
+from delivery_note.inbound.models import (
     SelfOperatedInboundRequest,
+)
+from delivery_note.self_operated_inbound import (
     normalize_self_operated_delivery_sheet,
     process_self_operated_inbound,
     process_self_operated_inbound_batch,

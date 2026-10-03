@@ -4,7 +4,9 @@ from io import BytesIO
 from openpyxl import load_workbook
 
 from delivery_note.processing.models import IMPORT_COLUMNS
-from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+from delivery_note.inbound.models import (
+    INBOUND_TEMPLATE_COLUMNS,
+)
 
 
 class WebApiTests(WebApiCase):

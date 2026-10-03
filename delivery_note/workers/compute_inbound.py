@@ -14,9 +14,11 @@ from ..excel_io import (
     read_supplier_workbook,
 )
 from ..exception_reasons import ExceptionReason, exception_reason_code
-from ..self_operated_inbound import (
+from ..inbound.models import (
     SelfOperatedInboundBatchResult,
     SelfOperatedInboundRequest,
+)
+from ..self_operated_inbound import (
     process_self_operated_inbound_batch,
 )
 from ..web.models import AuditLog, Batch, ExceptionRecord, Job

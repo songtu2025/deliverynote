@@ -8,7 +8,9 @@ from openpyxl import Workbook
 from sqlalchemy import event
 
 from delivery_note.processing.models import IMPORT_COLUMNS
-from delivery_note.self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
+from delivery_note.inbound.models import (
+    INBOUND_TEMPLATE_COLUMNS,
+)
 from tests.asgi_client import SyncASGIClient
 
 from delivery_note.web.api import create_app
