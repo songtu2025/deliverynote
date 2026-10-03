@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import OverreceiptRulesPage from "../OverreceiptRulesPage";
 import { api, AUTH_EXPIRED_EVENT } from "../../api";
 import { jsonResponse, deferred } from "../admin/positionDraftTestSupport";
-import { render, setupRuleTests, selfOperatedRule } from "./ruleTestSupport";
+import { render, setupRuleTests, selfOperatedRule, previousSelfOperatedRule } from "./ruleTestSupport";
 
 setupRuleTests();
 
@@ -63,5 +63,28 @@ describe("OverreceiptRulesPage", () => {
     } finally {
       window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
     }
+  });
+  it("刷新返回的旧名称不能覆盖已保存的重命名", async () => {
+    const view = render(<OverreceiptRulesPage />);
+    await screen.findByText(selfOperatedRule.name);
+    const originalFetch = fetch;
+    const pending = deferred<Response>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith("/api/self-operated-overreceipt-rule-versions") && !init?.method
+          ? pending.promise
+          : originalFetch(input, init)
+      )
+    );
+    fireEvent.click(screen.getByRole("button", { name: /刷\s*新/ }));
+    fireEvent.click(screen.getByRole("button", { name: `重命名 ${previousSelfOperatedRule.name}` }));
+    fireEvent.change(screen.getByLabelText("版本名称"), { target: { value: "已保存的新名称" } });
+    fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
+    expect(await screen.findByText("已保存的新名称")).toBeInTheDocument();
+    await act(async () => pending.resolve(jsonResponse([selfOperatedRule, previousSelfOperatedRule])));
+    expect(screen.getByText("已保存的新名称")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: `重命名 ${previousSelfOperatedRule.name}` })).not.toBeInTheDocument();
+    view.unmount();
   });
 });

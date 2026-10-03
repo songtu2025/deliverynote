@@ -58,10 +58,12 @@ export function useRuleMutations(data: RulesData, active: boolean) {
       if (target.scope === "delivery") {
         const renamed = await renameOverreceiptRule(target.scope, target.rule.id, values.name.trim());
         if (!isCurrent()) return;
+        data.invalidateRuleRead();
         data.setRules((current) => current.map((rule) => (rule.id === renamed.id ? renamed : rule)));
       } else {
         const renamed = await renameOverreceiptRule(target.scope, target.rule.id, values.name.trim());
         if (!isCurrent()) return;
+        data.invalidateRuleRead();
         data.setSelfOperatedRules((current) => current.map((rule) => (rule.id === renamed.id ? renamed : rule)));
       }
       message.success("版本名称已更新");

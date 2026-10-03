@@ -24,6 +24,11 @@ export function useRulesData(active: boolean) {
     return () => session === sessionRef.current;
   }, []);
 
+  const invalidateRuleRead = () => {
+    loadRequestRef.current += 1;
+    setLoading(false);
+  };
+
   const handleLoadError = useCallback((loadError: unknown, afterWrite: boolean, requestId: number) => {
     if (requestId !== loadRequestRef.current) return false;
     if (loadError instanceof ApiError && loadError.status === 401) {
@@ -115,7 +120,8 @@ export function useRulesData(active: boolean) {
     load,
     loadWarehouses,
     refresh,
-    beginOperation
+    beginOperation,
+    invalidateRuleRead
   };
 }
 export type RulesData = ReturnType<typeof useRulesData>;
