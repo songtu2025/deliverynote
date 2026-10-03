@@ -56,8 +56,17 @@ def register_input_version_routes(
         if kind not in UPLOAD_INPUT_KINDS:
             raise HTTPException(status_code=404, detail="输入类型不存在")
         original_name = _safe_filename(file.filename or "")
-        if Path(original_name).suffix.lower() not in {".xls", ".xlsx"}:
-            raise HTTPException(status_code=400, detail="仅支持 Excel 文件")
+        suffix = Path(original_name).suffix.lower()
+        template_label = {
+            "template": "导出模板",
+            "inbound_template": "积加入库模板",
+        }.get(kind)
+        if template_label is not None and suffix != ".xlsx":
+            raise HTTPException(
+                status_code=400, detail=f"{template_label}仅支持 .xlsx 文件"
+            )
+        if suffix not in {".xls", ".xlsx"}:
+            raise HTTPException(status_code=400, detail="仅支持 .xls、.xlsx 文件")
         validate_new_input_version(session, kind, name)
         destination = storage / "master" / kind / f"{uuid4().hex}_{original_name}"
         await _save_upload(file, destination, app.state.max_upload_bytes)
