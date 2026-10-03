@@ -12,7 +12,7 @@
     "lint:tools": "eslint scripts eslint.config.js",
     "lint": "node scripts/check-lint.mjs",
     "lint:all": "node scripts/check-lint.mjs --all",
-    "check:duplicates": "jscpd src ../delivery_note --format python,typescript,tsx,javascript --reporters console",
+    "check:duplicates": "jscpd src ../delivery_note ../scripts --format python,typescript,tsx,javascript --reporters console",
     "check:unused": "knip",
     "check:imports": "node scripts/check-imports.mjs",
     "build": "tsc -b && vite build",

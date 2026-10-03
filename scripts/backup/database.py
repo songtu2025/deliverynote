@@ -101,6 +101,69 @@ def _temporary_restore_database_name() -> str:
     return database_name
 
 
+def _restore_database(
+    config: BackupConfig,
+    runner: Runner,
+    database_path: Path,
+    database_name: str,
+) -> None:
+    runner.run(
+        compose(
+            config,
+            "exec",
+            "-T",
+            "db",
+            "createdb",
+            "-U",
+            "delivery_note",
+            "--maintenance-db=postgres",
+            "--owner=delivery_note",
+            database_name,
+        )
+    )
+    with database_path.open("rb") as source:
+        runner.run(
+            compose(
+                config,
+                "exec",
+                "-T",
+                "db",
+                "pg_restore",
+                "-U",
+                "delivery_note",
+                "-d",
+                database_name,
+                "--exit-on-error",
+                "--no-owner",
+                "--no-privileges",
+            ),
+            stdin=source,
+            timeout_seconds=config.snapshot_timeout_seconds,
+        )
+
+
+def _drop_database(
+    config: BackupConfig,
+    runner: Runner,
+    database_name: str,
+) -> None:
+    runner.run(
+        compose(
+            config,
+            "exec",
+            "-T",
+            "db",
+            "dropdb",
+            "-U",
+            "delivery_note",
+            "--maintenance-db=postgres",
+            "--if-exists",
+            "--force",
+            database_name,
+        )
+    )
+
+
 def validate_database_restore(
     config: BackupConfig,
     runner: Runner,
@@ -112,39 +175,7 @@ def validate_database_restore(
     primary_error: Exception | None = None
     restored_counts: dict[str, int] = {}
     try:
-        runner.run(
-            compose(
-                config,
-                "exec",
-                "-T",
-                "db",
-                "createdb",
-                "-U",
-                "delivery_note",
-                "--maintenance-db=postgres",
-                "--owner=delivery_note",
-                database_name,
-            )
-        )
-        with database_path.open("rb") as source:
-            runner.run(
-                compose(
-                    config,
-                    "exec",
-                    "-T",
-                    "db",
-                    "pg_restore",
-                    "-U",
-                    "delivery_note",
-                    "-d",
-                    database_name,
-                    "--exit-on-error",
-                    "--no-owner",
-                    "--no-privileges",
-                ),
-                stdin=source,
-                timeout_seconds=config.snapshot_timeout_seconds,
-            )
+        _restore_database(config, runner, database_path, database_name)
         restored_counts = critical_table_counts(config, runner, database_name)
         if restored_counts != source_counts:
             differences = ", ".join(
@@ -157,21 +188,7 @@ def validate_database_restore(
         primary_error = error
     finally:
         try:
-            runner.run(
-                compose(
-                    config,
-                    "exec",
-                    "-T",
-                    "db",
-                    "dropdb",
-                    "-U",
-                    "delivery_note",
-                    "--maintenance-db=postgres",
-                    "--if-exists",
-                    "--force",
-                    database_name,
-                )
-            )
+            _drop_database(config, runner, database_name)
         except Exception as cleanup_error:
             if primary_error is None:
                 primary_error = BackupError(f"临时恢复数据库清理失败：{cleanup_error}")

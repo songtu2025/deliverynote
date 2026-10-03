@@ -119,6 +119,14 @@ def check_new_python_types(root: Path, files: list[str], base: str) -> int:
     )
 
 
+def check_import_cycles(root: Path) -> list[list[str]]:
+    return [
+        cycle
+        for package in ("delivery_note", "scripts")
+        for cycle in import_cycles(root / package)
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", help="CI 变更范围的起始提交")
@@ -127,7 +135,7 @@ def main() -> int:
     files = changed_files(root, args.base)
     base = args.base or "HEAD"
     failures, warnings = check_sizes(root, files, base)
-    cycles = import_cycles(root / "delivery_note")
+    cycles = check_import_cycles(root)
     for message in [*warnings, *failures]:
         print(message)
     for cycle in cycles:

@@ -3,7 +3,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from scripts.check_code_health import check_new_python_types, check_sizes, changed_files
+from scripts.check_code_health import (
+    changed_files,
+    check_import_cycles,
+    check_new_python_types,
+    check_sizes,
+)
 from scripts.python_imports import import_cycles
 
 
@@ -88,6 +93,14 @@ class CodeHealthTests(unittest.TestCase):
         cycles = import_cycles(self.root / "delivery_note")
         self.assertEqual(len(cycles), 1)
         self.assertEqual(cycles[0][0], cycles[0][-1])
+
+    def test_script_import_cycle_is_included_in_project_gate(self) -> None:
+        self.write("scripts/__init__.py", "")
+        self.write("scripts/first.py", "from . import second\n")
+        self.write("scripts/second.py", "from . import first\n")
+        cycles = check_import_cycles(self.root)
+        self.assertEqual(len(cycles), 1)
+        self.assertEqual(set(cycles[0]), {"scripts.first", "scripts.second"})
 
     def test_type_only_import_does_not_create_runtime_cycle(self) -> None:
         self.write("delivery_note/__init__.py", "")
