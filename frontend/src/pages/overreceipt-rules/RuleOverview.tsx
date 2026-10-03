@@ -1,7 +1,7 @@
 import { Button, Card, Empty, Space, Tag, Typography } from "antd";
 import { CheckCircleFilled, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../../types";
-import type { RuleScope } from "./ruleTypes";
+import type { RuleScope } from "../../overreceiptRuleApi";
 
 export function RuleLimits({ rule }: { rule: OverreceiptRuleVersion }) {
   return (

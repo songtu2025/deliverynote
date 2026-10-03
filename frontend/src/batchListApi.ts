@@ -1,5 +1,5 @@
 import { api } from "./api";
-import type { Batch, InputVersion, OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "./types";
+import type { Batch, InputVersion } from "./types";
 import type { BatchWorkflow } from "./pages/batches/batchWorkspace";
 
 export function getBatchPage(workflow: BatchWorkflow, page: number, search: string, status?: string) {
@@ -11,12 +11,6 @@ export function getBatchPage(workflow: BatchWorkflow, page: number, search: stri
 
 export function getBatchInputVersions() {
   return api<InputVersion[]>("/api/input-versions");
-}
-
-export function getBatchOverreceiptRules(workflow: BatchWorkflow) {
-  return workflow === "self_operated_inbound"
-    ? api<SelfOperatedOverreceiptRuleVersion[]>("/api/self-operated-overreceipt-rule-versions")
-    : api<OverreceiptRuleVersion[]>("/api/overreceipt-rule-versions");
 }
 
 export function createBatchWithFiles(workflow: BatchWorkflow, name: string, files: File[]): Promise<Batch> {

@@ -1,5 +1,5 @@
 import { Space, Tag, Typography } from "antd";
-import type { RuleForm, SelfOperatedRuleForm } from "./ruleTypes";
+import type { RuleForm, SelfOperatedRuleForm } from "../../overreceiptRuleApi";
 
 export function DeliveryPublishSummary({ values }: { values: RuleForm }) {
   return (

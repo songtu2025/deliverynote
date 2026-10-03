@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App as AntApp } from "antd";
 import { ApiError } from "../../api";
-import { getBatchPage, getBatchInputVersions, getBatchOverreceiptRules } from "../../batchListApi";
+import { getBatchPage, getBatchInputVersions } from "../../batchListApi";
+import { getOverreceiptRules } from "../../overreceiptRuleApi";
 import { getInboundSyncStatus } from "../../syncApi";
 import { useDebouncedValue } from "../../useDebouncedValue";
 import type {
@@ -43,7 +44,7 @@ export function useBatchList(workflow: BatchWorkflow, active: boolean) {
         const [batchPage, versionRows, overreceiptRuleRows, inboundSyncStatus] = await Promise.all([
           getBatchPage(workflow, page, debouncedQuery, statusFilter),
           getBatchInputVersions(),
-          getBatchOverreceiptRules(workflow),
+          getOverreceiptRules(workflow),
           workflow === "self_operated_inbound"
             ? knownInboundSyncStatus
               ? Promise.resolve(knownInboundSyncStatus)

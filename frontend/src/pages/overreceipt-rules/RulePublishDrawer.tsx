@@ -1,7 +1,7 @@
 import { Alert, Button, Drawer, Form, Input, InputNumber, Select, Typography } from "antd";
 import type { FormInstance } from "antd";
 import type { SelfOperatedOverreceiptRuleVersion } from "../../types";
-import type { RuleForm, RuleScope, SelfOperatedRuleForm } from "./ruleTypes";
+import type { RuleForm, RuleScope, SelfOperatedRuleForm } from "../../overreceiptRuleApi";
 
 const DEFAULT_LIMITS = {
   short_tail_limit: 50,

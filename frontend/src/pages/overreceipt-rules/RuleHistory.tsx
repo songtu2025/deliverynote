@@ -2,7 +2,8 @@ import { Button, Card, Space, Table, Typography } from "antd";
 import { formatBeijingDate, formatBeijingTime } from "../../dateTime";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../../types";
 import { RuleLimits } from "./RuleOverview";
-import type { RenameRuleTarget, RuleScope } from "./ruleTypes";
+import type { RenameRuleTarget } from "./ruleTypes";
+import type { RuleScope } from "../../overreceiptRuleApi";
 
 export function RuleHistory({
   scope,
