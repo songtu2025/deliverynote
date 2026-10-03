@@ -73,7 +73,7 @@ def _stream_xlsx_inspection(
             "row_count": total,
             "columns": columns,
             "metrics": {},
-            "issues": (frames.shared_site_warning(shared_site_rows)),
+            "issues": frames.shared_site_warning(shared_site_rows),
         }
         return {"summary": summary, "preview": preview}
     finally:

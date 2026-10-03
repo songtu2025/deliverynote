@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from ..excel_io import read_position_workbook
-from ..input_inspection import (
+from ..inspection.positions import (
     position_change_warnings,
     position_diff,
     validate_position_frame,

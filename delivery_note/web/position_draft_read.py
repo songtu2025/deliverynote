@@ -5,7 +5,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.orm import Session
 
-from ..input_inspection import (
+from ..inspection.positions import (
     position_change_warnings,
     position_diff,
     validate_position_frame,

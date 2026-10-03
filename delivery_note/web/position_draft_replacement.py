@@ -4,7 +4,7 @@ import pandas as pd
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
-from ..input_inspection import position_diff
+from ..inspection.positions import position_diff
 from ..processing.models import (POSITION_SOURCE_COLUMNS)
 from .models import InputDraft, PositionDraftRow
 from .position_draft_state import list_draft_rows

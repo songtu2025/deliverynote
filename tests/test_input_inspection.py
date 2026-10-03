@@ -16,10 +16,12 @@ from delivery_note.excel_io import (
 from delivery_note.input_inspection import (
     inspect_input_version,
     inspect_input_version_with_preview,
-    position_change_warnings,
-    position_diff,
     preview_input_version,
     preview_input_version_page,
+)
+from delivery_note.inspection.positions import (
+    position_change_warnings,
+    position_diff,
     validate_position_frame,
 )
 from delivery_note.inspection.workbooks import write_position_workbook
