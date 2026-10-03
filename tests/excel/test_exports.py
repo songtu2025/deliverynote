@@ -1,166 +1,44 @@
+"""三种导出工作簿的原有内容、样式和编辑权限场景。"""
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 import unittest
 
 import pandas as pd
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill
+from openpyxl.worksheet.worksheet import Worksheet
 
-try:
-    from delivery_note.excel_io import (
-        read_delivery_workbook,
-        read_position_workbook,
-        read_supplier_workbook,
-        write_self_operated_inbound_workbook,
-        write_delivery_workbook,
-        write_import_workbook,
-    )
-    from delivery_note.processing.models import (
-        BatchResult,
-        EXCEPTION_COLUMNS,
-        IMPORT_COLUMNS,
-        PENDING_COLUMNS,
-        POSITION_SOURCE_COLUMNS,
-    )
-except ImportError:
-    read_delivery_workbook = None
-    read_position_workbook = None
-    read_supplier_workbook = None
-    write_delivery_workbook = None
-    write_import_workbook = None
-    write_self_operated_inbound_workbook = None
-    BatchResult = None
-    EXCEPTION_COLUMNS = []
-    IMPORT_COLUMNS = []
-    PENDING_COLUMNS = []
-    POSITION_SOURCE_COLUMNS = []
-
-
-class ExcelInputTests(unittest.TestCase):
-    def test_read_delivery_workbook_uses_detail_even_with_summary(self):
-        self.assertIsNotNone(read_delivery_workbook, "交货单读取函数尚未实现")
-        if read_delivery_workbook is None:
-            return
-
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "明细交货单.xlsx"
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet.title = "明细"
-            sheet.append([])
-            sheet.append([])
-            sheet.append([])
-            sheet.append(["积加SKU", "数量", "站点"])
-            sheet.append(["SKU-A", 5, "CA站"])
-            sheet.append(["SKU-A", 10, "US站"])
-            sheet.append(["SKU-A", 2, "CA站"])
-            sheet.append(["合计", None, None])
-            sheet.append(["次品问题描述", None, None])
-            summary = workbook.create_sheet("汇总")
-            summary.append(["SKU", "US站"])
-            summary.append(["SKU-A", 999])
-            workbook.save(path)
-
-            result = read_delivery_workbook(path)
-
-        self.assertEqual(
-            result.to_dict("records"),
-            [
-                {"SKU": "SKU-A", "原始站点": "CA", "交货量": 7},
-                {"SKU": "SKU-A", "原始站点": "US", "交货量": 10},
-            ],
-        )
-
-    def test_read_delivery_workbook_requires_detail_sheet(self):
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "只有汇总的交货单.xlsx"
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet.title = "汇总"
-            sheet.append([])
-            sheet.append(["SKU", "US站"])
-            sheet.append(["SKU-A", 10])
-            workbook.save(path)
-
-            with self.assertRaisesRegex(ValueError, "明细"):
-                read_delivery_workbook(path)
-
-    def test_read_delivery_workbook_rejects_missing_detail_columns(self):
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "缺少数量的交货单.xlsx"
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet.title = "明细"
-            sheet.append([])
-            sheet.append([])
-            sheet.append([])
-            sheet.append(["积加SKU", "站点"])
-            sheet.append(["SKU-A", "US站"])
-            workbook.save(path)
-
-            with self.assertRaisesRegex(ValueError, "数量"):
-                read_delivery_workbook(path)
-
-    def test_read_added_supplier_xls(self):
-        self.assertIsNotNone(read_supplier_workbook, "供应商资料读取函数尚未实现")
-        if read_supplier_workbook is None:
-            return
-
-        source = Path(__file__).parent / "fixtures" / "supplier_minimal.xls"
-        result = read_supplier_workbook(source)
-        zhangdun = result[result["供应商名称"].eq("Zhangdun")].iloc[0]
-
-        self.assertEqual(zhangdun["供应商编号"], "GYS-027")
-        self.assertEqual(zhangdun["状态"], "启用")
-        self.assertIn("供应商别名", result.columns)
-        self.assertEqual(zhangdun["供应商别名"], "")
-
-    def test_read_supplier_workbook_keeps_optional_alias_column(self):
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "supplier.xlsx"
-            pd.DataFrame(
-                [["STGYS001", "RUIZY", "启用", "瑞智雅|RIVBOS"]],
-                columns=["供应商编号", "供应商名称", "状态", "供应商别名"],
-            ).to_excel(path, index=False)
-
-            result = read_supplier_workbook(path)
-
-        self.assertEqual(result.iloc[0]["供应商别名"], "瑞智雅|RIVBOS")
-
-    def test_read_position_workbook_ignores_ordered_days(self):
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "position.xlsx"
-            pd.DataFrame(
-                [["SEEKWAY:US", "SKU-A", "MSKU-A", "短尾", "备货", 90]],
-                columns=[*POSITION_SOURCE_COLUMNS, "已下单可售天数"],
-            ).to_excel(path, sheet_name="MSKU_视图", index=False)
-
-            result = read_position_workbook(path)
-
-        self.assertEqual(result.columns.tolist(), POSITION_SOURCE_COLUMNS)
-        self.assertNotIn("已下单可售天数", result.columns)
+from delivery_note.excel.styles import _StyledCell, _WorkbookStyles
+from delivery_note.excel_io import (
+    write_delivery_workbook,
+    write_import_workbook,
+    write_self_operated_inbound_workbook,
+)
+from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
+from delivery_note.processing.models import (
+    BatchResult,
+    EXCEPTION_COLUMNS,
+    IMPORT_COLUMNS,
+    PENDING_COLUMNS,
+)
+from tests.support.excel import make_import_template, make_inbound_template
 
 
 class ExcelOutputTests(unittest.TestCase):
-    def test_write_self_operated_inbound_workbook_replaces_template_rows(self):
-        self.assertIsNotNone(write_self_operated_inbound_workbook)
-        if write_self_operated_inbound_workbook is None:
-            return
-
-        from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
-
+    def test_write_self_operated_inbound_workbook_replaces_template_rows(self) -> None:
         with TemporaryDirectory() as directory:
             template_path = Path(directory) / "批量入库模板.xlsx"
             output_path = Path(directory) / "批量入库结果.xlsx"
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet.title = "批量入库"
-            sheet.append(INBOUND_TEMPLATE_COLUMNS)
-            sheet.append(["示例"] * len(INBOUND_TEMPLATE_COLUMNS))
+            workbook = make_inbound_template()
+            sheet = workbook.worksheets[0]
             sheet["A2"].font = Font(bold=True)
             workbook.save(template_path)
 
-            values = {column: "" for column in INBOUND_TEMPLATE_COLUMNS}
+            values: dict[str, str | int] = {
+                column: "" for column in INBOUND_TEMPLATE_COLUMNS
+            }
             values.update(
                 {
                     "入库单号": "WV-1",
@@ -176,28 +54,22 @@ class ExcelOutputTests(unittest.TestCase):
             )
 
             result = load_workbook(output_path)
-            result_sheet = result.active
+            result_sheet = cast(Worksheet, result.active)
             self.assertEqual(result_sheet.max_row, 2)
             self.assertEqual(result_sheet["A2"].value, "WV-1")
             self.assertEqual(result_sheet["Q2"].value, 20)
             self.assertEqual(result_sheet["R2"].value, "未分配库位")
             self.assertTrue(result_sheet["A2"].font.bold)
 
-    def test_write_import_workbook_preserves_template_header_and_data_style(self):
-        self.assertIsNotNone(write_import_workbook, "正式导入文件导出函数尚未实现")
-        if write_import_workbook is None:
-            return
-
+    def test_write_import_workbook_preserves_template_header_and_data_style(
+        self,
+    ) -> None:
         with TemporaryDirectory() as directory:
             directory_path = Path(directory)
             template_path = directory_path / "template.xlsx"
             output_path = directory_path / "output.xlsx"
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet["A1"] = "模板提示"
-            sheet.merge_cells("A1:G1")
-            sheet.append(IMPORT_COLUMNS)
-            sheet.append(["示例仓", "示例供应商", "示例SKU", 1, "示例站点", "", ""])
+            workbook = make_import_template()
+            sheet = workbook.worksheets[0]
             for cell in sheet[2]:
                 cell.font = Font(color="FF0000", bold=True)
             for cell in sheet[3]:
@@ -214,7 +86,7 @@ class ExcelOutputTests(unittest.TestCase):
             )
             write_import_workbook(template_path, output_path, rows)
             result = load_workbook(output_path)
-            output_sheet = result.active
+            output_sheet = cast(Worksheet, result.active)
 
         self.assertEqual(output_sheet["A1"].value, "模板提示")
         self.assertEqual([cell.value for cell in output_sheet[2]], IMPORT_COLUMNS)
@@ -222,16 +94,15 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertEqual(output_sheet["A4"].value, "仓B")
         self.assertEqual(output_sheet["D3"].value, 10)
         self.assertEqual(output_sheet["D4"].value, 20)
-        self.assertEqual(output_sheet["A3"]._style, output_sheet["A4"]._style)
+        self.assertEqual(
+            cast(_StyledCell, output_sheet["A3"])._style,
+            cast(_StyledCell, output_sheet["A4"])._style,
+        )
         self.assertNotEqual(output_sheet["A3"].value, "示例仓")
 
     def test_write_delivery_workbook_contains_import_details_and_editable_pending_rows(
         self,
-    ):
-        self.assertIsNotNone(write_delivery_workbook, "交货处理文件导出函数尚未实现")
-        if write_delivery_workbook is None:
-            return
-
+    ) -> None:
         result = BatchResult(
             import_rows=pd.DataFrame(
                 [["仓A", "KuangBiao", "SKU-A", 80, "AMAZON:SEEKWAY:US", "", ""]],
@@ -260,14 +131,8 @@ class ExcelOutputTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             template_path = Path(directory) / "template.xlsx"
             output_path = Path(directory) / "delivery.xlsx"
-            template_book = Workbook()
-            template_sheet = template_book.active
-            template_sheet["A1"] = "模板提示"
-            template_sheet.merge_cells("A1:G1")
-            template_sheet.append(IMPORT_COLUMNS)
-            template_sheet.append(
-                ["示例仓", "示例供应商", "示例SKU", 1, "示例站点", "", ""]
-            )
+            template_book = make_import_template()
+            template_sheet = template_book.worksheets[0]
             for cell in template_sheet[3]:
                 cell.font = Font(name="宋体", size=10, color="808080")
                 cell.fill = PatternFill("solid", fgColor="FFF2CC")
@@ -309,6 +174,12 @@ class ExcelOutputTests(unittest.TestCase):
             self.assertFalse(protection.formatColumns)
             self.assertFalse(protection.formatRows)
             self.assertFalse(protection.selectLockedCells)
+        self._assert_delivery_sheet(workbook)
+        self._assert_pending_sheet(workbook)
+
+    def _assert_delivery_sheet(self, workbook: Workbook) -> None:
+        """核对示例保留、正式数据和默认编辑权限。"""
+
         self.assertEqual(workbook["交货导入"]["A1"].value, "模板提示")
         self.assertEqual(workbook["交货导入"]["A3"].value, "示例仓")
         self.assertEqual(workbook["交货导入"]["A4"].value, "仓A")
@@ -324,8 +195,13 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertTrue(workbook["交货导入"]["A2"].protection.locked)
         self.assertFalse(workbook["交货导入"]["A3"].protection.locked)
         self.assertFalse(workbook["交货导入"]["G4"].protection.locked)
-        default_protection_id = workbook._cell_styles[0].protectionId
-        self.assertFalse(workbook._protections[default_protection_id].locked)
+        workbook_styles = cast(_WorkbookStyles, workbook)
+        default_protection_id = workbook_styles._cell_styles[0].protectionId
+        self.assertFalse(workbook_styles._protections[default_protection_id].locked)
+
+    def _assert_pending_sheet(self, workbook: Workbook) -> None:
+        """核对待处理数量、定位内容和表头保护。"""
+
         self.assertEqual(workbook["待处理导入"]["A1"].value, "模板提示")
         self.assertEqual(
             [cell.value for cell in workbook["待处理导入"][2]], PENDING_COLUMNS
@@ -349,7 +225,3 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertTrue(workbook["待处理导入"]["H3"].alignment.wrap_text)
         self.assertEqual(workbook["待处理导入"].row_dimensions[3].height, 60)
         self.assertEqual(workbook["待处理导入"].column_dimensions["G"].width, 35)
-
-
-if __name__ == "__main__":
-    unittest.main()
