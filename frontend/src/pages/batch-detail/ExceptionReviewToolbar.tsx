@@ -1,6 +1,6 @@
 import { Input, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
-import type { ExceptionReview } from "../useExceptionReview";
+import type { ExceptionReview } from "./useExceptionReview";
 
 function filterOptions(values: string[]) {
   return Array.from(new Set(values.filter(Boolean)))

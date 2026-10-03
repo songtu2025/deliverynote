@@ -1,3 +1,4 @@
+import { batchFileResultName } from "./batchPresentation";
 import { Alert, Button, Card, Empty, Popconfirm, Space, Table, Tooltip } from "antd";
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { Batch, BatchFile } from "../../types";
@@ -162,7 +163,7 @@ function batchFileColumns({
                     onClick={() =>
                       void downloadResult(
                         `/api/batch-files/${file.id}/download`,
-                        `${file.original_name.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`
+                        batchFileResultName(file.original_name, selfOperated)
                       )
                     }
                   >

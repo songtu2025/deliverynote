@@ -3,7 +3,7 @@ import { ApiError } from "../../api";
 import { getBatchDetail } from "../../batchDetailApi";
 import { getBatchInputVersions } from "../../batchListApi";
 import type { Batch, DeliveryException, InputVersion } from "../../types";
-import { useExceptionReview } from "../useExceptionReview";
+import { useExceptionReview } from "./useExceptionReview";
 
 export function useBatchDetailData(
   batchId: number,

@@ -1,7 +1,8 @@
+import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
 import { Button, Card, Empty, Table, Tooltip, Typography } from "antd";
 import type { Ref } from "react";
 import type { BatchFile, DeliveryException } from "../../types";
-import type { ExceptionReview } from "../useExceptionReview";
+import type { ExceptionReview } from "./useExceptionReview";
 import {
   ExceptionReason,
   ExceptionEvidence,
@@ -40,10 +41,10 @@ export default function ExceptionReviewTable({
           rowKey="id"
           dataSource={exceptions}
           pagination={
-            exceptionTotal > 10
+            exceptionTotal > REVIEW_PAGE_SIZE
               ? {
                   current: reviewPage,
-                  pageSize: 10,
+                  pageSize: REVIEW_PAGE_SIZE,
                   total: exceptionTotal,
                   showSizeChanger: false,
                   onChange: setReviewPage

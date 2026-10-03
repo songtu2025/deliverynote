@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { App as AntApp, Form } from "antd";
 import type { DeliveryException, SplitPart } from "../../types";
 import { REVIEW_PAGE_SIZE, saveExceptionSplit, resolveSelfOperatedSite } from "../../batchDetailApi";
-import type { ExceptionPage, ExceptionReview } from "../useExceptionReview";
+import type { ExceptionReview } from "./useExceptionReview";
+import type { ExceptionPage } from "../../batchDetailApi";
 import { candidateSites, initialSplitPart, reviewNeighbors, summarizeSplit } from "./reviewDraft";
 
 export type SplitFormValues = { parts: SplitPart[] };

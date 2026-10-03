@@ -1,30 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { api } from "../api";
-import type { DeliveryException } from "../types";
-import { useDebouncedValue } from "../useDebouncedValue";
+import { getBatchExceptionPage, getBatchExceptionFilters, REVIEW_PAGE_SIZE } from "../../batchDetailApi";
+import type { ExceptionPage, ExceptionFilters } from "../../batchDetailApi";
+import type { DeliveryException } from "../../types";
+import { useDebouncedValue } from "../../useDebouncedValue";
 
 type ReviewScope = "unfinished" | "resolved" | "all";
 type FilterField = "site" | "scale" | "stocking" | "reason";
 type FilterValues = Partial<Record<FilterField, string>>;
-
-export type ExceptionPage = {
-  items: DeliveryException[];
-  total: number;
-  stats: {
-    unfinished_count: number;
-    unfinished_quantity: number;
-    resolved_count: number;
-    total_count: number;
-  };
-};
-
-type ExceptionFilters = {
-  reasons: string[];
-  sites: string[];
-  scales: string[];
-  stocking: string[];
-};
 
 export function useExceptionReview(batchId: number, batchStatus?: string) {
   const [exceptions, setExceptions] = useState<DeliveryException[]>([]);
@@ -52,8 +35,8 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
   const fetchExceptionPage = useCallback(
     (requestedPage = reviewPage) => {
       const params = new URLSearchParams({
-        offset: String((requestedPage - 1) * 10),
-        limit: "10",
+        offset: String((requestedPage - 1) * REVIEW_PAGE_SIZE),
+        limit: String(REVIEW_PAGE_SIZE),
         review_scope: reviewScope
       });
       if (debouncedQuery.trim()) params.set("search", debouncedQuery.trim());
@@ -61,7 +44,7 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
       if (filterValues.scale) params.set("scale_position", filterValues.scale);
       if (filterValues.stocking) params.set("stocking_position", filterValues.stocking);
       if (filterValues.reason) params.set("reason", filterValues.reason);
-      return api<ExceptionPage>(`/api/batches/${batchId}/exceptions?${params}`);
+      return getBatchExceptionPage(batchId, params);
     },
     [batchId, reviewPage, reviewScope, debouncedQuery, filterValues]
   );
@@ -106,9 +89,17 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
   };
 
   useEffect(() => {
-    void api<ExceptionFilters>(`/api/batches/${batchId}/exceptions/filters`)
-      .then(setExceptionFilters)
-      .catch(() => setExceptionFilters({ reasons: [], sites: [], scales: [], stocking: [] }));
+    let cancelled = false;
+    void getBatchExceptionFilters(batchId)
+      .then((filters) => {
+        if (!cancelled) setExceptionFilters(filters);
+      })
+      .catch(() => {
+        if (!cancelled) setExceptionFilters({ reasons: [], sites: [], scales: [], stocking: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [batchId, batchStatus]);
 
   return {

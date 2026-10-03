@@ -3,6 +3,32 @@ import type { Batch, BatchFile, DeliveryException, Job, SplitPart } from "./type
 
 export const REVIEW_PAGE_SIZE = 10;
 
+export type ExceptionPage = {
+  items: DeliveryException[];
+  total: number;
+  stats: {
+    unfinished_count: number;
+    unfinished_quantity: number;
+    resolved_count: number;
+    total_count: number;
+  };
+};
+
+export type ExceptionFilters = {
+  reasons: string[];
+  sites: string[];
+  scales: string[];
+  stocking: string[];
+};
+
+export function getBatchExceptionPage(batchId: number, params: URLSearchParams) {
+  return api<ExceptionPage>(`/api/batches/${batchId}/exceptions?${params}`);
+}
+
+export function getBatchExceptionFilters(batchId: number) {
+  return api<ExceptionFilters>(`/api/batches/${batchId}/exceptions/filters`);
+}
+
 export function getBatchDetail(batchId: number) {
   return api<Batch>(`/api/batches/${batchId}`);
 }

@@ -16,7 +16,7 @@ export default [
     }
   },
   {
-    files: ["**/src/pages/batch-detail/**/*.{ts,tsx}", "**/src/batchDetailApi.ts"],
+    files: ["**/src/pages/batch-detail/**/*.{ts,tsx}", "**/src/batchDetailApi.ts", "**/src/pages/BatchDetail.tsx"],
     rules: {
       complexity: ["error", 10],
       "max-depth": ["error", 5],

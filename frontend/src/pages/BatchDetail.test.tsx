@@ -1,296 +1,14 @@
-import { fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react";
-import { App as AntApp, ConfigProvider, message } from "antd";
-import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import BatchDetail from "./BatchDetail";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import { api, AUTH_EXPIRED_EVENT } from "../api";
-
-const render = (ui: ReactElement) =>
-  renderComponent(ui, {
-    wrapper: ({ children }) => (
-      <ConfigProvider theme={{ token: { motion: false } }}>
-        <AntApp>{children}</AntApp>
-      </ConfigProvider>
-    )
-  });
-
-const jsonResponse = (payload: unknown) =>
-  new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  });
+import { jsonResponse } from "./admin/positionDraftTestSupport";
+import { fixtureJob } from "./batch-detail/detailFixtures";
+import { describe } from "vitest";
+import BatchDetail from "./BatchDetail";
+import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 
 describe("BatchDetail", () => {
-  let batchPayload: Record<string, any>;
-  let exceptionPayload: Record<string, any>[];
-
-  const exceptionPage = (url: string) => {
-    const params = new URL(url, "http://localhost").searchParams;
-    const scope = params.get("review_scope");
-    const rows = exceptionPayload.filter(
-      (item) =>
-        (scope !== "resolved" || item.status === "resolved") &&
-        (scope !== "unfinished" || item.status !== "resolved") &&
-        (!params.get("reason") || item.reason === params.get("reason")) &&
-        (!params.get("site") || item.full_site === params.get("site")) &&
-        (!params.get("scale_position") || item.scale_position === params.get("scale_position")) &&
-        (!params.get("stocking_position") || item.stocking_position === params.get("stocking_position")) &&
-        String(item.sku).includes(params.get("search") ?? "")
-    );
-    const offset = Number(params.get("offset") ?? 0);
-    const limit = Number(params.get("limit") ?? 10);
-    const unfinished = exceptionPayload.filter((item) => item.status !== "resolved");
-    return {
-      items: rows.slice(offset, offset + limit),
-      total: rows.length,
-      stats: {
-        unfinished_count: unfinished.length,
-        unfinished_quantity: unfinished.reduce(
-          (sum, item) =>
-            sum +
-            (item.parts.length
-              ? item.parts
-                  .filter((part: { resolved: boolean }) => !part.resolved)
-                  .reduce((partSum: number, part: { quantity: number }) => partSum + part.quantity, 0)
-              : item.manual_quantity),
-          0
-        ),
-        resolved_count: exceptionPayload.length - unfinished.length,
-        total_count: exceptionPayload.length
-      }
-    };
-  };
-
-  const exceptionFilters = () => ({
-    reasons: [...new Set(exceptionPayload.map((item) => item.reason))],
-    sites: [...new Set(exceptionPayload.map((item) => item.full_site))],
-    scales: [...new Set(exceptionPayload.map((item) => item.scale_position).filter(Boolean))],
-    stocking: [...new Set(exceptionPayload.map((item) => item.stocking_position).filter(Boolean))]
-  });
-
-  const pagedExceptions = () =>
-    Array.from({ length: 12 }, (_, index) => ({
-      ...exceptionPayload[0],
-      id: 100 + index,
-      sku: `SKU-${index + 1}`,
-      manual_quantity: 1
-    }));
-
-  beforeEach(() => {
-    const version = (id: number, kind: string) => ({
-      id,
-      kind,
-      name: `${kind}-v1`,
-      original_name: `${kind}.xlsx`,
-      active: true,
-      created_by: 1,
-      created_at: "2026-07-21T08:00:00"
-    });
-    batchPayload = {
-      id: 7,
-      name: "2026-07-21 交货批次",
-      status: "succeeded",
-      created_by: 1,
-      version_ids: { purchase: 1, product: 2, supplier: 3, position: 4, template: 5 },
-      overreceipt_rule: {
-        id: 9,
-        name: "短尾超收 V1",
-        short_tail_limit: 50,
-        medium_tail_limit: 20,
-        long_tail_limit: 10,
-        allowed_warehouses: ["水鞋-广州仓"],
-        active: false,
-        created_by: 1,
-        created_at: "2026-07-21T07:00:00"
-      },
-      versions: {
-        purchase: version(1, "purchase"),
-        product: version(2, "product"),
-        supplier: version(3, "supplier"),
-        position: version(4, "position"),
-        template: version(5, "template")
-      },
-      jobs: {},
-      error_message: null,
-      download_ready: false,
-      merged_download_ready: false,
-      created_at: "2026-07-21T08:00:00",
-      updated_at: "2026-07-21T09:00:00",
-      file_count: 2,
-      summary: { delivery_total: 160, import_total: 100, manual_total: 60, conserved: true },
-      files: [
-        {
-          id: 10,
-          batch_id: 7,
-          original_name: "KuangBiao-A交货单.xlsx",
-          file_order: 1,
-          supplier_name: "KuangBiao",
-          supplier_code: "GYS-023",
-          document_note: "A",
-          delivery_total: 80,
-          import_total: 80,
-          manual_total: 0,
-          download_ready: false
-        },
-        {
-          id: 11,
-          batch_id: 7,
-          original_name: "KuangBiao-B交货单.xlsx",
-          file_order: 2,
-          supplier_name: "KuangBiao",
-          supplier_code: "GYS-023",
-          document_note: "B",
-          delivery_total: 80,
-          import_total: 20,
-          manual_total: 60,
-          download_ready: false
-        }
-      ]
-    };
-    exceptionPayload = [
-      {
-        id: 30,
-        batch_file_id: 11,
-        sku: "SKU-A",
-        original_site: "US",
-        full_site: "AMAZON:SEEKWAY:US",
-        destination: "水鞋-东莞仓",
-        delivery_quantity: 80,
-        allocated_quantity: 20,
-        purchase_allocated_quantity: 20,
-        overreceipt_allocated_quantity: 0,
-        overreceipt_remaining_quantity: null,
-        manual_quantity: 60,
-        reason: "超出采购未交量",
-        reason_code: "purchase_balance_exceeded",
-        allowed_actions: ["split"],
-        status: "pending",
-        scale_position: "短尾",
-        stocking_position: "备货",
-        parts: []
-      },
-      {
-        id: 31,
-        batch_file_id: 11,
-        sku: "SKU-B",
-        original_site: "CA",
-        full_site: "AMAZON:SEEKWAY:CA",
-        destination: "水鞋-东莞仓",
-        delivery_quantity: 20,
-        allocated_quantity: 0,
-        purchase_allocated_quantity: 0,
-        overreceipt_allocated_quantity: 0,
-        overreceipt_remaining_quantity: null,
-        manual_quantity: 20,
-        reason: "未找到可交货采购需求",
-        reason_code: "purchase_not_found",
-        allowed_actions: ["split"],
-        status: "pending",
-        scale_position: "中尾",
-        stocking_position: "不备货",
-        parts: []
-      },
-      {
-        id: 32,
-        batch_file_id: 11,
-        sku: "SKU-C",
-        original_site: "US",
-        full_site: "AMAZON:OTHER:US、AMAZON:SEEKWAY:US",
-        destination: "",
-        delivery_quantity: 12,
-        allocated_quantity: 0,
-        purchase_allocated_quantity: 0,
-        overreceipt_allocated_quantity: 0,
-        overreceipt_remaining_quantity: null,
-        manual_quantity: 12,
-        reason: "产品信息站点不唯一",
-        reason_code: "ambiguous_product_site",
-        allowed_actions: ["split"],
-        status: "pending",
-        scale_position: "",
-        stocking_position: "",
-        parts: []
-      },
-      {
-        id: 33,
-        batch_file_id: 11,
-        sku: "SKU-D",
-        original_site: "US",
-        full_site: "AMAZON:SEEKWAY:US",
-        destination: "水鞋-广州仓",
-        delivery_quantity: 85,
-        allocated_quantity: 70,
-        purchase_allocated_quantity: 20,
-        overreceipt_allocated_quantity: 50,
-        overreceipt_remaining_quantity: 0,
-        manual_quantity: 15,
-        reason: "超出允许超收量",
-        reason_code: "overreceipt_limit_exceeded",
-        allowed_actions: ["split"],
-        status: "pending",
-        scale_position: "短尾",
-        stocking_position: "备货",
-        parts: []
-      }
-    ];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/api/auth/me")) return jsonResponse({ id: 1, username: "admin", role: "admin" });
-        if (url.endsWith("/api/batches/7/exceptions/filters")) return jsonResponse(exceptionFilters());
-        if (url.includes("/api/batches/7/exceptions?")) return jsonResponse(exceptionPage(url));
-        if (url.endsWith("/api/input-versions")) {
-          return jsonResponse([{ ...version(9, "supplier"), name: "supplier-v2" }]);
-        }
-        if (url.endsWith("/api/batches/7/refresh-supplier-version") && init?.method === "POST") {
-          batchPayload = {
-            ...batchPayload,
-            version_ids: { ...batchPayload.version_ids, supplier: 9 },
-            versions: {
-              ...batchPayload.versions,
-              supplier: { ...version(9, "supplier"), name: "supplier-v2" }
-            }
-          };
-          return jsonResponse(batchPayload);
-        }
-        if (url.endsWith("/api/batches/7")) return jsonResponse(batchPayload);
-        const splitMatch = url.match(/\/api\/exceptions\/(\d+)\/split$/);
-        if (splitMatch && init?.method === "PUT") {
-          const exceptionId = Number(splitMatch[1]);
-          const parts = JSON.parse(String(init.body)).parts as Array<{ resolved: boolean }>;
-          const resolvedCount = parts.filter((part) => part.resolved).length;
-          const updated = {
-            ...exceptionPayload.find((item) => item.id === exceptionId)!,
-            parts,
-            status: resolvedCount === parts.length ? "resolved" : resolvedCount ? "partial" : "pending"
-          };
-          exceptionPayload = exceptionPayload.map((item) => (item.id === exceptionId ? updated : item));
-          return jsonResponse(updated);
-        }
-        const selfOperatedSiteMatch = url.match(/\/api\/exceptions\/(\d+)\/self-operated-site$/);
-        if (selfOperatedSiteMatch && init?.method === "PUT") {
-          return jsonResponse({ id: 99, kind: "compute", status: "queued" });
-        }
-        if (url.endsWith("/api/batches/7/download-merged")) {
-          return new Response("merged", { status: 200 });
-        }
-        if (url.endsWith("/api/batches/7/download")) {
-          return new Response("zip", { status: 200 });
-        }
-        if (url.endsWith("/api/batches/7/files/order") && init?.method === "PUT") {
-          return jsonResponse(batchPayload);
-        }
-        throw new Error(`Unexpected request: ${url}`);
-      })
-    );
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
+  const { state, exceptionPage, exceptionFilters } = setupBatchDetailTest();
 
   it.each(["server", "network"])("recovers an initial %s failure with read-only retry", async (failure) => {
     const originalFetch = fetch;
@@ -306,7 +24,7 @@ describe("BatchDetail", () => {
       })
     );
     const onBack = vi.fn();
-    render(<BatchDetail batchId={7} onBack={onBack} />);
+    renderDetail(<BatchDetail batchId={7} onBack={onBack} />);
     expect(await screen.findByRole("alert")).toHaveTextContent(
       failure === "network" ? "网络连接失败" : "服务暂不可用 <&>"
     );
@@ -328,7 +46,7 @@ describe("BatchDetail", () => {
         "fetch",
         vi.fn(async () => new Response(JSON.stringify({ detail: "未登录" }), { status: 401 }))
       );
-      render(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
+      renderDetail(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
       await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
       await waitFor(() => expect(expired).toHaveBeenCalledOnce());
       expect(screen.queryByText("未登录")).not.toBeInTheDocument();
@@ -340,7 +58,7 @@ describe("BatchDetail", () => {
   });
 
   it.each([403, 409, 422, 500])("shows a %s operation failure and releases its loading state", async (status) => {
-    batchPayload.status = "draft";
+    state.batch.status = "draft";
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
@@ -350,7 +68,7 @@ describe("BatchDetail", () => {
         return originalFetch(input, init);
       })
     );
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const button = await screen.findByRole("button", { name: /执行预检/ });
     fireEvent.click(button);
     await screen.findByText(`预检失败 ${status}`);
@@ -362,15 +80,15 @@ describe("BatchDetail", () => {
     "suppresses page feedback for unauthorized %s",
     async (phase) => {
       await api("/api/auth/me");
-      batchPayload.status = "draft";
+      state.batch.status = "draft";
       if (phase === "download") {
-        batchPayload.status = "succeeded";
-        batchPayload.file_count = 1;
-        batchPayload.files = [batchPayload.files[0]];
-        batchPayload.files[0].download_ready = true;
-        batchPayload.download_ready = true;
+        state.batch.status = "succeeded";
+        state.batch.file_count = 1;
+        state.batch.files = [state.batch.files[0]];
+        state.batch.files[0].download_ready = true;
+        state.batch.download_ready = true;
       }
-      if (phase.startsWith("poll")) batchPayload.jobs = { compute: { id: 88, kind: "compute", status: "running" } };
+      if (phase.startsWith("poll")) state.batch.jobs = { compute: fixtureJob() };
       const originalFetch = fetch;
       let refreshing = false;
       const unauthorized = () => new Response(JSON.stringify({ detail: "未登录" }), { status: 401 });
@@ -383,7 +101,7 @@ describe("BatchDetail", () => {
             const url = String(input);
             if (url.endsWith("/preflight")) {
               refreshing = true;
-              return phase === "operation" ? unauthorized() : jsonResponse(batchPayload);
+              return phase === "operation" ? unauthorized() : jsonResponse(state.batch);
             }
             if (url.endsWith("/api/jobs/88")) {
               refreshing = true;
@@ -394,8 +112,8 @@ describe("BatchDetail", () => {
             return originalFetch(input, init);
           })
         );
-        render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-        await screen.findByText(batchPayload.name);
+        renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+        await screen.findByText(state.batch.name);
         if (phase === "operation" || phase === "refresh")
           fireEvent.click(screen.getByRole("button", { name: /执行预检/ }));
         if (phase === "download") fireEvent.click(screen.getAllByRole("button", { name: /下载处理结果/ })[0]);
@@ -407,51 +125,6 @@ describe("BatchDetail", () => {
       }
     }
   );
-
-  it("uses context feedback for successful operations instead of static messages", async () => {
-    batchPayload.status = "draft";
-    const staticSuccess = vi.spyOn(message, "success");
-    render(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "采用当前供应商资料" }));
-    await screen.findByText("批次已采用当前供应商资料");
-    expect(staticSuccess).not.toHaveBeenCalled();
-  });
-
-  it("shows quantity conservation and prevents an invalid split", async () => {
-    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    await screen.findByText("160 = 100 + 60");
-    expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
-    expect(screen.getByText("异常审校").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
-    expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
-    expect(screen.getByText("待处理 60 件")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "处理异常" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
-    expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
-    expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
-    expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
-    expect(container.querySelector(".exception-review-card .ant-table-content")).toHaveStyle({ overflowX: "auto" });
-    fireEvent.click(screen.getByRole("button", { name: "收起锁定版本" }));
-    expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
-    expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
-    expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
-
-    await screen.findByText("审校处理 · SKU-A");
-    const drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("规模定位")).toBeInTheDocument();
-    expect(within(drawer).getByText("短尾")).toBeInTheDocument();
-    expect(within(drawer).getByText("备货定位")).toBeInTheDocument();
-    expect(within(drawer).getByText("备货")).toBeInTheDocument();
-    expect(within(drawer).queryByText("已下单可售天数")).not.toBeInTheDocument();
-    const saveButton = screen.getByRole("button", { name: "保存" });
-    expect(saveButton).toBeEnabled();
-    const quantity = screen.getByRole("spinbutton", { name: "数量" });
-    fireEvent.change(quantity, { target: { value: "59" } });
-    await waitFor(() => expect(saveButton).toBeDisabled());
-    expect(screen.getByText("1", { selector: ".split-conservation strong" })).toBeInTheDocument();
-  }, 30_000);
 
   it("shows the batch overview before exception enrichment finishes", async () => {
     let finishExceptions: (response: Response) => void = () => undefined;
@@ -465,13 +138,13 @@ describe("BatchDetail", () => {
         if (url.includes("/api/batches/7/exceptions?")) return delayedExceptions;
         if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
         if (url.endsWith("/api/batches/7")) {
-          return Promise.resolve(jsonResponse(batchPayload));
+          return Promise.resolve(jsonResponse(state.batch));
         }
         throw new Error(`Unexpected request: ${url}`);
       })
     );
 
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
     expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
@@ -482,59 +155,14 @@ describe("BatchDetail", () => {
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
   });
 
-  it("lets an admin draft adopt the current supplier version", async () => {
-    batchPayload.status = "draft";
-    render(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
-
-    const refreshButton = await screen.findByRole("button", {
-      name: "采用当前供应商资料"
-    });
-    fireEvent.click(refreshButton);
-
-    await waitFor(() =>
-      expect(
-        vi
-          .mocked(fetch)
-          .mock.calls.some(
-            ([input, init]) =>
-              String(input).endsWith("/api/batches/7/refresh-supplier-version") && init?.method === "POST"
-          )
-      ).toBe(true)
-    );
-    await screen.findByText("supplier-v2");
-    expect(screen.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
-  });
-
-  it("does not show supplier refresh outside an admin draft", async () => {
-    batchPayload.status = "draft";
-    const { rerender } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    await screen.findByText("批次锁定版本");
-    expect(screen.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
-
-    batchPayload.status = "failed";
-    rerender(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("button", {
-          name: "采用当前供应商资料"
-        })
-      ).not.toBeInTheDocument()
-    );
-  });
-
   it("shows exception loading during a silent job refresh", async () => {
     let finishRefresh: (response: Response) => void = () => undefined;
     const delayedRefresh = new Promise<Response>((resolve) => {
       finishRefresh = resolve;
     });
     let exceptionRequests = 0;
-    batchPayload.jobs = {
-      compute: {
-        id: 88,
-        kind: "compute",
-        status: "running"
-      }
+    state.batch.jobs = {
+      compute: fixtureJob()
     };
     vi.stubGlobal(
       "fetch",
@@ -555,13 +183,13 @@ describe("BatchDetail", () => {
         }
         if (url.endsWith("/api/batches/7/exceptions/filters")) return Promise.resolve(jsonResponse(exceptionFilters()));
         if (url.endsWith("/api/batches/7")) {
-          return Promise.resolve(jsonResponse(batchPayload));
+          return Promise.resolve(jsonResponse(state.batch));
         }
         throw new Error(`Unexpected request: ${url}`);
       })
     );
 
-    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
     expect(await screen.findByText("160 = 100 + 60")).toBeInTheDocument();
     await waitFor(() => expect(exceptionRequests).toBe(2));
@@ -573,362 +201,5 @@ describe("BatchDetail", () => {
     await waitFor(() => {
       expect(container.querySelector(".exception-review-card.ant-card-loading")).not.toBeInTheDocument();
     });
-  });
-
-  it("filters pending rows by site, scale position, and stocking position", async () => {
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    await screen.findByText("SKU-A");
-    expect(screen.getByText("SKU-B")).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "原因筛选" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "审校概览" })).toBeInTheDocument();
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "站点筛选" }));
-    fireEvent.click(await screen.findByText("AMAZON:SEEKWAY:US", { selector: ".ant-select-item-option-content" }));
-    await waitFor(() => expect(screen.queryByText("SKU-B")).not.toBeInTheDocument());
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
-    fireEvent.click(await screen.findByText("短尾", { selector: ".ant-select-item-option-content" }));
-    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "备货定位筛选" }));
-    fireEvent.click(await screen.findByText("备货", { selector: ".ant-select-item-option-content" }));
-    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
-
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
-    fireEvent.click(await screen.findByText("中尾", { selector: ".ant-select-item-option-content" }));
-    await screen.findByText("当前没有未完成记录");
-  }, 30_000);
-
-  it("keeps review navigation working across server pages", async () => {
-    exceptionPayload = pagedExceptions();
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    expect(await screen.findByRole("button", { name: "全部 12 条" })).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle("2"));
-    expect(await screen.findByText("SKU-11")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
-    const drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("第 11 / 12 条")).toBeInTheDocument();
-
-    expect(within(drawer).getByRole("button", { name: "上一条" })).toBeEnabled();
-    fireEvent.click(within(drawer).getByRole("button", { name: "上一条" }));
-    expect(await within(drawer).findByText("审校处理 · SKU-10")).toBeInTheDocument();
-    expect(within(drawer).getByText("第 10 / 12 条")).toBeInTheDocument();
-
-    await waitFor(() => expect(within(drawer).getByRole("button", { name: "下一条" })).toBeEnabled());
-    fireEvent.click(within(drawer).getByRole("button", { name: "下一条" }));
-    expect(await within(drawer).findByText("审校处理 · SKU-11")).toBeInTheDocument();
-    fireEvent.change(within(drawer).getByRole("spinbutton", { name: "数量" }), {
-      target: { value: "2" }
-    });
-    await waitFor(() => expect(within(drawer).getByRole("button", { name: "上一条" })).toBeDisabled());
-  }, 30_000);
-
-  it("returns to the first review page when searching from a later page", async () => {
-    exceptionPayload = pagedExceptions();
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    await screen.findByRole("button", { name: "全部 12 条" });
-    fireEvent.click(screen.getByTitle("2"));
-    await screen.findByText("SKU-11");
-    fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), {
-      target: { value: "SKU-1" }
-    });
-
-    await waitFor(() => {
-      const urls = vi
-        .mocked(fetch)
-        .mock.calls.map(([input]) => String(input))
-        .filter((url) => url.includes("/exceptions?") && url.includes("search=SKU-1"));
-      expect(urls.length).toBeGreaterThan(0);
-      expect(new URL(urls.at(-1)!, "http://localhost").searchParams.get("offset")).toBe("0");
-    });
-    expect(await screen.findByText("SKU-1")).toBeInTheDocument();
-  });
-
-  it("shows complete SKU and site identifiers in the review table", async () => {
-    exceptionPayload[0] = {
-      ...exceptionPayload[0],
-      sku: "SKU-EXCESS-LONG",
-      full_site: "AMAZON:SEEKWAY:US"
-    };
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    const sku = await screen.findByText("SKU-EXCESS-LONG");
-    const row = sku.closest("tr");
-    expect(row).not.toBeNull();
-    const site = within(row!).getByText("AMAZON:SEEKWAY:US");
-
-    expect(sku).toHaveClass("exception-sku-value");
-    expect(site).toHaveClass("exception-site-value");
-    expect(site.closest("td")).not.toHaveClass("ant-table-cell-ellipsis");
-  }, 30_000);
-
-  it("summarizes unfinished work and saves directly into the next exception", async () => {
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    const overview = await screen.findByRole("region", { name: "审校概览" });
-    expect(within(overview).getByRole("button", { name: "未完成 4 条，待处理 107 件" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-    expect(within(overview).getByRole("button", { name: "已处理 0 条" })).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "全部 4 条" })).toBeInTheDocument();
-
-    const excessRow = (await screen.findByText("SKU-A")).closest("tr");
-    expect(excessRow).not.toBeNull();
-    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理" }));
-
-    let drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("第 1 / 4 条")).toBeInTheDocument();
-    expect(within(drawer).getByRole("radio", { name: "继续保留待处理" })).toBeChecked();
-    fireEvent.click(within(drawer).getByRole("radio", { name: "可正式导入" }));
-    const saveAndNext = within(drawer).getByRole("button", { name: "保存并下一条" });
-    await waitFor(() => expect(saveAndNext).toBeEnabled());
-    fireEvent.click(saveAndNext);
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith("/api/exceptions/30/split", expect.objectContaining({ method: "PUT" }));
-    });
-    drawer = await screen.findByRole("dialog");
-    expect(within(drawer).getByText("审校处理 · SKU-B")).toBeInTheDocument();
-    expect(within(drawer).getByText("第 1 / 3 条")).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "未完成 3 条，待处理 47 件" })).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "已处理 1 条" })).toBeInTheDocument();
-  }, 30_000);
-
-  it("offers merged and per-file downloads without a duplicate export card", async () => {
-    batchPayload.download_ready = true;
-    batchPayload.merged_download_ready = true;
-    batchPayload.files = batchPayload.files.map((file: Record<string, unknown>) => ({
-      ...file,
-      download_ready: true
-    }));
-    Object.defineProperty(URL, "createObjectURL", {
-      configurable: true,
-      value: vi.fn(() => "blob:test")
-    });
-    Object.defineProperty(URL, "revokeObjectURL", {
-      configurable: true,
-      value: vi.fn()
-    });
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
-    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    const mergedButton = await screen.findByRole("button", { name: /下载合并结果/ });
-    const zipButton = screen.getByRole("button", { name: /下载分文件 ZIP/ });
-    expect(screen.getAllByRole("button", { name: "下载单文件结果" })).toHaveLength(2);
-    expect(container.querySelector(".export-card")).not.toBeInTheDocument();
-
-    fireEvent.click(mergedButton);
-    fireEvent.click(zipButton);
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith("/api/batches/7/download-merged", expect.any(Object));
-      expect(fetch).toHaveBeenCalledWith("/api/batches/7/download", expect.any(Object));
-    });
-  }, 30_000);
-
-  it("shows a download error when the file request fails", async () => {
-    batchPayload.download_ready = true;
-    batchPayload.file_count = 1;
-    batchPayload.files = [{ ...batchPayload.files[0], download_ready: true }];
-    const originalFetch = fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).endsWith("/api/batch-files/10/download")
-          ? Promise.resolve(new Response("unavailable", { status: 503 }))
-          : originalFetch(input, init)
-      )
-    );
-
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /下载处理结果/ }));
-
-    await screen.findByText("下载失败");
-  });
-
-  it("keeps only the necessary footer actions for a single review item", async () => {
-    exceptionPayload = [exceptionPayload[0]];
-    batchPayload.summary = {
-      delivery_total: 160,
-      import_total: 100,
-      manual_total: 60,
-      conserved: true
-    };
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    const row = (await screen.findByText("SKU-A")).closest("tr");
-    expect(row).not.toBeNull();
-    fireEvent.click(within(row!).getByRole("button", { name: "查看并处理" }));
-
-    const drawer = await screen.findByRole("dialog");
-    expect(within(drawer).queryByRole("button", { name: "上一条" })).not.toBeInTheDocument();
-    expect(within(drawer).queryByRole("button", { name: "下一条" })).not.toBeInTheDocument();
-    expect(within(drawer).getByRole("button", { name: "保存" })).toBeInTheDocument();
-  }, 30_000);
-
-  it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
-    exceptionPayload[2].reason = "候选站点需要确认";
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    expect(await screen.findByRole("columnheader", { name: "审校依据" })).toBeInTheDocument();
-
-    const excessRow = (await screen.findByText("SKU-A")).closest("tr");
-    expect(excessRow).not.toBeNull();
-    expect(excessRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("已分配 20");
-    expect(excessRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("超出 60");
-    expect(excessRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("未命中超收规则");
-    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理" }));
-    let drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("采购量与超出量")).toBeInTheDocument();
-    expect(within(drawer).getByText("已分配量")).toBeInTheDocument();
-    expect(within(drawer).getByText("超出量")).toBeInTheDocument();
-    expect(within(drawer).getByText("未命中本批次超收规则")).toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
-
-    const noPurchaseRow = screen.getByText("SKU-B").closest("tr");
-    expect(noPurchaseRow).not.toBeNull();
-    expect(noPurchaseRow!.querySelector(".exception-evidence-cell")).toHaveTextContent(
-      "需核对 供应商、SKU、站点、目的仓"
-    );
-    fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: "查看并处理" }));
-    drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("核对锁定采购版本")).toBeInTheDocument();
-    expect(within(drawer).getByText(/供应商、SKU、站点和目的仓/)).toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
-
-    const ambiguousRow = screen.getByText("SKU-C").closest("tr");
-    expect(ambiguousRow).not.toBeNull();
-    expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("候选站点");
-    expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("AMAZON:OTHER:US");
-    expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("AMAZON:SEEKWAY:US");
-    fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "查看并处理" }));
-    drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("选择候选站点")).toBeInTheDocument();
-    const siteChoice = within(drawer).getByRole("radio", { name: "AMAZON:SEEKWAY:US" });
-    fireEvent.click(siteChoice);
-    expect(siteChoice).toBeChecked();
-    expect(within(drawer).queryByRole("textbox", { name: "完整站点" })).not.toBeInTheDocument();
-    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
-
-    const allowanceRow = screen.getByText("SKU-D").closest("tr");
-    expect(allowanceRow).not.toBeNull();
-    expect(allowanceRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("正常采购 20");
-    expect(allowanceRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("使用超收 50");
-    expect(allowanceRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("剩余 0");
-    fireEvent.click(within(allowanceRow!).getByRole("button", { name: "查看并处理" }));
-    drawer = screen.getByRole("dialog");
-    expect(within(drawer).getByText("超收额度使用情况")).toBeInTheDocument();
-    expect(within(drawer).getByText("正常采购分配")).toBeInTheDocument();
-    expect(within(drawer).getByText("本条使用超收额度")).toBeInTheDocument();
-    expect(within(drawer).getByText("剩余额度")).toBeInTheDocument();
-    const guidance = within(drawer).getByRole("region", { name: "原因指导" });
-    expect(within(guidance).getByText("20")).toBeInTheDocument();
-    expect(within(guidance).getByText("50")).toBeInTheDocument();
-    expect(within(guidance).getByText("0")).toBeInTheDocument();
-  }, 30_000);
-
-  it("recomputes a self-operated batch after selecting an ambiguous site", async () => {
-    batchPayload = {
-      ...batchPayload,
-      workflow: "self_operated_inbound",
-      name: "2026-08-21 自营仓入库批次",
-      self_operated_overreceipt_rule: {
-        id: 10,
-        name: "自营仓超收 5 件",
-        allowance: 5,
-        active: false,
-        created_by: 1,
-        created_at: "2026-08-21T08:00:00"
-      },
-      inbound_file: {
-        original_name: "自营仓收货入库单.xlsx",
-        uploaded: true
-      },
-      file_count: 1,
-      files: [batchPayload.files[0]],
-      summary: {
-        delivery_total: 27,
-        import_total: 0,
-        manual_total: 27,
-        conserved: true
-      }
-    };
-    exceptionPayload = [exceptionPayload[2], exceptionPayload[3]];
-    exceptionPayload[0].allowed_actions = ["resolve_site"];
-    exceptionPayload[1].allowed_actions = [];
-
-    render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    expect(await screen.findByText("自营仓入库单：自营仓收货入库单.xlsx")).toBeInTheDocument();
-    expect(screen.getByText("每个供应商 + SKU + 站点共享 +5")).toBeInTheDocument();
-    const ambiguousRow = screen.getByText("SKU-C").closest("tr");
-    const overreceiptRow = screen.getByText("SKU-D").closest("tr");
-    expect(ambiguousRow).not.toBeNull();
-    expect(overreceiptRow).not.toBeNull();
-    expect(within(overreceiptRow!).getByText("待处理")).toBeInTheDocument();
-    expect(within(overreceiptRow!).queryByText("保留待处理")).not.toBeInTheDocument();
-    fireEvent.click(within(ambiguousRow!).getByRole("button", { name: "查看并处理" }));
-
-    const drawer = await screen.findByRole("dialog");
-    expect(within(drawer).queryByRole("spinbutton", { name: "数量" })).not.toBeInTheDocument();
-    const save = within(drawer).getByRole("button", { name: "保存并重新计算" });
-    expect(save).toBeDisabled();
-    fireEvent.click(within(drawer).getByRole("radio", { name: "AMAZON:SEEKWAY:US" }));
-    await waitFor(() => expect(save).toBeEnabled());
-    fireEvent.click(save);
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/exceptions/32/self-operated-site",
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({ full_site: "AMAZON:SEEKWAY:US" })
-        })
-      );
-    });
-  }, 30_000);
-
-  it("allows multiple self-operated delivery files to be reordered", async () => {
-    batchPayload = {
-      ...batchPayload,
-      workflow: "self_operated_inbound",
-      name: "2026-08-21 自营仓入库批次",
-      status: "draft",
-      inbound_file: {
-        original_name: "自营仓收货入库单.xlsx",
-        uploaded: true
-      },
-      summary: {
-        delivery_total: 0,
-        import_total: 0,
-        manual_total: 0,
-        conserved: true
-      }
-    };
-    exceptionPayload = [];
-
-    const { container } = render(<BatchDetail batchId={7} onBack={vi.fn()} />);
-
-    expect(await screen.findByText("2 份质检单 + 1 份待入库数据")).toBeInTheDocument();
-    expect(screen.getByText("序号越小，越先扣减待入库余额和超收额度")).toBeInTheDocument();
-    const uploadInput = container.querySelector<HTMLInputElement>('.batch-primary-actions input[type="file"]');
-    expect(uploadInput).toHaveAttribute("multiple");
-    fireEvent.click(screen.getByRole("button", { name: "下移 KuangBiao-A交货单.xlsx" }));
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/batches/7/files/order",
-        expect.objectContaining({
-          method: "PUT",
-          body: JSON.stringify({ file_ids: [11, 10] })
-        })
-      );
-    });
-    expect(await screen.findByText("处理顺序已更新，需要重新预检")).toBeInTheDocument();
   });
 });

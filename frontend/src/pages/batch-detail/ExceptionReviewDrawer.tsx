@@ -1,3 +1,4 @@
+import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
 import { Descriptions, Drawer, Form, Radio, Tag } from "antd";
 import type { Batch, BatchFile, DeliveryException } from "../../types";
 import type { ExceptionEditor } from "./useExceptionEditor";
@@ -36,7 +37,7 @@ export default function ExceptionReviewDrawer({
           <strong>审校处理 · {splitTarget?.sku ?? ""}</strong>
           {currentReviewIndex >= 0 && (
             <span>
-              第 {(reviewPage - 1) * 10 + currentReviewIndex + 1} / {exceptionTotal} 条
+              第 {(reviewPage - 1) * REVIEW_PAGE_SIZE + currentReviewIndex + 1} / {exceptionTotal} 条
             </span>
           )}
         </div>

@@ -30,8 +30,8 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
   }, [batch?.jobs]);
 
   const refreshAfterJob = useEffectEvent(() => load(true));
-  const announceJob = useEffectEvent((job: Job) => {
-    if (!mounted.current) return;
+  const announceJob = useEffectEvent((job: Job, completedBatchId: number | undefined) => {
+    if (!mounted.current || batch?.id !== completedBatchId) return;
     if (!announcedJobs.current.has(job.id)) {
       announcedJobs.current.add(job.id);
       if (job.status === "succeeded") {
@@ -41,6 +41,7 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
       }
     }
   });
+  const batchId = batch?.id;
   const activeJobId = activeJob?.id;
   const activeJobStatus = activeJob?.status;
   useEffect(() => {
@@ -55,7 +56,7 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
         if (job.status === "succeeded" || job.status === "failed") {
           pollingJob.current = null;
           await refreshAfterJob();
-          announceJob(job);
+          announceJob(job, batchId);
           return;
         }
         await wait(1500);
@@ -73,7 +74,7 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
       cancelled = true;
       if (pollingJob.current === activeJobId) pollingJob.current = null;
     };
-  }, [activeJobId, activeJobStatus, message]);
+  }, [batchId, activeJobId, activeJobStatus, message]);
 
   return activeJob;
 }
