@@ -5,6 +5,10 @@ import { join } from "node:path";
 import { createCheckRepository } from "./frontend-check-support.mjs";
 
 let repository;
+const complexFunction =
+  "export function example(value: number) { " +
+  Array.from({ length: 10 }, (_, index) => `if (value === ${index}) return ${index};`).join(" ") +
+  " return -1; }";
 beforeEach(() => {
   repository = createCheckRepository("check-lint.mjs", "export const legacy: any = 1;\n");
 });
@@ -34,13 +38,7 @@ for (const [name, source, rule] of [
     "export function example(a: number, b: number, c: number, d: number, e: number, f: number) { return a+b+c+d+e+f; }",
     "max-params"
   ],
-  [
-    "复杂度",
-    "export function example(value: number) { " +
-      Array.from({ length: 10 }, (_, index) => `if (value === ${index}) return ${index};`).join(" ") +
-      " return -1; }",
-    "complexity"
-  ]
+  ["复杂度", complexFunction, "complexity"]
 ]) {
   test(`incremental checks reject ${name} errors without rewriting Chinese paths`, () => {
     const file = `frontend/src/pages/batch-detail/新增 ${name}.tsx`;
@@ -54,6 +52,21 @@ for (const [name, source, rule] of [
     assert.equal(valid.status, 0, valid.stdout + valid.stderr);
   });
 }
+
+for (const path of ["App.tsx", "app/Workspace.tsx"]) {
+  test(`app entry complexity gate rejects ${path}`, () => {
+    repository.write(`frontend/src/${path}`, complexFunction);
+    const result = repository.check();
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, /complexity/);
+  });
+}
+
+test("app test support stays outside production complexity rules", () => {
+  repository.write("frontend/src/app/appTestSupport.ts", complexFunction);
+  const result = repository.check();
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+});
 
 test("CI ranges check all commits and reject invalid references", () => {
   const base = repository.git("rev-parse", "HEAD");
