@@ -105,7 +105,7 @@ class WorkerProcessLifecycleTests(unittest.TestCase):
                     "--poll-interval",
                     "0.05",
                 ],
-                cwd=Path(__file__).resolve().parents[1],
+                cwd=Path(__file__).resolve().parents[2],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
