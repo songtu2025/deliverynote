@@ -6,7 +6,7 @@ import pandas as pd
 
 from ..application import project_split
 from ..processing.models import (EXCEPTION_COLUMNS, IMPORT_COLUMNS, BatchResult)
-from ..pipeline import (build_manual_import_rows, enrich_pending_import_rows)
+from ..processing.pending import (build_manual_import_rows, enrich_pending_import_rows)
 from ..self_operated_inbound import INBOUND_TEMPLATE_COLUMNS
 from ..web.models import ExceptionRecord
 

@@ -14,7 +14,7 @@ from .processing.models import (
     POSITION_SOURCE_COLUMNS,
     POSITION_VALUE_COLUMNS,
 )
-from .pipeline import (normalize_delivery_sheet)
+from .processing.delivery_sites import (normalize_delivery_sheet)
 from .self_operated_inbound import (
     INBOUND_COLUMNS as SELF_OPERATED_INBOUND_COLUMNS,
     INBOUND_TEMPLATE_COLUMNS,

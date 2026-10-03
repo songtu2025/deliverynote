@@ -14,7 +14,8 @@ try:
         validate_supplier_frame,
     )
     from delivery_note.processing.models import (BatchResult)
-    from delivery_note.pipeline import (normalize_delivery_sheet, process_data)
+    from delivery_note.processing.delivery_sites import (normalize_delivery_sheet)
+    from delivery_note.pipeline import (process_data)
 except ImportError:
     resolve_supplier = None
     SupplierIdentity = None
@@ -24,7 +25,7 @@ except ImportError:
 
 try:
     from delivery_note.processing.models import (OverreceiptPolicy)
-    from delivery_note.pipeline import (build_overreceipt_allowances)
+    from delivery_note.processing.overreceipt import (build_overreceipt_allowances)
 except ImportError:
     OverreceiptPolicy = None
     build_overreceipt_allowances = None
@@ -36,7 +37,7 @@ except ImportError:
 
 try:
     from delivery_note.processing.models import (PENDING_COLUMNS)
-    from delivery_note.pipeline import (
+    from delivery_note.processing.pending import (
         build_manual_import_rows,
         enrich_pending_import_rows,
     )

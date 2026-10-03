@@ -14,11 +14,8 @@ from .excel_io import (
     write_delivery_workbook,
 )
 from .processing.models import (BatchResult)
-from .pipeline import (
-    build_manual_import_rows,
-    enrich_pending_import_rows,
-    process_data,
-)
+from .processing.pending import (build_manual_import_rows, enrich_pending_import_rows)
+from .pipeline import (process_data)
 
 BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
