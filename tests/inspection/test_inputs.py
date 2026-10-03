@@ -1,15 +1,81 @@
-import pandas as pd
-from openpyxl import Workbook
+from unittest.mock import patch
 
+import pandas as pd
+from openpyxl import Workbook, load_workbook
+
+import delivery_note.excel.templates as template_module
+import delivery_note.inspection.workbooks as workbook_module
+from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
 from delivery_note.input_inspection import (
     inspect_input_version,
+    inspect_input_version_with_preview,
     preview_input_version,
+    preview_input_version_page,
 )
 from delivery_note.processing.models import IMPORT_COLUMNS
+from tests.support.excel import make_template_preview_workbook
 from tests.support.inspection import InputInspectionCase
 
 
 class InputInspectionTests(InputInspectionCase):
+    def test_template_preview_and_pages_use_active_sheet(self) -> None:
+        for kind, columns in (
+            ("template", IMPORT_COLUMNS),
+            ("inbound_template", INBOUND_TEMPLATE_COLUMNS),
+        ):
+            for active_index in (0, 1):
+                for auxiliary_valid in (False, True):
+                    with self.subTest(
+                        kind=kind, index=active_index, valid=auxiliary_valid
+                    ):
+                        path = self.root / f"{kind}.xlsx"
+                        workbook = make_template_preview_workbook(
+                            kind, active_index, auxiliary_valid=auxiliary_valid
+                        )
+                        workbook.save(path)
+                        summary = inspect_input_version(kind, path)
+                        result = inspect_input_version_with_preview(kind, path, 0, 1)
+                        page = preview_input_version_page(kind, path, 1, 1, summary)
+                        self.assertEqual(summary, result["summary"])
+                        self.assertEqual(summary["columns"], columns)
+                        self.assertEqual(summary["row_count"], 2)
+                        self.assertEqual(
+                            result["preview"]["rows"][0][columns[0]], "活动示例"
+                        )
+                        self.assertEqual(page["rows"][0][columns[0]], "活动数据")
+                        self.assertEqual(page["columns"], columns)
+                        self.assertEqual(page["total"], 2)
+                        self.assertIsNone(page["rows"][0][columns[-1]])
+                        self.assertIsNone(page["rows"][0][columns[-2]])
+
+    def test_template_inspection_rejects_invalid_active_sheet(self) -> None:
+        for kind, header_row in (("template", 2), ("inbound_template", 1)):
+            with self.subTest(kind=kind):
+                path = self.root / f"{kind}.xlsx"
+                workbook = make_template_preview_workbook(kind)
+                workbook.worksheets[1].cell(row=header_row, column=1).value = "错误表头"
+                workbook.save(path)
+                with self.assertRaisesRegex(ValueError, "表头与预期字段不一致"):
+                    inspect_input_version_with_preview(kind, path, 0, 1)
+
+    def test_template_inspection_does_not_add_workbook_parses(self) -> None:
+        for kind in ("template", "inbound_template"):
+            with self.subTest(kind=kind):
+                path = self.root / f"{kind}.xlsx"
+                make_template_preview_workbook(kind).save(path)
+                with (
+                    patch.object(
+                        template_module, "load_workbook", wraps=load_workbook
+                    ) as load,
+                    patch.object(
+                        workbook_module.pd, "read_excel", wraps=pd.read_excel
+                    ) as read,
+                ):
+                    inspect_input_version_with_preview(kind, path, 0, 1)
+                self.assertEqual(load.call_count, 1)
+                self.assertEqual(read.call_count, 1)
+                self.assertEqual(read.call_args.kwargs.get("sheet_name"), "活动模板")
+
     def test_all_input_kinds_are_read_and_template_uses_second_row_headers(
         self,
     ) -> None:

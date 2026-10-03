@@ -6,13 +6,16 @@ from pathlib import Path
 import pandas as pd
 from openpyxl import Workbook
 
+from ..excel.templates import (
+    _validate_import_template_sheet,
+    _validate_inbound_template_sheet,
+    _validated_template_sheet_name,
+)
 from ..excel_io import (
     read_position_workbook,
     read_product_workbook,
     read_purchase_workbook,
     read_supplier_workbook,
-    validate_self_operated_template_workbook,
-    validate_template_workbook,
 )
 from ..processing.models import POSITION_SOURCE_COLUMNS
 
@@ -20,15 +23,15 @@ from ..processing.models import POSITION_SOURCE_COLUMNS
 def _read_template_workbook(path: Path) -> pd.DataFrame:
     """读取以第二行作为表头的交货模板。"""
 
-    validate_template_workbook(path)
-    return pd.read_excel(path, header=1, usecols="A:G")
+    sheet_name = _validated_template_sheet_name(path, _validate_import_template_sheet)
+    return pd.read_excel(path, sheet_name=sheet_name, header=1, usecols="A:G")
 
 
 def _read_self_operated_template_workbook(path: Path) -> pd.DataFrame:
     """读取自营仓入库模板并保持原字段范围。"""
 
-    validate_self_operated_template_workbook(path)
-    return pd.read_excel(path, header=0, usecols="A:T")
+    sheet_name = _validated_template_sheet_name(path, _validate_inbound_template_sheet)
+    return pd.read_excel(path, sheet_name=sheet_name, header=0, usecols="A:T")
 
 
 def _read_frame(kind: str, path: Path) -> pd.DataFrame:

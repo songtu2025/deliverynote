@@ -1,5 +1,6 @@
 """交货和自营入库模板校验。"""
 
+from collections.abc import Callable
 from copy import copy
 from pathlib import Path
 from typing import cast
@@ -10,7 +11,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from ..inbound.models import INBOUND_TEMPLATE_COLUMNS
 from ..processing.models import IMPORT_COLUMNS
-from .styles import _StyledCell, _excel_value
+from .styles import _excel_value, _StyledCell
 
 
 def _validate_template_headers(
@@ -29,39 +30,57 @@ def _validate_template_headers(
         raise ValueError(message)
 
 
-def validate_template_workbook(path: Path) -> None:
-    """只读校验官方模板的 A:G 表头和示例格式行。"""
+def _validated_template_sheet_name(
+    path: Path, validator: Callable[[Worksheet], None]
+) -> str:
+    """校验活动工作表并返回表名，供读取方复用本次选表结果。"""
+
     workbook = load_workbook(path, read_only=True, data_only=False)
     try:
         sheet = cast(Worksheet, workbook.active)
-        _validate_template_headers(
-            sheet, IMPORT_COLUMNS, row=2, message="官方模板表头与预期字段不一致"
-        )
-        example_cells = [sheet.cell(row=3, column=column) for column in range(1, 8)]
-        if not any(
-            cell.value is not None or getattr(cell, "has_style", False)
-            for cell in example_cells
-        ):
-            raise ValueError("官方模板缺少第 3 行示例格式")
+        validator(sheet)
+        return sheet.title
     finally:
         workbook.close()
+
+
+def _validate_import_template_sheet(sheet: Worksheet) -> None:
+    """校验交货表头，以及任意示例单元格中的值或样式。"""
+
+    _validate_template_headers(
+        sheet, IMPORT_COLUMNS, row=2, message="官方模板表头与预期字段不一致"
+    )
+    example_cells = [sheet.cell(row=3, column=column) for column in range(1, 8)]
+    if not any(
+        cell.value is not None or getattr(cell, "has_style", False)
+        for cell in example_cells
+    ):
+        raise ValueError("官方模板缺少第 3 行示例格式")
+
+
+def _validate_inbound_template_sheet(sheet: Worksheet) -> None:
+    """保持积加入库表头和第二行示例存在性的校验规则。"""
+
+    _validate_template_headers(
+        sheet,
+        INBOUND_TEMPLATE_COLUMNS,
+        row=1,
+        message="积加入库模板表头与预期字段不一致",
+    )
+    if sheet.max_row < 2:
+        raise ValueError("积加入库模板缺少第 2 行示例格式")
+
+
+def validate_template_workbook(path: Path) -> None:
+    """只读校验官方模板的 A:G 表头和示例格式行。"""
+
+    _validated_template_sheet_name(path, _validate_import_template_sheet)
 
 
 def validate_self_operated_template_workbook(path: Path) -> None:
     """只读校验积加入库模板表头和样式示例行。"""
-    workbook = load_workbook(path, read_only=True, data_only=False)
-    try:
-        sheet = cast(Worksheet, workbook.active)
-        _validate_template_headers(
-            sheet,
-            INBOUND_TEMPLATE_COLUMNS,
-            row=1,
-            message="积加入库模板表头与预期字段不一致",
-        )
-        if sheet.max_row < 2:
-            raise ValueError("积加入库模板缺少第 2 行示例格式")
-    finally:
-        workbook.close()
+
+    _validated_template_sheet_name(path, _validate_inbound_template_sheet)
 
 
 def _populate_import_sheet(

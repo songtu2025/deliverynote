@@ -1,10 +1,54 @@
-from tests.support.web_api import WebApiCase
 from io import BytesIO
 
-from tests.support.excel import make_import_template
+from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
+from delivery_note.processing.models import IMPORT_COLUMNS
+from tests.support.excel import make_import_template, make_template_preview_workbook
+from tests.support.web_api import WebApiCase
 
 
 class WebApiTests(WebApiCase):
+    def test_uploaded_template_summary_and_preview_use_active_sheet(self) -> None:
+        admin_headers = self.login("admin", "admin-pass")
+        for kind, columns in (
+            ("template", IMPORT_COLUMNS),
+            ("inbound_template", INBOUND_TEMPLATE_COLUMNS),
+        ):
+            with self.subTest(kind=kind):
+                workbook = make_template_preview_workbook(kind)
+                payload = BytesIO()
+                workbook.save(payload)
+                uploaded = self.client.post(
+                    f"/api/input-versions/{kind}",
+                    headers=admin_headers,
+                    data={"name": f"active-{kind}", "activate": "false"},
+                    files={"file": ("template.xlsx", BytesIO(payload.getvalue()))},
+                )
+                self.assertEqual(uploaded.status_code, 201, uploaded.text)
+                version_id = uploaded.json()["id"]
+                result = self.client.get(
+                    f"/api/input-versions/{version_id}/inspection?offset=0&limit=1",
+                    headers=admin_headers,
+                )
+                summary = self.client.get(
+                    f"/api/input-versions/{version_id}/summary", headers=admin_headers
+                )
+                page = self.client.get(
+                    f"/api/input-versions/{version_id}/preview?offset=1&limit=1",
+                    headers=admin_headers,
+                )
+                for response in (result, summary, page):
+                    self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(result.json()["summary"], summary.json())
+                self.assertEqual(summary.json()["columns"], columns)
+                self.assertEqual(summary.json()["row_count"], 2)
+                self.assertEqual(
+                    result.json()["preview"]["rows"][0][columns[0]], "活动示例"
+                )
+                self.assertEqual(page.json()["rows"][0][columns[0]], "活动数据")
+                self.assertEqual(page.json()["columns"], columns)
+                self.assertIsNone(page.json()["rows"][0][columns[-1]])
+                self.assertIsNone(page.json()["rows"][0][columns[-2]])
+
     def test_template_upload_rejects_empty_example_without_changing_versions(
         self,
     ) -> None:
