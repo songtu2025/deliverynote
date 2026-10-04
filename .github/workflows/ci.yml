@@ -98,6 +98,8 @@ jobs:
         env:
           LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: npm run lint -- --base "$LINT_BASE"
+      - name: 全量 React 与 TypeScript ESLint
+        run: npm run lint:all
       - name: 重复代码扫描
         run: npm run check:duplicates
       - name: 前端死代码检查

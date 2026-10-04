@@ -33,6 +33,7 @@ for (const [name, source, rule] of [
     'import { useEffect } from "react"; export function Example({ value }: { value: number }) { useEffect(() => { console.log(value); }, []); return null; }',
     "exhaustive-deps"
   ],
+  ["未使用变量", "const unused = 1; export const quantity = 1;", "no-unused-vars"],
   [
     "参数",
     "export function example(a: number, b: number, c: number, d: number, e: number, f: number) { return a+b+c+d+e+f; }",
@@ -51,6 +52,21 @@ for (const [name, source, rule] of [
     const valid = repository.check();
     assert.equal(valid.status, 0, valid.stdout + valid.stderr);
   });
+  if (["Hook", "依赖", "未使用变量"].includes(name)) {
+    test(`full checks reject unchanged ${name} errors and accept their fix`, () => {
+      repository.write("frontend/src/legacy.ts", source);
+      repository.git("add", ".");
+      repository.git("commit", "--quiet", "-m", "unchanged lint error");
+      assert.equal(repository.check().status, 0);
+      const result = repository.check("--all");
+      assert.equal(result.status, 1, result.stdout + result.stderr);
+      assert.match(result.stderr, new RegExp(rule));
+      assert.equal(readFileSync(join(repository.root, "frontend/src/legacy.ts"), "utf8"), source);
+      repository.write("frontend/src/legacy.ts", "export const quantity: number = 1;\n");
+      const valid = repository.check("--all");
+      assert.equal(valid.status, 0, valid.stdout + valid.stderr);
+    });
+  }
 }
 
 for (const path of [
