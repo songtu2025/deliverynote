@@ -1,0 +1,89 @@
+.password-reset-alert {
+  margin-bottom: 16px;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  color: #53605d;
+  font-weight: 650;
+}
+
+.ant-btn:focus-visible,
+.ant-input:focus-visible,
+.ant-select-selector:focus-visible {
+  outline: 3px solid rgba(23, 107, 91, 0.22);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1180px) {
+  .summary-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .summary-metric:nth-child(3) {
+    border-left: none;
+    border-top: 1px solid #e5ebe9;
+  }
+  .summary-equation {
+    border-top: 1px solid #e5ebe9;
+  }
+  .overreceipt-layout {
+    grid-template-columns: 1fr;
+  }
+  .exception-toolbar {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .app-content {
+    padding: 18px;
+  }
+  .brand-name {
+    display: none;
+  }
+  .page-heading,
+  .batch-heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .stage-actions {
+    grid-template-columns: 1fr;
+  }
+  .stage-actions-export {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .stage-actions > .ant-btn {
+    width: 100%;
+  }
+  .batch-primary-actions {
+    justify-content: flex-start;
+  }
+  .workflow-surface {
+    overflow-x: auto;
+    padding: 22px 18px;
+  }
+  .workflow-surface .ant-steps {
+    min-width: 760px;
+  }
+  .summary-strip {
+    grid-template-columns: 1fr 1fr;
+  }
+  .summary-metric,
+  .summary-equation {
+    min-height: 96px;
+    padding: 18px;
+  }
+  .summary-equation strong {
+    font-size: 18px;
+  }
+  .toolbar-count {
+    width: 100%;
+    margin-left: 0;
+  }
+  .overreceipt-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .exception-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+}
