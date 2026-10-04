@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { App as AntApp } from "antd";
 import type { UploadProps } from "antd";
 
@@ -59,6 +59,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     conflictMessage,
     getRevision,
     recordRevision,
+    loadDraft: loadSessionDraft,
     markConflict: invalidateLocalState
   } = session;
   const rowsState = usePositionDraftRows(draft?.id);
@@ -71,7 +72,7 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
 
   const loadDraft = async () => {
     rowMutations.reset();
-    if (!(await session.loadDraft())) return;
+    if (!(await loadSessionDraft())) return;
     importFlow.reset();
     publishFlow.reset();
     setSelectedRowIds([]);
@@ -81,9 +82,9 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
   };
 
   useEffect(() => {
-    void loadDraft();
+    void loadSessionDraft();
     // 创建或恢复由草稿接口决定，目录中的启用版本不触发重复加载。
-  }, []);
+  }, [loadSessionDraft]);
 
   const acceptRevision = (revision: number) => {
     session.acceptRevision(revision);
@@ -178,22 +179,18 @@ export function PositionMaintenance({ onPublished, onBack }: PositionMaintenance
     else options.onSuccess?.({});
   };
 
-  const rowColumns = useMemo(
-    () =>
-      createPositionRowColumns({
-        disabled: actionsDisabled,
-        copying: busyAction === "copy",
-        deleting: busyAction === "delete",
-        deleteConfirmRowId: deleteConfirmation.rowId,
-        onEdit: editor.openEditRow,
-        onCopy: async (row) => {
-          await rowMutations.copy(row);
-        },
-        onDeleteOpenChange: deleteConfirmation.changeRowOpen,
-        onDeleteConfirm: deleteConfirmation.confirmRow
-      }),
-    [actionsDisabled, busyAction, deleteConfirmation.rowId]
-  );
+  const rowColumns = createPositionRowColumns({
+    disabled: actionsDisabled,
+    copying: busyAction === "copy",
+    deleting: busyAction === "delete",
+    deleteConfirmRowId: deleteConfirmation.rowId,
+    onEdit: editor.openEditRow,
+    onCopy: async (row) => {
+      await rowMutations.copy(row);
+    },
+    onDeleteOpenChange: deleteConfirmation.changeRowOpen,
+    onDeleteConfirm: deleteConfirmation.confirmRow
+  });
 
   if (!draft) {
     return <PositionDraftEntry loading={entryLoading} error={entryError} onBack={onBack} onRetry={loadDraft} />;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError } from "../../api";
 import type { PositionDraft } from "../../types";
@@ -86,7 +86,7 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
     }
   };
 
-  const loadDraft = async (): Promise<boolean> => {
+  const loadDraft = useCallback(async (): Promise<boolean> => {
     const request = ++entryRequestRef.current;
     metadataRequestRef.current += 1;
     setMetadataLoading(false);
@@ -95,7 +95,7 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
     try {
       const nextDraft = await createOrResumeDraft();
       if (request !== entryRequestRef.current) return false;
-      recordRevision(nextDraft.revision);
+      revisionRef.current = nextDraft.revision;
       setDraft(nextDraft);
       setConflictMessage(null);
       setMetadataError(null);
@@ -109,7 +109,7 @@ export function usePositionDraftSession(onConflict: (messageText: string) => voi
     } finally {
       if (request === entryRequestRef.current) setEntryLoading(false);
     }
-  };
+  }, []);
 
   const acceptRevision = (revision: number) => {
     recordRevision(revision);
