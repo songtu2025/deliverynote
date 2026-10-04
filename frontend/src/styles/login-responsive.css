@@ -1,0 +1,114 @@
+@media (min-width: 901px) and (max-width: 1180px) {
+  .login-brand-lockup,
+  .login-story-copy,
+  .login-story-illustration {
+    left: 40px;
+  }
+
+  .login-story-copy h1 {
+    width: calc(100vw - 600px);
+    font-size: 38px;
+    letter-spacing: -0.8px;
+    line-height: 54px;
+  }
+
+  .login-story-copy p {
+    width: calc(100vw - 600px);
+    font-size: 16px;
+    line-height: 28px;
+  }
+
+  .login-story-illustration {
+    width: calc(100% - 80px);
+  }
+}
+
+@media (max-width: 900px) {
+  .login-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 196px minmax(648px, calc(100svh - 196px));
+  }
+
+  .login-story {
+    min-height: 196px;
+  }
+
+  .login-brand-lockup {
+    top: 26px;
+    left: 24px;
+    height: 30px;
+    gap: 12px;
+  }
+
+  .login-company-mark {
+    font-size: 18px;
+    letter-spacing: 3px;
+  }
+
+  .login-brand-divider {
+    height: 22px;
+  }
+
+  .login-product-name {
+    font-size: 15px;
+    letter-spacing: 0;
+  }
+
+  .login-story-copy {
+    top: 94px;
+    right: 24px;
+    left: 24px;
+  }
+
+  .login-story-copy h1 {
+    width: auto;
+    font-size: 25px;
+    letter-spacing: -0.5px;
+    line-height: 36px;
+  }
+
+  .login-story-copy p,
+  .login-story-illustration {
+    display: none;
+  }
+
+  .login-panel {
+    min-height: 648px;
+  }
+
+  .login-form-wrap {
+    top: 46px;
+    right: 24px;
+    left: 24px;
+    width: auto;
+    transform: none;
+  }
+
+  .login-form-header {
+    margin-bottom: 28px;
+  }
+
+  .login-form-header h2 {
+    font-size: 32px;
+    letter-spacing: -0.5px;
+    line-height: 44px;
+  }
+
+  .login-form-header p {
+    margin-top: 8px;
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  .login-form .ant-form-item {
+    margin-bottom: 20px;
+  }
+
+  .login-form .ant-form-item-label {
+    padding-bottom: 6px;
+  }
+
+  .login-footer {
+    bottom: 27px;
+  }
+}
