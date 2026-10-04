@@ -1,0 +1,110 @@
+@media (max-width: 1279px) {
+  .purchase-sync-result {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "copy"
+      "diff"
+      "warning"
+      "action";
+  }
+
+  .purchase-sync-diff {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container admin-workspace (max-width: 900px) {
+  .audit-log-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .audit-search-field {
+    grid-column: 1 / -1;
+  }
+  .input-data-kind-list {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .input-data-status-header,
+  .input-data-context-grid,
+  .integration-config-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .input-data-status-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .input-data-status-actions .ant-btn {
+    width: auto;
+  }
+  .input-data-preview-heading,
+  .input-data-tab-heading,
+  .admin-panel-intro {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .input-data-preview-summary,
+  .user-summary {
+    justify-content: flex-start;
+  }
+  .integration-config-summary {
+    border-right: 0;
+    border-bottom: 1px solid var(--dn-border);
+  }
+}
+
+@container admin-workspace (max-width: 480px) {
+  .input-data-kind-list,
+  .audit-log-toolbar,
+  .integration-config-credentials {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .input-data-status-time {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+
+/* 同步结果与当前资料保持相近的信息密度，避免候选状态过度占据首屏。 */
+@media (min-width: 1280px) {
+  .purchase-sync-card {
+    gap: 8px;
+    padding: 10px 14px;
+  }
+
+  .purchase-sync-heading {
+    padding-bottom: 8px;
+  }
+
+  .purchase-sync-heading > div > .ant-typography {
+    margin-top: 1px;
+    line-height: 1.4;
+  }
+
+  .purchase-sync-result {
+    grid-template-columns: minmax(0, 1fr) 206px;
+    grid-template-areas:
+      "copy action"
+      "diff diff"
+      "warning warning";
+    gap: 8px 16px;
+    padding: 10px;
+  }
+
+  .purchase-sync-diff > div {
+    padding: 7px 10px;
+  }
+
+  .purchase-sync-result > .ant-alert {
+    align-self: stretch;
+    padding: 9px 12px;
+  }
+
+  .purchase-sync-result > .ant-btn {
+    align-self: center;
+    min-width: 206px;
+  }
+
+  .purchase-sync-time {
+    margin-top: -4px;
+  }
+}

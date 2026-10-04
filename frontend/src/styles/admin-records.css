@@ -1,0 +1,117 @@
+.user-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-panel-busy {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed #cad6d2;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.audit-log-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.45fr) minmax(190px, 0.8fr) minmax(180px, 0.75fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+  border: 1px solid #e2e9e7;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.audit-filter-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.audit-filter-field label {
+  color: #53605d;
+  font-size: 12px;
+  font-weight: 650;
+}
+.audit-filter-field .ant-select,
+.audit-filter-field .ant-input-affix-wrapper {
+  width: 100%;
+}
+.audit-result-count {
+  padding-bottom: 6px;
+  white-space: nowrap;
+}
+.audit-date {
+  font-variant-numeric: tabular-nums;
+}
+.audit-system-actor {
+  color: #53605d;
+}
+.audit-entity {
+  color: #2f5149;
+  font-weight: 650;
+}
+.audit-log-panel .ant-table-tbody > tr > td {
+  padding-block: 13px;
+}
+.audit-action-cell {
+  font-weight: 650;
+}
+.audit-action-processing {
+  color: #176b5b;
+}
+.audit-action-success {
+  color: #287d3c;
+}
+.audit-action-error {
+  color: #b42318;
+}
+.audit-action-warning {
+  color: #a35f08;
+}
+.audit-action-default {
+  color: #53605d;
+}
+
+.audit-log-panel .ant-table-cell,
+.user-management-panel .ant-table-cell,
+.position-maintenance .ant-table-cell {
+  white-space: nowrap;
+}
+
+.position-save-status .ant-alert-description {
+  color: #40514c;
+  font-size: 13px;
+}
+
+.position-maintenance > .ant-card {
+  border-color: #d8e2df;
+}
+
+.position-filter-field .ant-input-affix-wrapper,
+.position-filter-field .ant-select {
+  width: 100%;
+}
+.position-filter-scope .ant-checkbox-wrapper {
+  min-height: 32px;
+  align-items: center;
+}
+
+.position-maintenance .ant-alert,
+.input-data-layout .ant-alert,
+.admin-panel-card .ant-alert {
+  border-radius: 8px;
+}
+
+.position-maintenance .ant-descriptions-bordered,
+.input-data-layout .ant-descriptions-bordered {
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.admin-maintenance-pc .ant-empty-normal {
+  margin-block: 44px;
+}

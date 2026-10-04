@@ -1,0 +1,179 @@
+/* 采购同步以“结果确认”为主线，避免警告信息挤压为窄栏。 */
+.purchase-sync-card {
+  gap: 16px;
+  padding: 18px 20px;
+  border-color: var(--dn-primary-border);
+  background: var(--dn-surface);
+  box-shadow: 0 1px 2px rgba(20, 64, 54, 0.035);
+}
+
+.purchase-sync-heading {
+  align-items: flex-start;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #e8efec;
+}
+
+.purchase-sync-heading h5 {
+  color: var(--dn-ink);
+  font-size: 16px !important;
+  font-weight: 680;
+}
+
+.purchase-sync-scope-tag {
+  margin-inline-end: 0;
+  font-weight: 600;
+}
+
+.purchase-sync-heading > div > .ant-typography {
+  display: block;
+  max-width: 920px;
+  margin-top: 4px;
+  color: var(--dn-muted);
+  line-height: 1.55;
+}
+
+.purchase-sync-heading > .ant-btn {
+  min-width: 96px;
+  margin-top: 1px;
+}
+
+.purchase-sync-result {
+  grid-template-columns: minmax(270px, 0.9fr) minmax(440px, 1.45fr);
+  grid-template-areas:
+    "copy diff"
+    "warning warning"
+    "action action";
+  gap: 14px 20px;
+  padding: 18px;
+  border-color: var(--dn-primary-border);
+  border-radius: 9px;
+  background: var(--dn-canvas);
+}
+
+.purchase-sync-result-copy {
+  grid-area: copy;
+}
+.purchase-sync-result-copy > .anticon {
+  color: var(--dn-success);
+}
+.purchase-sync-result-copy > div {
+  gap: 3px;
+}
+.purchase-sync-result-copy strong {
+  color: var(--dn-ink);
+  font-size: 15px;
+}
+.purchase-sync-result-copy .ant-typography {
+  color: var(--dn-muted);
+  line-height: 1.55;
+}
+
+.purchase-sync-actions {
+  grid-area: action;
+  justify-self: start;
+}
+
+.purchase-sync-actions .ant-btn-link {
+  padding-inline: 0;
+}
+
+.purchase-sync-diff {
+  grid-area: diff;
+  grid-template-columns: repeat(4, minmax(96px, 1fr));
+  border-color: var(--dn-border);
+  background: var(--dn-surface);
+}
+
+.purchase-sync-diff > div {
+  padding: 10px 12px;
+  border-left-color: #e7eeeb;
+}
+.purchase-sync-diff dt {
+  color: var(--dn-muted);
+  font-size: 11px;
+}
+.purchase-sync-diff dd {
+  color: var(--dn-ink);
+  font-size: 15px;
+}
+
+.purchase-sync-result > .ant-alert {
+  grid-area: warning;
+  min-width: 0;
+  margin: 0;
+  border-color: #f0d99e;
+  background: #fffaf0;
+}
+
+.purchase-sync-result > .ant-alert .ant-alert-message {
+  color: #8d641b;
+}
+.purchase-sync-result > .ant-alert .ant-alert-description {
+  color: #725d35;
+  line-height: 1.55;
+}
+.purchase-sync-result > .ant-alert .ant-alert-action {
+  align-self: center;
+}
+
+.purchase-sync-result > .ant-btn {
+  grid-area: action;
+  justify-self: start;
+  min-width: 236px;
+}
+
+.self-operated-sync-card {
+  margin-bottom: 16px;
+}
+.self-operated-sync-card .purchase-sync-result > .ant-space {
+  grid-area: action;
+  justify-self: start;
+}
+
+.purchase-sync-permission-note {
+  grid-area: action;
+  justify-self: start;
+  color: var(--dn-muted);
+  font-size: 13px;
+}
+
+/* 异常清单在侧边完成核对，避免离开当前候选版本的确认上下文。 */
+.purchase-sync-issues-drawer.ant-drawer-right > .ant-drawer-content-wrapper {
+  bottom: auto;
+  height: auto;
+  max-height: calc(100vh - 32px);
+}
+
+.purchase-sync-issues-drawer .ant-drawer-content,
+.purchase-sync-issues-drawer .ant-drawer-section {
+  height: auto;
+  max-height: calc(100vh - 32px);
+}
+
+.purchase-sync-issues-drawer .ant-drawer-body {
+  flex: none;
+  max-height: calc(100vh - 88px);
+  overflow: auto;
+  padding: 18px 20px 22px;
+  background: var(--dn-canvas);
+}
+
+.purchase-sync-issues-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.purchase-sync-issues-table .ant-table {
+  border: 1px solid var(--dn-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.purchase-sync-issues-table .ant-table-thead > tr > th {
+  color: var(--dn-muted);
+  background: #f5f8f7;
+  font-size: 12px;
+}

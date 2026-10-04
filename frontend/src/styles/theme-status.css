@@ -1,0 +1,150 @@
+.summary-metric.import,
+.overreceipt-effect-notice,
+.input-data-context,
+.purchase-sync-card {
+  background: var(--dn-primary-soft);
+  border-color: var(--dn-primary-border);
+}
+.next-action,
+.job-indicator,
+.import-value,
+.conservation-ok,
+.input-data-kind-button .anticon,
+.audit-action-processing,
+.overreceipt-allowance-value {
+  color: var(--dn-primary);
+}
+.summary-metric,
+.summary-equation {
+  border-left-color: var(--dn-border);
+}
+.summary-metric.import strong,
+.summary-equation strong {
+  color: var(--dn-primary);
+}
+.summary-metric.pending strong,
+.pending-value,
+.audit-action-warning {
+  color: var(--dn-warning);
+}
+.workflow-surface .ant-steps-item-process .ant-steps-item-icon {
+  background: var(--dn-primary);
+  border-color: var(--dn-primary);
+}
+.workflow-surface .ant-steps-item-finish .ant-steps-item-icon {
+  border-color: var(--dn-primary);
+}
+.workflow-surface .ant-steps-item-finish .ant-steps-icon,
+.workflow-surface .ant-steps-item-process .ant-steps-item-title,
+.workflow-surface .ant-steps-item-finish .ant-steps-item-title {
+  color: var(--dn-primary);
+}
+.workflow-surface .ant-steps-item-finish .ant-steps-item-tail::after {
+  background-color: var(--dn-primary-border);
+}
+
+.overreceipt-scope-switcher,
+.overreceipt-current-card,
+.overreceipt-history-card,
+.admin-panel-card,
+.position-maintenance > .ant-card {
+  border-color: var(--dn-border);
+}
+.overreceipt-scope-switcher button.is-active {
+  color: var(--dn-primary);
+  border-color: var(--dn-primary-border);
+  background: var(--dn-primary-soft);
+}
+.overreceipt-scope-switcher button:hover {
+  border-color: var(--dn-primary-border);
+  background: #f3f9f7;
+}
+.overreceipt-metric,
+.overreceipt-impact-preview,
+.admin-panel-intro,
+.audit-log-toolbar,
+.input-data-workspace-tabs > .ant-tabs-nav {
+  background: var(--dn-surface-muted);
+}
+.overreceipt-metric.is-accent {
+  background: var(--dn-primary-soft);
+}
+.overreceipt-metric.is-accent > strong {
+  color: var(--dn-primary);
+}
+.overreceipt-current-card .ant-card-head,
+.overreceipt-history-card .ant-card-head {
+  border-bottom-color: var(--dn-border);
+}
+.input-data-layout .input-data-kind-button {
+  border-color: var(--dn-border);
+  background: var(--dn-surface-muted);
+}
+.input-data-layout .input-data-kind-button:not(.ant-btn-primary):hover {
+  border-color: var(--dn-primary-border);
+  background: #f3f9f7;
+}
+.input-data-layout .input-data-kind-button.is-selected {
+  color: #144036;
+  border-color: var(--dn-primary-border);
+  background: var(--dn-primary-soft);
+  box-shadow: inset 0 -3px 0 var(--dn-primary);
+}
+.input-data-status-header.is-ready,
+.purchase-sync-result,
+.purchase-sync-result.is-active {
+  border-color: var(--dn-primary-border);
+  background: var(--dn-surface);
+}
+.purchase-sync-progress-track span {
+  background: var(--dn-primary);
+}
+.input-data-context-summary .ant-btn {
+  color: var(--dn-primary);
+}
+.input-data-active-version-row > td {
+  background: #f3f9f7 !important;
+}
+.audit-entity,
+.position-reference-value {
+  color: #2f5f55;
+}
+
+.ant-alert-success {
+  border-color: #cfe8dd;
+  background: #f3fbf7;
+}
+.ant-alert-warning {
+  border-color: #f1dfb6;
+  background: #fffaf0;
+}
+.ant-alert-error {
+  border-color: #f2d1d4;
+  background: #fff6f7;
+}
+.ant-alert-error .ant-alert-message,
+.audit-action-error {
+  color: var(--dn-danger);
+}
+.ant-alert-warning .ant-alert-message {
+  color: var(--dn-warning);
+}
+.ant-tag {
+  border-radius: 4px;
+}
+.ant-tag.ant-tag-processing,
+.ant-tag.purchase-sync-scope-tag {
+  color: #426f63 !important;
+  background: #f7fbf9 !important;
+  border-color: #c8ddd7 !important;
+}
+.ant-tag.ant-tag-success {
+  color: var(--dn-success) !important;
+  background: #f3faf6 !important;
+  border-color: #cfe3d8 !important;
+}
+.ant-tag-blue {
+  color: var(--dn-primary);
+  background: var(--dn-primary-soft);
+  border-color: var(--dn-primary-border);
+}

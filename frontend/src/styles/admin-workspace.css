@@ -1,0 +1,145 @@
+/* 根据内容区而非屏幕宽度调整管理员工作台，兼顾侧栏与浏览器缩放。 */
+.page-shell.admin-maintenance-pc {
+  width: 100%;
+  max-width: 1600px;
+  min-width: 0;
+  container: admin-workspace / inline-size;
+}
+
+.admin-maintenance-heading {
+  margin-bottom: 14px;
+}
+
+.admin-maintenance-tabs > .ant-tabs-nav {
+  margin-bottom: 20px;
+  padding: 0 4px;
+  border-bottom: 1px solid #dfe6e3;
+}
+
+.admin-maintenance-tabs > .ant-tabs-nav .ant-tabs-tab {
+  min-width: 112px;
+  justify-content: center;
+  padding: 13px 12px;
+  font-weight: 650;
+}
+
+.admin-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.admin-section-heading h4 {
+  margin: 0 0 3px !important;
+}
+.admin-section-heading [tabindex="-1"]:focus-visible {
+  outline: 3px solid rgba(5, 82, 71, 0.32);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.input-data-view > .admin-section-heading {
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.input-data-view > .admin-section-heading > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.input-data-view > .admin-section-heading h4 {
+  margin: 0 !important;
+  font-size: 15px !important;
+}
+
+.input-data-view > .admin-section-heading .ant-typography-secondary {
+  font-size: 12px;
+}
+
+.input-workspace,
+.input-data-view,
+.input-data-layout,
+.position-workspace {
+  min-width: 0;
+}
+
+.input-data-layout > .input-data-panel {
+  position: relative;
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch !important;
+  gap: 16px !important;
+  width: 100%;
+}
+
+.input-data-kind-switcher {
+  padding: 10px 12px 12px;
+  overflow: hidden;
+  border: 1px solid #d8e2df;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.input-data-kind-switcher-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 8px;
+}
+
+.input-data-kind-switcher-heading > .ant-typography {
+  font-size: 12px;
+}
+
+.input-data-kind-list {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.input-data-layout .input-data-kind-button {
+  display: flex;
+  height: 42px;
+  min-width: 150px;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  white-space: nowrap;
+  border-color: #e0e7e5;
+  border-radius: 8px;
+  background: #f7f9f8;
+  box-shadow: none;
+}
+
+.input-data-layout .input-data-kind-button:not(.ant-btn-primary):hover {
+  border-color: #b8d8d0;
+  background: #f0f8f5;
+}
+
+.input-data-layout .input-data-kind-button.is-selected {
+  color: #123f36;
+  border-color: #87bcae;
+  background: #e8f4f1;
+  box-shadow: inset 0 -3px 0 #176b5b;
+}
+
+.input-data-kind-button .anticon {
+  color: #176b5b;
+}
+.input-data-kind-pending {
+  color: #a56b16;
+  font-size: 11px;
+}
+
+.input-data-layout .input-data-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}

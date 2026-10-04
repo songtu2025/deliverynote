@@ -1,0 +1,207 @@
+.admin-panel-card {
+  border-color: #d8e2df;
+}
+
+.admin-panel-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  border: 1px solid #e2e9e7;
+  border-radius: 8px;
+  background: #f7f9f8;
+}
+
+.admin-panel-intro .ant-typography {
+  margin-bottom: 0;
+}
+
+.user-summary {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 390px;
+}
+.user-summary .ant-tag,
+.user-name-cell .ant-tag {
+  margin-inline-end: 0;
+}
+.integration-config-panel > .ant-card-body {
+  padding: 0;
+}
+
+.integration-config-provider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--dn-border);
+  background: linear-gradient(90deg, #f2f8f6 0%, #f8fbfa 60%, #fff 100%);
+}
+
+.integration-config-provider-icon {
+  display: grid;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  color: #fff;
+  border-radius: 10px;
+  background: var(--dn-primary);
+  box-shadow: 0 7px 18px rgb(0 91 74 / 16%);
+  font-size: 22px;
+}
+
+.integration-config-provider h4 {
+  margin: 0 0 2px !important;
+  color: #143f36;
+  font-size: 17px;
+}
+
+.integration-config-provider .ant-typography-secondary {
+  font-size: 13px;
+}
+
+.integration-config-workspace {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  min-height: 390px;
+}
+
+.integration-config-summary {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 22px;
+  padding: 24px;
+  border-right: 1px solid var(--dn-border);
+  background: #fbfcfc;
+}
+
+.integration-config-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.integration-config-status > .anticon {
+  margin-top: 3px;
+  font-size: 17px;
+}
+
+.integration-config-status > .is-success {
+  color: #239857;
+}
+.integration-config-status > .is-warning {
+  color: #d48806;
+}
+
+.integration-config-status > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.integration-config-status .ant-typography-secondary {
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.integration-config-facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-block: 1px solid #e5ecea;
+}
+
+.integration-config-facts > div {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  padding: 13px 0;
+}
+
+.integration-config-facts > div + div {
+  border-top: 1px solid #edf1f0;
+}
+.integration-config-facts dt {
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+.integration-config-facts dd {
+  margin: 0;
+  color: #1f3d36;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.integration-config-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.integration-config-security-note > .anticon {
+  margin-top: 3px;
+  color: var(--dn-primary);
+  font-size: 14px;
+}
+
+.integration-config-security-note .ant-typography {
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.integration-config-editor {
+  padding: 24px 26px;
+}
+
+.integration-config-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #edf1f0;
+}
+
+.integration-config-editor-heading h5 {
+  margin: 0 0 3px !important;
+}
+.integration-config-editor-heading .ant-typography-secondary {
+  font-size: 12px;
+}
+.integration-config-editor > .ant-alert {
+  margin-bottom: 16px;
+}
+
+.integration-config-form .ant-form-item {
+  margin-bottom: 18px;
+}
+
+.integration-config-credentials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.integration-config-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 18px;
+  margin-top: 4px;
+  border-top: 1px solid #edf1f0;
+}
+
+.integration-config-actions > .ant-typography {
+  font-size: 12px;
+}

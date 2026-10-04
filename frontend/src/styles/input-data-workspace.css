@@ -1,0 +1,167 @@
+.input-data-workspace {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #d8e2df;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.input-data-workspace-tabs > .ant-tabs-nav {
+  padding: 0 20px;
+  margin: 0;
+  background: #fbfcfc;
+}
+
+.input-data-workspace-tabs > .ant-tabs-nav .ant-tabs-tab {
+  min-width: 124px;
+  justify-content: center;
+  padding: 14px 10px;
+  font-weight: 650;
+}
+
+.input-data-workspace-tabs > .ant-tabs-content-holder {
+  border-top: 1px solid #eef2f1;
+}
+
+.input-data-tab-count {
+  display: inline-grid;
+  min-width: 22px;
+  height: 20px;
+  place-items: center;
+  padding: 0 6px;
+  margin-left: 5px;
+  color: #65716d;
+  font-size: 11px;
+  font-weight: 650;
+  border-radius: 10px;
+  background: #edf2f0;
+}
+
+.ant-tabs-tab-active .input-data-tab-count {
+  color: #176b5b;
+  background: #e0efeb;
+}
+
+.input-data-tab-panel {
+  min-height: 400px;
+  padding: 20px 22px 24px;
+}
+
+.input-data-tab-heading,
+.input-data-preview-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.input-data-tab-heading h5,
+.input-data-preview-heading h5 {
+  margin: 0 0 2px !important;
+}
+
+.input-data-tab-heading > .ant-typography,
+.input-data-preview-heading > .ant-typography {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.input-data-preview-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px 0;
+}
+
+.input-data-preview-metric::before {
+  content: "·";
+  margin: 0 6px;
+}
+
+.input-data-loading {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+}
+
+.input-data-preview-table .ant-table-cell {
+  white-space: nowrap;
+}
+.input-data-preview-table .ant-table-cell:first-child {
+  color: #65716d;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.input-data-maintenance-form h5 {
+  margin: 0 0 6px !important;
+}
+.input-data-maintenance-form .ant-upload-wrapper {
+  display: block;
+}
+.input-data-uploader .ant-upload-drag {
+  padding: 6px 10px;
+  background: #fafcfb;
+}
+.input-data-uploader .ant-upload-drag:hover {
+  border-color: #559889;
+}
+.input-data-uploader .ant-upload-drag-icon {
+  margin-bottom: 7px !important;
+}
+.input-data-uploader .ant-upload-drag-icon .anticon {
+  color: #176b5b !important;
+  font-size: 34px !important;
+}
+.input-data-uploader .ant-upload-text {
+  margin-bottom: 2px !important;
+  font-size: 14px !important;
+}
+.input-data-uploader .ant-upload-hint {
+  font-size: 12px !important;
+}
+.input-data-upload-submit {
+  margin-top: 14px;
+}
+.input-data-upload-impact {
+  margin: 12px 0 0 !important;
+  font-size: 12px;
+}
+
+.input-data-quality-list {
+  width: 100%;
+}
+.input-data-quality-list .ant-tag {
+  margin-inline-end: 0;
+}
+.input-data-quality-panel .ant-alert {
+  padding: 10px 12px;
+}
+
+.input-data-version-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.input-data-version-cell > .ant-typography {
+  max-width: 260px;
+}
+.input-data-active-version-row > td {
+  background: #f3f9f7 !important;
+}
+
+.input-data-layout .ant-table-wrapper,
+.admin-panel-card .ant-table-wrapper,
+.position-maintenance .ant-table-wrapper {
+  overflow: hidden;
+  border: 1px solid #e2e9e7;
+  border-radius: 8px;
+}
+
+.input-data-layout .ant-table-thead > tr > th,
+.admin-panel-card .ant-table-thead > tr > th,
+.position-maintenance .ant-table-thead > tr > th {
+  background: #f5f8f7;
+}
