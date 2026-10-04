@@ -17,16 +17,12 @@ function parseApiDateTime(value: string): Date {
 
 export function formatBeijingDateTime(value: string): string {
   const date = parseApiDateTime(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleString("zh-CN", { timeZone: BEIJING_TIME_ZONE });
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString("zh-CN", { timeZone: BEIJING_TIME_ZONE });
 }
 
 export function formatBeijingDate(value: string): string {
   const date = parseApiDateTime(value);
-  return Number.isNaN(date.getTime())
-    ? "—"
-    : date.toLocaleDateString("zh-CN", { timeZone: BEIJING_TIME_ZONE });
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("zh-CN", { timeZone: BEIJING_TIME_ZONE });
 }
 
 export function formatBeijingTime(value: string): string {
@@ -34,9 +30,9 @@ export function formatBeijingTime(value: string): string {
   return Number.isNaN(date.getTime())
     ? "—"
     : date.toLocaleTimeString("zh-CN", {
-      timeZone: BEIJING_TIME_ZONE,
-      hour12: false
-    });
+        timeZone: BEIJING_TIME_ZONE,
+        hour12: false
+      });
 }
 
 export function beijingDateTimeParts(date = new Date()): BeijingDateTimeParts {

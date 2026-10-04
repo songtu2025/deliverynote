@@ -15,10 +15,16 @@ describe("browser API authentication", () => {
 
   it("uses cookies without reading or sending the legacy bearer token", async () => {
     const getItem = vi.spyOn(Storage.prototype, "getItem");
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ status: "ok" }),
-      { status: 200, headers: { "Content-Type": "application/json" } }
-    )));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ status: "ok" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          })
+      )
+    );
 
     await api<{ status: string }>("/api/example");
 
@@ -33,7 +39,10 @@ describe("browser API authentication", () => {
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("file")));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("file"))
+    );
 
     await download("/api/example/download", "example.xlsx");
 
@@ -43,26 +52,36 @@ describe("browser API authentication", () => {
   });
 
   it("explains login throttling when the gateway returns HTML", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("<h1>429</h1>", {
-      status: 429,
-      headers: { "Content-Type": "text/html" }
-    })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("<h1>429</h1>", {
+            status: 429,
+            headers: { "Content-Type": "text/html" }
+          })
+      )
+    );
 
-    await expect(api("/api/auth/login", { method: "POST" }))
-      .rejects.toThrow("登录尝试过于频繁，请稍后再试");
+    await expect(api("/api/auth/login", { method: "POST" })).rejects.toThrow("登录尝试过于频繁，请稍后再试");
   });
 
   it("retains a machine-readable error code alongside the display message", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ detail: "提示文案可调整", code: "draft_revision_conflict" }),
-      { status: 409, headers: { "Content-Type": "application/json" } }
-    )));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: "提示文案可调整", code: "draft_revision_conflict" }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" }
+          })
+      )
+    );
 
-    await expect(api("/api/input-drafts/7/rows", { method: "POST" }))
-      .rejects.toMatchObject({
-        status: 409,
-        message: "提示文案可调整",
-        code: "draft_revision_conflict"
-      } satisfies Partial<ApiError>);
+    await expect(api("/api/input-drafts/7/rows", { method: "POST" })).rejects.toMatchObject({
+      status: 409,
+      message: "提示文案可调整",
+      code: "draft_revision_conflict"
+    } satisfies Partial<ApiError>);
   });
 });

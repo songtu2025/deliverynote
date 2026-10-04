@@ -1,3 +1,4 @@
+import SyncDifference from "./SyncDifference";
 import { useState } from "react";
 import { Alert, Button, Popconfirm, Space, Tag, Typography } from "antd";
 import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
@@ -112,24 +113,7 @@ export default function InboundSyncPanel({
               </div>
             </div>
             {syncDetailsOpen && (
-              <dl className="purchase-sync-diff">
-                <div>
-                  <dt>新增匹配项</dt>
-                  <dd>{syncJob.diff.added_lines ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>数量变化项</dt>
-                  <dd>{syncJob.diff.changed_lines ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>移除匹配项</dt>
-                  <dd>{syncJob.diff.removed_lines ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>候选剩余应收总量</dt>
-                  <dd>{syncJob.diff.after_quantity ?? 0}</dd>
-                </div>
-              </dl>
+              <SyncDifference diff={syncJob.diff} changeLabel="数量变化项" totalLabel="候选剩余应收总量" />
             )}
             {syncDetailsOpen && syncJob.warning_count > 0 && (
               <Alert

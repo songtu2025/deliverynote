@@ -56,6 +56,46 @@ export function RuleScopeSwitcher({
   );
 }
 
+function CurrentRuleHeading({
+  name,
+  emptyTitle,
+  onPublish,
+  onRename
+}: {
+  name?: string;
+  emptyTitle: string;
+  onPublish: () => void;
+  onRename?: () => void;
+}) {
+  return (
+    <div className="overreceipt-current-heading">
+      <div>
+        <Typography.Text className="overreceipt-eyebrow">当前启用规则</Typography.Text>
+        {name !== undefined ? (
+          <div className="overreceipt-current-title">
+            <Typography.Title level={4}>{name}</Typography.Title>
+            <Tag color="success" icon={<CheckCircleFilled />}>
+              用于新批次
+            </Tag>
+          </div>
+        ) : (
+          <Typography.Title level={4}>{emptyTitle}</Typography.Title>
+        )}
+      </div>
+      <Space>
+        {name !== undefined ? (
+          <Button icon={<EditOutlined />} aria-label={`重命名 ${name}`} onClick={onRename}>
+            重命名
+          </Button>
+        ) : null}
+        <Button type="primary" icon={<PlusOutlined />} onClick={onPublish}>
+          发布新版本
+        </Button>
+      </Space>
+    </div>
+  );
+}
+
 export function CurrentSelfOperatedRule({
   rule,
   loading,
@@ -69,31 +109,12 @@ export function CurrentSelfOperatedRule({
 }) {
   return (
     <Card className="section-card overreceipt-current-card" loading={loading}>
-      <div className="overreceipt-current-heading">
-        <div>
-          <Typography.Text className="overreceipt-eyebrow">当前启用规则</Typography.Text>
-          {rule ? (
-            <div className="overreceipt-current-title">
-              <Typography.Title level={4}>{rule.name}</Typography.Title>
-              <Tag color="success" icon={<CheckCircleFilled />}>
-                用于新批次
-              </Tag>
-            </div>
-          ) : (
-            <Typography.Title level={4}>尚未启用自营仓超收规则</Typography.Title>
-          )}
-        </div>
-        <Space>
-          {rule ? (
-            <Button icon={<EditOutlined />} aria-label={`重命名 ${rule.name}`} onClick={() => onRename(rule)}>
-              重命名
-            </Button>
-          ) : null}
-          <Button type="primary" icon={<PlusOutlined />} onClick={onPublish}>
-            发布新版本
-          </Button>
-        </Space>
-      </div>
+      <CurrentRuleHeading
+        name={rule?.name}
+        emptyTitle="尚未启用自营仓超收规则"
+        onPublish={onPublish}
+        onRename={rule ? () => onRename(rule) : undefined}
+      />
       {rule ? (
         <div className="overreceipt-metric-grid">
           <div className="overreceipt-metric is-accent">
@@ -127,31 +148,12 @@ export function CurrentDeliveryRule({
 }) {
   return (
     <Card className="section-card overreceipt-current-card" loading={loading}>
-      <div className="overreceipt-current-heading">
-        <div>
-          <Typography.Text className="overreceipt-eyebrow">当前启用规则</Typography.Text>
-          {rule ? (
-            <div className="overreceipt-current-title">
-              <Typography.Title level={4}>{rule.name}</Typography.Title>
-              <Tag color="success" icon={<CheckCircleFilled />}>
-                用于新批次
-              </Tag>
-            </div>
-          ) : (
-            <Typography.Title level={4}>尚未启用普通交货超收规则</Typography.Title>
-          )}
-        </div>
-        <Space>
-          {rule ? (
-            <Button icon={<EditOutlined />} aria-label={`重命名 ${rule.name}`} onClick={() => onRename(rule)}>
-              重命名
-            </Button>
-          ) : null}
-          <Button type="primary" icon={<PlusOutlined />} onClick={onPublish}>
-            发布新版本
-          </Button>
-        </Space>
-      </div>
+      <CurrentRuleHeading
+        name={rule?.name}
+        emptyTitle="尚未启用普通交货超收规则"
+        onPublish={onPublish}
+        onRename={rule ? () => onRename(rule) : undefined}
+      />
       {rule ? (
         <div className="overreceipt-metric-grid">
           <div className="overreceipt-metric is-accent">

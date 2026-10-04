@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import select
 
 from ..application import DeliveryBatchResult, DeliveryRequest, process_delivery_batch
 from ..config import resolve_supplier
@@ -19,11 +17,17 @@ from ..excel_io import (
 )
 from ..exception_reasons import exception_reason_code
 from ..web.database import Database
-from ..web.models import AuditLog, Batch, ExceptionRecord, Job
+from ..web.models import AuditLog, ExceptionRecord
 from .compute_inbound import _execute_self_operated_compute
 from .compute_inputs import _load_compute_inputs
-from .compute_records import _json_records, clear_compute_results, update_compute_source
-from .leases import JobContext, LostJobLeaseError, _heartbeat
+from .compute_records import (
+    _json_records,
+    clear_compute_results,
+    load_owned_compute,
+    mark_compute_succeeded,
+    update_compute_source,
+)
+from .leases import JobContext, _heartbeat
 
 
 def _save_delivery_compute(
@@ -32,19 +36,8 @@ def _save_delivery_compute(
     payloads: list[dict[str, Any]],
     batch_result: DeliveryBatchResult,
 ) -> None:
-    database = context.database
-    job_id = context.job_id
-    claim_token = context.claim_token
-    with database.session() as session:
-        job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
-        batch = session.get(Batch, batch_id)
-        if (
-            job is None
-            or batch is None
-            or job.status != "running"
-            or job.claim_token != claim_token
-        ):
-            raise LostJobLeaseError("计算任务租约已失效")
+    with context.database.session() as session:
+        job, batch = load_owned_compute(session, context, batch_id)
         clear_compute_results(session, payloads)
 
         for payload in payloads:
@@ -75,14 +68,7 @@ def _save_delivery_compute(
                     )
                 )
 
-        batch.status = "succeeded"
-        batch.error_message = None
-        batch.zip_path = None
-        job.status = "succeeded"
-        job.finished_at = datetime.utcnow()
-        job.heartbeat_at = job.finished_at
-        job.error_message = None
-        job.claim_token = None
+        mark_compute_succeeded(job, batch)
         session.add(
             AuditLog(
                 user_id=None,

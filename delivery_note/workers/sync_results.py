@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from ..web.database import Database
 from ..web.models import (
@@ -43,21 +44,25 @@ def _load_sync_base_path(
         return Path(base_version.storage_path) if base_version else None
 
 
+def _load_owned_sync_job(
+    session: Session, model: SyncJobModel, context: JobContext
+) -> SyncJob:
+    """在同步结果事务中锁定并核验当前租约所属任务。"""
+    job = cast(
+        SyncJob | None,
+        session.scalar(
+            select(model).where(model.id == context.job_id).with_for_update()
+        ),
+    )
+    if job is None or job.status != "running" or job.claim_token != context.claim_token:
+        raise LostJobLeaseError(f"{SYNC_METADATA[model][0]}任务租约已失效")
+    return job
+
+
 def _block_sync(context: JobContext, model: SyncJobModel, issue_count: int) -> None:
     context.before_finalize()
     with context.database.session() as session:
-        job = cast(
-            SyncJob | None,
-            session.scalar(
-                select(model).where(model.id == context.job_id).with_for_update()
-            ),
-        )
-        if (
-            job is None
-            or job.status != "running"
-            or job.claim_token != context.claim_token
-        ):
-            raise LostJobLeaseError(f"{SYNC_METADATA[model][0]}任务租约已失效")
+        job = _load_owned_sync_job(session, model, context)
         now = datetime.utcnow()
         job.status = "blocked"
         job.active_slot = None
@@ -84,18 +89,7 @@ def _publish_sync_candidate(
 ) -> None:
     context.before_finalize()
     with context.database.session() as session:
-        job = cast(
-            SyncJob | None,
-            session.scalar(
-                select(model).where(model.id == context.job_id).with_for_update()
-            ),
-        )
-        if (
-            job is None
-            or job.status != "running"
-            or job.claim_token != context.claim_token
-        ):
-            raise LostJobLeaseError(f"{SYNC_METADATA[model][0]}任务租约已失效")
+        job = _load_owned_sync_job(session, model, context)
         version = InputVersion(
             kind=candidate.kind,
             name=candidate.name,

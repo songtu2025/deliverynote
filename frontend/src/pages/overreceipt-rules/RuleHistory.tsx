@@ -5,6 +5,26 @@ import { RuleLimits } from "./RuleOverview";
 import type { RenameRuleTarget } from "./ruleTypes";
 import type { RuleScope } from "../../overreceiptRuleApi";
 
+const publicationColumns = [
+  {
+    title: "发布人",
+    dataIndex: "created_by",
+    width: 100,
+    render: (value: number) => `用户 #${value}`
+  },
+  {
+    title: "发布时间",
+    dataIndex: "created_at",
+    width: 150,
+    render: (value: string) => (
+      <span className="overreceipt-published-at">
+        {formatBeijingDate(value)}
+        <small>{formatBeijingTime(value)}</small>
+      </span>
+    )
+  }
+];
+
 export function RuleHistory({
   scope,
   rules,
@@ -83,23 +103,7 @@ export function RuleHistory({
                   </span>
                 )
               },
-              {
-                title: "发布人",
-                dataIndex: "created_by",
-                width: 100,
-                render: (value: number) => `用户 #${value}`
-              },
-              {
-                title: "发布时间",
-                dataIndex: "created_at",
-                width: 150,
-                render: (value: string) => (
-                  <span className="overreceipt-published-at">
-                    {formatBeijingDate(value)}
-                    <small>{formatBeijingTime(value)}</small>
-                  </span>
-                )
-              },
+              ...publicationColumns,
               {
                 title: "操作",
                 width: 174,
@@ -161,23 +165,7 @@ export function RuleHistory({
                   <Typography.Text type="secondary">未开放任何仓库</Typography.Text>
                 )
             },
-            {
-              title: "发布人",
-              dataIndex: "created_by",
-              width: 100,
-              render: (value: number) => `用户 #${value}`
-            },
-            {
-              title: "发布时间",
-              dataIndex: "created_at",
-              width: 150,
-              render: (value: string) => (
-                <span className="overreceipt-published-at">
-                  {formatBeijingDate(value)}
-                  <small>{formatBeijingTime(value)}</small>
-                </span>
-              )
-            },
+            ...publicationColumns,
             {
               title: "操作",
               width: 174,

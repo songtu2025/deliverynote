@@ -38,11 +38,7 @@ export function expireSession(message = "登录已过期，请重新登录"): vo
   window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { message } }));
 }
 
-export async function api<T>(
-  path: string,
-  init: RequestInit = {},
-  options: ApiOptions = {}
-): Promise<T> {
+export async function api<T>(path: string, init: RequestInit = {}, options: ApiOptions = {}): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
@@ -56,9 +52,10 @@ export async function api<T>(
     if (response.status === 401 && options.notifyUnauthorized !== false) {
       expireSession();
     }
-    let message = response.status === 429 && path === "/api/auth/login"
-      ? "登录尝试过于频繁，请稍后再试"
-      : `请求失败（${response.status}）`;
+    let message =
+      response.status === 429 && path === "/api/auth/login"
+        ? "登录尝试过于频繁，请稍后再试"
+        : `请求失败（${response.status}）`;
     let code: string | null = null;
     try {
       const payload = (await response.json()) as { detail?: unknown; code?: unknown };

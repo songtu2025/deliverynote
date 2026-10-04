@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  beijingDateTimeParts,
-  formatBeijingDate,
-  formatBeijingDateTime,
-  formatBeijingTime
-} from "./dateTime";
+import { beijingDateTimeParts, formatBeijingDate, formatBeijingDateTime, formatBeijingTime } from "./dateTime";
 
 describe("Beijing time formatting", () => {
   it("treats legacy timezone-free API values as UTC and displays Beijing time", () => {

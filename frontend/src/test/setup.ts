@@ -4,9 +4,11 @@ import { message } from "antd";
 import { afterEach } from "vitest";
 
 const flushReactScheduler = async () => {
-  const scheduleImmediate = (globalThis as typeof globalThis & {
-    setImmediate: (callback: () => void) => unknown;
-  }).setImmediate;
+  const scheduleImmediate = (
+    globalThis as typeof globalThis & {
+      setImmediate: (callback: () => void) => unknown;
+    }
+  ).setImmediate;
   for (let turn = 0; turn < 4; turn += 1) {
     await Promise.resolve();
     await new Promise<void>((resolve) => scheduleImmediate(resolve));

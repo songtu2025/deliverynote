@@ -6,6 +6,9 @@ from typing import Any
 
 import pandas as pd
 
+from .sync_mapping import normalize_sync_site as _normalize_site
+from .sync_mapping import sync_text as _text
+
 from .excel_io import PURCHASE_COLUMNS
 
 
@@ -20,22 +23,6 @@ class PurchaseMappingResult:
     raw_count: int
     eligible_count: int
     filtered_count: int
-
-
-def _text(value: Any) -> str:
-    if value is None or pd.isna(value):
-        return ""
-    return str(value).strip()
-
-
-def _normalize_site(value: Any) -> tuple[str, str]:
-    source_site = _text(value)
-    if source_site == "共享":
-        return source_site, ""
-    site = source_site.removeprefix("AMAZON:").strip()
-    if ":" not in site:
-        return "", "积加接口站点信息不足"
-    return f"AMAZON:{site}", ""
 
 
 def _detail_items(detail: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1,3 +1,4 @@
+import SyncDifference from "./batches/SyncDifference";
 import { useState } from "react";
 import { Alert, Button, Popconfirm, Space, Skeleton, Tag, Typography } from "antd";
 import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
@@ -139,26 +140,7 @@ export default function PurchaseSyncPanel({
                 </Typography.Text>
               </div>
             </div>
-            {detailsOpen && (
-              <dl className="purchase-sync-diff">
-                <div>
-                  <dt>新增匹配项</dt>
-                  <dd>{syncJob.diff.added_lines ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>余额变化项</dt>
-                  <dd>{syncJob.diff.changed_lines ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>移除匹配项</dt>
-                  <dd>{syncJob.diff.removed_lines ?? 0}</dd>
-                </div>
-                <div>
-                  <dt>候选未交总量</dt>
-                  <dd>{syncJob.diff.after_quantity ?? 0}</dd>
-                </div>
-              </dl>
-            )}
+            {detailsOpen && <SyncDifference diff={syncJob.diff} changeLabel="余额变化项" totalLabel="候选未交总量" />}
             {detailsOpen && syncJob.warning_count > 0 && (
               <Alert
                 type="warning"
