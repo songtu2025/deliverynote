@@ -2,7 +2,6 @@ import { render, setupInputDataPanelTests, versions, getCatalogButton } from "./
 import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { api } from "../../api";
 import { InputDataPanel } from "./InputDataPanel";
 
 setupInputDataPanelTests();

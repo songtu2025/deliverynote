@@ -17,6 +17,7 @@ export function useInputVersionInspection(activeVersionId: number | undefined, l
   const [inspectionLoading, setInspectionLoading] = useState(false);
   const [inspectionError, setInspectionError] = useState<{ versionId: number; message: string } | null>(null);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
+  const inspection = activeVersionId === undefined ? null : (inspections.get(activeVersionId) ?? null);
 
   useEffect(() => {
     setInspectionError(null);
@@ -27,7 +28,7 @@ export function useInputVersionInspection(activeVersionId: number | undefined, l
 
     let cancelled = false;
     const versionId = activeVersionId;
-    if (inspections.has(versionId)) {
+    if (inspection) {
       setInspectionLoading(false);
       return undefined;
     }
@@ -68,9 +69,8 @@ export function useInputVersionInspection(activeVersionId: number | undefined, l
     return () => {
       cancelled = true;
     };
-  }, [activeVersionId, inspectionAttempt, loading]);
+  }, [activeVersionId, inspection, inspectionAttempt, loading]);
 
-  const inspection = activeVersionId === undefined ? null : (inspections.get(activeVersionId) ?? null);
   const summary = inspection?.summary;
 
   return {

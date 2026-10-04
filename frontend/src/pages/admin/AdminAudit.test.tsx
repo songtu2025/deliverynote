@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AuditLog } from "../../types";
 import { AuditLogPanel } from "./AuditLogPanel";
@@ -71,6 +71,36 @@ describe("管理员Audit", () => {
 
     expect(screen.getByText("待入库数据同步完成")).toBeInTheDocument();
     expect(screen.getByText("待入库同步任务 #12")).toBeInTheDocument();
+  });
+
+  it("updates actor search results when the user list changes", () => {
+    const records: AuditLog[] = [
+      {
+        id: 1,
+        user_id: operator.id,
+        action: "login",
+        entity_type: "user",
+        entity_id: String(operator.id),
+        details: {},
+        created_at: "2026-07-21T09:00:00"
+      }
+    ];
+    const { rerender } = render(
+      <AuditLogPanel auditLogs={records} users={[admin, operator]} loading={false} error={null} onRetry={vi.fn()} />
+    );
+    fireEvent.change(screen.getByLabelText("搜索操作记录"), { target: { value: "更新后的操作员" } });
+    expect(screen.getByText("显示 0 / 1 条")).toBeInTheDocument();
+    rerender(
+      <AuditLogPanel
+        auditLogs={records}
+        users={[admin, { ...operator, username: "更新后的操作员" }]}
+        loading={false}
+        error={null}
+        onRetry={vi.fn()}
+      />
+    );
+    expect(screen.getByText("显示 1 / 1 条")).toBeInTheDocument();
+    expect(within(screen.getByRole("table", { name: "操作记录" })).getByText("更新后的操作员")).toBeInTheDocument();
   });
 
   it("shows draft audit labels and resolves operator names", async () => {

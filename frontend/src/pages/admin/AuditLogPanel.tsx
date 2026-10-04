@@ -74,6 +74,9 @@ const ENTITY_LABELS: Record<string, string> = {
 };
 
 const actionLabel = (action: string) => AUDIT_LABELS[action] ?? "其他操作";
+const actorLabel = (log: AuditLog, users: User[]) =>
+  log.user_id ? (users.find((user) => user.id === log.user_id)?.username ?? `用户 #${log.user_id}`) : "系统任务";
+const entityLabel = (log: AuditLog) => `${ENTITY_LABELS[log.entity_type] ?? "其他对象"} #${log.entity_id}`;
 
 const AUDIT_TABLE_COMPONENTS: NonNullable<TableProps<AuditLog>["components"]> = {
   table: (props) => <table {...props} aria-label="操作记录" />
@@ -100,49 +103,62 @@ export function AuditLogPanel({ auditLogs, users, loading, error, onRetry }: Aud
   const [actionFilter, setActionFilter] = useState("all");
   const [actorFilter, setActorFilter] = useState("all");
 
-  const actorLabel = (log: AuditLog) => log.user_id
-    ? users.find((user) => user.id === log.user_id)?.username ?? `用户 #${log.user_id}`
-    : "系统任务";
-  const entityLabel = (log: AuditLog) => `${ENTITY_LABELS[log.entity_type] ?? "其他对象"} #${log.entity_id}`;
-  const actionOptions = useMemo(() => [
-    { value: "all", label: "全部操作" },
-    ...[...new Set(auditLogs.map((log) => log.action))]
-      .sort((left, right) => actionLabel(left).localeCompare(actionLabel(right), "zh-CN"))
-      .map((action) => ({ value: action, label: actionLabel(action) }))
-  ], [auditLogs]);
-  const actorOptions = useMemo(() => [
-    { value: "all", label: "全部操作人" },
-    ...(auditLogs.some((log) => log.user_id === null) ? [{ value: "system", label: "系统任务" }] : []),
-    ...users
-      .filter((user) => auditLogs.some((log) => log.user_id === user.id))
-      .map((user) => ({ value: `user:${user.id}`, label: user.username }))
-  ], [auditLogs, users]);
+  const actionOptions = useMemo(
+    () => [
+      { value: "all", label: "全部操作" },
+      ...[...new Set(auditLogs.map((log) => log.action))]
+        .sort((left, right) => actionLabel(left).localeCompare(actionLabel(right), "zh-CN"))
+        .map((action) => ({ value: action, label: actionLabel(action) }))
+    ],
+    [auditLogs]
+  );
+  const actorOptions = useMemo(
+    () => [
+      { value: "all", label: "全部操作人" },
+      ...(auditLogs.some((log) => log.user_id === null) ? [{ value: "system", label: "系统任务" }] : []),
+      ...users
+        .filter((user) => auditLogs.some((log) => log.user_id === user.id))
+        .map((user) => ({ value: `user:${user.id}`, label: user.username }))
+    ],
+    [auditLogs, users]
+  );
   const filteredLogs = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("zh-CN");
     return auditLogs.filter((log) => {
       const matchesAction = actionFilter === "all" || log.action === actionFilter;
-      const matchesActor = actorFilter === "all"
-        || (actorFilter === "system" ? log.user_id === null : actorFilter === `user:${log.user_id}`);
+      const matchesActor =
+        actorFilter === "all" ||
+        (actorFilter === "system" ? log.user_id === null : actorFilter === `user:${log.user_id}`);
       const searchable = [
-        actorLabel(log),
+        actorLabel(log, users),
         actionLabel(log.action),
         entityLabel(log),
         log.action,
         log.entity_type
-      ].join(" ").toLocaleLowerCase("zh-CN");
+      ]
+        .join(" ")
+        .toLocaleLowerCase("zh-CN");
       return matchesAction && matchesActor && (!query || searchable.includes(query));
     });
   }, [actionFilter, actorFilter, auditLogs, search, users]);
 
   return (
-    <Card className="admin-panel-card audit-log-panel" title="操作记录" extra={<Typography.Text type="secondary">最多显示 200 条</Typography.Text>}>
+    <Card
+      className="admin-panel-card audit-log-panel"
+      title="操作记录"
+      extra={<Typography.Text type="secondary">最多显示 200 条</Typography.Text>}
+    >
       {error ? (
         <Alert
           type="error"
           showIcon
           title="无法读取操作记录"
           description={error}
-          action={<Button size="small" onClick={() => void onRetry()}>重新加载</Button>}
+          action={
+            <Button size="small" onClick={() => void onRetry()}>
+              重新加载
+            </Button>
+          }
         />
       ) : loading ? (
         <div className="admin-panel-busy" aria-live="polite">
@@ -191,7 +207,10 @@ export function AuditLogPanel({ auditLogs, users, loading, error, onRetry }: Aud
             dataSource={filteredLogs}
             components={AUDIT_TABLE_COMPONENTS}
             pagination={{ pageSize: 15, showSizeChanger: false }}
-            locale={{ emptyText: search || actionFilter !== "all" || actorFilter !== "all" ? "没有匹配的操作记录" : "暂无操作记录" }}
+            locale={{
+              emptyText:
+                search || actionFilter !== "all" || actorFilter !== "all" ? "没有匹配的操作记录" : "暂无操作记录"
+            }}
             columns={[
               {
                 title: "时间",
@@ -203,7 +222,9 @@ export function AuditLogPanel({ auditLogs, users, loading, error, onRetry }: Aud
                 title: "操作人",
                 dataIndex: "user_id",
                 width: 180,
-                render: (_, log) => <span className={log.user_id === null ? "audit-system-actor" : ""}>{actorLabel(log)}</span>
+                render: (_, log) => (
+                  <span className={log.user_id === null ? "audit-system-actor" : ""}>{actorLabel(log, users)}</span>
+                )
               },
               {
                 title: "操作",

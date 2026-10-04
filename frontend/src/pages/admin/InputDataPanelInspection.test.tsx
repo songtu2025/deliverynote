@@ -125,6 +125,36 @@ describe("InputDataPanel 检查缓存与预览", () => {
     expect(screen.getByText("PRODUCT-SKU")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/7/inspection"))).toHaveLength(2);
   }, 30_000);
+  it("keeps the current failure until retry when another version finishes late", async () => {
+    const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+    const pending = createDeferred<Response>();
+    const productResponse = await originalFetch("/api/input-versions/7/inspection");
+    let positionFailed = true;
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      const url = String(input);
+      if (url.endsWith("/7/inspection")) return pending.promise;
+      if (url.endsWith("/3/inspection") && positionFailed) {
+        return Promise.resolve(jsonResponse({ detail: "定位检查失败" }, 400));
+      }
+      return originalFetch(input, init);
+    });
+    render(
+      <InputDataPanel versions={versions} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />
+    );
+    expect(await screen.findByText("读取摘要与预览")).toBeInTheDocument();
+    fireEvent.click(getCatalogButton("MSKU定位"));
+    expect(await screen.findByText("定位检查失败")).toBeInTheDocument();
+    await act(async () => pending.resolve(productResponse));
+    expect(screen.getByText("定位检查失败")).toBeInTheDocument();
+    const positionRequests = () =>
+      vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/3/inspection"));
+    expect(positionRequests()).toHaveLength(1);
+    positionFailed = false;
+    fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+    expect(positionRequests()).toHaveLength(2);
+  });
+
   it("keeps quality row counts, tab totals and cached results consistent when switching kinds", async () => {
     const originalFetch = vi.mocked(fetch).getMockImplementation()!;
     vi.mocked(fetch).mockImplementation(async (input, init) => {

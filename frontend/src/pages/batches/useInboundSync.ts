@@ -71,7 +71,7 @@ export function useInboundSync({
       cancelled = true;
       if (timer) window.clearTimeout(timer);
     };
-  }, [active, reload, status?.job?.status, workflow]);
+  }, [active, reload, setStatus, status?.job?.status, workflow]);
 
   const startInboundSync = async () => {
     setSyncStarting(true);

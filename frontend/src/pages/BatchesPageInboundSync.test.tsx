@@ -3,6 +3,7 @@ import { App as AntApp } from "antd";
 import { describe, expect, it, vi } from "vitest";
 import { setupBatchesPageTests, jsonResponse } from "./batchesPageTestSupport";
 import BatchesPage from "./BatchesPage";
+import { deferred } from "./admin/positionDraftTestSupport";
 
 describe("BatchesPageInboundSync", () => {
   const state = setupBatchesPageTests();
@@ -139,6 +140,37 @@ describe("BatchesPageInboundSync", () => {
     );
     expect(requests).toHaveLength(4);
   });
+  it("ignores an in-flight inbound poll after leaving the workspace", async () => {
+    vi.useFakeTimers();
+    state.inboundSyncStatus = {
+      ...state.inboundSyncStatus,
+      job: { ...(state.inboundSyncStatus.job as Record<string, unknown>), status: "running" }
+    };
+    const view = render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const pending = deferred<Response>();
+    vi.mocked(fetch).mockClear();
+    vi.mocked(fetch).mockReturnValueOnce(pending.promise);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+    view.rerender(<BatchesPage workflow="self_operated_inbound" active={false} onOpen={vi.fn()} />);
+    await act(async () => {
+      pending.resolve(
+        jsonResponse({
+          ...state.inboundSyncStatus,
+          job: { ...(state.inboundSyncStatus.job as Record<string, unknown>), status: "succeeded" }
+        })
+      );
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(screen.getByRole("progressbar", { name: "正在同步待入库数据" })).toBeInTheDocument();
+  });
+
   it("stops inbound polling when leaving the workspace", async () => {
     vi.useFakeTimers();
     state.inboundSyncStatus = {
