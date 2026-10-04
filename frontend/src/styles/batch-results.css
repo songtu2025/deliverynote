@@ -1,0 +1,108 @@
+.summary-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 0.8fr)) minmax(260px, 1.6fr);
+  margin-bottom: 18px;
+  background: #fff;
+  border: 1px solid #dfe6e3;
+  border-radius: 10px;
+}
+
+.summary-metric,
+.summary-equation {
+  min-height: 72px;
+  padding: 10px 28px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-left: 1px solid #e5ebe9;
+}
+
+.summary-metric:first-child {
+  border-left: none;
+}
+.summary-metric span,
+.summary-equation span {
+  color: #53605d;
+  margin-bottom: 6px;
+}
+.summary-metric strong {
+  font-size: 31px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.summary-metric.import strong {
+  color: #176b5b;
+}
+.summary-metric.pending strong {
+  color: #a35f08;
+}
+.summary-equation strong {
+  font-size: 23px;
+  font-variant-numeric: tabular-nums;
+}
+.summary-pending strong {
+  color: #89938f !important;
+}
+
+.file-order {
+  color: #176b5b;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+.file-order-card .ant-card-head {
+  min-height: 46px;
+}
+.file-order-card .ant-card-body {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.file-order-card .ant-table-thead > tr > th,
+.file-order-card .ant-table-tbody > tr > td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.import-value {
+  color: #176b5b;
+  font-weight: 700;
+}
+.pending-value {
+  color: #a35f08;
+  font-weight: 700;
+}
+.conservation-ok {
+  color: #176b5b;
+  font-weight: 700;
+}
+.conservation-bad {
+  color: #b42318;
+  font-weight: 700;
+}
+.order-hint {
+  color: #53605d;
+  font-size: 13px;
+}
+.inline-alert {
+  margin-bottom: 14px;
+}
+
+.locked-data-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.locked-data-title .anticon {
+  color: #176b5b;
+}
+.locked-data-card .ant-card-head {
+  min-height: 48px;
+}
+.locked-data-card .ant-card-body {
+  padding-top: 10px;
+  padding-bottom: 6px;
+}
+.locked-data-card.is-collapsed .ant-card-body {
+  display: none;
+}
+.locked-data-card .ant-descriptions-item {
+  padding-bottom: 3px;
+}
