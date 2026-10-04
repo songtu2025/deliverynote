@@ -1,0 +1,70 @@
+.overreceipt-publish-drawer .ant-drawer-header {
+  min-height: 72px;
+  padding: 18px 28px;
+  border-bottom-color: #e2e8e6;
+}
+
+.overreceipt-publish-drawer .ant-drawer-title {
+  color: #172522;
+  font-size: 18px;
+}
+.overreceipt-publish-drawer .ant-drawer-body {
+  padding: 24px 28px;
+}
+.overreceipt-publish-drawer .ant-drawer-footer {
+  padding: 20px 28px;
+}
+.overreceipt-drawer-notice {
+  margin-bottom: 20px;
+  border-color: #cde9e1;
+  background: #edf7f4;
+}
+.overreceipt-drawer-notice .ant-alert-title {
+  color: #176b5b;
+}
+.overreceipt-publish-drawer .ant-form-item {
+  margin-bottom: 20px;
+}
+.overreceipt-publish-drawer .ant-input-number-group-wrapper,
+.overreceipt-publish-drawer .ant-input-number {
+  width: 100%;
+}
+.overreceipt-impact-title {
+  margin: 10px 0 16px !important;
+  font-size: 14px !important;
+}
+
+.overreceipt-impact-preview {
+  padding: 4px 18px;
+  border: 1px solid #e0e6e4;
+  border-radius: 8px;
+  background: #f6f8f7;
+}
+
+.overreceipt-impact-row {
+  min-height: 55px;
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e1e6e4;
+}
+
+.overreceipt-impact-row:last-child {
+  border-bottom: 0;
+}
+.overreceipt-impact-row span {
+  color: #7a8683;
+  font-size: 12px;
+}
+.overreceipt-impact-row strong {
+  color: #263531;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.overreceipt-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
