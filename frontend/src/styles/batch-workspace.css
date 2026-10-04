@@ -1,0 +1,103 @@
+.table-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.batch-list-toolbar {
+  align-items: flex-end;
+}
+.table-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.table-filter-field label {
+  color: #53605d;
+  font-size: 12px;
+  font-weight: 650;
+}
+.table-filter-field:first-child {
+  width: 280px;
+}
+.table-filter-field:nth-child(2) {
+  width: 160px;
+}
+.batch-result-count {
+  margin-left: auto;
+  padding-bottom: 7px;
+  font-size: 12px;
+}
+.batch-list-table .ant-table {
+  overflow: hidden;
+  border: 1px solid #dfe6e3;
+  border-radius: 10px;
+}
+.batch-list-table .ant-table-thead > tr > th {
+  background: #f7f9f8;
+}
+.batch-list-table .ant-table-cell {
+  vertical-align: middle;
+}
+.batch-list-table .ant-pagination {
+  margin: 16px 4px 0;
+}
+.batch-table-value {
+  min-width: 0;
+}
+.batch-cell-label {
+  display: none;
+}
+.batch-name-link {
+  padding-left: 0;
+  font-weight: 650;
+}
+.batch-volume {
+  color: #53605d;
+}
+.next-action {
+  color: #176b5b;
+  font-weight: 650;
+}
+
+.locked-version-preview {
+  border-top: 1px solid #e5ebe9;
+  padding-top: 16px;
+}
+
+.locked-version-preview > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 9px;
+  color: #53605d;
+}
+
+.locked-version-preview strong {
+  color: #17211f;
+}
+.locked-overreceipt-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.locked-overreceipt-rule small {
+  color: #66736f;
+}
+
+.self-operated-version-lock.ant-alert-info {
+  border-color: var(--dn-primary-border);
+  background: var(--dn-primary-soft);
+}
+
+.self-operated-version-lock.ant-alert-info .ant-alert-icon,
+.self-operated-version-lock.ant-alert-info .ant-alert-message,
+.self-operated-version-lock.ant-alert-info .ant-alert-title {
+  color: var(--dn-primary);
+}
+
+.self-operated-version-lock.ant-alert-info .ant-alert-description {
+  color: #426f63;
+}
