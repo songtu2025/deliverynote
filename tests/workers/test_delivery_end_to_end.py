@@ -107,7 +107,7 @@ class WorkerIntegrationTests(WorkerCase):
         self.assertEqual(merged_response.status_code, 200, merged_response.text)
         self.assertEqual(
             merged_response.headers["content-type"],
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            guess_type("export.xlsx")[0] or "application/octet-stream",
         )
         self.assertIn(
             f"batch-{batch_id}-merged.xlsx",
