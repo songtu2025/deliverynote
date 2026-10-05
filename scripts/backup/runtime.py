@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 import subprocess
@@ -98,7 +97,18 @@ class BackupConfig:
             raise BackupError("保留数量不能小于 0")
 
 
-def compose(config: BackupConfig, *arguments: str) -> list[str]:
+class ComposeConfig(Protocol):
+    @property
+    def compose_file(self) -> Path: ...
+
+    @property
+    def env_file(self) -> Path: ...
+
+    @property
+    def project_name(self) -> str: ...
+
+
+def compose(config: ComposeConfig, *arguments: str) -> list[str]:
     return [
         "docker",
         "compose",
@@ -114,6 +124,8 @@ def compose(config: BackupConfig, *arguments: str) -> list[str]:
 
 @contextmanager
 def exclusive_lock(path: Path) -> Iterator[None]:
+    import fcntl
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as lock:
         os.fchmod(lock.fileno(), 0o600)

@@ -26,9 +26,9 @@ MAX_FILE_LINES = 300
 COMPLEXITY_RULES = "C901,PLR0911,PLR0912,PLR0913,PLR0915"
 
 
-def _git(root: Path, *args: str) -> str:
+def _git(root: Path, *args: str, env: dict[str, str] | None = None) -> str:
     return subprocess.check_output(
-        ["git", *args], cwd=root, encoding="utf-8", stderr=subprocess.PIPE
+        ["git", *args], cwd=root, env=env, encoding="utf-8", stderr=subprocess.PIPE
     )
 
 

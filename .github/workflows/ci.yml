@@ -93,6 +93,10 @@ jobs:
           python -m mypy --check-untyped-defs tests/postgres/test_sync_claim_concurrency.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
+      - name: 发布工具类型与格式检查
+        run: |
+          python -m mypy --strict scripts/package_release.py scripts/release_web.py tests/test_release_package.py tests/test_release_web.py tests/test_release_docker.py tests/support/release_docker.py
+          python -m ruff format --check scripts/package_release.py scripts/release_web.py scripts/backup/runtime.py tests/test_release_package.py tests/test_release_web.py tests/test_release_docker.py tests/support/release_docker.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
@@ -164,3 +168,10 @@ jobs:
           ADMIN_PASSWORD: ci-admin-password
           POSTGRES_PASSWORD: ci-postgres-password
         run: docker compose config --quiet
+      - name: 隔离 Docker 代理切换与失败回退演练
+        env:
+          RELEASE_DOCKER_TESTS: "1"
+          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
+        run: |
+          docker build -t "$RELEASE_WEB_IMAGE" frontend
+          python3 -m unittest tests.test_release_docker -v
