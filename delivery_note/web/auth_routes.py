@@ -35,12 +35,12 @@ def register_auth_routes(
     current_user = dependencies.current_user
     bearer = dependencies.bearer
 
-    @app.post("/api/auth/login")
+    @app.post("/api/auth/login", response_model=None)
     def login(
         payload: LoginPayload,
         response: Response,
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         user = session.scalar(select(User).where(User.username == payload.username))
         if (
             user is None
@@ -70,7 +70,9 @@ def register_auth_routes(
             "user": user_json(user),
         }
 
-    @app.post("/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+    @app.post(
+        "/api/auth/logout", status_code=status.HTTP_204_NO_CONTENT, response_model=None
+    )
     def logout(
         request: Request,
         credentials: Annotated[
@@ -79,7 +81,7 @@ def register_auth_routes(
         ],
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> Response:
         selected_token = (
             credentials.credentials
             if credentials is not None
@@ -103,8 +105,8 @@ def register_auth_routes(
         _delete_session_cookie(response, secure=configured_session_cookie_secure)
         return response
 
-    @app.get("/api/auth/me")
-    def me(user: Annotated[User, Depends(current_user)]):
+    @app.get("/api/auth/me", response_model=None)
+    def me(user: Annotated[User, Depends(current_user)]) -> dict[str, object]:
         return user_json(user)
 
     register_user_routes(app, dependencies, _audit)
@@ -116,12 +118,12 @@ def register_user_routes(
     get_session = dependencies.get_session
     admin_user = dependencies.admin_user
 
-    @app.post("/api/users", status_code=status.HTTP_201_CREATED)
+    @app.post("/api/users", status_code=status.HTTP_201_CREATED, response_model=None)
     def create_user(
         payload: UserPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         user = create_user_account(
             session, payload.username, payload.password, payload.role
         )
@@ -129,22 +131,22 @@ def register_user_routes(
         session.commit()
         return user_json(user)
 
-    @app.get("/api/users")
+    @app.get("/api/users", response_model=None)
     def list_users(
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> list[dict[str, object]]:
         return [
             user_json(user) for user in session.scalars(select(User).order_by(User.id))
         ]
 
-    @app.put("/api/users/{user_id}/status")
+    @app.put("/api/users/{user_id}/status", response_model=None)
     def update_user_status(
         user_id: int,
         payload: UserStatusPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         user = change_user_status(session, user_id, payload.active, admin.id)
         _audit(
             session,
@@ -160,13 +162,14 @@ def register_user_routes(
     @app.put(
         "/api/users/{user_id}/password",
         status_code=status.HTTP_204_NO_CONTENT,
+        response_model=None,
     )
     def reset_user_password(
         user_id: int,
         payload: PasswordResetPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> Response:
         user = reset_account_password(session, user_id, payload.password)
         _audit(session, admin.id, "reset_user_password", "user", user.id)
         session.commit()

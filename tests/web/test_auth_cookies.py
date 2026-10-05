@@ -83,7 +83,7 @@ class WebApiTests(WebApiCase):
         self.assertEqual(rejected.status_code, 401, rejected.text)
         self.assertNotIn("set-cookie", rejected.headers)
 
-    def test_cookie_logout_revokes_session_and_clears_cookie(self):
+    def test_cookie_logout_revokes_session_and_clears_cookie(self) -> None:
         login = self.client.post(
             "/api/auth/login",
             json={"username": "admin", "password": "admin-pass"},
@@ -93,6 +93,7 @@ class WebApiTests(WebApiCase):
 
         logout = self.client.post("/api/auth/logout", headers=cookie_headers)
         self.assertEqual(logout.status_code, 204, logout.text)
+        self.assertEqual(logout.content, b"")
         expired_cookie = logout.headers["set-cookie"]
         self.assertIn("delivery_note_session=", expired_cookie)
         self.assertIn("Max-Age=0", expired_cookie)
@@ -106,6 +107,30 @@ class WebApiTests(WebApiCase):
         self.assertEqual(
             self.client.get("/api/auth/me", headers=cookie_headers).status_code,
             401,
+        )
+
+    def test_logout_revokes_bearer_and_cookie_but_keeps_other_sessions(self) -> None:
+        bearer_headers, cookie_session, other_headers = (
+            self.login("admin", "admin-pass") for _ in range(3)
+        )
+        cookie_headers = {
+            "Cookie": (
+                "delivery_note_session=" + cookie_session["Authorization"].split()[1]
+            )
+        }
+        logout = self.client.post(
+            "/api/auth/logout", headers={**bearer_headers, **cookie_headers}
+        )
+        self.assertEqual(logout.status_code, 204, logout.text)
+        self.assertEqual(logout.content, b"")
+        self.assertIn("Max-Age=0", logout.headers["set-cookie"])
+        for headers in (bearer_headers, cookie_headers):
+            with self.subTest(headers=list(headers)):
+                self.assertEqual(
+                    self.client.get("/api/auth/me", headers=headers).status_code, 401
+                )
+        self.assertEqual(
+            self.client.get("/api/auth/me", headers=other_headers).status_code, 200
         )
 
     def test_invalid_or_disabled_cookie_session_is_cleared(self):

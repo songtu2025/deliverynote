@@ -15,7 +15,7 @@ from delivery_note.web.models import (
 
 
 class WebApiTests(WebApiCase):
-    def test_batch_exception_and_job_routes_preserve_response_contract(self) -> None:
+    def test_typed_routes_preserve_response_contract(self) -> None:
         schema = self.app.openapi()
         operations = (
             ("/api/batches", "get", "200"),
@@ -32,11 +32,23 @@ class WebApiTests(WebApiCase):
             ("/api/batches/{batch_id}/compute", "post", "202"),
             ("/api/jobs/{job_id}", "get", "200"),
             ("/api/audit-logs", "get", "200"),
+            ("/api/auth/login", "post", "200"),
+            ("/api/auth/me", "get", "200"),
+            ("/api/users", "post", "201"),
+            ("/api/users", "get", "200"),
+            ("/api/users/{user_id}/status", "put", "200"),
         )
         for path, method, status in operations:
             with self.subTest(path=path):
                 response = schema["paths"][path][method]["responses"][status]
                 self.assertEqual(response["content"]["application/json"]["schema"], {})
+        for path, method in (
+            ("/api/auth/logout", "post"),
+            ("/api/users/{user_id}/password", "put"),
+        ):
+            with self.subTest(path=path):
+                response = schema["paths"][path][method]["responses"]["204"]
+                self.assertNotIn("content", response)
 
     def test_batch_reads_bulk_load_exception_splits(self):
         admin_headers = self.login("admin", "admin-pass")
