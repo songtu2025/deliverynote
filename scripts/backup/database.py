@@ -10,7 +10,15 @@ from scripts.backup.runtime import BackupConfig, BackupError, Runner, compose
 RESTORE_DATABASE_PATTERN = re.compile(r"^delivery_note_restore_[0-9a-f]{16}$")
 
 
-CRITICAL_TABLES = ("users", "input_versions", "batches", "batch_files", "jobs")
+CRITICAL_TABLES = (
+    "users",
+    "input_versions",
+    "batches",
+    "batch_files",
+    "jobs",
+    "purchase_sync_jobs",
+    "self_operated_inbound_sync_jobs",
+)
 
 
 CRITICAL_TABLE_COUNTS_SQL = "\nUNION ALL\n".join(

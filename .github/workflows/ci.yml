@@ -100,6 +100,8 @@ jobs:
           python -m mypy --strict scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/test_web_verification.py
           python -m mypy --check-untyped-defs tests/postgres/test_backup_queues.py
           python -m ruff format --check scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/backup/test_cli.py tests/postgres/test_backup_queues.py tests/test_web_verification.py
+          python -m mypy --strict tests/support/backup_docker.py tests/test_backup_docker.py
+          python -m ruff format --check tests/support/backup_docker.py tests/test_backup_docker.py tests/backup/test_restore.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
@@ -178,3 +180,11 @@ jobs:
         run: |
           docker build -t "$RELEASE_WEB_IMAGE" frontend
           python3 -m unittest tests.test_release_docker -v
+      - name: 隔离 PostgreSQL 与文件卷备份恢复演练
+        env:
+          BACKUP_DOCKER_TESTS: "1"
+          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
+          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
+        run: |
+          docker build -t "$BACKUP_API_IMAGE" .
+          python3 -m unittest tests.test_backup_docker -v

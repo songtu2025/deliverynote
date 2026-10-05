@@ -36,7 +36,6 @@ class FakeRunner:
         *,
         failure: str | None = None,
         fail_compose_reconcile: bool = False,
-        restored_counts: dict[str, int] | None = None,
     ) -> None:
         self.fail_archive = failure == "archive"
         self.fail_create_database = failure == "create_database"
@@ -50,8 +49,10 @@ class FakeRunner:
             "batches": 5,
             "batch_files": 8,
             "jobs": 2,
+            "purchase_sync_jobs": 2,
+            "self_operated_inbound_sync_jobs": 3,
         }
-        self.restored_counts = restored_counts or dict(self.source_counts)
+        self.restored_counts = dict(self.source_counts)
         self.restored_payload: bytes | None = None
         self.commands: list[tuple[str, ...]] = []
 

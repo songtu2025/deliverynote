@@ -5,15 +5,20 @@ from tests.support.backup import BackupTestCase, FakeRunner
 
 
 class BackupRestoreTests(BackupTestCase):
+    def test_purchase_sync_restore_count_mismatch_prevents_ready(self) -> None:
+        self._assert_sync_count_mismatch("purchase_sync_jobs")
+
+    def test_inbound_sync_restore_count_mismatch_prevents_ready(self) -> None:
+        self._assert_sync_count_mismatch("self_operated_inbound_sync_jobs")
+
+    def _assert_sync_count_mismatch(self, table: str) -> None:
+        runner = FakeRunner()
+        runner.restored_counts[table] -= 1
+        self.assert_failed_backup(runner, f"关键表行数.*不一致.*{table}")
+
     def test_restore_count_mismatch_fails_and_drops_temporary_database(self):
-        restored_counts = {
-            "users": 3,
-            "input_versions": 7,
-            "batches": 4,
-            "batch_files": 8,
-            "jobs": 2,
-        }
-        runner = FakeRunner(restored_counts=restored_counts)
+        runner = FakeRunner()
+        runner.restored_counts["batches"] -= 1
 
         self.assert_failed_backup(runner, "关键表行数.*不一致")
 

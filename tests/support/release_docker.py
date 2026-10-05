@@ -113,23 +113,44 @@ class ReleaseDockerFixture:
         with socket.socket() as reservation:
             reservation.bind(("127.0.0.1", 0))
             port = reservation.getsockname()[1]
-        services: dict[str, object] = {
-            "api": {"image": backend_image, "command": ["python", "-c", API_SERVER]},
-            "web": {"image": self.current, "ports": [f"127.0.0.1:{port}:80"]},
-        }
-        for service in ("db", "worker", "purchase-sync-worker", "inbound-sync-worker"):
-            services[service] = {
-                "image": backend_image,
-                "command": ["python", "-c", "import time; time.sleep(600)"],
-            }
         self.compose_file.write_text(
-            json.dumps({"services": services}), encoding="utf-8"
+            json.dumps(self._configuration(backend_image, port)), encoding="utf-8"
         )
         self.compose("up", "-d", "--wait", "--wait-timeout", "30")
         records = self.inspect("web")
         port = records[0]["NetworkSettings"]["Ports"]["80/tcp"][0]["HostPort"]
         self.url = "http://127.0.0.1:" + port
         self.wait_ready()
+
+    def _configuration(self, backend_image: str, port: int) -> dict[str, Any]:
+        services = {
+            "api": {
+                "image": backend_image,
+                "command": ["python", "-c", API_SERVER],
+                "healthcheck": {
+                    "test": [
+                        "CMD",
+                        "python",
+                        "-c",
+                        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')",
+                    ],
+                    "interval": "1s",
+                    "timeout": "5s",
+                    "retries": 30,
+                },
+            },
+            "web": {
+                "image": self.current,
+                "ports": [f"127.0.0.1:{port}:80"],
+                "depends_on": {"api": {"condition": "service_healthy"}},
+            },
+        }
+        for service in ("db", "worker", "purchase-sync-worker", "inbound-sync-worker"):
+            services[service] = {
+                "image": backend_image,
+                "command": ["python", "-c", "import time; time.sleep(600)"],
+            }
+        return {"services": services}
 
     def inspect(self, *services: str) -> list[dict[str, Any]]:
         ids = [self.compose("ps", "-q", service) for service in services]
