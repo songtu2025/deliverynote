@@ -31,18 +31,18 @@ def register_overreceipt_routes(
     get_session = dependencies.get_session
     current_user = dependencies.current_user
 
-    @app.get("/api/overreceipt-rule-versions/warehouses")
+    @app.get("/api/overreceipt-rule-versions/warehouses", response_model=None)
     def list_overreceipt_warehouses(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> list[str]:
         return purchase_warehouses(session, overreceipt_warehouse_cache)
 
-    @app.get("/api/overreceipt-rule-versions")
+    @app.get("/api/overreceipt-rule-versions", response_model=None)
     def list_overreceipt_rule_versions(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> list[dict[str, object]]:
         versions = session.scalars(
             select(OverreceiptRuleVersion).order_by(
                 OverreceiptRuleVersion.created_at.desc(),
@@ -51,13 +51,13 @@ def register_overreceipt_routes(
         ).all()
         return [overreceipt_rule_json(version) for version in versions]
 
-    @app.put("/api/overreceipt-rule-versions/{version_id}/name")
+    @app.put("/api/overreceipt-rule-versions/{version_id}/name", response_model=None)
     def rename_overreceipt_rule(
         version_id: int,
         payload: RuleVersionNamePayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         name = validated_rule_name(payload.name)
         with overreceipt_rule_lock:
             target = rename_rule(
@@ -71,12 +71,13 @@ def register_overreceipt_routes(
     @app.post(
         "/api/overreceipt-rule-versions",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     def publish_overreceipt_rule(
         payload: OverreceiptRulePayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         name = validated_rule_name(payload.name)
         warehouses = validated_warehouses(payload.allowed_warehouses)
         with overreceipt_rule_lock:
@@ -101,12 +102,14 @@ def register_overreceipt_routes(
             )
         return overreceipt_rule_json(version)
 
-    @app.post("/api/overreceipt-rule-versions/{version_id}/activate")
+    @app.post(
+        "/api/overreceipt-rule-versions/{version_id}/activate", response_model=None
+    )
     def activate_overreceipt_rule(
         version_id: int,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         with overreceipt_rule_lock:
             target = activate_rule(
                 RuleContext(session, user.id, _audit),

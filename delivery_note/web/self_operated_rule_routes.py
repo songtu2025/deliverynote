@@ -28,11 +28,11 @@ def register_self_operated_rule_routes(
     get_session = dependencies.get_session
     current_user = dependencies.current_user
 
-    @app.get("/api/self-operated-overreceipt-rule-versions")
+    @app.get("/api/self-operated-overreceipt-rule-versions", response_model=None)
     def list_self_operated_overreceipt_rule_versions(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> list[dict[str, object]]:
         versions = session.scalars(
             select(SelfOperatedOverreceiptRuleVersion).order_by(
                 SelfOperatedOverreceiptRuleVersion.created_at.desc(),
@@ -41,13 +41,16 @@ def register_self_operated_rule_routes(
         ).all()
         return [self_operated_overreceipt_rule_json(version) for version in versions]
 
-    @app.put("/api/self-operated-overreceipt-rule-versions/{version_id}/name")
+    @app.put(
+        "/api/self-operated-overreceipt-rule-versions/{version_id}/name",
+        response_model=None,
+    )
     def rename_self_operated_overreceipt_rule(
         version_id: int,
         payload: RuleVersionNamePayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         name = validated_rule_name(payload.name)
         with overreceipt_rule_lock:
             target = rename_rule(
@@ -61,12 +64,13 @@ def register_self_operated_rule_routes(
     @app.post(
         "/api/self-operated-overreceipt-rule-versions",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     def publish_self_operated_overreceipt_rule(
         payload: SelfOperatedOverreceiptRulePayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         name = validated_rule_name(payload.name)
         with overreceipt_rule_lock:
             version = SelfOperatedOverreceiptRuleVersion(
@@ -82,12 +86,15 @@ def register_self_operated_rule_routes(
             )
         return self_operated_overreceipt_rule_json(version)
 
-    @app.post("/api/self-operated-overreceipt-rule-versions/{version_id}/activate")
+    @app.post(
+        "/api/self-operated-overreceipt-rule-versions/{version_id}/activate",
+        response_model=None,
+    )
     def activate_self_operated_overreceipt_rule(
         version_id: int,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         with overreceipt_rule_lock:
             target = activate_rule(
                 RuleContext(session, user.id, _audit),

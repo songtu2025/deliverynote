@@ -28,10 +28,10 @@ def register_gerpgo_routes(
     get_session = dependencies.get_session
     admin_user = dependencies.admin_user
 
-    @app.get("/api/admin/integrations/gerpgo")
+    @app.get("/api/admin/integrations/gerpgo", response_model=None)
     def get_gerpgo_config(
         _admin: Annotated[User, Depends(admin_user)],
-    ):
+    ) -> dict[str, object]:
         try:
             return gerpgo_config_json(load_gerpgo_settings(storage))
         except GerpgoError:
@@ -47,12 +47,12 @@ def register_gerpgo_routes(
                 "source": "environment",
             }
 
-    @app.put("/api/admin/integrations/gerpgo")
+    @app.put("/api/admin/integrations/gerpgo", response_model=None)
     def update_gerpgo_config(
         payload: GerpgoConfigPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         try:
             current = load_gerpgo_settings(storage)
         except GerpgoError:

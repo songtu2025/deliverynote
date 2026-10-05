@@ -17,6 +17,13 @@ class SyncCommands:
         self.storage = storage
         self.audit = audit
 
+    def is_configured(self) -> bool:
+        try:
+            GerpgoClient.from_config(self.storage)
+        except GerpgoError:
+            return False
+        return True
+
     def start_purchase_sync(self, user: User, session: Session) -> PurchaseSyncJob:
         try:
             GerpgoClient.from_config(self.storage)

@@ -1,5 +1,6 @@
 from io import BytesIO
 from pathlib import Path
+from collections.abc import Hashable, Mapping
 
 import pandas as pd
 from fastapi import HTTPException
@@ -7,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ...excel_io import read_self_operated_inbound_workbook
+from ...inspection.frames import _json_safe
 from ..models import InputVersion, PurchaseSyncJob, SelfOperatedInboundSyncJob
 from .queries import get_sync_job
 
@@ -14,7 +16,7 @@ from .queries import get_sync_job
 def _self_operated_inbound_sync_issues(
     session: Session,
     job: SelfOperatedInboundSyncJob,
-) -> list[dict]:
+) -> list[dict[str, object]]:
     issues = [dict(issue) for issue in (job.issues or [])]
     detail_fields = {
         "warehouse",
@@ -37,10 +39,10 @@ def _self_operated_inbound_sync_issues(
     except (OSError, ValueError):
         return issues
 
-    def key_value(value) -> str:
-        return "" if pd.isna(value) else str(value).strip()
+    def key_value(value: object) -> str:
+        return "" if _json_safe(value) is None else str(value).strip()
 
-    candidates: dict[tuple[str, str, str], list[dict]] = {}
+    candidates: dict[tuple[str, str, str], list[Mapping[Hashable, object]]] = {}
     for record in frame.to_dict("records"):
         key = (
             key_value(record.get("入库单号")),
@@ -62,22 +64,22 @@ def _self_operated_inbound_sync_issues(
         offset = offsets.get(key, 0)
         if offset >= len(matches):
             continue
-        record = matches[offset]
+        matched_record = matches[offset]
         offsets[key] = offset + 1
-        quantity = record.get("应收货")
-        issue.setdefault("warehouse", key_value(record.get("入库仓")))
+        quantity = matched_record.get("应收货")
+        issue.setdefault("warehouse", key_value(matched_record.get("入库仓")))
         issue.setdefault(
             "remaining_quantity",
             None
-            if pd.isna(quantity)
+            if _json_safe(quantity) is None
             else quantity.item()
             if hasattr(quantity, "item")
             else quantity,
         )
-        issue.setdefault("purchase_code", key_value(record.get("关联采购单")))
+        issue.setdefault("purchase_code", key_value(matched_record.get("关联采购单")))
         issue.setdefault(
             "related_code",
-            key_value(record.get("关联交货单/调拨单")),
+            key_value(matched_record.get("关联交货单/调拨单")),
         )
     return issues
 

@@ -9,7 +9,7 @@ from ..models import PurchaseSyncJob, SelfOperatedInboundSyncJob
 def sync_job_json(
     job: PurchaseSyncJob | SelfOperatedInboundSyncJob,
     utc_isoformat: Callable[[datetime], str],
-) -> dict:
+) -> dict[str, object]:
     findings = job.issues or []
     warning_count = sum(finding.get("severity") == "warning" for finding in findings)
     result = {
@@ -40,7 +40,7 @@ def sync_job_json(
     return result
 
 
-def _sync_preview_json(frame: pd.DataFrame, limit: int) -> dict:
+def _sync_preview_json(frame: pd.DataFrame, limit: int) -> dict[str, object]:
     preview = frame.head(limit)
     rows = [
         {

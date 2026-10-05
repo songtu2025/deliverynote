@@ -4,12 +4,17 @@ from typing import TypeVar
 
 import pandas as pd
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import InputVersion, PurchaseSyncJob, SelfOperatedInboundSyncJob
 from .views import _sync_preview_json
 
 SyncJob = TypeVar("SyncJob", PurchaseSyncJob, SelfOperatedInboundSyncJob)
+
+
+def latest_sync_job(session: Session, model: type[SyncJob]) -> SyncJob | None:
+    return session.scalar(select(model).order_by(model.id.desc()))
 
 
 def get_sync_job(session: Session, model: type[SyncJob], job_id: int) -> SyncJob:
@@ -25,7 +30,7 @@ def candidate_preview(
     job: PurchaseSyncJob | SelfOperatedInboundSyncJob,
     limit: int,
     reader: Callable[[Path], pd.DataFrame],
-) -> dict:
+) -> dict[str, object]:
     version = (
         session.get(InputVersion, job.candidate_version_id)
         if job.candidate_version_id is not None
