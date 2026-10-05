@@ -26,7 +26,7 @@ class BatchFileUploader:
     app: FastAPI
     dependencies: RequestDependencies
     storage: Path
-    audit: Callable
+    audit: Callable[..., None]
     parse_workbook: UploadParser
     append_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
@@ -36,7 +36,7 @@ class BatchFileUploader:
         batch_id: int,
         file: UploadFile,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         batch = self.dependencies.get_batch_or_404(batch_id, session)
         profile = session.get(SelfOperatedBatch, batch.id)
         if profile is None:
@@ -67,11 +67,9 @@ class BatchFileUploader:
             ) from error
 
         try:
-            batch = self.dependencies.get_batch_or_404(
+            batch = self.dependencies.get_editable_batch(
                 batch_id, session, for_update=True
             )
-            if batch.status not in {"draft", "preflight_ready", "failed"}:
-                raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
             profile = session.scalar(
                 select(SelfOperatedBatch)
                 .where(SelfOperatedBatch.batch_id == batch_id)
@@ -116,10 +114,8 @@ class BatchFileUploader:
         batch_id: int,
         file: UploadFile,
         user_id: int,
-    ) -> dict:
-        batch = self.dependencies.get_batch_or_404(batch_id, session)
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可修改文件")
+    ) -> dict[str, object]:
+        batch = self.dependencies.get_editable_batch(batch_id, session)
         source_count = session.scalar(
             select(func.count())
             .select_from(BatchFile)
@@ -153,14 +149,9 @@ class BatchFileUploader:
         await _save_upload(file, destination, self.app.state.max_upload_bytes)
         try:
             async with self.append_lock:
-                batch = self.dependencies.get_batch_or_404(
+                batch = self.dependencies.get_editable_batch(
                     batch_id, session, for_update=True
                 )
-                if batch.status not in {"draft", "preflight_ready", "failed"}:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="当前批次状态不可修改文件",
-                    )
                 source_count = session.scalar(
                     select(func.count())
                     .select_from(BatchFile)

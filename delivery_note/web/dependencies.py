@@ -12,7 +12,7 @@ from .auth import SESSION_COOKIE_NAME, _deleted_session_cookie_header, hash_toke
 from .caches import PositionFrameCache
 from .database import Database
 from .models import AuthSession, Batch, InputDraft, User
-from .position_draft_state import (POSITION_FRAME_CACHE_SESSION_KEY)
+from .position_draft_state import POSITION_FRAME_CACHE_SESSION_KEY
 
 
 class BatchLookup(Protocol):
@@ -31,6 +31,20 @@ class RequestDependencies:
     bearer: HTTPBearer
     get_batch_or_404: BatchLookup
     get_draft_or_404: Callable[[int, Session], InputDraft]
+
+    def get_editable_batch(
+        self,
+        batch_id: int,
+        session: Session,
+        *,
+        for_update: bool = False,
+        detail: str = "当前批次状态不可修改文件",
+    ) -> Batch:
+        """复用查询与锁，在各文件入口保持一致的可编辑状态。"""
+        batch = self.get_batch_or_404(batch_id, session, for_update=for_update)
+        if batch.status not in {"draft", "preflight_ready", "failed"}:
+            raise HTTPException(status_code=409, detail=detail)
+        return batch
 
 
 def build_request_dependencies(

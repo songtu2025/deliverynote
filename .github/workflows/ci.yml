@@ -73,6 +73,8 @@ jobs:
         run: python -m ruff format --check delivery_note/web/input_version_routes.py delivery_note/web/input_versions.py tests/web/test_input_version_commands.py
       - name: 共享上传与健康模块格式检查
         run: python -m ruff format --check delivery_note/web/uploads.py delivery_note/web/health_routes.py tests/web/test_upload_concurrency.py
+      - name: 批次写入与维护模块格式检查
+        run: python -m ruff format --check delivery_note/web/batch_creation.py delivery_note/web/batch_creation_routes.py delivery_note/web/batch_file_edits.py delivery_note/web/batch_file_routes.py delivery_note/web/batch_file_uploads.py delivery_note/web/batch_maintenance.py delivery_note/web/batch_maintenance_routes.py delivery_note/web/batch_preflight.py delivery_note/web/self_operated_creation.py delivery_note/web/self_operated_creation_routes.py delivery_note/web/dependencies.py tests/web/test_inbound_files.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试

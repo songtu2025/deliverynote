@@ -19,21 +19,26 @@ def register_batch_creation_routes(
     get_session = dependencies.get_session
     current_user = dependencies.current_user
 
-    @app.post("/api/batches", status_code=status.HTTP_201_CREATED)
+    @app.post(
+        "/api/batches",
+        status_code=status.HTTP_201_CREATED,
+        response_model=None,
+    )
     def create_batch(
         payload: BatchPayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         return creator.create(session, payload, user.id)
 
     @app.post(
         "/api/batches/with-files",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     async def create_batch_with_files(
         form: Annotated[DeliveryBatchForm, Depends()],
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         return await creator.create_with_files(session, form, user.id)

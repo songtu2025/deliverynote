@@ -63,7 +63,7 @@ def _active_rule(session: Session) -> SelfOperatedOverreceiptRuleVersion | None:
 class SelfOperatedBatchCreator:
     app: FastAPI
     storage: Path
-    audit: Callable
+    audit: Callable[..., None]
     parse_workbook: UploadParser
 
     def create_empty(
@@ -72,7 +72,7 @@ class SelfOperatedBatchCreator:
         name: str,
         user_id: int,
         active_versions: dict[str, InputVersion],
-    ) -> dict:
+    ) -> dict[str, object]:
         active_rule = _active_rule(session)
         batch = _new_self_operated_batch(session, name, user_id, active_versions)
         session.add(
@@ -100,7 +100,7 @@ class SelfOperatedBatchCreator:
         request: Request,
         form: SelfOperatedBatchForm,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         batch_name = await self_operated_batch_name(request, form.name)
         active_versions = require_active_versions(session, SELF_OPERATED_INPUT_KINDS)
         delivery_files = form.delivery_file or []

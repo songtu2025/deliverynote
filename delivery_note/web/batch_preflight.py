@@ -30,7 +30,11 @@ def _batch_input_signature(
     batch: Batch,
     sources: Sequence[BatchFile],
     self_operated: SelfOperatedBatch | None,
-) -> tuple:
+) -> tuple[
+    tuple[int | None, ...],
+    tuple[tuple[int, str, str, int], ...],
+    tuple[int, int | None, str] | None,
+]:
     return (
         tuple(getattr(batch, VERSION_FIELDS[kind]) for kind in INPUT_KINDS),
         tuple(
@@ -87,8 +91,8 @@ def preflight_batch_record(
     batch_id: int,
     user_id: int,
     get_batch_or_404: BatchLookup,
-    audit: Callable,
-) -> dict:
+    audit: Callable[..., None],
+) -> dict[str, object]:
     batch = get_batch_or_404(batch_id, session)
     if batch.status not in {"draft", "failed"}:
         raise HTTPException(status_code=409, detail="当前批次状态不可预检")

@@ -195,7 +195,7 @@ def create_app(
         BatchFileEditor(dependencies, _audit),
     )
     register_batch_maintenance_routes(
-        app, dependencies, BatchMaintenance(storage, _audit)
+        app, dependencies, BatchMaintenance(storage, _audit, dependencies)
     )
 
     queue_job = build_job_queue(_audit)

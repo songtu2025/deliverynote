@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .batch_views import batch_json
+from .dependencies import RequestDependencies
 from .models import (
     Batch,
     BatchFile,
@@ -28,14 +29,15 @@ class BatchMaintenance:
     """在事务提交后清理批次文件，并复用既有审计写入。"""
 
     storage: Path
-    audit: Callable
+    audit: Callable[..., None]
+    dependencies: RequestDependencies
 
     def delete_selected(
         self,
         session: Session,
         user_id: int,
         requested_ids: list[int],
-    ) -> dict:
+    ) -> dict[str, object]:
         batch_ids = list(dict.fromkeys(requested_ids))
         batches = session.scalars(
             select(Batch)
@@ -142,7 +144,7 @@ class BatchMaintenance:
         session: Session,
         user_id: int,
         self_operated: bool,
-    ) -> dict:
+    ) -> dict[str, object]:
         query = select(Batch)
         if self_operated:
             query = query.join(
@@ -199,12 +201,8 @@ class BatchMaintenance:
         session: Session,
         batch_id: int,
         user_id: int,
-    ) -> dict:
-        batch = session.scalar(
-            select(Batch).where(Batch.id == batch_id).with_for_update()
-        )
-        if batch is None:
-            raise HTTPException(status_code=404, detail="批次不存在")
+    ) -> dict[str, object]:
+        batch = self.dependencies.get_batch_or_404(batch_id, session, for_update=True)
         if batch.status != "draft":
             raise HTTPException(
                 status_code=409,

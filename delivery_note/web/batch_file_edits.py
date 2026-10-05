@@ -18,7 +18,7 @@ from .uploads import _unlink_after_commit
 @dataclass
 class BatchFileEditor:
     dependencies: RequestDependencies
-    audit: Callable
+    audit: Callable[..., None]
 
     def delete(
         self,
@@ -26,10 +26,10 @@ class BatchFileEditor:
         batch_id: int,
         file_id: int,
         user_id: int,
-    ) -> dict:
-        batch = self.dependencies.get_batch_or_404(batch_id, session, for_update=True)
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可删除文件")
+    ) -> dict[str, object]:
+        batch = self.dependencies.get_editable_batch(
+            batch_id, session, for_update=True, detail="当前批次状态不可删除文件"
+        )
         source = session.scalar(
             select(BatchFile).where(
                 BatchFile.id == file_id,
@@ -82,10 +82,10 @@ class BatchFileEditor:
         batch_id: int,
         payload: FileOrderPayload,
         user_id: int,
-    ) -> dict:
-        batch = self.dependencies.get_batch_or_404(batch_id, session, for_update=True)
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
-            raise HTTPException(status_code=409, detail="当前批次状态不可调整顺序")
+    ) -> dict[str, object]:
+        batch = self.dependencies.get_editable_batch(
+            batch_id, session, for_update=True, detail="当前批次状态不可调整顺序"
+        )
         sources = session.scalars(
             select(BatchFile).where(BatchFile.batch_id == batch.id)
         ).all()

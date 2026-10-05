@@ -5,11 +5,43 @@ from unittest.mock import patch
 
 
 from delivery_note.web.models import (
+    Batch,
     SelfOperatedBatch,
 )
 
 
 class WebApiTests(WebApiCase):
+    def test_inbound_upload_checks_batch_kind_before_editable_status(self) -> None:
+        headers = self.login("admin", "admin-pass")
+        self.upload_active_versions(headers)
+        ordinary = self.client.post(
+            "/api/batches", headers=headers, json={"name": "普通批次"}
+        ).json()
+        inbound = self.client.post(
+            "/api/self-operated-batches", headers=headers, json={"name": "自营批次"}
+        ).json()
+        with self.app.state.database.session() as session:
+            for batch_id in (ordinary["id"], inbound["id"]):
+                batch = session.get(Batch, batch_id)
+                assert batch is not None
+                batch.status = "running"
+            session.commit()
+        for batch, status, detail in (
+            (ordinary, 404, "自营仓入库批次不存在"),
+            (inbound, 409, "当前批次状态不可修改文件"),
+        ):
+            with self.subTest(batch_id=batch["id"]):
+                response = self.client.post(
+                    f"/api/self-operated-batches/{batch['id']}/inbound-file",
+                    headers=headers,
+                    files={"file": ("入库单.xlsx", BytesIO(b"invalid"))},
+                )
+                self.assertEqual(response.status_code, status, response.text)
+                self.assertEqual(response.json(), {"detail": detail})
+                self.assertFalse(
+                    (self.root / "storage" / "batches" / str(batch["id"])).exists()
+                )
+
     def test_self_operated_batch_locks_rule_and_accepts_an_appended_delivery(self):
         headers = self.login("admin", "admin-pass")
         self.upload_active_versions(headers)

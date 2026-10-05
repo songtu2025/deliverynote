@@ -83,10 +83,12 @@ def _bind_overreceipt_rule(
 class DeliveryBatchCreator:
     app: FastAPI
     storage: Path
-    audit: Callable
+    audit: Callable[..., None]
     parse_workbook: UploadParser
 
-    def create(self, session: Session, payload: BatchPayload, user_id: int) -> dict:
+    def create(
+        self, session: Session, payload: BatchPayload, user_id: int
+    ) -> dict[str, object]:
         versions = require_active_versions(session, INPUT_KINDS)
         active_overreceipt_rule = _active_overreceipt_rule(session)
         batch = _new_delivery_batch(session, payload.name, user_id, versions)
@@ -113,7 +115,7 @@ class DeliveryBatchCreator:
         session: Session,
         form: DeliveryBatchForm,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         name, files = form.name, form.files
         batch_name = validated_batch_name(name)
         if not files:

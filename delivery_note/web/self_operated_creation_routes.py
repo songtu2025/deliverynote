@@ -22,11 +22,12 @@ def register_self_operated_creation_routes(
     @app.post(
         "/api/self-operated-batches",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     async def create_self_operated_batch(
         request: Request,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
         form: Annotated[SelfOperatedBatchForm, Depends()],
-    ):
+    ) -> dict[str, object]:
         return await creator.create(session, request, form, user.id)
