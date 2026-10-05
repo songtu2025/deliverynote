@@ -1,17 +1,25 @@
 import json
-from typing import Annotated, Callable
+from collections.abc import Callable, Iterator, Sequence
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from sqlalchemy import case, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .batch_read_routes import MAX_LIST_PAGE_SIZE
+from .caches import PositionFrameCache
+from .dependencies import BatchLookup
+from .exception_views import (
+    ExceptionRenderer,
+    PositionLookup,
+    PositionValuesByException,
+    SplitLookup,
+    _exception_review_stats,
+)
 from .models import (
-    Batch,
     BatchFile,
     ExceptionRecord,
     SelfOperatedBatch,
-    SplitRecord,
     User,
 )
 
@@ -55,56 +63,18 @@ def _position_display_value(value: str | int | float) -> str:
     )
 
 
-def _exception_review_stats(session: Session, batch_id: int) -> dict:
-    rows = session.execute(
-        select(
-            ExceptionRecord.status,
-            func.count(func.distinct(ExceptionRecord.id)),
-            func.sum(
-                case(
-                    (
-                        SplitRecord.id.is_(None),
-                        case(
-                            (
-                                ExceptionRecord.status != "resolved",
-                                ExceptionRecord.manual_quantity,
-                            ),
-                            else_=0,
-                        ),
-                    ),
-                    (SplitRecord.resolved.is_(False), SplitRecord.quantity),
-                    else_=0,
-                )
-            ),
-        )
-        .join(BatchFile, BatchFile.id == ExceptionRecord.batch_file_id)
-        .outerjoin(SplitRecord, SplitRecord.exception_id == ExceptionRecord.id)
-        .where(BatchFile.batch_id == batch_id)
-        .group_by(ExceptionRecord.status)
-    )
-    counts = {status: (count, quantity or 0) for status, count, quantity in rows}
-    resolved_count = counts.get("resolved", (0, 0))[0]
-    total_count = sum(count for count, _ in counts.values())
-    return {
-        "unfinished_count": total_count - resolved_count,
-        "unfinished_quantity": sum(quantity for _, quantity in counts.values()),
-        "resolved_count": resolved_count,
-        "total_count": total_count,
-    }
-
-
 def register_exception_read_routes(
     app: FastAPI,
     *,
-    get_session: Callable,
-    current_user: Callable,
-    get_batch_or_404: Callable[[int, Session], Batch],
-    exception_position_values: Callable,
-    position_frame_cache: object,
-    split_records_by_exception: Callable,
-    exception_json: Callable,
+    get_session: Callable[[], Iterator[Session]],
+    current_user: Callable[..., User],
+    get_batch_or_404: BatchLookup,
+    exception_position_values: PositionLookup,
+    position_frame_cache: PositionFrameCache,
+    split_records_by_exception: SplitLookup,
+    exception_json: ExceptionRenderer,
 ) -> None:
-    @app.get("/api/batches/{batch_id}/exceptions")
+    @app.get("/api/batches/{batch_id}/exceptions", response_model=None)
     def list_exceptions(
         batch_id: int,
         _user: Annotated[User, Depends(current_user)],
@@ -119,7 +89,7 @@ def register_exception_read_routes(
         scale_position: str = "",
         stocking_position: str = "",
         search: str = "",
-    ):
+    ) -> list[dict[str, object]] | dict[str, object]:
         batch = get_batch_or_404(batch_id, session)
         self_operated = session.get(SelfOperatedBatch, batch.id) is not None
         conditions = [BatchFile.batch_id == batch_id]
@@ -137,23 +107,28 @@ def register_exception_read_routes(
             .where(*conditions)
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         )
-        filtered_positions = None
+        filtered_positions: PositionValuesByException | None = None
+        exceptions: Sequence[ExceptionRecord]
         if search.strip() or scale_position or stocking_position:
             filtered_positions = {}
             keyword = search.strip().casefold()
             total = 0
-            exceptions = []
+            selected_exceptions: list[ExceptionRecord] = []
             with session.execute(
                 query.add_columns(BatchFile.original_name).execution_options(
                     yield_per=MAX_LIST_PAGE_SIZE
                 )
             ) as candidates:
                 for chunk in candidates.partitions(MAX_LIST_PAGE_SIZE):
-                    positions = {} if self_operated else exception_position_values(
-                        [record for record, _ in chunk],
-                        batch,
-                        session,
-                        position_frame_cache,
+                    positions = (
+                        {}
+                        if self_operated
+                        else exception_position_values(
+                            [record for record, _ in chunk],
+                            batch,
+                            session,
+                            position_frame_cache,
+                        )
                     )
                     for record, filename in chunk:
                         values = positions.get(record.id, {})
@@ -185,10 +160,11 @@ def register_exception_read_routes(
                                 detail="结果超过 200 条，请使用分页查询",
                             )
                         if limit is None or offset <= total < offset + limit:
-                            exceptions.append(record)
+                            selected_exceptions.append(record)
                             if record.id in positions:
                                 filtered_positions[record.id] = values
                         total += 1
+            exceptions = selected_exceptions
         elif limit is None:
             exceptions = session.scalars(query.limit(MAX_LIST_PAGE_SIZE + 1)).all()
             if len(exceptions) > MAX_LIST_PAGE_SIZE:
@@ -196,11 +172,14 @@ def register_exception_read_routes(
                     status_code=422, detail="结果超过 200 条，请使用分页查询"
                 )
         else:
-            total = session.scalar(
-                select(func.count(ExceptionRecord.id))
-                .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
-                .where(*conditions)
-            ) or 0
+            total = (
+                session.scalar(
+                    select(func.count(ExceptionRecord.id))
+                    .join(BatchFile, ExceptionRecord.batch_file_id == BatchFile.id)
+                    .where(*conditions)
+                )
+                or 0
+            )
             exceptions = session.scalars(query.offset(offset).limit(limit)).all()
         position_values = (
             filtered_positions
@@ -234,12 +213,12 @@ def register_exception_read_routes(
             "stats": _exception_review_stats(session, batch_id),
         }
 
-    @app.get("/api/batches/{batch_id}/exceptions/filters")
+    @app.get("/api/batches/{batch_id}/exceptions/filters", response_model=None)
     def exception_filters(
         batch_id: int,
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, list[str]]:
         batch = get_batch_or_404(batch_id, session)
         reasons = session.scalars(
             select(ExceptionRecord.reason)

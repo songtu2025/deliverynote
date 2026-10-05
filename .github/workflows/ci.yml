@@ -59,6 +59,8 @@ jobs:
         run: python -m mypy
       - name: 模型与契约测试格式检查
         run: python -m ruff format --check delivery_note/web/models tests/test_model_contracts.py
+      - name: 异常读写模块格式检查
+        run: python -m ruff format --check delivery_note/web/exception_read_routes.py delivery_note/web/exception_write_routes.py delivery_note/web/exception_views.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试

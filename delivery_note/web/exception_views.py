@@ -1,23 +1,84 @@
 """待处理记录的拆分查询、锁定库位回填和响应字段。"""
 
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
 import pandas as pd
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from ..exception_reasons import exception_reason_code
-from ..processing.models import (IMPORT_COLUMNS, POSITION_VALUE_COLUMNS)
-from ..processing.pending import (enrich_pending_import_rows)
+from ..processing.models import IMPORT_COLUMNS, POSITION_VALUE_COLUMNS
+from ..processing.pending import enrich_pending_import_rows
 from .caches import PositionFrameCache
-from .models import Batch, ExceptionRecord, InputVersion, SplitRecord
+from .models import Batch, BatchFile, ExceptionRecord, InputVersion, SplitRecord
+
+
+PositionValues = dict[str, str | int | float]
+PositionValuesByException = dict[int, PositionValues]
+PositionLookup = Callable[
+    [Sequence[ExceptionRecord], Batch, Session, PositionFrameCache],
+    PositionValuesByException,
+]
+SplitLookup = Callable[
+    [Session, Sequence[ExceptionRecord]], dict[int, list[SplitRecord]]
+]
+
+
+class ExceptionRenderer(Protocol):
+    def __call__(
+        self,
+        exception: ExceptionRecord,
+        parts: list[SplitRecord],
+        position_values: PositionValues | None = None,
+        *,
+        self_operated: bool = False,
+    ) -> dict[str, object]: ...
+
+
+def _exception_review_stats(session: Session, batch_id: int) -> dict[str, int | float]:
+    rows = session.execute(
+        select(
+            ExceptionRecord.status,
+            func.count(func.distinct(ExceptionRecord.id)),
+            func.sum(
+                case(
+                    (
+                        SplitRecord.id.is_(None),
+                        case(
+                            (
+                                ExceptionRecord.status != "resolved",
+                                ExceptionRecord.manual_quantity,
+                            ),
+                            else_=0,
+                        ),
+                    ),
+                    (SplitRecord.resolved.is_(False), SplitRecord.quantity),
+                    else_=0,
+                )
+            ),
+        )
+        .join(BatchFile, BatchFile.id == ExceptionRecord.batch_file_id)
+        .outerjoin(SplitRecord, SplitRecord.exception_id == ExceptionRecord.id)
+        .where(BatchFile.batch_id == batch_id)
+        .group_by(ExceptionRecord.status)
+    )
+    counts = {status: (count, quantity or 0) for status, count, quantity in rows}
+    resolved_count = counts.get("resolved", (0, 0))[0]
+    total_count = sum(count for count, _ in counts.values())
+    return {
+        "unfinished_count": total_count - resolved_count,
+        "unfinished_quantity": sum(quantity for _, quantity in counts.values()),
+        "resolved_count": resolved_count,
+        "total_count": total_count,
+    }
 
 
 def _split_records_by_exception(
     session: Session,
-    exceptions: list[ExceptionRecord],
+    exceptions: Sequence[ExceptionRecord],
 ) -> dict[int, list[SplitRecord]]:
     exception_ids = [exception.id for exception in exceptions]
     if not exception_ids:
@@ -34,11 +95,11 @@ def _split_records_by_exception(
 
 
 def _exception_position_values(
-    exceptions: list[ExceptionRecord],
+    exceptions: Sequence[ExceptionRecord],
     batch: Batch,
     session: Session,
     position_frame_cache: PositionFrameCache,
-) -> dict[int, dict[str, str | int | float]]:
+) -> PositionValuesByException:
     if not exceptions:
         return {}
     version = session.get(InputVersion, batch.position_version_id)
@@ -75,7 +136,7 @@ def _exception_position_values(
             detail=f"批次锁定的库位资料无法读取：{error}",
         ) from error
 
-    result: dict[int, dict[str, str | int | float]] = {}
+    result: PositionValuesByException = {}
     for exception_id, row in enriched.iterrows():
         values = {}
         for column, key in zip(
@@ -96,10 +157,10 @@ def _exception_position_values(
 def _exception_json(
     exception: ExceptionRecord,
     parts: list[SplitRecord],
-    position_values: dict[str, str | int | float] | None = None,
+    position_values: PositionValues | None = None,
     *,
     self_operated: bool = False,
-) -> dict:
+) -> dict[str, object]:
     position_values = position_values or {}
     reason_code = exception.reason_code or exception_reason_code(exception.reason)
     if self_operated:

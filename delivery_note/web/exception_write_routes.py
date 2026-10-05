@@ -1,4 +1,5 @@
-from typing import Annotated, Callable
+from collections.abc import Callable, Iterator
+from typing import Annotated
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -8,7 +9,9 @@ from sqlalchemy.orm import Session
 
 from ..application import SplitPart, project_split
 from ..exception_reasons import exception_reason_code
+from .caches import PositionFrameCache
 from .dependencies import BatchLookup
+from .exception_views import ExceptionRenderer, PositionLookup, SplitLookup
 from .models import (
     Batch,
     BatchFile,
@@ -25,27 +28,28 @@ from .schemas import SelfOperatedSiteResolutionPayload, SplitPayload
 def register_exception_write_routes(
     app: FastAPI,
     *,
-    get_session: Callable,
-    current_user: Callable,
+    get_session: Callable[[], Iterator[Session]],
+    current_user: Callable[..., User],
     get_batch_or_404: BatchLookup,
-    position_frame_cache: object,
-    exception_position_values: Callable,
-    split_records_by_exception: Callable,
-    exception_json: Callable,
+    position_frame_cache: PositionFrameCache,
+    exception_position_values: PositionLookup,
+    split_records_by_exception: SplitLookup,
+    exception_json: ExceptionRenderer,
     queue_job: Callable[[Batch, str, User, Session], Job],
-    job_json: Callable[[Job], dict],
-    audit: Callable,
+    job_json: Callable[[Job], dict[str, object]],
+    audit: Callable[..., None],
 ) -> None:
     @app.put(
         "/api/exceptions/{exception_id}/self-operated-site",
         status_code=status.HTTP_202_ACCEPTED,
+        response_model=None,
     )
     def save_self_operated_site_resolution(
         exception_id: int,
         payload: SelfOperatedSiteResolutionPayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         exception = session.get(ExceptionRecord, exception_id)
         if exception is None:
             raise HTTPException(status_code=404, detail="待处理记录不存在")
@@ -151,13 +155,13 @@ def register_exception_write_routes(
             ) from error
         return job_json(job)
 
-    @app.put("/api/exceptions/{exception_id}/split")
+    @app.put("/api/exceptions/{exception_id}/split", response_model=None)
     def save_split(
         exception_id: int,
         payload: SplitPayload,
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         exception = session.scalar(
             select(ExceptionRecord)
             .where(ExceptionRecord.id == exception_id)

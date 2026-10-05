@@ -15,6 +15,19 @@ from delivery_note.web.models import (
 
 
 class WebApiTests(WebApiCase):
+    def test_exception_routes_preserve_response_contract(self) -> None:
+        schema = self.app.openapi()
+        operations = (
+            ("/api/batches/{batch_id}/exceptions", "get", "200"),
+            ("/api/batches/{batch_id}/exceptions/filters", "get", "200"),
+            ("/api/exceptions/{exception_id}/split", "put", "200"),
+            ("/api/exceptions/{exception_id}/self-operated-site", "put", "202"),
+        )
+        for path, method, status in operations:
+            with self.subTest(path=path):
+                response = schema["paths"][path][method]["responses"][status]
+                self.assertEqual(response["content"]["application/json"]["schema"], {})
+
     def test_batch_reads_bulk_load_exception_splits(self):
         admin_headers = self.login("admin", "admin-pass")
         self.upload_active_versions(admin_headers)
