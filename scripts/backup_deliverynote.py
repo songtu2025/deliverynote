@@ -9,7 +9,12 @@ from typing import Sequence
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.backup.runtime import BackupConfig, BackupError, SubprocessRunner  # noqa: E402
+from scripts.backup.runtime import (  # noqa: E402
+    DEFAULT_LOCK_FILE,
+    BackupConfig,
+    BackupError,
+    SubprocessRunner,
+)
 from scripts.backup.services import inspect_environment  # noqa: E402
 from scripts.backup.workflow import create_backup  # noqa: E402
 
@@ -25,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--lock-file",
         type=Path,
-        default=Path("/run/lock/deliverynote-backup.lock"),
+        default=DEFAULT_LOCK_FILE,
     )
     parser.add_argument("--stop-timeout-seconds", type=int, default=60)
     parser.add_argument("--job-drain-timeout-seconds", type=int, default=1800)

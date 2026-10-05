@@ -196,7 +196,13 @@ def _complete_backup(
     data_archive_bytes = archive_path.stat().st_size
     final_directory = config.destination / snapshot.started_at.strftime("%Y%m%d-%H%M%S")
     snapshot.directory.replace(final_directory)
-    pruned = prune_completed_backups(config.destination, config.retention_count)
+    snapshot.directory = final_directory
+    try:
+        pruned = prune_completed_backups(config.destination, config.retention_count)
+    except (BackupError, OSError) as error:
+        raise BackupError(
+            f"旧备份清理失败，完整备份保留于 {final_directory}：{error}"
+        ) from error
     return {
         "status": "complete",
         "backup_directory": str(final_directory),
@@ -237,10 +243,12 @@ def create_backup(
                 ),
             )
             _verify_snapshot(config, runner, snapshot)
+            return _complete_backup(config, environment, snapshot, now())
         except Exception as error:
-            write_private_text(
-                snapshot.directory / "FAILED.txt",
-                f"failed_at={now().isoformat()}\nerror={error}\n",
-            )
+            if snapshot.directory.name.startswith(".incomplete-"):
+                (snapshot.directory / "READY").unlink(missing_ok=True)
+                write_private_text(
+                    snapshot.directory / "FAILED.txt",
+                    f"failed_at={now().isoformat()}\nerror={error}\n",
+                )
             raise
-        return _complete_backup(config, environment, snapshot, now())

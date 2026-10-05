@@ -10,6 +10,7 @@ from typing import BinaryIO, Iterator, Protocol, Sequence
 
 
 PROJECT_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+DEFAULT_LOCK_FILE = Path("/run/lock/deliverynote-backup.lock")
 
 
 class BackupError(RuntimeError):

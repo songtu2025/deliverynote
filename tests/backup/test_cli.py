@@ -49,6 +49,25 @@ class BackupCliTests(BackupTestCase):
         self.assertEqual(code, 1)
         self.assertIn("备份失败：环境检查失败", output.getvalue())
 
+    def test_backup_failures_never_output_success_json(self) -> None:
+        for error in (
+            BackupError("备份失败且服务恢复失败：快照失败; 恢复失败"),
+            BackupError("临时数据库清理失败"),
+            BackupError("旧备份清理失败，完整备份保留"),
+            OSError("完成文件写入失败"),
+        ):
+            with self.subTest(error=error):
+                output, errors = io.StringIO(), io.StringIO()
+                with patch(
+                    "scripts.backup_deliverynote.create_backup", side_effect=error
+                ) as backup:
+                    with redirect_stdout(output), redirect_stderr(errors):
+                        code = main(self.arguments()[:-1])
+                self.assertEqual(code, 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertIn(str(error), errors.getvalue())
+                backup.assert_called_once()
+
     def test_check_only_accepts_explicit_web_url_without_port_discovery(self) -> None:
         output = io.StringIO()
         runner = FakeRunner()

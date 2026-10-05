@@ -102,6 +102,8 @@ jobs:
           python -m ruff format --check scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/backup/test_cli.py tests/postgres/test_backup_queues.py tests/test_web_verification.py
           python -m mypy --strict tests/support/backup_docker.py tests/test_backup_docker.py
           python -m ruff format --check tests/support/backup_docker.py tests/test_backup_docker.py tests/backup/test_restore.py
+          python -m mypy --strict tests/backup/test_completion.py tests/backup/test_operational_lock.py tests/backup/test_cli.py
+          python -m ruff format --check tests/backup/test_completion.py tests/backup/test_operational_lock.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查

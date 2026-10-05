@@ -10,6 +10,7 @@ from typing import Any, cast
 from urllib.request import Request, urlopen
 
 from scripts.backup.runtime import (
+    DEFAULT_LOCK_FILE,
     BackupError,
     Runner,
     SubprocessRunner,
@@ -33,7 +34,7 @@ class ReleaseConfig:
     revision: str
     health_url: str
     wait_seconds: int = 120
-    lock_file: Path = Path("/run/lock/deliverynote-backup.lock")
+    lock_file: Path = DEFAULT_LOCK_FILE
 
 
 def verify_ci(revision: str, run_id: int) -> None:
@@ -187,9 +188,7 @@ def main() -> int:
     parser.add_argument("--ci-run", type=int, required=True)
     parser.add_argument("--health-url", required=True)
     parser.add_argument("--wait-seconds", type=int, default=120)
-    parser.add_argument(
-        "--lock-file", type=Path, default=Path("/run/lock/deliverynote-backup.lock")
-    )
+    parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE)
     arguments = parser.parse_args()
     config = ReleaseConfig(
         root=arguments.root.resolve(),
