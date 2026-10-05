@@ -7,6 +7,7 @@ from delivery_note.web.models import (
     Batch,
     BatchFile,
     ExceptionRecord,
+    SplitRecord,
 )
 
 
@@ -200,6 +201,40 @@ class WebApiTests(WebApiCase):
             json={"parts": [{"quantity": 39, "resolved": False}]},
         )
         self.assertEqual(invalid.status_code, 400)
+
+        with self.app.state.database.session() as session:
+            batch = session.get(Batch, batch_id)
+            source = session.get(BatchFile, exception.batch_file_id)
+            batch.zip_path = "previous-export.zip"
+            source.result_path = "previous-export.xlsx"
+            session.commit()
+        for quantity in (True, False):
+            with self.subTest(quantity=quantity):
+                rejected = self.client.put(
+                    f"/api/exceptions/{exception_id}/split",
+                    headers=operator_headers,
+                    json={
+                        "parts": [
+                            {"quantity": quantity, "resolved": False},
+                            {"quantity": 39 if quantity else 40, "resolved": False},
+                        ]
+                    },
+                )
+                self.assertEqual(rejected.status_code, 422, rejected.text)
+                with self.app.state.database.session() as session:
+                    self.assertEqual(
+                        session.query(SplitRecord)
+                        .filter_by(exception_id=exception_id)
+                        .count(),
+                        0,
+                    )
+                    self.assertEqual(
+                        session.get(Batch, batch_id).zip_path, "previous-export.zip"
+                    )
+                    self.assertEqual(
+                        session.get(BatchFile, source.id).result_path,
+                        "previous-export.xlsx",
+                    )
 
         valid = self.client.put(
             f"/api/exceptions/{exception_id}/split",

@@ -205,6 +205,7 @@ def create_app(
         app=app,
         get_session=get_session,
         current_user=current_user,
+        get_batch_or_404=get_batch_or_404,
         position_frame_cache=position_frame_cache,
         exception_position_values=_exception_position_values,
         split_records_by_exception=_split_records_by_exception,

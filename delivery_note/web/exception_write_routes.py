@@ -2,13 +2,13 @@ from typing import Annotated, Callable
 
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, status
-from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..application import SplitPart, project_split
 from ..exception_reasons import exception_reason_code
+from .dependencies import BatchLookup
 from .models import (
     Batch,
     BatchFile,
@@ -19,24 +19,7 @@ from .models import (
     SplitRecord,
     User,
 )
-
-
-class SplitPartPayload(BaseModel):
-    quantity: int
-    destination: str = ""
-    site: str = ""
-    supplier_code: str = ""
-    sku: str = ""
-    delivery_note: str = ""
-    resolved: bool = True
-
-
-class SplitPayload(BaseModel):
-    parts: list[SplitPartPayload]
-
-
-class SelfOperatedSiteResolutionPayload(BaseModel):
-    full_site: str = Field(min_length=1, max_length=300)
+from .schemas import SelfOperatedSiteResolutionPayload, SplitPayload
 
 
 def register_exception_write_routes(
@@ -44,6 +27,7 @@ def register_exception_write_routes(
     *,
     get_session: Callable,
     current_user: Callable,
+    get_batch_or_404: BatchLookup,
     position_frame_cache: object,
     exception_position_values: Callable,
     split_records_by_exception: Callable,
@@ -62,15 +46,15 @@ def register_exception_write_routes(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ):
-        exception = session.scalar(
-            select(ExceptionRecord)
-            .where(ExceptionRecord.id == exception_id)
-            .with_for_update()
-        )
+        exception = session.get(ExceptionRecord, exception_id)
         if exception is None:
             raise HTTPException(status_code=404, detail="待处理记录不存在")
         source = session.get(BatchFile, exception.batch_file_id)
-        batch = session.get(Batch, source.batch_id) if source is not None else None
+        batch = (
+            get_batch_or_404(source.batch_id, session, for_update=True)
+            if source is not None
+            else None
+        )
         profile = (
             session.get(SelfOperatedBatch, batch.id) if batch is not None else None
         )
@@ -78,6 +62,15 @@ def register_exception_write_routes(
             raise HTTPException(status_code=409, detail="不是自营仓入库待处理记录")
         if batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
+        # 与导出共用批次锁；取得锁后刷新异常，避免使用重算前的记录。
+        exception = session.scalar(
+            select(ExceptionRecord)
+            .where(ExceptionRecord.id == exception_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if exception is None:
+            raise HTTPException(status_code=404, detail="待处理记录不存在")
         if (
             exception.reason_code or exception_reason_code(exception.reason)
         ) != "ambiguous_product_site":
@@ -180,7 +173,7 @@ def register_exception_write_routes(
             if source
             else None
         )
-        if batch is None or batch.status != "succeeded":
+        if source is None or batch is None or batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
         if session.get(SelfOperatedBatch, batch.id) is not None:
             raise HTTPException(

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import File, Form, Query, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginPayload(BaseModel):
@@ -36,6 +36,32 @@ class BatchDeletePayload(BaseModel):
 
 class FileOrderPayload(BaseModel):
     file_ids: list[int]
+
+
+class SplitPartPayload(BaseModel):
+    quantity: int
+    destination: str = ""
+    site: str = ""
+    supplier_code: str = ""
+    sku: str = ""
+    delivery_note: str = ""
+    resolved: bool = True
+
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def reject_boolean_quantity(cls, value: object) -> object:
+        """保留原有整数转换，但禁止把布尔值作为数量。"""
+        if isinstance(value, bool):
+            raise ValueError("拆分数量必须是整数，不能是布尔值")
+        return value
+
+
+class SplitPayload(BaseModel):
+    parts: list[SplitPartPayload]
+
+
+class SelfOperatedSiteResolutionPayload(BaseModel):
+    full_site: str = Field(min_length=1, max_length=300)
 
 
 class DraftMutationPayload(BaseModel):
