@@ -117,7 +117,12 @@ def _take_snapshot(
         primary_error = error
     finally:
         try:
-            resume_services(config, runner, environment["service_containers"])
+            resume_services(
+                config,
+                runner,
+                environment["service_containers"],
+                health_url=environment["health_url"],
+            )
         except Exception as resume_error:
             if primary_error is None:
                 primary_error = resume_error

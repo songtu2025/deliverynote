@@ -4,6 +4,7 @@ import re
 from typing import Callable, TypedDict
 
 from scripts.backup.runtime import BackupConfig, BackupError, Runner, compose
+from scripts.web_verification import resolve_web_url, verify_served_web
 
 
 class Environment(TypedDict):
@@ -12,6 +13,7 @@ class Environment(TypedDict):
     data_volume: str
     api_image: str
     service_containers: dict[str, str]
+    health_url: str
 
 
 DOCKER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
@@ -64,7 +66,12 @@ def active_job_count(config: BackupConfig, runner: Runner) -> int:
             "delivery_note",
             "-Atq",
             "-c",
-            "SELECT count(*) FROM jobs WHERE status IN ('queued','running');",
+            "SELECT "
+            "(SELECT count(*) FROM jobs WHERE status IN ('queued','running')) + "
+            "(SELECT count(*) FROM purchase_sync_jobs "
+            "WHERE status IN ('queued','running')) + "
+            "(SELECT count(*) FROM self_operated_inbound_sync_jobs "
+            "WHERE status IN ('queued','running'));",
         )
     ).strip()
     try:
@@ -132,12 +139,16 @@ def inspect_environment(config: BackupConfig, runner: Runner) -> Environment:
             "delivery_note",
         )
     )
+    containers = _resolve_service_containers(config, runner)
+    health_url = resolve_web_url(config, runner)
+    verify_served_web(config, runner, web_id=containers["web"], health_url=health_url)
     return {
         "running_services": sorted(running),
         "active_jobs": active_job_count(config, runner),
         "data_volume": _resolve_volume(config, runner),
         "api_image": _resolve_image(config, runner, "api"),
-        "service_containers": _resolve_service_containers(config, runner),
+        "service_containers": containers,
+        "health_url": health_url,
     }
 
 
@@ -162,6 +173,8 @@ def resume_services(
     config: BackupConfig,
     runner: Runner,
     service_containers: dict[str, str],
+    *,
+    health_url: str | None = None,
 ) -> None:
     missing_containers = [
         service for service in RESUMED_SERVICES if service not in service_containers
@@ -189,3 +202,6 @@ def resume_services(
     missing = sorted(REQUIRED_SERVICES - _running_services(config, runner))
     if missing:
         raise BackupError(f"备份后服务未全部恢复：{', '.join(missing)}")
+    verify_served_web(
+        config, runner, web_id=service_containers["web"], health_url=health_url
+    )

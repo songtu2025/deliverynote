@@ -49,6 +49,21 @@ class BackupCliTests(BackupTestCase):
         self.assertEqual(code, 1)
         self.assertIn("备份失败：环境检查失败", output.getvalue())
 
+    def test_check_only_accepts_explicit_web_url_without_port_discovery(self) -> None:
+        output = io.StringIO()
+        runner = FakeRunner()
+        with patch("scripts.backup_deliverynote.SubprocessRunner", return_value=runner):
+            with redirect_stdout(output):
+                code = main(
+                    self.arguments() + ["--health-url", "http://127.0.0.1:19090"]
+                )
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            json.loads(output.getvalue())["health_url"], "http://127.0.0.1:19090"
+        )
+        self.assertFalse(any("port" in command for command in runner.commands))
+        self.assertFalse(any("stop" in command for command in runner.commands))
+
     def test_original_cli_defaults_are_preserved(self) -> None:
         arguments = build_parser().parse_args(["--destination", str(self.destination)])
         expected = {

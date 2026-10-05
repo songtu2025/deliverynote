@@ -74,6 +74,11 @@ class BackupConfig:
     service_wait_timeout_seconds: int = 120
     snapshot_timeout_seconds: int = 3600
     retention_count: int = 0
+    health_url: str | None = None
+
+    @property
+    def wait_seconds(self) -> int:
+        return self.service_wait_timeout_seconds
 
     def validate(self) -> None:
         if not self.compose_file.is_file():

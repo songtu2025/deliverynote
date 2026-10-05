@@ -97,6 +97,9 @@ jobs:
         run: |
           python -m mypy --strict scripts/package_release.py scripts/release_web.py tests/test_release_package.py tests/test_release_web.py tests/test_release_docker.py tests/support/release_docker.py
           python -m ruff format --check scripts/package_release.py scripts/release_web.py scripts/backup/runtime.py tests/test_release_package.py tests/test_release_web.py tests/test_release_docker.py tests/support/release_docker.py
+          python -m mypy --strict scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/test_web_verification.py
+          python -m mypy --check-untyped-defs tests/postgres/test_backup_queues.py
+          python -m ruff format --check scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/backup/test_cli.py tests/postgres/test_backup_queues.py tests/test_web_verification.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查

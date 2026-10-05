@@ -107,3 +107,29 @@ class ReleaseDockerTests(unittest.TestCase):
         )
         for old, updated in zip(before[1:], released[1:]):
             self.assertEqual(old["Id"], updated["Id"])
+
+    def test_backup_resumes_original_containers_and_verifies_web_entry(self) -> None:
+        from scripts.backup.runtime import BackupConfig, SubprocessRunner
+        from scripts.backup.services import RESUMED_SERVICES, resume_services
+
+        fixture = self.fixture
+        before = {service: fixture.inspect(service)[0] for service in RESUMED_SERVICES}
+        config = BackupConfig(
+            compose_file=fixture.compose_file,
+            env_file=fixture.env_file,
+            project_name=fixture.project,
+            destination=fixture.root / "backups",
+            lock_file=fixture.root / "backup.lock",
+            service_wait_timeout_seconds=30,
+        )
+        fixture.compose("stop", *RESUMED_SERVICES)
+        resume_services(
+            config,
+            SubprocessRunner(),
+            {service: record["Id"] for service, record in before.items()},
+        )
+        for service, old in before.items():
+            current = fixture.inspect(service)[0]
+            self.assertEqual(old["Id"], current["Id"])
+            self.assertEqual(current["State"]["Status"], "running")
+        fixture.wait_ready()

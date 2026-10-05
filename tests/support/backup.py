@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import tarfile
 import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, Sequence
+from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from scripts.backup.database import CRITICAL_TABLES, RESTORE_DATABASE_PATTERN
 from scripts.backup.runtime import BackupConfig, BackupError
@@ -14,6 +17,20 @@ from scripts.backup.workflow import create_backup
 
 
 class FakeRunner:
+    web_contents = {
+        "/index.html": b'<script src="/assets/app.js"></script>',
+        "/assets/app.js": b"console.log('backup-test')",
+    }
+
+    @staticmethod
+    def web_response(url: str, *, timeout: int) -> io.BytesIO:
+        path = urlsplit(url).path
+        if path.startswith("/health/"):
+            return io.BytesIO(b'{"status":"ok"}')
+        return io.BytesIO(
+            FakeRunner.web_contents["/index.html" if path == "/" else path]
+        )
+
     def __init__(
         self,
         *,
@@ -48,6 +65,9 @@ class FakeRunner:
     ) -> str:
         command = tuple(arguments)
         self.commands.append(command)
+        if command[:2] == ("docker", "exec") and "sha256sum" in command:
+            path = command[-1].removeprefix("/usr/share/nginx/html")
+            return hashlib.sha256(self.web_contents[path]).hexdigest() + "  " + path
         if command[:3] == ("docker", "volume", "ls"):
             return "deliverynote_delivery_data\n"
         if command[:2] == ("docker", "run"):
@@ -117,6 +137,8 @@ class FakeRunner:
         return ""
 
     def _compose(self, command: tuple[str, ...]) -> str:
+        if "port" in command and command[-2:] == ("web", "80"):
+            return "127.0.0.1:18080\n"
         self._fail(
             command[:2] == ("docker", "compose")
             and self.fail_compose_reconcile
@@ -149,6 +171,11 @@ class BackupTestCase(unittest.TestCase):
             lock_file=self.root / "backup.lock",
         )
         self.fixed_time = datetime(2026, 7, 22, 18, 30, 0, tzinfo=timezone.utc)
+        self.web_requests = self.enterContext(
+            patch(
+                "scripts.web_verification.urlopen", side_effect=FakeRunner.web_response
+            )
+        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()

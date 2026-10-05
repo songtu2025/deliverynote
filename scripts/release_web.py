@@ -2,14 +2,11 @@
 
 import argparse
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 import re
 import sys
-import time
 from typing import Any, cast
-from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from scripts.backup.runtime import (
@@ -20,6 +17,7 @@ from scripts.backup.runtime import (
     exclusive_lock,
 )
 from scripts.backup.services import REQUIRED_SERVICES
+from scripts.web_verification import verify_served_web
 
 
 REVISION_LABEL = "org.opencontainers.image.revision"
@@ -87,48 +85,6 @@ def _snapshot(config: ReleaseConfig, runner: Runner) -> dict[str, dict[str, Any]
         ):
             raise BackupError(f"服务状态未通过验收：{service}")
     return result
-
-
-def _verify_response(config: ReleaseConfig, runner: Runner, web_id: str) -> None:
-    base = config.health_url.rstrip("/")
-    for endpoint in ("live", "ready"):
-        with urlopen(base + "/health/" + endpoint, timeout=5) as response:
-            if json.load(response) != {"status": "ok"}:
-                raise BackupError("Web 代理健康响应不正确")
-    with urlopen(base + "/", timeout=5) as response:
-        html = response.read()
-    assets = set(re.findall(r'(?:src|href)="(/assets/[^"\s]+)"', html.decode()))
-    if not assets:
-        raise BackupError("正式首页缺少构建资源")
-    contents = {"/index.html": html}
-    for asset in assets:
-        with urlopen(base + asset, timeout=5) as response:
-            contents[asset] = response.read()
-    for path, content in contents.items():
-        digest = runner.run(
-            [
-                "docker",
-                "exec",
-                web_id,
-                "sha256sum",
-                "/usr/share/nginx/html" + path,
-            ]
-        ).split()[0]
-        if hashlib.sha256(content).hexdigest() != digest:
-            raise BackupError(f"对外资源与发布镜像不一致：{path}")
-
-
-def verify_served_web(config: ReleaseConfig, runner: Runner) -> None:
-    web_id = runner.run(compose(config, "ps", "--quiet", "web")).strip()
-    deadline = time.monotonic() + config.wait_seconds
-    while True:
-        try:
-            _verify_response(config, runner, web_id)
-            return
-        except (URLError, ConnectionError, TimeoutError, ValueError, BackupError):
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(1)
 
 
 def _unchanged(

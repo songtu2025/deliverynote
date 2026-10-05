@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job-drain-timeout-seconds", type=int, default=1800)
     parser.add_argument("--job-poll-seconds", type=int, default=5)
     parser.add_argument("--service-wait-timeout-seconds", type=int, default=120)
+    parser.add_argument("--health-url", help="Web 入口地址；默认读取实际端口映射。")
     parser.add_argument("--snapshot-timeout-seconds", type=int, default=3600)
     parser.add_argument(
         "--retention-count",
@@ -60,6 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         service_wait_timeout_seconds=arguments.service_wait_timeout_seconds,
         snapshot_timeout_seconds=arguments.snapshot_timeout_seconds,
         retention_count=arguments.retention_count,
+        health_url=arguments.health_url,
     )
     try:
         if arguments.check_only:
