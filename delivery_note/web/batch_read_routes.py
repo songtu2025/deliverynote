@@ -1,9 +1,11 @@
-from typing import Annotated, Callable
+from collections.abc import Callable, Iterator, Sequence
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .dependencies import BatchLookup
 from .models import Batch, BatchFile, SelfOperatedBatch, User
 
 
@@ -13,13 +15,13 @@ MAX_LIST_PAGE_SIZE = 200
 def register_batch_read_routes(
     app: FastAPI,
     *,
-    get_session: Callable,
-    current_user: Callable,
-    batch_json: Callable[[Batch, Session], dict],
-    batch_list_json: Callable[[list[Batch], Session], list[dict]],
-    get_batch_or_404: Callable[[int, Session], Batch],
+    get_session: Callable[[], Iterator[Session]],
+    current_user: Callable[..., User],
+    batch_json: Callable[[Batch, Session], dict[str, object]],
+    batch_list_json: Callable[[Sequence[Batch], Session], list[dict[str, object]]],
+    get_batch_or_404: BatchLookup,
 ) -> None:
-    @app.get("/api/batches")
+    @app.get("/api/batches", response_model=None)
     def list_batches(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
@@ -30,7 +32,7 @@ def register_batch_read_routes(
         ] = "",
         batch_status: str = "",
         search: str = "",
-    ):
+    ) -> list[dict[str, object]] | dict[str, object]:
         conditions = []
         if workflow == "delivery":
             conditions.append(
@@ -48,9 +50,7 @@ def register_batch_read_routes(
             conditions.append(Batch.status == batch_status)
         if search.strip():
             conditions.append(
-                func.lower(Batch.name).contains(
-                    search.strip().lower(), autoescape=True
-                )
+                func.lower(Batch.name).contains(search.strip().lower(), autoescape=True)
             )
         query = select(Batch).where(*conditions).order_by(Batch.id.desc())
         if limit is None:
@@ -85,10 +85,10 @@ def register_batch_read_routes(
             "empty_draft_count": session.scalar(empty_query) or 0,
         }
 
-    @app.get("/api/batches/{batch_id}")
+    @app.get("/api/batches/{batch_id}", response_model=None)
     def get_batch(
         batch_id: int,
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         return batch_json(get_batch_or_404(batch_id, session), session)

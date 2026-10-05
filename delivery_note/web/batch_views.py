@@ -1,8 +1,8 @@
 """共用批次数量统计，并组装列表和详情响应。"""
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import Row
@@ -46,7 +46,7 @@ class BatchTotals:
 
 
 def _totals_by_batch(
-    sources: Iterable[BatchFile | Row[tuple[int, int, int, int]]],
+    sources: Iterable[BatchFile | Row[int, int, int, int]],
     exception_totals: dict[int, tuple[int, int]],
 ) -> dict[int, BatchTotals]:
     """共用 ORM 文件和列表标量记录，统一计入已解决的拆分数量。"""
@@ -66,7 +66,7 @@ def file_json(
     *,
     import_total: int | None = None,
     manual_total: int | None = None,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     return {
         "id": source.id,
         "batch_id": source.batch_id,
@@ -109,7 +109,7 @@ def _version_ids(batch: Batch, metadata: BatchMetadata) -> dict[str, int | None]
 
 def _batch_base_json(
     batch: Batch, metadata: BatchMetadata, totals: BatchTotals
-) -> dict[str, Any]:
+) -> dict[str, object]:
     self_operated = metadata.self_operated
     return {
         "id": batch.id,
@@ -154,7 +154,7 @@ def _batch_details(
     sources: list[BatchFile],
     exception_totals: dict[int, tuple[int, int]],
     session: Session,
-) -> dict[str, Any]:
+) -> dict[str, object]:
     return {
         "files": [
             file_json(
@@ -187,7 +187,7 @@ def _batch_details(
 
 def batch_json(
     batch: Batch, session: Session, include_files: bool = True
-) -> dict[str, Any]:
+) -> dict[str, object]:
     sources = batch_sources(session, batch.id)
     exception_totals = exception_totals_by_source(
         session, [source.id for source in sources]
@@ -202,7 +202,9 @@ def batch_json(
     return result
 
 
-def batch_list_json(batches: list[Batch], session: Session) -> list[dict[str, Any]]:
+def batch_list_json(
+    batches: Sequence[Batch], session: Session
+) -> list[dict[str, object]]:
     if not batches:
         return []
     batch_ids = [batch.id for batch in batches]

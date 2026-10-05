@@ -15,9 +15,15 @@ from delivery_note.web.models import (
 
 
 class WebApiTests(WebApiCase):
-    def test_exception_routes_preserve_response_contract(self) -> None:
+    def test_batch_and_exception_routes_preserve_response_contract(self) -> None:
         schema = self.app.openapi()
         operations = (
+            ("/api/batches", "get", "200"),
+            ("/api/batches/{batch_id}", "get", "200"),
+            ("/api/batches/{batch_id}/export", "post", "202"),
+            ("/api/batches/{batch_id}/download", "get", "200"),
+            ("/api/batches/{batch_id}/download-merged", "get", "200"),
+            ("/api/batch-files/{file_id}/download", "get", "200"),
             ("/api/batches/{batch_id}/exceptions", "get", "200"),
             ("/api/batches/{batch_id}/exceptions/filters", "get", "200"),
             ("/api/exceptions/{exception_id}/split", "put", "200"),

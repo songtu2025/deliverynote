@@ -1,5 +1,6 @@
 from tests.support.worker import WorkerCase
 from io import BytesIO
+from mimetypes import guess_type
 from pathlib import Path
 from unittest.mock import patch
 from zipfile import ZipFile
@@ -104,6 +105,14 @@ class WorkerIntegrationTests(WorkerCase):
             f"/api/batches/{batch_id}/download-merged", headers=self.headers
         )
         self.assertEqual(merged_response.status_code, 200, merged_response.text)
+        self.assertEqual(
+            merged_response.headers["content-type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertIn(
+            f"batch-{batch_id}-merged.xlsx",
+            merged_response.headers["content-disposition"],
+        )
         merged_book = load_workbook(
             BytesIO(merged_response.content),
             data_only=True,
@@ -138,6 +147,12 @@ class WorkerIntegrationTests(WorkerCase):
             f"/api/batches/{batch_id}/download", headers=self.headers
         )
         self.assertEqual(archive_response.status_code, 200, archive_response.text)
+        self.assertEqual(
+            archive_response.headers["content-type"], guess_type("export.zip")[0]
+        )
+        self.assertTrue(
+            archive_response.headers["content-disposition"].startswith("attachment;")
+        )
         with ZipFile(BytesIO(archive_response.content)) as archive:
             names = sorted(archive.namelist())
             self.assertEqual(len(names), 2)
