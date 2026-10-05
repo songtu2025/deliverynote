@@ -4,16 +4,30 @@ from collections import OrderedDict
 from concurrent.futures import Future
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, TypedDict
+from typing import Any, Callable, Generic, TypeVar, TypedDict
 
 import pandas as pd
 
 from ..excel_io import read_position_workbook
+from ..inspection.positions import PositionIssue
 from ..input_inspection import (
     inspect_input_version_with_preview,
     preview_input_version_page,
 )
 from .models import InputVersion
+
+AnalysisResult = TypeVar("AnalysisResult")
+
+
+class DraftAnalysis(TypedDict):
+    """草稿摘要、逐行问题与分页过滤共享的缓存结构。"""
+
+    row_count: int
+    modified_count: int
+    diff: dict[str, int]
+    issues: list[PositionIssue]
+    issues_by_row: dict[int, list[PositionIssue]]
+    error_row_ids: tuple[int, ...]
 
 
 class _InspectionEntry(TypedDict):
@@ -196,22 +210,22 @@ class PositionFrameCache:
             return frame
 
 
-class DraftAnalysisCache:
+class DraftAnalysisCache(Generic[AnalysisResult]):
     """按草稿修订缓存纯数据分析结果，不保留跨会话 ORM 实体。"""
 
     def __init__(self, max_entries: int) -> None:
         if max_entries <= 0:
             raise ValueError("草稿分析缓存容量必须大于 0")
         self._max_entries = max_entries
-        self._analyses: OrderedDict[tuple[int, int], dict[str, Any]] = OrderedDict()
+        self._analyses: OrderedDict[tuple[int, int], AnalysisResult] = OrderedDict()
         self._lock = Lock()
 
     def get(
         self,
         draft_id: int,
         revision: int,
-        loader: Callable[[], dict[str, Any]],
-    ) -> dict[str, Any]:
+        loader: Callable[[], AnalysisResult],
+    ) -> AnalysisResult:
         key = (draft_id, revision)
         with self._lock:
             analysis = self._analyses.get(key)

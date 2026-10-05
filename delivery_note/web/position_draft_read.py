@@ -1,27 +1,45 @@
 """库位草稿的只读分析、问题映射和响应字段。"""
 
+from collections.abc import Mapping, Sequence
+from typing import TypedDict, cast
+
 import pandas as pd
 from sqlalchemy import func, or_, select
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.orm import Session
 
 from ..inspection.positions import (
+    PositionIssue,
     position_change_warnings,
     position_diff,
     validate_position_frame,
 )
-from ..processing.models import (POSITION_SOURCE_COLUMNS)
-from .caches import DraftAnalysisCache
+from ..processing.models import POSITION_SOURCE_COLUMNS
+from .caches import DraftAnalysis, DraftAnalysisCache
 from .models import InputDraft, InputVersion, PositionDraftRow
 from .position_draft_state import FIELD_TO_COLUMN, ROW_FIELDS, load_base_frame
 from .serializers import utc_isoformat
 from .schemas import PositionRowFilters
 
 
+class _DraftRowSnapshot(TypedDict):
+    """只读查询选出的标量字段，不保留 ORM 实体。"""
+
+    id: int
+    row_order: int
+    change_type: str
+    deleted: bool
+    store_site: str
+    jiaji_sku: str
+    msku: str
+    scale_position: str
+    stocking_position: str
+
+
 def position_row_json(
     row: PositionDraftRow,
-    issues: list[dict] | None = None,
-) -> dict:
+    issues: list[PositionIssue] | None = None,
+) -> dict[str, object]:
     return {
         "id": row.id,
         "draft_id": row.draft_id,
@@ -37,7 +55,7 @@ def position_row_json(
     }
 
 
-def _draft_row_snapshots(session: Session, draft_id: int) -> list[dict]:
+def _draft_row_snapshots(session: Session, draft_id: int) -> list[_DraftRowSnapshot]:
     """按稳定顺序加载分析所需标量，避免把整表 ORM 实体放入缓存。"""
 
     columns = [
@@ -48,7 +66,7 @@ def _draft_row_snapshots(session: Session, draft_id: int) -> list[dict]:
         *(getattr(PositionDraftRow, field) for field in ROW_FIELDS),
     ]
     return [
-        dict(row)
+        cast(_DraftRowSnapshot, dict(row))
         for row in session.execute(
             select(*columns)
             .where(PositionDraftRow.draft_id == draft_id)
@@ -57,7 +75,7 @@ def _draft_row_snapshots(session: Session, draft_id: int) -> list[dict]:
     ]
 
 
-def _snapshot_position_frame(rows: list[dict]) -> pd.DataFrame:
+def _snapshot_position_frame(rows: Sequence[Mapping[str, object]]) -> pd.DataFrame:
     records = [
         {FIELD_TO_COLUMN[field]: row[field] for field in ROW_FIELDS}
         for row in rows
@@ -67,11 +85,11 @@ def _snapshot_position_frame(rows: list[dict]) -> pd.DataFrame:
 
 
 def _position_issue_map(
-    rows: list[dict],
-    issues: list[dict],
-) -> dict[int, list[dict]]:
+    rows: list[_DraftRowSnapshot],
+    issues: list[PositionIssue],
+) -> dict[int, list[PositionIssue]]:
     active_rows = [row for row in rows if not row["deleted"]]
-    by_row_id: dict[int, list[dict]] = {}
+    by_row_id: dict[int, list[PositionIssue]] = {}
     for issue in issues:
         for row_number in issue["row_numbers"]:
             offset = row_number - 2
@@ -80,7 +98,7 @@ def _position_issue_map(
     return by_row_id
 
 
-def summarize_issues(issues: list[dict]) -> dict:
+def summarize_issues(issues: list[PositionIssue]) -> dict[str, object]:
     error_count = sum(
         max(1, len(issue["row_numbers"]))
         for issue in issues
@@ -102,11 +120,11 @@ def summarize_issues(issues: list[dict]) -> dict:
 def draft_analysis(
     session: Session,
     draft: InputDraft,
-    cache: DraftAnalysisCache,
-) -> dict:
+    cache: DraftAnalysisCache[DraftAnalysis],
+) -> DraftAnalysis:
     """按草稿修订复用摘要、差异和逐行问题分析。"""
 
-    def load() -> dict:
+    def load() -> DraftAnalysis:
         rows = _draft_row_snapshots(session, draft.id)
         base_frame = load_base_frame(session, draft)
         current_frame = _snapshot_position_frame(rows)
@@ -135,8 +153,8 @@ def draft_analysis(
 def draft_json(
     session: Session,
     draft: InputDraft,
-    analysis_cache: DraftAnalysisCache,
-) -> dict:
+    analysis_cache: DraftAnalysisCache[DraftAnalysis],
+) -> dict[str, object]:
     analysis = draft_analysis(session, draft, analysis_cache)
     base_version = session.get(InputVersion, draft.base_version_id)
     active_version = session.scalar(
@@ -175,9 +193,9 @@ def draft_json(
 def draft_rows_page(
     session: Session,
     draft: InputDraft,
-    cache: DraftAnalysisCache,
+    cache: DraftAnalysisCache[DraftAnalysis],
     filters: PositionRowFilters,
-) -> dict:
+) -> dict[str, object]:
     analysis = draft_analysis(session, draft, cache)
     issues_by_row = analysis["issues_by_row"]
     search_value = filters.search.strip().casefold()

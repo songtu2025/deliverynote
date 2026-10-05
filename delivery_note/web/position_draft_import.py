@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..excel_io import read_position_workbook
 from ..inspection.positions import (
+    PositionIssue,
     position_change_warnings,
     position_diff,
     validate_position_frame,
@@ -31,7 +32,7 @@ from .uploads import UploadParser, _safe_filename, _save_upload
 def _inspect_position_import(
     path: Path,
     current_frame: pd.DataFrame,
-) -> tuple[pd.DataFrame, list, dict]:
+) -> tuple[pd.DataFrame, list[PositionIssue], dict[str, int]]:
     """在线程池中读取并检查库位导入文件。"""
     candidate_frame = read_position_workbook(path)
     issues = [
@@ -55,7 +56,7 @@ class PositionDraftImporter:
         draft: InputDraft,
         form: PositionImportForm,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         try:
             require_revision(draft, form.revision)
         except DraftConflictError as error:
@@ -114,7 +115,7 @@ class PositionDraftImporter:
         draft: InputDraft,
         payload: ImportApplyPayload,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         candidate_path = self.candidates.consume(session, draft, payload, user_id)
         try:
             candidate_frame = read_position_workbook(candidate_path)

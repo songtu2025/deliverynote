@@ -1,6 +1,6 @@
 """库位质量检查、复合标识差异与变化幅度告警。"""
 
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 
 import pandas as pd
 
@@ -14,6 +14,17 @@ _POSITION_VALUES = [
 _KNOWN_SCALES = {"短尾", "中尾", "长尾"}
 
 
+class PositionIssue(TypedDict):
+    """库位校验与变化告警共享的问题字段。"""
+
+    severity: str
+    code: str
+    message: str
+    row_numbers: list[int]
+    before: NotRequired[int]
+    after: NotRequired[int]
+
+
 def _identity_values(frame: pd.DataFrame, column: str) -> pd.Series:
     """统一复合标识的大小写和两端空白。"""
 
@@ -21,7 +32,7 @@ def _identity_values(frame: pd.DataFrame, column: str) -> pd.Series:
 
 
 def _append_issue(
-    issues: list[dict[str, Any]],
+    issues: list[PositionIssue],
     *,
     severity: str,
     code: str,
@@ -42,7 +53,7 @@ def _append_issue(
         )
 
 
-def validate_position_frame(frame: pd.DataFrame) -> list[dict[str, Any]]:
+def validate_position_frame(frame: pd.DataFrame) -> list[PositionIssue]:
     """按既有顺序报告库位标识错误和定位告警。"""
 
     site = _identity_values(frame, "店铺-站点")
@@ -63,7 +74,7 @@ def validate_position_frame(frame: pd.DataFrame) -> list[dict[str, Any]]:
     stocking = frames._text_values(frame, "备货定位")
     unknown_scale = ~scale.isin(_KNOWN_SCALES)
 
-    issues: list[dict[str, Any]] = []
+    issues: list[PositionIssue] = []
     _append_issue(
         issues,
         severity="error",
@@ -168,7 +179,7 @@ def position_diff(base: pd.DataFrame, candidate: pd.DataFrame) -> dict[str, int]
 def position_change_warnings(
     reference: pd.DataFrame,
     candidate: pd.DataFrame,
-) -> list[dict[str, Any]]:
+) -> list[PositionIssue]:
     """报告资料清空或变化达到百分之五十的指标。"""
 
     metrics = (
@@ -186,7 +197,7 @@ def position_change_warnings(
             int(_identity_values(candidate, "积加SKU").replace("", pd.NA).nunique()),
         ),
     )
-    warnings = []
+    warnings: list[PositionIssue] = []
     for code, label, before, after in metrics:
         if before == after:
             continue

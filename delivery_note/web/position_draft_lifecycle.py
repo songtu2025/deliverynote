@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .caches import DraftAnalysisCache
+from .caches import DraftAnalysis, DraftAnalysisCache
 from .errors import (
     CodedHTTPException,
     INPUT_VERSION_NAME_EXISTS_CODE,
@@ -79,11 +79,11 @@ class PositionDraftLifecycle:
     """共享草稿生命周期所需的文件、缓存和审计资源。"""
 
     storage: Path
-    audit: Callable
-    analysis_cache: DraftAnalysisCache
+    audit: Callable[..., None]
+    analysis_cache: DraftAnalysisCache[DraftAnalysis]
     candidates: PositionImportCandidates
 
-    def create(self, session: Session, user_id: int) -> tuple[dict, bool]:
+    def create(self, session: Session, user_id: int) -> tuple[dict[str, object], bool]:
         version, resuming = _locked_position_base(session)
         with commit_draft_changes(session):
             draft = create_or_resume_draft(session, version, user_id)
@@ -105,7 +105,7 @@ class PositionDraftLifecycle:
         draft: InputDraft,
         payload: PublishDraftPayload,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         original_name = _safe_filename(f"{payload.name}.xlsx")
         destination = (
             self.storage / "master" / "position" / f"{uuid4().hex}_{original_name}"
@@ -158,7 +158,7 @@ class PositionDraftLifecycle:
         draft: InputDraft,
         payload: DraftMutationPayload,
         user_id: int,
-    ) -> dict:
+    ) -> dict[str, object]:
         try:
             discard_draft(
                 session,

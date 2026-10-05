@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from ..migrations.runner import migrate_schema as run_schema_migrations
-from .caches import PositionFrameCache, DraftAnalysisCache
+from .caches import PositionFrameCache, DraftAnalysis, DraftAnalysisCache
 from .database import Database
 from .dependencies import RequestDependencies, build_request_dependencies
 from .errors import register_exception_handlers
@@ -107,7 +107,7 @@ def initialize_application(settings: ApplicationSettings) -> ApplicationResource
     import_candidates_state = PositionImportCandidates(import_candidate_root)
     import_candidates_state.remove_expired(configured_import_candidate_ttl)
     position_frame_cache = PositionFrameCache(configured_position_frame_cache_size)
-    draft_analysis_cache = DraftAnalysisCache(DRAFT_ANALYSIS_CACHE_SIZE)
+    draft_analysis_cache = DraftAnalysisCache[DraftAnalysis](DRAFT_ANALYSIS_CACHE_SIZE)
 
     admin_credentials = settings.bootstrap_admin
     if admin_credentials is None:

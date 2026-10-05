@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 
 from ..inspection.workbooks import write_position_workbook
-from .caches import DraftAnalysisCache
+from .caches import DraftAnalysis, DraftAnalysisCache
 from .dependencies import RequestDependencies
 from .models import InputDraft, User
 from .position_draft_read import (
@@ -28,18 +28,18 @@ from .schemas import PositionRowFilters
 def register_position_draft_read_routes(
     app: FastAPI,
     dependencies: RequestDependencies,
-    draft_analysis_cache: DraftAnalysisCache,
+    draft_analysis_cache: DraftAnalysisCache[DraftAnalysis],
     storage: Path,
 ) -> None:
     get_session = dependencies.get_session
     admin_user = dependencies.admin_user
     get_draft_or_404 = dependencies.get_draft_or_404
 
-    @app.get("/api/input-drafts/position")
+    @app.get("/api/input-drafts/position", response_model=None)
     def get_position_draft(
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = session.scalar(
             select(InputDraft).where(
                 InputDraft.kind == "position",
@@ -50,22 +50,22 @@ def register_position_draft_read_routes(
             raise HTTPException(status_code=404, detail="当前没有进行中的库位草稿")
         return draft_json(session, draft, draft_analysis_cache)
 
-    @app.get("/api/input-drafts/{draft_id}/rows")
+    @app.get("/api/input-drafts/{draft_id}/rows", response_model=None)
     def get_position_draft_rows(
         draft_id: int,
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
         filters: Annotated[PositionRowFilters, Depends()],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         return draft_rows_page(session, draft, draft_analysis_cache, filters)
 
-    @app.get("/api/input-drafts/{draft_id}/download")
+    @app.get("/api/input-drafts/{draft_id}/download", response_model=None)
     def download_position_draft(
         draft_id: int,
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> FileResponse:
         draft = get_draft_or_404(draft_id, session)
         download_root = storage / "temporary" / "draft-downloads"
         download_path = download_root / f"{uuid4().hex}.xlsx"
@@ -86,12 +86,12 @@ def register_position_draft_read_routes(
             background=BackgroundTask(download_path.unlink, missing_ok=True),
         )
 
-    @app.post("/api/input-drafts/{draft_id}/validate")
+    @app.post("/api/input-drafts/{draft_id}/validate", response_model=None)
     def validate_position_draft(
         draft_id: int,
         _admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         analysis = draft_analysis(session, draft, draft_analysis_cache)
         return {

@@ -8,8 +8,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
 from ..excel_io import read_position_workbook
-from ..processing.models import (POSITION_SOURCE_COLUMNS)
-from ..inspection.positions import position_change_warnings, validate_position_frame
+from ..processing.models import POSITION_SOURCE_COLUMNS
+from ..inspection.positions import (
+    PositionIssue,
+    position_change_warnings,
+    validate_position_frame,
+)
 from .models import AuditLog, InputDraft, InputVersion, PositionDraftRow, utcnow
 
 
@@ -67,7 +71,7 @@ def _audit(
     user_id: int,
     action: str,
     draft_id: int,
-    details: dict | None = None,
+    details: dict[str, object] | None = None,
 ) -> None:
     session.add(
         AuditLog(
@@ -169,7 +173,7 @@ def list_draft_rows(session: Session, draft_id: int) -> list[PositionDraftRow]:
     )
 
 
-def validate_draft(session: Session, draft: InputDraft) -> list[dict]:
+def validate_draft(session: Session, draft: InputDraft) -> list[PositionIssue]:
     frame = position_frame(list_draft_rows(session, draft.id))
     return [
         *validate_position_frame(frame),

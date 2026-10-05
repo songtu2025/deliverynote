@@ -21,13 +21,13 @@ def register_position_draft_import_routes(
     admin_user = dependencies.admin_user
     get_draft_or_404 = dependencies.get_draft_or_404
 
-    @app.post("/api/input-drafts/{draft_id}/import-preview")
+    @app.post("/api/input-drafts/{draft_id}/import-preview", response_model=None)
     async def preview_position_draft_import(
         draft_id: int,
         form: Annotated[PositionImportForm, Depends()],
         _admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
-    ):
+    ) -> dict[str, object]:
         await run_in_threadpool(
             importer.candidates.remove_expired,
             app.state.import_candidate_ttl_seconds,
@@ -35,13 +35,13 @@ def register_position_draft_import_routes(
         draft = get_draft_or_404(draft_id, session)
         return await importer.preview(session, draft, form, _admin.id)
 
-    @app.post("/api/input-drafts/{draft_id}/import-apply")
+    @app.post("/api/input-drafts/{draft_id}/import-apply", response_model=None)
     def apply_position_draft_import(
         draft_id: int,
         payload: ImportApplyPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         importer.candidates.remove_expired(app.state.import_candidate_ttl_seconds)
         draft = get_draft_or_404(draft_id, session)
         return importer.apply(session, draft, payload, admin.id)

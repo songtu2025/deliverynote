@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import TypedDict
 
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session, SessionTransaction
@@ -12,7 +13,19 @@ from .position_draft_state import (
 )
 
 
-def _remove_pending_publish_files(state: dict, *, remove_target: bool) -> None:
+class PendingPublishState(TypedDict):
+    """外层事务提交与回滚共用的文件提升状态。"""
+
+    temporary_path: str
+    target_path: str
+    promoted: bool
+    root_commit_started: bool
+    root_commit_succeeded: bool
+
+
+def _remove_pending_publish_files(
+    state: PendingPublishState, *, remove_target: bool
+) -> None:
     Path(state["temporary_path"]).unlink(missing_ok=True)
     if remove_target and state.get("promoted"):
         Path(state["target_path"]).unlink(missing_ok=True)
@@ -20,7 +33,7 @@ def _remove_pending_publish_files(state: dict, *, remove_target: bool) -> None:
 
 @event.listens_for(Session, "before_commit")
 def _promote_pending_publish_file(session: Session) -> None:
-    state = session.info.get(_PENDING_PUBLISH_KEY)
+    state: PendingPublishState | None = session.info.get(_PENDING_PUBLISH_KEY)
     if state is None or session.in_nested_transaction():
         return
     state["root_commit_started"] = True
@@ -34,7 +47,7 @@ def _promote_pending_publish_file(session: Session) -> None:
 
 @event.listens_for(Session, "after_commit")
 def _mark_root_publish_commit_succeeded(session: Session) -> None:
-    state = session.info.get(_PENDING_PUBLISH_KEY)
+    state: PendingPublishState | None = session.info.get(_PENDING_PUBLISH_KEY)
     if (
         state is not None
         and state.get("root_commit_started")
@@ -49,7 +62,7 @@ def _finish_pending_publish_file(
 ) -> None:
     if transaction.parent is not None:
         return
-    state = session.info.pop(_PENDING_PUBLISH_KEY, None)
+    state: PendingPublishState | None = session.info.pop(_PENDING_PUBLISH_KEY, None)
     if state is not None:
         _remove_pending_publish_files(
             state,
@@ -61,13 +74,14 @@ def stage_publication_files(
     session: Session, temporary_path: Path, target_path: Path
 ) -> None:
     """将文件登记到外层事务，由提交与回滚事件完成清理。"""
-    session.info[_PENDING_PUBLISH_KEY] = {
+    state: PendingPublishState = {
         "temporary_path": str(temporary_path),
         "target_path": str(target_path),
         "promoted": False,
         "root_commit_started": False,
         "root_commit_succeeded": False,
     }
+    session.info[_PENDING_PUBLISH_KEY] = state
 
 
 def validate_publication_target(

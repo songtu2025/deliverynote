@@ -23,12 +23,13 @@ def register_position_draft_lifecycle_routes(
     @app.post(
         "/api/input-drafts/position",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     def create_position_draft(
         response: Response,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         result, resuming = lifecycle.create(session, admin.id)
         if resuming:
             response.status_code = status.HTTP_200_OK
@@ -37,22 +38,23 @@ def register_position_draft_lifecycle_routes(
     @app.post(
         "/api/input-drafts/{draft_id}/publish",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     def publish_position_draft(
         draft_id: int,
         payload: PublishDraftPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         return lifecycle.publish(session, draft, payload, admin.id)
 
-    @app.post("/api/input-drafts/{draft_id}/discard")
+    @app.post("/api/input-drafts/{draft_id}/discard", response_model=None)
     def discard_position_draft(
         draft_id: int,
         payload: DraftMutationPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         return lifecycle.discard(session, draft, payload, admin.id)

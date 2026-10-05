@@ -27,13 +27,14 @@ def register_position_draft_row_routes(
     @app.post(
         "/api/input-drafts/{draft_id}/rows",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     def create_position_draft_row(
         draft_id: int,
         payload: PositionRowPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         with commit_draft_changes(session):
             row = mutate_draft_row(
@@ -48,14 +49,14 @@ def register_position_draft_row_routes(
         import_candidates_state.remove_draft(draft.id)
         return {"row": position_row_json(row), "revision": draft.revision}
 
-    @app.put("/api/input-drafts/{draft_id}/rows/{row_id}")
+    @app.put("/api/input-drafts/{draft_id}/rows/{row_id}", response_model=None)
     def update_position_draft_row(
         draft_id: int,
         row_id: int,
         payload: PositionRowPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         existing_row = session.get(PositionDraftRow, row_id)
         if existing_row is None or existing_row.draft_id != draft.id:
@@ -74,14 +75,14 @@ def register_position_draft_row_routes(
         import_candidates_state.remove_draft(draft.id)
         return {"row": position_row_json(row), "revision": draft.revision}
 
-    @app.delete("/api/input-drafts/{draft_id}/rows/{row_id}")
+    @app.delete("/api/input-drafts/{draft_id}/rows/{row_id}", response_model=None)
     def delete_position_draft_row(
         draft_id: int,
         row_id: int,
         payload: DraftMutationPayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         existing_row = session.get(PositionDraftRow, row_id)
         if existing_row is None or existing_row.draft_id != draft.id:
@@ -100,13 +101,13 @@ def register_position_draft_row_routes(
         import_candidates_state.remove_draft(draft.id)
         return {"row_id": row_id, "revision": draft.revision}
 
-    @app.post("/api/input-drafts/{draft_id}/rows/bulk-delete")
+    @app.post("/api/input-drafts/{draft_id}/rows/bulk-delete", response_model=None)
     def bulk_delete_position_draft_rows(
         draft_id: int,
         payload: BulkDeletePayload,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         draft = get_draft_or_404(draft_id, session)
         if len(payload.row_ids) != len(set(payload.row_ids)):
             raise HTTPException(status_code=400, detail="批量删除行不可重复")
