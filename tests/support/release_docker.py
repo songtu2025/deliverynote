@@ -1,6 +1,5 @@
 """只在独立 Compose 项目内构造代理切换与回退演练环境。"""
 
-import ipaddress
 import json
 from pathlib import Path
 import socket
@@ -154,11 +153,7 @@ class ReleaseDockerFixture:
         record = self.inspect("api")[0]
         network, settings = next(iter(record["NetworkSettings"]["Networks"].items()))
         old_ip = settings["IPAddress"]
-        info = json.loads(self.run("docker", "network", "inspect", network))[0]
-        subnet = ipaddress.ip_network(info["IPAM"]["Config"][0]["Subnet"])
-        new_ip = str(subnet.network_address + 20)
-        assert old_ip != new_ip
-        self.run("docker", "rm", "-f", record["Id"])
+        # 旧 API 仍占用原地址时创建替代容器，确保 Docker 分配不同地址。
         self.run(
             "docker",
             "run",
@@ -169,13 +164,15 @@ class ReleaseDockerFixture:
             network,
             "--network-alias",
             "api",
-            "--ip",
-            new_ip,
             record["Config"]["Image"],
             "python",
             "-c",
             API_SERVER,
         )
+        replacement = json.loads(self.run("docker", "inspect", self.replacement))[0]
+        new_ip = replacement["NetworkSettings"]["Networks"][network]["IPAddress"]
+        assert old_ip != new_ip
+        self.run("docker", "rm", "-f", record["Id"])
         return old_ip, new_ip
 
     def close(self) -> None:
