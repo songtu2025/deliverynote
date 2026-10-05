@@ -106,7 +106,7 @@ class BatchFile(Base):
     delivery_total: Mapped[int] = mapped_column(Integer, default=0)
     import_total: Mapped[int] = mapped_column(Integer, default=0)
     manual_total: Mapped[int] = mapped_column(Integer, default=0)
-    import_rows: Mapped[list] = mapped_column(JSON, default=list)
+    import_rows: Mapped[list[dict[str, object]]] = mapped_column(JSON, default=list)
     result_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

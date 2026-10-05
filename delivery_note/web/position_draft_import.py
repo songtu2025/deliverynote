@@ -1,10 +1,8 @@
 """库位草稿导入文件的预览和应用事务。"""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 import pandas as pd
@@ -27,7 +25,7 @@ from .position_draft_state import list_draft_rows
 from .position_draft_replacement import replace_draft_from_frame
 from .position_import_candidates import PositionImportCandidates
 from .schemas import ImportApplyPayload, PositionImportForm
-from .uploads import _safe_filename, _save_upload
+from .uploads import UploadParser, _safe_filename, _save_upload
 
 
 def _inspect_position_import(
@@ -49,7 +47,7 @@ class PositionDraftImporter:
 
     app: FastAPI
     candidates: PositionImportCandidates
-    parse_workbook: Callable[..., Awaitable[Any]]
+    parse_workbook: UploadParser
 
     async def preview(
         self,

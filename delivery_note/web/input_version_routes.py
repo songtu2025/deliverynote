@@ -1,7 +1,7 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
@@ -19,7 +19,7 @@ from .input_versions import (
 )
 from .models import InputVersion, User
 from .serializers import version_json
-from .uploads import _safe_filename, _save_upload
+from .uploads import UploadParser, _safe_filename, _save_upload
 
 
 @dataclass
@@ -35,7 +35,7 @@ def register_input_version_routes(
     app: FastAPI,
     dependencies: RequestDependencies,
     storage: Path,
-    parse_uploaded_workbook: Callable[..., Awaitable[Any]],
+    parse_uploaded_workbook: UploadParser,
     _audit: Callable[..., None],
 ) -> None:
     get_session = dependencies.get_session

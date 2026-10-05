@@ -36,7 +36,7 @@ class OverreceiptRuleVersion(Base):
     short_tail_limit: Mapped[int] = mapped_column(Integer)
     medium_tail_limit: Mapped[int] = mapped_column(Integer)
     long_tail_limit: Mapped[int] = mapped_column(Integer)
-    allowed_warehouses: Mapped[list] = mapped_column(JSON, default=list)
+    allowed_warehouses: Mapped[list[str]] = mapped_column(JSON, default=list)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

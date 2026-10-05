@@ -4,13 +4,23 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import BinaryIO, ParamSpec, Protocol, TypeVar
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 LOGGER = logging.getLogger("delivery_note.web.api")
+P = ParamSpec("P")
+T = TypeVar("T")
+
+
+class UploadParser(Protocol):
+    """保留同步解析函数的参数与结果类型。"""
+
+    def __call__(
+        self, function: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
+    ) -> Awaitable[T]: ...
 
 
 def _safe_filename(filename: str) -> str:
@@ -60,12 +70,14 @@ async def _save_upload(
         await upload.close()
 
 
-def build_upload_parser(limit: int) -> Callable[..., Awaitable[Any]]:
+def build_upload_parser(limit: int) -> UploadParser:
     """限制进程内并发，并在线程池执行工作簿解析。"""
     semaphore = asyncio.Semaphore(limit)
 
-    async def parse_workbook(function: Callable, *args):
+    async def parse_workbook(
+        function: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
+    ) -> T:
         async with semaphore:
-            return await run_in_threadpool(function, *args)
+            return await run_in_threadpool(function, *args, **kwargs)
 
     return parse_workbook

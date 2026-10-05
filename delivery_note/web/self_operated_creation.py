@@ -1,10 +1,10 @@
 """自营批次空草稿与带文件创建事务。"""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
@@ -28,7 +28,7 @@ from .self_operated_inputs import (
     self_operated_batch_name,
     validated_inbound_source,
 )
-from .uploads import _save_upload
+from .uploads import UploadParser, _save_upload
 
 
 def _new_self_operated_batch(
@@ -64,7 +64,7 @@ class SelfOperatedBatchCreator:
     app: FastAPI
     storage: Path
     audit: Callable
-    parse_workbook: Callable[..., Awaitable[Any]]
+    parse_workbook: UploadParser
 
     def create_empty(
         self,

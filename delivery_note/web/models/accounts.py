@@ -35,5 +35,5 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(100), index=True)
     entity_type: Mapped[str] = mapped_column(String(50))
     entity_id: Mapped[str] = mapped_column(String(100))
-    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    details: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

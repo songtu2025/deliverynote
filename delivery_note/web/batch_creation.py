@@ -1,10 +1,9 @@
 """普通交货批次创建及其文件落盘事务。"""
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, UploadFile, status
@@ -24,7 +23,7 @@ from .models import (
     OverreceiptRuleVersion,
 )
 from .schemas import BatchPayload, DeliveryBatchForm
-from .uploads import _safe_filename, _save_upload
+from .uploads import UploadParser, _safe_filename, _save_upload
 
 
 def validated_batch_name(name: str) -> str:
@@ -85,7 +84,7 @@ class DeliveryBatchCreator:
     app: FastAPI
     storage: Path
     audit: Callable
-    parse_workbook: Callable[..., Awaitable[Any]]
+    parse_workbook: UploadParser
 
     def create(self, session: Session, payload: BatchPayload, user_id: int) -> dict:
         versions = require_active_versions(session, INPUT_KINDS)

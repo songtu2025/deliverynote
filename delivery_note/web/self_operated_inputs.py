@@ -1,9 +1,8 @@
 """自营批次名称、上传文件和 API 入库来源校验。"""
 
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile, status
 from starlette.concurrency import run_in_threadpool
@@ -11,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from ..excel_io import read_self_operated_inbound_workbook
 from .batch_creation import validated_batch_name
 from .models import InputVersion
-from .uploads import _safe_filename, _save_upload
+from .uploads import UploadParser, _safe_filename, _save_upload
 
 
 @dataclass
@@ -91,7 +90,7 @@ async def prepare_self_operated_files(
 async def validated_inbound_source(
     files: SelfOperatedFiles,
     temporary_inbound: Path | None,
-    parse_workbook: Callable[..., Awaitable[Any]],
+    parse_workbook: UploadParser,
     app: FastAPI,
 ) -> Path:
     if files.inbound_file is not None and temporary_inbound is not None:

@@ -1,10 +1,9 @@
 """批次追加交货文件和替换自营收货入库文件。"""
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, UploadFile, status
@@ -17,7 +16,7 @@ from ..excel_io import read_self_operated_inbound_workbook
 from .batch_views import batch_json, file_json
 from .dependencies import RequestDependencies
 from .models import BatchFile, SelfOperatedBatch
-from .uploads import _safe_filename, _save_upload, _unlink_after_commit
+from .uploads import UploadParser, _safe_filename, _save_upload, _unlink_after_commit
 
 
 @dataclass
@@ -28,7 +27,7 @@ class BatchFileUploader:
     dependencies: RequestDependencies
     storage: Path
     audit: Callable
-    parse_workbook: Callable[..., Awaitable[Any]]
+    parse_workbook: UploadParser
     append_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     async def replace_inbound(

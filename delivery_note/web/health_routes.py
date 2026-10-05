@@ -5,7 +5,7 @@ from .database import Database
 
 
 def register_health_routes(app: FastAPI, database: Database) -> None:
-    def readiness() -> dict:
+    def readiness() -> dict[str, object]:
         try:
             with database.session() as session:
                 session.execute(text("SELECT 1"))
@@ -17,13 +17,13 @@ def register_health_routes(app: FastAPI, database: Database) -> None:
         return {"status": "ok"}
 
     @app.get("/health/live")
-    def health_live() -> dict:
+    def health_live() -> dict[str, object]:
         return {"status": "ok"}
 
     @app.get("/health/ready")
-    def health_ready() -> dict:
+    def health_ready() -> dict[str, object]:
         return readiness()
 
     @app.get("/health")
-    def health() -> dict:
+    def health() -> dict[str, object]:
         return readiness()

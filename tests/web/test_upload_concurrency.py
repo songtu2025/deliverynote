@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Barrier, BrokenBarrierError, Lock
 from unittest.mock import patch
+from unittest import IsolatedAsyncioTestCase
 
 from httpx2 import ASGITransport, AsyncClient
 
@@ -13,6 +14,35 @@ import delivery_note.web.input_version_routes as input_version_routes_module
 from tests.asgi_client import SyncASGIClient
 
 from delivery_note.web.api import create_app
+from delivery_note.web.uploads import build_upload_parser
+
+
+class UploadParserTests(IsolatedAsyncioTestCase):
+    async def test_parser_preserves_arguments_and_result(self) -> None:
+        parser = build_upload_parser(1)
+        result = {"rows": 3}
+
+        def parse(path: Path, *, expected: Path) -> dict[str, int]:
+            self.assertEqual(path, expected)
+            with self.assertRaises(RuntimeError):
+                asyncio.get_running_loop()
+            return result
+
+        path = Path("candidate.xlsx")
+        actual = await parser(parse, path, expected=path)
+        self.assertIs(actual, result)
+
+    async def test_parser_releases_capacity_after_failure(self) -> None:
+        parser = build_upload_parser(1)
+        error = ValueError("解析失败")
+
+        def fail() -> None:
+            raise error
+
+        with self.assertRaises(ValueError) as caught:
+            await parser(fail)
+        self.assertIs(caught.exception, error)
+        self.assertEqual(await asyncio.wait_for(parser(lambda: 7), timeout=2), 7)
 
 
 class WebApiTests(WebApiCase):
