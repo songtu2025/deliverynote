@@ -15,7 +15,7 @@ from delivery_note.web.models import (
 
 
 class WebApiTests(WebApiCase):
-    def test_batch_and_exception_routes_preserve_response_contract(self) -> None:
+    def test_batch_exception_and_job_routes_preserve_response_contract(self) -> None:
         schema = self.app.openapi()
         operations = (
             ("/api/batches", "get", "200"),
@@ -28,6 +28,10 @@ class WebApiTests(WebApiCase):
             ("/api/batches/{batch_id}/exceptions/filters", "get", "200"),
             ("/api/exceptions/{exception_id}/split", "put", "200"),
             ("/api/exceptions/{exception_id}/self-operated-site", "put", "202"),
+            ("/api/batches/{batch_id}/preflight", "post", "200"),
+            ("/api/batches/{batch_id}/compute", "post", "202"),
+            ("/api/jobs/{job_id}", "get", "200"),
+            ("/api/audit-logs", "get", "200"),
         )
         for path, method, status in operations:
             with self.subTest(path=path):

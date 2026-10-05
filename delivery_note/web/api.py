@@ -60,7 +60,7 @@ def _audit(
     action: str,
     entity_type: str,
     entity_id: int | str,
-    details: dict | None = None,
+    details: dict[str, object] | None = None,
 ) -> None:
     session.add(
         AuditLog(
