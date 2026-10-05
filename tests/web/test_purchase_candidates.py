@@ -31,7 +31,23 @@ class WebApiTests(WebApiCase):
                         "warehouse": "水鞋-广州仓",
                         "quantity": 12,
                         "code": "shared_site",
-                    }
+                        "internal_note": "不导出的内部字段",
+                    },
+                    {
+                        "severity": "error",
+                        "message": "数量为零",
+                        "po_code": "PO-1002",
+                        "sku": "SKU-B",
+                        "quantity": 0,
+                        "code": "zero_quantity",
+                    },
+                    {
+                        "severity": "warning",
+                        "message": "小数数量待确认",
+                        "po_code": "PO-1003",
+                        "sku": "SKU-C",
+                        "quantity": 0.5,
+                    },
                 ],
             )
             session.add(job)
@@ -55,6 +71,70 @@ class WebApiTests(WebApiCase):
         issue_frame = pd.read_excel(BytesIO(download.content))
         self.assertEqual(issue_frame.loc[0, "目的仓"], "水鞋-广州仓")
         self.assertEqual(issue_frame.loc[0, "未交量"], 12)
+        workbook = load_workbook(BytesIO(download.content))
+        self.assertEqual(workbook.sheetnames, ["Sheet1"])
+        self.assertEqual(
+            list(workbook.active.values),
+            [
+                (
+                    "级别",
+                    "问题",
+                    "采购单号",
+                    "SKU",
+                    "目的仓",
+                    "未交量",
+                    "接口站点",
+                    "接口供应商编号",
+                    "接口供应商名称",
+                    "问题类型",
+                ),
+                (
+                    "warning",
+                    "共享站点数据不能参与正常交货匹配",
+                    "PO-1001",
+                    "SKU-A",
+                    "水鞋-广州仓",
+                    12,
+                    "共享",
+                    "SUP-1",
+                    "供应商 A",
+                    "shared_site",
+                ),
+                (
+                    "error",
+                    "数量为零",
+                    "PO-1002",
+                    "SKU-B",
+                    None,
+                    0,
+                    None,
+                    None,
+                    None,
+                    "zero_quantity",
+                ),
+                (
+                    "warning",
+                    "小数数量待确认",
+                    "PO-1003",
+                    "SKU-C",
+                    None,
+                    0.5,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(
+            download.headers["content-type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertEqual(
+            download.headers["content-disposition"],
+            f'attachment; filename="purchase_sync_issues_{job_id}.xlsx"',
+        )
+        workbook.close()
         operator = self.create_operator(admin_headers)
         operator_headers = self.login(operator["username"], "operator-pass")
         operator_preview = self.client.get(
@@ -63,6 +143,14 @@ class WebApiTests(WebApiCase):
         )
         self.assertEqual(operator_preview.status_code, 200, operator_preview.text)
         self.assertEqual(operator_preview.json()[0]["po_code"], "PO-1001")
+        operator_download = self.client.get(
+            f"/api/purchase-sync/{job_id}/issues/download",
+            headers=operator_headers,
+        )
+        self.assertEqual(operator_download.status_code, 200, operator_download.text)
+        pd.testing.assert_frame_equal(
+            pd.read_excel(BytesIO(operator_download.content)), issue_frame
+        )
 
     def test_purchase_sync_candidate_can_be_previewed_by_an_operator(self):
         admin_headers = self.login("admin", "admin-pass")

@@ -79,6 +79,8 @@ jobs:
         run: python -m ruff format --check delivery_note/web/position_draft_state.py delivery_note/web/position_draft_files.py delivery_note/web/position_draft_read.py delivery_note/web/position_draft_lifecycle.py delivery_note/web/position_draft_import.py delivery_note/web/position_draft_read_routes.py delivery_note/web/position_draft_row_routes.py delivery_note/web/position_draft_lifecycle_routes.py delivery_note/web/position_draft_import_routes.py delivery_note/web/caches.py delivery_note/web/app_setup.py delivery_note/inspection/positions.py
       - name: 规则与同步模块格式检查
         run: python -m ruff format --check delivery_note/web/gerpgo_routes.py delivery_note/web/overreceipt_routes.py delivery_note/web/self_operated_rule_routes.py delivery_note/web/sync/inbound_routes.py delivery_note/web/sync/purchase_routes.py delivery_note/web/sync/views.py delivery_note/web/sync/queries.py delivery_note/web/sync/issues.py delivery_note/web/sync/commands.py
+      - name: 同步问题导出契约测试格式检查
+        run: python -m ruff format --check tests/web/test_purchase_candidates.py tests/web/test_inbound_candidates.py tests/web/test_sync_jobs.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试

@@ -127,7 +127,26 @@ class WebApiTests(WebApiCase):
                         "supplier_code": "GYS-023",
                         "supplier_name": "KuangBiao",
                         "code": "shared_site",
-                    }
+                        "internal_note": "不导出的内部字段",
+                    },
+                    {
+                        "severity": "error",
+                        "message": "数量为零",
+                        "order_no": "IN-2",
+                        "sku": "SKU-B",
+                        "warehouse": "自营仓",
+                        "remaining_quantity": 0,
+                        "purchase_code": "PO-2",
+                        "related_code": "LN-2",
+                        "code": "zero_quantity",
+                    },
+                    {
+                        "severity": "warning",
+                        "message": "小数数量待确认",
+                        "order_no": "IN-3",
+                        "sku": "SKU-C",
+                        "remaining_quantity": 0.5,
+                    },
                 ],
             )
             session.add(job)
@@ -180,3 +199,75 @@ class WebApiTests(WebApiCase):
         issue_frame = pd.read_excel(BytesIO(download.content))
         self.assertEqual(issue_frame.loc[0, "入库仓"], "自营仓")
         self.assertEqual(issue_frame.loc[0, "剩余应收货"], 10)
+        exported = load_workbook(BytesIO(download.content))
+        self.assertEqual(exported.sheetnames, ["Sheet1"])
+        self.assertEqual(
+            list(exported.active.values),
+            [
+                (
+                    "级别",
+                    "问题",
+                    "入库单号",
+                    "SKU",
+                    "入库仓",
+                    "剩余应收货",
+                    "关联采购单",
+                    "关联交货单/调拨单",
+                    "接口站点",
+                    "接口供应商编号",
+                    "接口供应商名称",
+                    "问题类型",
+                ),
+                (
+                    "warning",
+                    "共享站点数据不能参与正常入库匹配",
+                    "IN-1",
+                    "SKU-A",
+                    "自营仓",
+                    10,
+                    "PO-20260801",
+                    "LN2608179025",
+                    "AMAZON:SEEKWAY:US",
+                    "GYS-023",
+                    "KuangBiao",
+                    "shared_site",
+                ),
+                (
+                    "error",
+                    "数量为零",
+                    "IN-2",
+                    "SKU-B",
+                    "自营仓",
+                    0,
+                    "PO-2",
+                    "LN-2",
+                    None,
+                    None,
+                    None,
+                    "zero_quantity",
+                ),
+                (
+                    "warning",
+                    "小数数量待确认",
+                    "IN-3",
+                    "SKU-C",
+                    None,
+                    0.5,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(
+            download.headers["content-type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.assertEqual(
+            download.headers["content-disposition"],
+            f'attachment; filename="self_operated_inbound_issues_{job_id}.xlsx"',
+        )
+        exported.close()

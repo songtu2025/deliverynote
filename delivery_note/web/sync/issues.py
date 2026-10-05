@@ -84,25 +84,30 @@ def _self_operated_inbound_sync_issues(
     return issues
 
 
+def _issues_excel_response(
+    issues: list[dict[str, object]], columns: dict[str, str], filename: str
+) -> StreamingResponse:
+    output = BytesIO()
+    pd.DataFrame(issues, columns=list(columns)).rename(columns=columns).to_excel(
+        output, index=False
+    )
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def download_purchase_sync_issues(job_id: int, session: Session) -> StreamingResponse:
     job = get_sync_job(session, PurchaseSyncJob, job_id)
     if not job.issues:
         raise HTTPException(status_code=404, detail="当前任务没有待处理问题")
-    columns = [
-        "severity",
-        "message",
-        "po_code",
-        "sku",
-        "warehouse",
-        "quantity",
-        "source_site",
-        "supplier_code",
-        "supplier_name",
-        "code",
-    ]
-    output = BytesIO()
-    pd.DataFrame(job.issues, columns=columns).rename(
-        columns={
+    return _issues_excel_response(
+        job.issues,
+        {
             "severity": "级别",
             "message": "问题",
             "po_code": "采购单号",
@@ -113,19 +118,8 @@ def download_purchase_sync_issues(job_id: int, session: Session) -> StreamingRes
             "supplier_code": "接口供应商编号",
             "supplier_name": "接口供应商名称",
             "code": "问题类型",
-        }
-    ).to_excel(output, index=False)
-    output.seek(0)
-    return StreamingResponse(
-        output,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="purchase_sync_issues_{job.id}.xlsx"'
-            )
         },
+        f"purchase_sync_issues_{job.id}.xlsx",
     )
 
 
@@ -136,23 +130,9 @@ def download_self_operated_inbound_sync_issues(
     issues = _self_operated_inbound_sync_issues(session, job)
     if not issues:
         raise HTTPException(status_code=404, detail="当前任务没有异常数据")
-    columns = [
-        "severity",
-        "message",
-        "order_no",
-        "sku",
-        "warehouse",
-        "remaining_quantity",
-        "purchase_code",
-        "related_code",
-        "source_site",
-        "supplier_code",
-        "supplier_name",
-        "code",
-    ]
-    output = BytesIO()
-    pd.DataFrame(issues, columns=columns).rename(
-        columns={
+    return _issues_excel_response(
+        issues,
+        {
             "severity": "级别",
             "message": "问题",
             "order_no": "入库单号",
@@ -165,17 +145,6 @@ def download_self_operated_inbound_sync_issues(
             "supplier_code": "接口供应商编号",
             "supplier_name": "接口供应商名称",
             "code": "问题类型",
-        }
-    ).to_excel(output, index=False)
-    output.seek(0)
-    return StreamingResponse(
-        output,
-        media_type=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="self_operated_inbound_issues_{job.id}.xlsx"'
-            )
         },
+        f"self_operated_inbound_issues_{job.id}.xlsx",
     )

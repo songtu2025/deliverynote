@@ -4,11 +4,48 @@ from unittest.mock import patch
 
 from delivery_note.web.models import (
     InputVersion,
+    PurchaseSyncJob,
     SelfOperatedInboundSyncJob,
 )
 
 
 class WebApiTests(WebApiCase):
+    def test_sync_issue_download_error_contracts(self) -> None:
+        headers = self.login("admin", "admin-pass")
+        empty_issues: tuple[list[dict[str, object]] | None, ...] = (None, [])
+        for prefix, model, missing, empty in (
+            (
+                "purchase-sync",
+                PurchaseSyncJob,
+                "采购同步任务不存在",
+                "当前任务没有待处理问题",
+            ),
+            (
+                "self-operated-inbound-sync",
+                SelfOperatedInboundSyncJob,
+                "待入库同步任务不存在",
+                "当前任务没有异常数据",
+            ),
+        ):
+            with self.subTest(prefix=prefix):
+                response = self.client.get(
+                    f"/api/{prefix}/999/issues/download", headers=headers
+                )
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.json(), {"detail": missing})
+            for issues in empty_issues:
+                with self.subTest(prefix=prefix, issues=issues):
+                    with self.app.state.database.session() as session:
+                        job = model(status="succeeded", created_by=1, issues=issues)
+                        session.add(job)
+                        session.commit()
+                        job_id = job.id
+                    response = self.client.get(
+                        f"/api/{prefix}/{job_id}/issues/download", headers=headers
+                    )
+                    self.assertEqual(response.status_code, 404)
+                    self.assertEqual(response.json(), {"detail": empty})
+
     @patch.dict(
         "os.environ",
         {
