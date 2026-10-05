@@ -45,13 +45,14 @@ def register_input_version_routes(
     @app.post(
         "/api/input-versions/{kind}",
         status_code=status.HTTP_201_CREATED,
+        response_model=None,
     )
     async def upload_input_version(
         kind: str,
         form: Annotated[InputUploadForm, Depends()],
         admin: User = Depends(admin_user),
         session: Session = Depends(get_session),
-    ):
+    ) -> dict[str, object]:
         name, activate, file = form.name, form.activate, form.file
         if kind not in UPLOAD_INPUT_KINDS:
             raise HTTPException(status_code=404, detail="输入类型不存在")
@@ -89,11 +90,11 @@ def register_input_version_routes(
         register_uploaded_input_version(session, version, _audit)
         return version_json(version)
 
-    @app.get("/api/input-versions")
+    @app.get("/api/input-versions", response_model=None)
     def list_input_versions(
         _user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> list[dict[str, object]]:
         versions = session.scalars(
             select(InputVersion).order_by(
                 InputVersion.kind, InputVersion.created_at.desc()
@@ -101,11 +102,11 @@ def register_input_version_routes(
         ).all()
         return [version_json(version) for version in versions]
 
-    @app.post("/api/input-versions/{version_id}/activate")
+    @app.post("/api/input-versions/{version_id}/activate", response_model=None)
     def activate_input_version(
         version_id: int,
         admin: Annotated[User, Depends(admin_user)],
         session: Annotated[Session, Depends(get_session)],
-    ):
+    ) -> dict[str, object]:
         version = activate_input_version_record(session, version_id, admin.id, _audit)
         return version_json(version)
