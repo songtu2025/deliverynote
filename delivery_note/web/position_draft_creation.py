@@ -8,6 +8,7 @@ from .position_draft_state import (
     _audit,
     _record_values,
     _version_frame,
+    locked_editing_position_draft,
 )
 
 
@@ -18,22 +19,7 @@ def create_or_resume_draft(
 ) -> InputDraft:
     if version.kind != "position":
         raise ValueError("只能从当前启用的库位版本创建草稿")
-    list(
-        session.scalars(
-            select(InputVersion.id)
-            .where(InputVersion.kind == "position")
-            .order_by(InputVersion.id)
-            .with_for_update()
-        )
-    )
-    existing = session.scalar(
-        select(InputDraft)
-        .where(
-            InputDraft.kind == "position",
-            InputDraft.status == "editing",
-        )
-        .with_for_update()
-    )
+    existing = locked_editing_position_draft(session)
     if existing is not None:
         return existing
     active_version_id = session.scalar(

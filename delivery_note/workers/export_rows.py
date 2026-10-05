@@ -5,25 +5,11 @@ from typing import Any
 import pandas as pd
 
 from ..application import project_split
-from ..processing.models import (EXCEPTION_COLUMNS, IMPORT_COLUMNS, BatchResult)
-from ..processing.pending import (build_manual_import_rows, enrich_pending_import_rows)
+from ..processing.models import EXCEPTION_COLUMNS, IMPORT_COLUMNS, BatchResult
+from ..processing.pending import build_manual_import_rows, enrich_pending_import_rows
 from ..inbound.models import (
     INBOUND_TEMPLATE_COLUMNS,
 )
-from ..web.models import ExceptionRecord
-
-
-def _exception_dict(exception: ExceptionRecord) -> dict[str, Any]:
-    return {
-        "SKU": exception.sku,
-        "原始站点": exception.original_site,
-        "完整站点": exception.full_site,
-        "目的仓": exception.destination,
-        "交货量": exception.delivery_quantity,
-        "已自动分配量": exception.allocated_quantity,
-        "人工处理量": exception.manual_quantity,
-        "异常原因": exception.reason,
-    }
 
 
 def _merge_delivery_notes(values: pd.Series[Any]) -> str:

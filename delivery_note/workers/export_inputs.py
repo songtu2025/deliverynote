@@ -16,7 +16,7 @@ from ..web.models import (
     SplitRecord,
 )
 from ..workers.compute_inputs import _version_paths
-from .export_rows import _exception_dict
+from ..web.serializers import exception_row
 
 
 def _load_export_inputs(
@@ -78,7 +78,7 @@ def _load_export_inputs(
             for exception in exceptions_by_source.get(source.id, []):
                 exception_payloads.append(
                     {
-                        "row": _exception_dict(exception),
+                        "row": exception_row(exception),
                         "parts": [
                             SplitPart(
                                 quantity=part.quantity,

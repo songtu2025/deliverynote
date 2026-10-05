@@ -21,7 +21,11 @@ from .errors import (
 )
 from .models import InputDraft, InputVersion
 from .position_draft_read import draft_json
-from .position_draft_state import DraftConflictError, DuplicateInputVersionNameError
+from .position_draft_state import (
+    DraftConflictError,
+    DuplicateInputVersionNameError,
+    locked_editing_position_draft,
+)
 from .position_draft_creation import create_or_resume_draft
 from .position_drafts import discard_draft, publish_draft
 from .position_import_candidates import PositionImportCandidates
@@ -31,22 +35,7 @@ from .uploads import _safe_filename
 
 
 def _locked_position_base(session: Session) -> tuple[InputVersion, bool]:
-    list(
-        session.scalars(
-            select(InputVersion.id)
-            .where(InputVersion.kind == "position")
-            .order_by(InputVersion.id)
-            .with_for_update()
-        )
-    )
-    existing = session.scalar(
-        select(InputDraft)
-        .where(
-            InputDraft.kind == "position",
-            InputDraft.status == "editing",
-        )
-        .with_for_update()
-    )
+    existing = locked_editing_position_draft(session)
     if existing is not None:
         version = session.get(
             InputVersion,

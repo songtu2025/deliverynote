@@ -23,6 +23,7 @@ from .models import (
     User,
 )
 from .schemas import SelfOperatedSiteResolutionPayload, SplitPayload
+from .serializers import exception_row
 
 
 def register_exception_write_routes(
@@ -213,18 +214,7 @@ def register_exception_write_routes(
             for part in previous_parts
         ]
         parts = [SplitPart(**part.model_dump()) for part in payload.parts]
-        exception_row = pd.Series(
-            {
-                "SKU": exception.sku,
-                "原始站点": exception.original_site,
-                "完整站点": exception.full_site,
-                "目的仓": exception.destination,
-                "交货量": exception.delivery_quantity,
-                "已自动分配量": exception.allocated_quantity,
-                "人工处理量": exception.manual_quantity,
-                "异常原因": exception.reason,
-            }
-        )
+        pending_row = pd.Series(exception_row(exception))
         supplier_code = next(
             (part.supplier_code for part in parts if part.supplier_code),
             "",
@@ -238,7 +228,7 @@ def register_exception_write_routes(
             )
         try:
             project_split(
-                exception_row,
+                pending_row,
                 parts,
                 supplier_code=supplier_code,
                 document_note=source.document_note,

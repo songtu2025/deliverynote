@@ -48,6 +48,23 @@ class DuplicateInputVersionNameError(ValueError):
     pass
 
 
+def locked_editing_position_draft(session: Session) -> InputDraft | None:
+    """按版本 ID 顺序加锁后读取编辑中的库位草稿，不提交事务。"""
+    list(
+        session.scalars(
+            select(InputVersion.id)
+            .where(InputVersion.kind == "position")
+            .order_by(InputVersion.id)
+            .with_for_update()
+        )
+    )
+    return session.scalar(
+        select(InputDraft)
+        .where(InputDraft.kind == "position", InputDraft.status == "editing")
+        .with_for_update()
+    )
+
+
 def require_revision(draft: InputDraft, expected_revision: int) -> None:
     if draft.status != "editing" or draft.revision != expected_revision:
         raise DraftConflictError

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from ..gerpgo import GerpgoSettings
 from .models import (
     InputVersion,
+    ExceptionRecord,
     Job,
     OverreceiptRuleVersion,
     SelfOperatedOverreceiptRuleVersion,
@@ -80,6 +81,20 @@ def self_operated_overreceipt_rule_json(
         "active": version.active,
         "created_by": version.created_by,
         "created_at": utc_isoformat(version.created_at),
+    }
+
+
+def exception_row(exception: ExceptionRecord) -> dict[str, object]:
+    """审校与导出共用的待处理记录投影，保留业务列顺序。"""
+    return {
+        "SKU": exception.sku,
+        "原始站点": exception.original_site,
+        "完整站点": exception.full_site,
+        "目的仓": exception.destination,
+        "交货量": exception.delivery_quantity,
+        "已自动分配量": exception.allocated_quantity,
+        "人工处理量": exception.manual_quantity,
+        "异常原因": exception.reason,
     }
 
 
