@@ -84,6 +84,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: 安装依赖
         run: npm ci
+      - name: 前端依赖安全审计
+        run: npm audit --registry=https://registry.npmjs.org
       - name: 增量格式检查
         env:
           FORMAT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
