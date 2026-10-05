@@ -99,6 +99,19 @@ class LeaseKeeper:
             self._stopped = True
 
 
+def _mark_claimed(job: Job | SyncJob) -> str:
+    """设置本次领取的状态与租约，不提交事务或改变批次状态。"""
+    now = datetime.utcnow()
+    claim_token = uuid4().hex
+    job.status = "running"
+    job.claim_token = claim_token
+    job.attempts += 1
+    job.claimed_at = now
+    job.heartbeat_at = now
+    job.error_message = None
+    return claim_token
+
+
 def _claim_job(database: Database) -> tuple[int, int, str, str] | None:
     with database.session() as session:
         job = session.scalar(
@@ -109,14 +122,7 @@ def _claim_job(database: Database) -> tuple[int, int, str, str] | None:
         )
         if job is None:
             return None
-        now = datetime.utcnow()
-        claim_token = uuid4().hex
-        job.status = "running"
-        job.claim_token = claim_token
-        job.attempts += 1
-        job.claimed_at = now
-        job.heartbeat_at = now
-        job.error_message = None
+        claim_token = _mark_claimed(job)
         batch = session.get(Batch, job.batch_id)
         if batch is None:
             raise RuntimeError("任务关联的批次不存在")
@@ -159,14 +165,7 @@ def _claim_sync_job(database: Database, model: SyncJobModel) -> tuple[int, str] 
         )
         if job is None:
             return None
-        now = datetime.utcnow()
-        claim_token = uuid4().hex
-        job.status = "running"
-        job.claim_token = claim_token
-        job.attempts += 1
-        job.claimed_at = now
-        job.heartbeat_at = now
-        job.error_message = None
+        claim_token = _mark_claimed(job)
         session.commit()
         return job.id, claim_token
 

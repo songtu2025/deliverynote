@@ -87,6 +87,10 @@ jobs:
         run: python -m mypy --check-untyped-defs tests/postgres/test_position_draft_concurrency.py
       - name: 批次上传回滚契约测试格式检查
         run: python -m ruff format --check tests/web/test_batch_creation_rollback.py
+      - name: Worker 领取状态与同步并发测试门禁
+        run: |
+          python -m ruff format --check delivery_note/workers/leases.py tests/workers/test_claim_state.py tests/postgres/test_sync_claim_concurrency.py
+          python -m mypy --check-untyped-defs tests/postgres/test_sync_claim_concurrency.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试
