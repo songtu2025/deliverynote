@@ -23,7 +23,7 @@ from .models import (
     OverreceiptRuleVersion,
 )
 from .schemas import BatchPayload, DeliveryBatchForm
-from .uploads import UploadParser, _safe_filename, _save_upload
+from .uploads import UploadParser, _safe_filename, _save_upload, rollback_batch_uploads
 
 
 def validated_batch_name(name: str) -> str:
@@ -188,14 +188,9 @@ class DeliveryBatchCreator:
             )
             session.commit()
         except Exception as error:
-            session.rollback()
-            for path in created_paths:
-                await run_in_threadpool(path.unlink, missing_ok=True)
-            if isinstance(error, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"交货文件校验失败：{error}",
-                ) from error
+            await rollback_batch_uploads(
+                session, created_paths, error, "交货文件校验失败"
+            )
             raise
         finally:
             for temporary_path in temporary_paths:

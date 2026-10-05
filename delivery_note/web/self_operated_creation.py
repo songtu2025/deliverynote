@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -28,7 +28,7 @@ from .self_operated_inputs import (
     self_operated_batch_name,
     validated_inbound_source,
 )
-from .uploads import UploadParser, _save_upload
+from .uploads import UploadParser, _save_upload, rollback_batch_uploads
 
 
 def _new_self_operated_batch(
@@ -218,14 +218,9 @@ class SelfOperatedBatchCreator:
             )
             session.commit()
         except Exception as error:
-            session.rollback()
-            for path in created_paths:
-                await run_in_threadpool(path.unlink, missing_ok=True)
-            if isinstance(error, ValueError):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"自营仓文件校验失败：{error}",
-                ) from error
+            await rollback_batch_uploads(
+                session, created_paths, error, "自营仓文件校验失败"
+            )
             raise
         finally:
             for temporary_delivery in temporary_deliveries:

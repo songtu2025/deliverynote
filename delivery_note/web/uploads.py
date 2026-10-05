@@ -8,6 +8,7 @@ from typing import BinaryIO, ParamSpec, Protocol, TypeVar
 from uuid import uuid4
 
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 LOGGER = logging.getLogger("delivery_note.web.api")
@@ -37,6 +38,22 @@ def _unlink_after_commit(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         LOGGER.warning("数据库已提交，但旧文件清理失败：%s", path, exc_info=True)
+
+
+async def rollback_batch_uploads(
+    session: Session,
+    created_paths: list[Path],
+    error: Exception,
+    validation_message: str,
+) -> None:
+    """回滚批次并删除本次落盘文件，共享来源不得列入 created_paths。"""
+    session.rollback()
+    for path in created_paths:
+        await run_in_threadpool(path.unlink, missing_ok=True)
+    if isinstance(error, ValueError):
+        raise HTTPException(
+            status_code=400, detail=f"{validation_message}：{error}"
+        ) from error
 
 
 async def _save_upload(

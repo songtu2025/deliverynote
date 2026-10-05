@@ -85,6 +85,8 @@ jobs:
         run: python -m ruff format --check delivery_note/web/position_draft_creation.py delivery_note/web/position_draft_state.py delivery_note/web/serializers.py delivery_note/workers/export_rows.py delivery_note/workers/export_inputs.py tests/postgres/test_position_draft_concurrency.py tests/workers/test_export_rows.py
       - name: PostgreSQL 草稿并发测试类型检查
         run: python -m mypy --check-untyped-defs tests/postgres/test_position_draft_concurrency.py
+      - name: 批次上传回滚契约测试格式检查
+        run: python -m ruff format --check tests/web/test_batch_creation_rollback.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试
