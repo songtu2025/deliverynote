@@ -1,7 +1,10 @@
 from io import BytesIO
+import mimetypes
+from pathlib import Path
 
 from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
 from delivery_note.processing.models import IMPORT_COLUMNS
+from delivery_note.web.models import InputVersion
 from tests.support.excel import make_import_template, make_template_preview_workbook
 from tests.support.web_api import WebApiCase
 
@@ -48,6 +51,68 @@ class WebApiTests(WebApiCase):
                 self.assertEqual(page.json()["columns"], columns)
                 self.assertIsNone(page.json()["rows"][0][columns[-1]])
                 self.assertIsNone(page.json()["rows"][0][columns[-2]])
+                for suffix in ("preview", "inspection"):
+                    for offset in (1, 2, 3):
+                        with self.subTest(suffix=suffix, offset=offset):
+                            response = self.client.get(
+                                f"/api/input-versions/{version_id}/{suffix}"
+                                f"?offset={offset}&limit=200",
+                                headers=admin_headers,
+                            )
+                            self.assertEqual(response.status_code, 200, response.text)
+                            data = response.json()
+                            page_data = (
+                                data["preview"] if suffix == "inspection" else data
+                            )
+                            self.assertEqual(page_data["total"], 2)
+                            self.assertEqual(page_data["offset"], offset)
+                            self.assertEqual(page_data["limit"], 200)
+                            self.assertEqual(len(page_data["rows"]), int(offset == 1))
+                            if suffix == "inspection":
+                                self.assertEqual(data["summary"], summary.json())
+
+    def test_input_version_read_routes_require_login(self) -> None:
+        for suffix in ("summary", "inspection", "preview", "download"):
+            with self.subTest(suffix=suffix):
+                response = self.client.get(f"/api/input-versions/999/{suffix}")
+                self.assertEqual(response.status_code, 401, response.text)
+
+    def test_input_version_download_and_unreadable_file_contract(self) -> None:
+        admin_headers = self.login("admin", "admin-pass")
+        version_id = self.upload_active_versions(admin_headers)["product"]
+        with self.app.state.database.session() as session:
+            version = session.get(InputVersion, version_id)
+            self.assertIsNotNone(version)
+            path = Path(version.storage_path)
+            original_name = version.original_name
+        downloaded = self.client.get(
+            f"/api/input-versions/{version_id}/download", headers=admin_headers
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertEqual(downloaded.content, path.read_bytes())
+        self.assertIn(original_name, downloaded.headers["content-disposition"])
+        self.assertEqual(
+            downloaded.headers["content-type"],
+            mimetypes.guess_type(original_name)[0] or "application/octet-stream",
+        )
+
+        # 只损坏测试目录内的文件，验证读取失败不会进入缓存。
+        path.write_bytes(b"not-an-excel-file")
+        for suffix in ("summary", "inspection", "preview"):
+            with self.subTest(suffix=suffix):
+                response = self.client.get(
+                    f"/api/input-versions/{version_id}/{suffix}", headers=admin_headers
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertTrue(
+                    response.json()["detail"].startswith("输入版本读取失败：")
+                )
+        path.unlink()
+        missing = self.client.get(
+            f"/api/input-versions/{version_id}/download", headers=admin_headers
+        )
+        self.assertEqual(missing.status_code, 404, missing.text)
+        self.assertEqual(missing.json()["detail"], "输入版本文件不存在")
 
     def test_template_upload_rejects_empty_example_without_changing_versions(
         self,

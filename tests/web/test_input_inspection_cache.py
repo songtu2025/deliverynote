@@ -69,6 +69,9 @@ class WebApiTests(WebApiCase):
         self.assertEqual(inspect_full.call_count, 1)
         self.assertEqual(inspect_page.call_count, 1)
         self.assertEqual(summary.json()["row_count"], 30)
+        self.assertEqual(inspection.json()["summary"], summary.json())
+        self.assertEqual(inspection.json()["preview"], preview.json())
+        self.assertEqual(len(preview.json()["rows"]), 20)
         self.assertEqual(next_page.json()["preview"]["offset"], 20)
         self.assertEqual(next_page.json()["preview"]["limit"], 10)
         self.assertEqual(

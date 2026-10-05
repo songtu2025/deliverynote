@@ -67,6 +67,8 @@ jobs:
         run: python -m ruff format --check delivery_note/web/job_routes.py delivery_note/web/api.py tests/web/test_jobs.py tests/web/test_exception_queries.py
       - name: 认证与用户管理模块格式检查
         run: python -m ruff format --check delivery_note/web/auth_routes.py delivery_note/web/user_accounts.py tests/web/test_auth_cookies.py tests/web/test_auth_users.py
+      - name: 基础资料查询与下载模块格式检查
+        run: python -m ruff format --check delivery_note/web/input_version_read_routes.py delivery_note/web/caches.py tests/web/test_input_versions.py tests/web/test_input_inspection_cache.py
       - name: Python 死代码检查
         run: python -m vulture delivery_note scripts --min-confidence 100
       - name: 后端测试

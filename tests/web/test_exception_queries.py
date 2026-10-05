@@ -37,6 +37,10 @@ class WebApiTests(WebApiCase):
             ("/api/users", "post", "201"),
             ("/api/users", "get", "200"),
             ("/api/users/{user_id}/status", "put", "200"),
+            ("/api/input-versions/{version_id}/summary", "get", "200"),
+            ("/api/input-versions/{version_id}/inspection", "get", "200"),
+            ("/api/input-versions/{version_id}/preview", "get", "200"),
+            ("/api/input-versions/{version_id}/download", "get", "200"),
         )
         for path, method, status in operations:
             with self.subTest(path=path):

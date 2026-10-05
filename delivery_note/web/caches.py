@@ -34,7 +34,7 @@ class InputInspectionCache:
         self._page_loads: dict[tuple[int, int, int], Future[dict[str, Any]]] = {}
         self._lock = Lock()
 
-    def inspect(self, version: InputVersion, offset: int, limit: int) -> dict:
+    def inspect(self, version: InputVersion, offset: int, limit: int) -> dict[str, Any]:
         return self.get(
             version.id,
             offset,
