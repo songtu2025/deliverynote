@@ -83,6 +83,8 @@ class BackupDockerTests(unittest.TestCase):
                 entry["sha256"],
                 hashlib.sha256((directory / name).read_bytes()).hexdigest(),
             )
+            self.assertEqual((directory / name).stat().st_uid, os.getuid())
+            self.assertEqual((directory / name).stat().st_mode & 0o777, 0o600)
         with tarfile.open(directory / "delivery_data.tar.gz", "r:gz") as archive:
             for name, expected in FILES.items():
                 stream = archive.extractfile("./" + name)

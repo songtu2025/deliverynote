@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import tarfile
@@ -38,6 +39,8 @@ def create_data_archive(
             "docker",
             "run",
             "--rm",
+            "--user",
+            f"{os.getuid()}:{os.getgid()}",
             "--network",
             "none",
             "--volume",
