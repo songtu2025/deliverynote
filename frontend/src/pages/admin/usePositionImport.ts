@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import { ApiError } from "../../api";
 import type { PositionImportPreview } from "../../types";
@@ -10,6 +10,7 @@ import {
   POSITION_ERROR_CODES,
   previewImport
 } from "./positionDraftApi";
+import { usePositionRequestGuard } from "./usePositionRequestGuard";
 
 interface PositionImportOptions {
   draftId: number | undefined;
@@ -32,20 +33,10 @@ export function usePositionImport({
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState<string | null>(null);
   // 页面负责忙碌状态；此引用只拦截同一渲染周期内的重复请求。
-  const inFlightRef = useRef(false);
-  const generationRef = useRef(0);
-  const activeRef = useRef(true);
-
-  useEffect(() => {
-    activeRef.current = true;
-    return () => {
-      activeRef.current = false;
-      generationRef.current += 1;
-    };
-  }, []);
+  const { inFlightRef, generationRef, activeRef, invalidate } = usePositionRequestGuard();
 
   const reset = () => {
-    generationRef.current += 1;
+    invalidate();
     setPreview(null);
     setFileName("");
     setError(null);

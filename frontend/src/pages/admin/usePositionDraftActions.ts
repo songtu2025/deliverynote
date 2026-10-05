@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 import { ApiError } from "../../api";
 import type { PositionDraft } from "../../types";
 import { discardDraft, downloadDraft, errorMessage, isRevisionConflict } from "./positionDraftApi";
+import { usePositionRequestGuard } from "./usePositionRequestGuard";
 
 interface PositionDraftActionsOptions {
   draft: Pick<PositionDraft, "id" | "revision"> | null;
@@ -25,20 +26,10 @@ export function usePositionDraftActions({
 }: PositionDraftActionsOptions) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const keepOpenRef = useRef(false);
-  const inFlightRef = useRef(false);
-  const generationRef = useRef(0);
-  const activeRef = useRef(true);
-
-  useEffect(() => {
-    activeRef.current = true;
-    return () => {
-      activeRef.current = false;
-      generationRef.current += 1;
-    };
-  }, []);
+  const { inFlightRef, generationRef, activeRef, invalidate } = usePositionRequestGuard();
 
   const reset = () => {
-    generationRef.current += 1;
+    invalidate();
     setConfirmOpen(false);
     keepOpenRef.current = false;
   };

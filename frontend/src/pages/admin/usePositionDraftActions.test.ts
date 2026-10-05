@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api";
@@ -23,7 +24,7 @@ function actionsView(
   const onDiscarded = vi.fn();
   const view = renderHook(
     (props) => usePositionDraftActions({ ...props, getRevision, onBusyChange, onError, onConflict, onDiscarded }),
-    { initialProps }
+    { initialProps, wrapper: StrictMode }
   );
   onConflict.mockImplementation(() => view.result.current.reset());
   return { ...view, getRevision, onBusyChange, onError, onConflict, onDiscarded };

@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../../api";
@@ -23,7 +24,7 @@ function importView(disabled = false, draftId: number | undefined = 7) {
   const view = renderHook<ReturnType<typeof usePositionImport>, { disabled: boolean; draftId: number | undefined }>(
     ({ disabled, draftId }: { disabled: boolean; draftId: number | undefined }) =>
       usePositionImport({ disabled, draftId, getRevision, onBusyChange, onApplied, onConflict }),
-    { initialProps: { disabled, draftId } }
+    { initialProps: { disabled, draftId }, wrapper: StrictMode }
   );
   onConflict.mockImplementation(() => view.result.current.reset());
   return { ...view, onBusyChange, onApplied, onConflict, getRevision };
