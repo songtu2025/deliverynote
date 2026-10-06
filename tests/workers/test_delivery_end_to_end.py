@@ -1,11 +1,9 @@
 from tests.support.worker import WorkerCase
-from io import BytesIO
+from tests.support.delivery_exports import SPLIT_PARTS, assert_delivery_exports
 from mimetypes import guess_type
 from pathlib import Path
 from unittest.mock import patch
-from zipfile import ZipFile
 
-from openpyxl import load_workbook
 
 import delivery_note.workers.export_files as export_files_module
 from delivery_note.web.models import (
@@ -63,21 +61,7 @@ class WorkerIntegrationTests(WorkerCase):
         split = self.client.put(
             f"/api/exceptions/{exceptions[0]['id']}/split",
             headers=self.headers,
-            json={
-                "parts": [
-                    {
-                        "quantity": 25,
-                        "destination": "水鞋-广州仓",
-                        "delivery_note": "超出采购未交量",
-                        "resolved": True,
-                    },
-                    {
-                        "quantity": 35,
-                        "delivery_note": "超出采购未交量",
-                        "resolved": False,
-                    },
-                ]
-            },
+            json={"parts": SPLIT_PARTS},
         )
         self.assertEqual(split.status_code, 200, split.text)
         self.assertEqual(split.json()["scale_position"], "短尾")
@@ -113,36 +97,6 @@ class WorkerIntegrationTests(WorkerCase):
             f"batch-{batch_id}-merged.xlsx",
             merged_response.headers["content-disposition"],
         )
-        merged_book = load_workbook(
-            BytesIO(merged_response.content),
-            data_only=True,
-        )
-        merged_import_sheet = merged_book["交货导入"]
-        merged_pending_sheet = merged_book["待处理导入"]
-        self.assertEqual(merged_import_sheet.cell(3, 1).value, "示例仓")
-        self.assertEqual(
-            sum(
-                merged_import_sheet.cell(row, 4).value or 0
-                for row in range(4, merged_import_sheet.max_row + 1)
-            ),
-            125,
-        )
-        self.assertEqual(
-            sum(
-                merged_pending_sheet.cell(row, 4).value or 0
-                for row in range(3, merged_pending_sheet.max_row + 1)
-            ),
-            35,
-        )
-        merged_import_notes = [
-            merged_import_sheet.cell(row, 6).value
-            for row in range(4, merged_import_sheet.max_row + 1)
-        ]
-        self.assertTrue(merged_import_notes[0].endswith("-01-10箱"))
-        self.assertTrue(
-            all(note.endswith("-02-20箱") for note in merged_import_notes[1:])
-        )
-        self.assertTrue(merged_pending_sheet.cell(3, 6).value.endswith("-02-20箱"))
         archive_response = self.client.get(
             f"/api/batches/{batch_id}/download", headers=self.headers
         )
@@ -153,30 +107,7 @@ class WorkerIntegrationTests(WorkerCase):
         self.assertTrue(
             archive_response.headers["content-disposition"].startswith("attachment;")
         )
-        with ZipFile(BytesIO(archive_response.content)) as archive:
-            names = sorted(archive.namelist())
-            self.assertEqual(len(names), 2)
-            self.assertFalse(any("merged" in name for name in names))
-            second_book = load_workbook(BytesIO(archive.read(names[1])), data_only=True)
-
-        import_sheet = second_book["交货导入"]
-        pending_sheet = second_book["待处理导入"]
-        import_total = sum(
-            import_sheet.cell(row, 4).value or 0
-            for row in range(4, import_sheet.max_row + 1)
-        )
-        pending_total = sum(
-            pending_sheet.cell(row, 4).value or 0
-            for row in range(3, pending_sheet.max_row + 1)
-        )
-        self.assertEqual((import_total, pending_total), (45, 35))
-        import_records = [
-            [import_sheet.cell(row, column).value for column in range(1, 8)]
-            for row in range(4, import_sheet.max_row + 1)
-        ]
-        self.assertEqual(len(import_records), 1)
-        self.assertEqual(import_records[0][3], 45)
-        self.assertEqual(import_records[0][6], "超出采购未交量：60")
+        assert_delivery_exports(self, merged_response.content, archive_response.content)
         self.assertIsNone(run_once(self.database_url, self.storage_root))
         repeated = self.client.post(
             f"/api/batches/{batch_id}/export", headers=self.headers
