@@ -64,6 +64,9 @@ class DeliveryScenario:
                     data={"name": f"{kind}-v1", "activate": "true"},
                     files={"file": (path.name, upload)},
                 )
+        self.create_delivery_batch()
+
+    def create_delivery_batch(self) -> None:
         self.batch_id = self.request(
             "POST", "/api/batches", 201, json={"name": "恢复业务基线"}
         ).json()["id"]
@@ -107,10 +110,14 @@ class DeliveryScenario:
 
     def downloads(self) -> tuple[bytes, bytes]:
         prefix = f"/api/batches/{self.batch_id}"
-        return (
-            self.request("GET", prefix + "/download-merged").content,
-            self.request("GET", prefix + "/download").content,
-        )
+        merged = self.request("GET", prefix + "/download-merged")
+        archive = self.request("GET", prefix + "/download")
+        for response, filename in (
+            (merged, f"batch-{self.batch_id}-merged.xlsx"),
+            (archive, f"batch-{self.batch_id}.zip"),
+        ):
+            assert f'filename="{filename}"' in response.headers["content-disposition"]
+        return merged.content, archive.content
 
     def snapshot(self) -> dict[str, Any]:
         versions = self.request("GET", "/api/input-versions").json()

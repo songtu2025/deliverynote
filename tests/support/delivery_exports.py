@@ -69,8 +69,13 @@ def assert_delivery_exports(
                 case.assertEqual(cell.number_format, "0")
     with ZipFile(BytesIO(archive_payload)) as archive:
         names = sorted(archive.namelist())
-        case.assertEqual(len(names), 2)
-        case.assertFalse(any("merged" in name for name in names))
+        case.assertEqual(
+            names,
+            [
+                "260717-狂飙-A交货单-发货10箱_交货处理.xlsx",
+                "260717-狂飙-B交货单-发货20箱_交货处理.xlsx",
+            ],
+        )
         second_book = load_workbook(BytesIO(archive.read(names[1])), data_only=True)
     import_sheet, pending_sheet = second_book["交货导入"], second_book["待处理导入"]
     import_total = sum(
