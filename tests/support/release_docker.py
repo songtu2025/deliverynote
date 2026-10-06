@@ -86,6 +86,10 @@ class ReleaseDockerFixture:
         return tag
 
     def start(self) -> None:
+        self.prepare()
+        self.start_services()
+
+    def prepare(self) -> None:
         for arguments in (
             ("init", "--quiet"),
             ("config", "user.name", "Release Test"),
@@ -116,6 +120,8 @@ class ReleaseDockerFixture:
         self.compose_file.write_text(
             json.dumps(self._configuration(backend_image, port)), encoding="utf-8"
         )
+
+    def start_services(self) -> None:
         self.compose("up", "-d", "--wait", "--wait-timeout", "30")
         records = self.inspect("web")
         port = records[0]["NetworkSettings"]["Ports"]["80/tcp"][0]["HostPort"]

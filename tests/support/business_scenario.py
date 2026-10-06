@@ -111,3 +111,27 @@ class DeliveryScenario:
             self.request("GET", prefix + "/download-merged").content,
             self.request("GET", prefix + "/download").content,
         )
+
+    def snapshot(self) -> dict[str, Any]:
+        versions = self.request("GET", "/api/input-versions").json()
+        active = [version for version in versions if version["active"]]
+        return {
+            "batch": self.batch(),
+            "versions": versions,
+            "inspection": {
+                version["kind"]: self.request(
+                    "GET", f"/api/input-versions/{version['id']}/inspection"
+                ).json()
+                for version in active
+            },
+            "input_files": {
+                version["kind"]: self.request(
+                    "GET", f"/api/input-versions/{version['id']}/download"
+                ).content
+                for version in active
+            },
+            "exceptions": self.request(
+                "GET", f"/api/batches/{self.batch_id}/exceptions"
+            ).json(),
+            "exports": self.downloads(),
+        }
