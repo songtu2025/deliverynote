@@ -84,4 +84,27 @@ class WorkerDockerFixture(PurchaseDockerFixture):
     def close(self) -> None:
         for kind in TASKS:
             self.release(kind)
+            self.release(kind + ".finalize")
         super().close()
+
+    def recover(self, kind: str) -> int:
+        queue = "batch" if TASKS[kind][0] == "worker" else kind
+        return int(
+            self.compose(
+                "exec",
+                "-T",
+                "api",
+                "python",
+                "-c",
+                "import os; from delivery_note.worker import recover_stale_jobs; "
+                "print(recover_stale_jobs(os.environ['DATABASE_URL'], "
+                f"queue={queue!r}))",
+            )
+        )
+
+    def expire(self, kind: str, identifier: int) -> None:
+        # 只推进随机测试项目中的任务时钟，不修改正式租约时长。
+        self.database_query(
+            f"UPDATE {TASKS[kind][1]} SET heartbeat_at=NOW()-INTERVAL '2 hours' "
+            f"WHERE id={identifier} AND status='running'"
+        )

@@ -118,8 +118,8 @@ jobs:
           python -m ruff format --check tests/support/sync_http.py tests/support/purchase_docker.py tests/support/purchase_scenario.py tests/test_recovery_purchase_docker.py
           python -m mypy --strict tests/support/purchase_recovery.py
           python -m ruff format --check tests/support/purchase_recovery.py
-          python -m mypy --strict tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/test_worker_shutdown_docker.py
-          python -m ruff format --check tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/test_worker_shutdown_docker.py
+          python -m mypy --strict tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/support/worker_case.py tests/test_worker_shutdown_docker.py tests/test_worker_interruption_docker.py
+          python -m ruff format --check tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/support/worker_case.py tests/test_worker_shutdown_docker.py tests/test_worker_interruption_docker.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
@@ -243,3 +243,9 @@ jobs:
           BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
           RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
         run: python -m unittest tests.test_worker_shutdown_docker -v
+      - name: 隔离真实 Worker 中断与租约恢复演练
+        env:
+          WORKER_DOCKER_TESTS: "1"
+          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
+          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
+        run: python -m unittest tests.test_worker_interruption_docker -v

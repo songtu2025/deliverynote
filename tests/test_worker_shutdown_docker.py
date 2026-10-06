@@ -10,39 +10,15 @@ import unittest
 from scripts.backup.runtime import BackupError
 from scripts.backup.services import REQUIRED_SERVICES
 from scripts.backup.workflow import create_backup
-from tests.support.business_case import RecoveryCase
-from tests.support.delivery_exports import assert_delivery_exports
-from tests.support.sync_http import configure_sync, start_sync
+from tests.support.worker_case import WorkerDockerCase
 from tests.support.worker_backup import DrainRunner
-from tests.support.worker_docker import TASKS, WorkerDockerFixture, wait_until
+from tests.support.worker_docker import TASKS, wait_until
 
 
 @unittest.skipUnless(
     os.getenv("WORKER_DOCKER_TESTS") == "1", "需显式开启隔离 Worker 演练"
 )
-class WorkerShutdownDockerTests(RecoveryCase):
-    fixture_type = WorkerDockerFixture
-    fixture: WorkerDockerFixture
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.scenario.login()
-        self.scenario.activate_inputs()
-        configure_sync(self.scenario)
-
-    def enqueue(self, kind: str) -> int:
-        if kind == "compute":
-            return self.scenario.create_delivery_batch(wait=False)
-        if kind == "export":
-            self.scenario.create_delivery_batch()
-            return self.scenario.export(wait=False)
-        path = (
-            "/api/purchase-sync"
-            if kind == "purchase-sync"
-            else "/api/self-operated-inbound-sync"
-        )
-        return int(start_sync(self.scenario, path, wait=False)["id"])
-
+class WorkerShutdownDockerTests(WorkerDockerCase):
     def assert_shutdown(self, kind: str) -> None:
         fixture = self.fixture
         fixture.arm(kind)
@@ -58,12 +34,8 @@ class WorkerShutdownDockerTests(RecoveryCase):
         fixture.release(kind)
         wait_until(lambda: not fixture.state(container)["Running"], "Worker 未正常退出")
         self.assertEqual(fixture.state(container)["ExitCode"], 0)
-        finished = fixture.job(kind, identifier)
-        self.assertEqual((finished["status"], finished["attempts"]), ("succeeded", 1))
-        self.assertIsNone(finished["claim_token"])
+        self.assert_result(kind, identifier, 1)
         if service != "worker":
-            self.assertIsNone(finished["active_slot"])
-            self.assertIsNotNone(finished["candidate_version_id"])
             queued = self.enqueue(kind)
         assert queued is not None
         queued_kind = "compute" if service == "worker" else kind
@@ -74,15 +46,6 @@ class WorkerShutdownDockerTests(RecoveryCase):
             lambda: fixture.job(queued_kind, queued)["status"] == "succeeded",
             "重启后排队任务未完成",
         )
-        if service == "worker":
-            self.scenario.batch_id = int(finished["batch_id"])
-            batch = self.scenario.batch()["summary"]
-            self.assertEqual(
-                (batch["delivery_total"], batch["import_total"], batch["manual_total"]),
-                (160, 100, 60),
-            )
-            if kind == "export":
-                assert_delivery_exports(self, *self.scenario.downloads(), resolved=0)
 
     def test_compute_finishes_current_task_on_sigterm(self) -> None:
         self.assert_shutdown("compute")
