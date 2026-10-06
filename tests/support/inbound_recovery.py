@@ -2,9 +2,8 @@
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from scripts.backup.workflow import create_backup
 from tests.support.business_case import RecoveryCase
 from tests.support.business_docker import BusinessDockerFixture
 from tests.support.inbound_scenario import InboundScenario
@@ -30,20 +29,9 @@ class InboundRecoveryCase(RecoveryCase):
     scenario: InboundScenario
     scenario_type: type[InboundScenario] = InboundScenario
 
-    def setUp(self) -> None:
-        super().setUp()
-        self.scenario = self.scenario_type(self.fixture.url, self.fixture.root)
-        self.addCleanup(self.scenario.client.close)
-
-    def backup_baseline(self) -> tuple[Path, dict[str, Any]]:
-        self.scenario.login()
-        self.create_baseline()
-        snapshot = self.scenario.snapshot()
-        self.remember_source()
+    def remember_source(self) -> None:
+        super().remember_source()
         self.source_inbound_records = inbound_records(self.fixture)
-        result = create_backup(self.fixture.config)
-        self.assertEqual(result["status"], "complete")
-        return Path(str(result["backup_directory"])), snapshot
 
     def create_baseline(self) -> None:
         self.scenario.create_inbound_baseline()
@@ -51,10 +39,7 @@ class InboundRecoveryCase(RecoveryCase):
     def restored_scenario(
         self, target: BusinessDockerFixture, directory: Path
     ) -> InboundScenario:
-        target.restore_from(self.fixture, directory)
-        scenario = self.scenario_type(target.url, target.root)
-        self.addCleanup(scenario.client.close)
-        self.assertEqual(scenario.login()["username"], "admin")
+        scenario = cast(InboundScenario, super().restored_scenario(target, directory))
         scenario.batch_ids = self.scenario.batch_ids.copy()
         return scenario
 

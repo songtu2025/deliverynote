@@ -116,6 +116,8 @@ jobs:
           python -m ruff format --check tests/support/api_recovery.py
           python -m mypy --strict tests/support/sync_http.py tests/support/purchase_docker.py tests/support/purchase_scenario.py tests/test_recovery_purchase_docker.py
           python -m ruff format --check tests/support/sync_http.py tests/support/purchase_docker.py tests/support/purchase_scenario.py tests/test_recovery_purchase_docker.py
+          python -m mypy --strict tests/support/purchase_recovery.py
+          python -m ruff format --check tests/support/purchase_recovery.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查

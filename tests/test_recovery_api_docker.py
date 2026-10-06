@@ -5,7 +5,8 @@ from typing import cast
 from scripts.backup.database import critical_table_counts
 from scripts.backup.runtime import SubprocessRunner
 from tests.support.api_docker import ApiDockerFixture
-from tests.support.api_recovery import ApiRecoveryCase, sync_records
+from tests.support.api_recovery import ApiRecoveryCase
+from tests.support.business_case import sync_records
 from tests.support.api_scenario import SYNC
 from tests.support.inbound_exports import assert_inbound_exports
 from tests.support.inbound_recovery import inbound_records

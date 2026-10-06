@@ -1,26 +1,21 @@
 import os
 import unittest
+from typing import cast
 
-from tests.support.business_case import RecoveryCase
+from scripts.backup.database import critical_table_counts
+from scripts.backup.runtime import SubprocessRunner
+from tests.support.business_case import sync_records
 from tests.support.delivery_exports import assert_delivery_exports
 from tests.support.purchase_docker import PurchaseDockerFixture
-from tests.support.purchase_scenario import PurchaseScenario, SYNC
+from tests.support.purchase_scenario import SYNC
+from tests.support.purchase_recovery import PurchaseRecoveryCase
 
 
 @unittest.skipUnless(
     os.environ.get("RECOVERY_PURCHASE_DOCKER_TESTS") == "1",
     "需显式启用隔离 Docker 采购 API 来源恢复演练",
 )
-class RecoveryPurchaseDockerTests(RecoveryCase):
-    fixture_type = PurchaseDockerFixture
-    fixture: PurchaseDockerFixture
-    scenario: PurchaseScenario
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.scenario = PurchaseScenario(self.fixture.url, self.fixture.root)
-        self.addCleanup(self.scenario.client.close)
-
+class RecoveryPurchaseDockerTests(PurchaseRecoveryCase):
     def test_real_purchase_http_preserves_order_and_candidate_states(self) -> None:
         self.assertEqual(self.scenario.login()["username"], "admin")
         self.scenario.create_api_baseline(self.fixture)
@@ -71,3 +66,42 @@ class RecoveryPurchaseDockerTests(RecoveryCase):
             self.assertEqual(len(report["issues"]), 1)
             self.assertEqual(len(report["workbook"]), 2)
         self.scenario.request("GET", f"{SYNC}/{blocked['id']}/preview", 409)
+
+    def test_complete_backup_restores_purchase_records_cache_and_files(self) -> None:
+        target = cast(PurchaseDockerFixture, self.empty_target())
+        directory, snapshot = self.backup_baseline()
+        restored = self.restored_scenario(target, directory)
+        self.assertEqual(
+            critical_table_counts(target.config, SubprocessRunner(), "delivery_note"),
+            self.source_counts,
+        )
+        self.assertEqual(sync_records(target, "purchase"), self.source_sync_records)
+        self.assertEqual(target.cache(), self.source_cache)
+        self.assertEqual(restored.snapshot(), snapshot)
+        self.assertEqual(len(self.source_sync_records), 4)
+        for job in self.source_sync_records:
+            self.assertEqual(job["attempts"], 1)
+            self.assertIsNone(job["active_slot"])
+            self.assertIsNone(job["claim_token"])
+        for path in ("config/gerpgo.json", "cache/purchase-details-v1.json"):
+            self.assertEqual(
+                target.compose(
+                    "exec", "-T", "api", "stat", "-c", "%a", f"/data/storage/{path}"
+                ),
+                "600",
+            )
+        historical = snapshot["batches"][restored.batch_id]
+        assert_delivery_exports(self, *historical["exports"], resolved=0)
+        # 保持恢复出的配置不变，由真实请求证明凭据和缓存可继续使用。
+        target.set_case(120)
+        fresh = restored.sync()
+        self.assertGreater(fresh["id"], self.source_sync_records[-1]["id"])
+        self.assertEqual(
+            fresh["base_version_id"], self.scenario.sync_jobs[0]["candidate_version_id"]
+        )
+        self.assertEqual(fresh["diff"]["before_quantity"], 100)
+        self.assertEqual(fresh["diff"]["after_quantity"], 120)
+        after = restored.snapshot()["batches"][restored.batch_id]
+        for key in ("batch", "exceptions", "exports"):
+            self.assertEqual(after[key], historical[key])
+        self.assert_source_unchanged(snapshot)

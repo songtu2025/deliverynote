@@ -2,15 +2,11 @@ import json
 import os
 from pathlib import Path
 import shutil
-from typing import Any
 import unittest
 from unittest.mock import patch
 
-from tests.support.business_docker import BusinessDockerFixture
 from tests.support.business_case import RecoveryCase
-from tests.support.business_scenario import DeliveryScenario
 from tests.support.delivery_exports import assert_delivery_exports
-from scripts.backup.workflow import create_backup
 from scripts.backup.archive import sha256
 from scripts.backup.database import _restore_database, critical_table_counts
 from scripts.backup.runtime import BackupError, SubprocessRunner
@@ -21,14 +17,8 @@ from scripts.backup.runtime import BackupError, SubprocessRunner
     "需显式启用隔离 Docker 业务恢复演练",
 )
 class RecoveryBusinessDockerTests(RecoveryCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self.scenario = DeliveryScenario(self.fixture.url, self.fixture.root)
-        self.addCleanup(self.scenario.client.close)
-
-    def backup_baseline(self) -> tuple[Path, dict[str, Any]]:
-        self.scenario.login()
-        self.scenario.create_baseline()
+    def create_baseline(self) -> None:
+        super().create_baseline()
         self.scenario.split_and_export()
         snapshot = self.scenario.snapshot()
         self.assertEqual(
@@ -38,10 +28,6 @@ class RecoveryBusinessDockerTests(RecoveryCase):
             ],
             [(25, True), (35, False)],
         )
-        self.remember_source()
-        result = create_backup(self.fixture.config)
-        self.assertEqual(result["status"], "complete")
-        return Path(str(result["backup_directory"])), snapshot
 
     def test_complete_backup_restores_real_business_in_empty_environment(self) -> None:
         target = self.empty_target()
@@ -54,16 +40,6 @@ class RecoveryBusinessDockerTests(RecoveryCase):
         self.assertEqual(restored.snapshot(), snapshot)
         assert_delivery_exports(self, *restored.downloads())
         self.assert_source_unchanged(snapshot)
-
-    def restored_scenario(
-        self, target: BusinessDockerFixture, directory: Path
-    ) -> DeliveryScenario:
-        target.restore_from(self.fixture, directory)
-        restored = DeliveryScenario(target.url, target.root)
-        self.addCleanup(restored.client.close)
-        self.assertEqual(restored.login()["username"], "admin")
-        restored.batch_id = self.scenario.batch_id
-        return restored
 
     def test_restored_workers_regenerate_export_and_compute_new_batch(self) -> None:
         target = self.empty_target()

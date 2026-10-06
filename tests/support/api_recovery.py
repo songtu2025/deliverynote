@@ -1,23 +1,13 @@
 """复用自营仓恢复流程并比较完整 API 同步记录。"""
 
-import json
 from pathlib import Path
 from typing import Any, cast
 
 from tests.support.api_docker import ApiDockerFixture
 from tests.support.api_scenario import ApiScenario
+from tests.support.business_case import sync_records
 from tests.support.business_docker import BusinessDockerFixture
 from tests.support.inbound_recovery import InboundRecoveryCase
-
-
-def sync_records(fixture: BusinessDockerFixture) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = json.loads(
-        fixture.database_query(
-            "SELECT COALESCE(json_agg(t), '[]'::json)::text FROM "
-            "(SELECT * FROM self_operated_inbound_sync_jobs ORDER BY id) t"
-        )
-    )
-    return records
 
 
 class ApiRecoveryCase(InboundRecoveryCase):

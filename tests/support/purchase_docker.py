@@ -45,3 +45,8 @@ class PurchaseDockerFixture(ApiDockerFixture):
     def requests(self) -> list[dict[str, Any]]:
         payload = self.compose("exec", "-T", "erp-stub", "cat", "/tmp/requests.jsonl")
         return [json.loads(line) for line in payload.splitlines()]
+
+    def cache(self) -> str:
+        return self.compose(
+            "exec", "-T", "api", "cat", "/data/storage/cache/purchase-details-v1.json"
+        )
