@@ -50,3 +50,14 @@ class PurchaseDockerFixture(ApiDockerFixture):
         return self.compose(
             "exec", "-T", "api", "cat", "/data/storage/cache/purchase-details-v1.json"
         )
+
+    def sync_stats(self, job_id: int) -> dict[str, Any]:
+        stats: dict[str, Any] = json.loads(
+            self.database_query(
+                "SELECT details::text FROM audit_logs "
+                "WHERE action='purchase_sync_succeeded' "
+                "AND entity_type='purchase_sync_job' "
+                f"AND entity_id='{job_id}' ORDER BY id DESC LIMIT 1"
+            )
+        )
+        return stats

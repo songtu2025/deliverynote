@@ -189,6 +189,8 @@ def activate_input_version_record(
                 .with_for_update()
             )
         )
+        if not Path(version.storage_path).is_file():
+            raise HTTPException(status_code=409, detail="输入版本文件不存在")
         if version.kind == "position" and any(
             current.active and current.id != version.id for current in current_versions
         ):

@@ -1,5 +1,6 @@
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
 from delivery_note.web import input_version_routes
@@ -12,6 +13,41 @@ class InputVersionCommandTests(WebApiCase):
         super().setUp()
         self.headers = self.login("admin", "admin-pass")
         self.version_ids = self.upload_active_versions(self.headers)
+
+    def test_missing_candidate_file_keeps_active_version_and_audit_unchanged(
+        self,
+    ) -> None:
+        response = self.client.post(
+            "/api/input-versions/purchase",
+            headers=self.headers,
+            data={"name": "purchase-file-loss"},
+            files={"file": ("purchase.xlsx", BytesIO(self.workbook_bytes("purchase")))},
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        identifier = response.json()["id"]
+        with self.app.state.database.session() as session:
+            path = Path(session.get(InputVersion, identifier).storage_path)
+        original = path.read_bytes()
+        before = self.client.get("/api/input-versions", headers=self.headers).json()
+        audits = self.client.get("/api/audit-logs", headers=self.headers).json()
+        path.unlink()
+        denied = self.client.post(
+            f"/api/input-versions/{identifier}/activate", headers=self.headers
+        )
+        self.assertEqual(denied.status_code, 409, denied.text)
+        self.assertEqual(denied.json()["detail"], "输入版本文件不存在")
+        self.assertEqual(
+            self.client.get("/api/input-versions", headers=self.headers).json(), before
+        )
+        self.assertEqual(
+            self.client.get("/api/audit-logs", headers=self.headers).json(), audits
+        )
+        path.write_bytes(original)
+        activated = self.client.post(
+            f"/api/input-versions/{identifier}/activate", headers=self.headers
+        )
+        self.assertEqual(activated.status_code, 200, activated.text)
+        self.assertTrue(activated.json()["active"])
 
     def test_version_list_is_readable_but_writes_require_admin(self) -> None:
         self.create_operator(self.headers)

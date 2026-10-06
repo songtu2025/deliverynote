@@ -60,4 +60,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    Path("/tmp/requests.jsonl").touch()
     HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
