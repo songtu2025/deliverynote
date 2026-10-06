@@ -122,6 +122,10 @@ jobs:
           python -m ruff format --check tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/support/worker_case.py tests/test_worker_shutdown_docker.py tests/test_worker_interruption_docker.py
           python -m mypy --strict tests/test_worker_ownership_docker.py tests/test_worker_retry_docker.py tests/test_worker_claim_docker.py
           python -m ruff format --check tests/test_worker_ownership_docker.py tests/test_worker_retry_docker.py tests/test_worker_claim_docker.py
+      - name: 同步候选清理类型与格式检查
+        run: |
+          python -m mypy --strict tests/workers/test_sync_file_cleanup.py
+          python -m ruff format --check delivery_note/workers/sync_results.py delivery_note/workers/sync_purchase.py delivery_note/workers/sync_inbound.py tests/workers/test_sync_file_cleanup.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查

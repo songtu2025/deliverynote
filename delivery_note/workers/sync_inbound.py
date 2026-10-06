@@ -16,6 +16,7 @@ from ..workers.leases import JobContext, _sync_heartbeat
 from .sync_results import (
     SyncCandidate,
     _block_sync,
+    _discard_unregistered_sync_candidate,
     _load_sync_base_path,
     _publish_sync_candidate,
 )
@@ -82,5 +83,5 @@ def _execute_self_operated_inbound_sync(
             {"warning_count": len(mapped.warnings)},
         )
     except Exception:
-        candidate_path.unlink(missing_ok=True)
+        _discard_unregistered_sync_candidate(database, candidate_path)
         raise

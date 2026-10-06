@@ -21,6 +21,7 @@ from .purchase_collection import (
 from .sync_results import (
     SyncCandidate,
     _block_sync,
+    _discard_unregistered_sync_candidate,
     _load_sync_base_path,
     _publish_sync_candidate,
 )
@@ -91,6 +92,6 @@ def _execute_purchase_sync(
             _purchase_audit_details(collection, len(mapped.warnings)),
         )
     except Exception:
-        candidate_path.unlink(missing_ok=True)
+        _discard_unregistered_sync_candidate(database, candidate_path)
         raise
     _write_collection_cache(collection)

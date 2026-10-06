@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 from pathlib import Path
 from typing import Any, cast
 
@@ -16,6 +17,22 @@ from ..web.models import (
 from .leases import JobContext, LostJobLeaseError
 
 from .sync_models import SYNC_METADATA, SyncJob, SyncJobModel
+
+LOGGER = logging.getLogger("delivery_note.worker")
+
+
+def _discard_unregistered_sync_candidate(database: Database, path: Path) -> None:
+    """仅清理已确认没有版本引用的当前同步候选文件。"""
+    try:
+        with database.session() as session:
+            registered = session.scalar(
+                select(InputVersion.id).where(InputVersion.storage_path == str(path))
+            )
+    except Exception:
+        LOGGER.warning("无法核验同步候选文件引用，已保留文件：%s", path, exc_info=True)
+        return
+    if registered is None:
+        path.unlink(missing_ok=True)
 
 
 @dataclass(frozen=True)
