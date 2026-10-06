@@ -10,10 +10,14 @@ from tests.support.purchase_docker import PurchaseDockerFixture
 
 
 TASKS = {
-    "compute": ("worker", "jobs"),
-    "export": ("worker", "jobs"),
-    "purchase-sync": ("purchase-sync-worker", "purchase_sync_jobs"),
-    "inbound-sync": ("inbound-sync-worker", "self_operated_inbound_sync_jobs"),
+    "compute": ("worker", "jobs", "batch"),
+    "export": ("worker", "jobs", "batch"),
+    "purchase-sync": ("purchase-sync-worker", "purchase_sync_jobs", "purchase-sync"),
+    "inbound-sync": (
+        "inbound-sync-worker",
+        "self_operated_inbound_sync_jobs",
+        "inbound-sync",
+    ),
 }
 
 
@@ -26,6 +30,12 @@ def wait_until(predicate: Callable[[], bool], message: str, seconds: int = 30) -
 
 
 class WorkerDockerFixture(PurchaseDockerFixture):
+    def __init__(
+        self, web_image: str, api_image: str, *, restore_target: bool = False
+    ) -> None:
+        super().__init__(web_image, api_image, restore_target=restore_target)
+        self.paused: list[str] = []
+
     @property
     def control(self) -> Path:
         return self.root / "control"
@@ -82,13 +92,15 @@ class WorkerDockerFixture(PurchaseDockerFixture):
         return cast(dict[str, Any], result["State"])
 
     def close(self) -> None:
+        for identifier in self.paused[:]:
+            self.resume(identifier)
         for kind in TASKS:
             self.release(kind)
             self.release(kind + ".finalize")
         super().close()
 
     def recover(self, kind: str) -> int:
-        queue = "batch" if TASKS[kind][0] == "worker" else kind
+        queue = TASKS[kind][2]
         return int(
             self.compose(
                 "exec",
@@ -107,4 +119,28 @@ class WorkerDockerFixture(PurchaseDockerFixture):
         self.database_query(
             f"UPDATE {TASKS[kind][1]} SET heartbeat_at=NOW()-INTERVAL '2 hours' "
             f"WHERE id={identifier} AND status='running'"
+        )
+
+    def pause(self, identifier: str) -> None:
+        self.run("docker", "pause", identifier)
+        self.paused.append(identifier)
+
+    def resume(self, identifier: str) -> None:
+        self.run("docker", "unpause", identifier)
+        self.paused.remove(identifier)
+
+    def once(self, kind: str) -> str:
+        service, _, queue = TASKS[kind]
+        return self.compose(
+            "run",
+            "-d",
+            "--no-deps",
+            "--name",
+            f"{self.project}-once-{kind}",
+            service,
+            "python",
+            "/control/worker_process.py",
+            "--queue",
+            queue,
+            "--once",
         )
