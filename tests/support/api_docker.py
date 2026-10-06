@@ -60,3 +60,22 @@ class ApiDockerFixture(BusinessDockerFixture):
             "condition": "service_healthy"
         }
         return document
+
+    def remove_restored_candidate(self, job_id: int) -> None:
+        if not self.restore_target:
+            raise ValueError("故障注入仅允许独立恢复目标")
+        path = self.database_query(
+            "SELECT v.storage_path FROM input_versions v "
+            "JOIN self_operated_inbound_sync_jobs j ON j.candidate_version_id=v.id "
+            f"WHERE j.id={job_id} AND v.kind='self_operated_inbound' AND NOT v.active"
+        )
+        self.compose(
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-c",
+            f"from pathlib import Path; p=Path({path!r}); "
+            "assert p.is_relative_to('/data/storage/master/self_operated_inbound'); "
+            "p.unlink()",
+        )

@@ -6,7 +6,7 @@ from scripts.backup.database import critical_table_counts
 from scripts.backup.runtime import SubprocessRunner
 from tests.support.api_docker import ApiDockerFixture
 from tests.support.api_recovery import ApiRecoveryCase, sync_records
-from tests.support.api_scenario import ApiScenario, SYNC
+from tests.support.api_scenario import SYNC
 from tests.support.inbound_exports import assert_inbound_exports
 from tests.support.inbound_recovery import inbound_records
 
@@ -66,8 +66,7 @@ class RecoveryApiDockerTests(ApiRecoveryCase):
     ) -> None:
         target = cast(ApiDockerFixture, self.empty_target())
         directory, snapshot = self.backup_baseline()
-        restored = cast(ApiScenario, self.restored_scenario(target, directory))
-        restored.sync_jobs = self.scenario.sync_jobs.copy()
+        restored = self.restored_scenario(target, directory)
         self.assertEqual(
             critical_table_counts(target.config, SubprocessRunner(), "delivery_note"),
             self.source_counts,
@@ -103,4 +102,77 @@ class RecoveryApiDockerTests(ApiRecoveryCase):
         )
         self.assertEqual(fresh["diff"]["before_quantity"], 10)
         self.assertEqual(fresh["diff"]["after_quantity"], 12)
+        self.assert_source_unchanged(snapshot)
+
+    def test_restored_activation_locks_history_and_new_sync_uses_new_base(self) -> None:
+        target = cast(ApiDockerFixture, self.empty_target())
+        directory, snapshot = self.backup_baseline()
+        restored = self.restored_scenario(target, directory)
+        first, second, _, _ = restored.sync_jobs
+        historical_id = restored.batch_ids[0]
+        restored.activate(second)
+        restored.create_api_batch()
+        after = restored.snapshot()
+        historical = after["batches"][historical_id]
+        original = snapshot["batches"][historical_id]
+        self.assertEqual(
+            historical["batch"]["version_ids"], original["batch"]["version_ids"]
+        )
+        self.assertEqual(historical["batch"]["summary"], original["batch"]["summary"])
+        self.assertEqual(historical["exports"], original["exports"])
+        self.assertEqual(historical["download"], original["download"])
+        fresh = after["batches"][restored.batch_id]
+        self.assertEqual(
+            fresh["batch"]["version_ids"]["self_operated_inbound"],
+            second["candidate_version_id"],
+        )
+        self.assertNotEqual(
+            first["candidate_version_id"], second["candidate_version_id"]
+        )
+        self.assertEqual(
+            fresh["batch"]["summary"],
+            {
+                "delivery_total": 18,
+                "import_total": 17,
+                "manual_total": 1,
+                "conserved": True,
+            },
+        )
+        self.assertEqual(fresh["exceptions"][0]["manual_quantity"], 1)
+        assert_inbound_exports(self, fresh, receivable=12)
+        target.set_case(14)
+        job = restored.sync()
+        self.assertEqual(job["base_version_id"], second["candidate_version_id"])
+        self.assertEqual(job["diff"]["before_quantity"], 12)
+        self.assertEqual(job["diff"]["after_quantity"], 14)
+        self.assertEqual(job["diff"]["changed_lines"], 1)
+        self.assertEqual(
+            restored.request("GET", SYNC).json()["active_version"]["id"],
+            second["candidate_version_id"],
+        )
+        self.assertEqual(restored.snapshot()["batches"][historical_id], historical)
+        self.assert_source_unchanged(snapshot)
+
+    def test_restored_faults_reject_candidates_and_release_failed_sync(self) -> None:
+        target = cast(ApiDockerFixture, self.empty_target())
+        directory, snapshot = self.backup_baseline()
+        restored = self.restored_scenario(target, directory)
+        first, second, _, blocked = restored.sync_jobs
+        active = restored.request("GET", SYNC).json()["active_version"]
+        restored.activate(blocked, 409)
+        target.remove_restored_candidate(second["id"])
+        restored.request("GET", f"{SYNC}/{second['id']}/preview", 409)
+        restored.activate(second, 409)
+        self.assertEqual(restored.request("GET", SYNC).json()["active_version"], active)
+        target.set_case(12, fail=True)
+        failure = restored.sync("failed")
+        self.assertIsNone(failure["candidate_version_id"])
+        self.assertIn("隔离接口故障", failure["error_message"])
+        self.assertIsNone(sync_records(target)[-1]["active_slot"])
+        self.assertIsNone(sync_records(target)[-1]["claim_token"])
+        self.assertEqual(restored.request("GET", SYNC).json()["active_version"], active)
+        target.set_case(12)
+        retried = restored.sync()
+        self.assertEqual(retried["base_version_id"], first["candidate_version_id"])
+        self.assertEqual(restored.request("GET", SYNC).json()["active_version"], active)
         self.assert_source_unchanged(snapshot)

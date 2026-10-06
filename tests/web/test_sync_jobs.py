@@ -167,6 +167,17 @@ class WebApiTests(WebApiCase):
 
         operator = self.create_operator(admin_headers)
         operator_headers = self.login(operator["username"], "operator-pass")
+        candidate_path.unlink()
+        missing = self.client.post(
+            f"/api/self-operated-inbound-sync/{job_id}/activate",
+            headers=operator_headers,
+        )
+        self.assertEqual(missing.status_code, 409, missing.text)
+        current = self.client.get(
+            "/api/self-operated-inbound-sync", headers=operator_headers
+        )
+        self.assertIsNone(current.json()["active_version"])
+        candidate_path.write_bytes(self.self_operated_inbound_bytes())
         activated = self.client.post(
             f"/api/self-operated-inbound-sync/{job_id}/activate",
             headers=operator_headers,

@@ -32,7 +32,7 @@ class Handler(BaseHTTPRequestHandler):
         }
         case = json.loads(Path("/stub/case.json").read_text())
         if case.get("fail"):
-            self.reply(200, {"code": 400, "msg": "隔离接口故障"})
+            self.reply(200, {"code": 400, "message": "隔离接口故障"})
             return
         rows = case["rows"] if payload["rnType"] == "0" else []
         self.reply(200, {"code": 200, "data": {"rows": rows, "total": len(rows)}})

@@ -133,6 +133,8 @@ class SyncCommands:
         version = session.get(InputVersion, job.candidate_version_id)
         if version is None or version.kind != "self_operated_inbound":
             raise HTTPException(status_code=409, detail="候选版本不存在")
+        if not Path(version.storage_path).is_file():
+            raise HTTPException(status_code=409, detail="候选版本文件不存在")
         try:
             current_versions = list(
                 session.scalars(

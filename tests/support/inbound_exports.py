@@ -11,13 +11,19 @@ from openpyxl import load_workbook
 from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
 
 
-def assert_inbound_exports(case: unittest.TestCase, record: dict[str, Any]) -> None:
+def assert_inbound_exports(
+    case: unittest.TestCase, record: dict[str, Any], *, receivable: int = 10
+) -> None:
     batch = record["batch"]
     site = "AMAZON:RIVMOUNT:US" if batch["site_resolutions"] else "AMAZON:SEEKWAY:US"
     for source in batch["files"]:
         data = record["exports"][source["original_name"]]
         assert_inbound_workbook(
-            case, data, site, source["import_total"], bool(source["manual_total"])
+            case,
+            data,
+            site,
+            (receivable, source["import_total"]),
+            bool(source["manual_total"]),
         )
     if len(batch["files"]) == 1:
         case.assertEqual(record["download"], next(iter(record["exports"].values())))
@@ -31,12 +37,17 @@ def assert_inbound_exports(case: unittest.TestCase, record: dict[str, Any]) -> N
         case.assertEqual(set(archive.namelist()), set(expected))
         for name, data in expected.items():
             case.assertEqual(archive.read(name), data)
-    assert_inbound_workbook(case, record["merged"], site, 15, True)
+    assert_inbound_workbook(case, record["merged"], site, (receivable, 15), True)
 
 
 def assert_inbound_workbook(
-    case: unittest.TestCase, data: bytes, site: str, total: int, overreceipt: bool
+    case: unittest.TestCase,
+    data: bytes,
+    site: str,
+    quantities: tuple[int, int],
+    overreceipt: bool,
 ) -> None:
+    receivable, total = quantities
     workbook = load_workbook(BytesIO(data), data_only=True)
     sheet = workbook["批量入库"]
     case.assertEqual([cell.value for cell in sheet[1]], INBOUND_TEMPLATE_COLUMNS)
@@ -48,7 +59,7 @@ def assert_inbound_workbook(
         8: site,
         9: f"PO-20260801-{site}",
         10: "LN2608179025",
-        12: 10,
+        12: receivable,
         17: total,
         18: "未分配库位",
         19: None,
