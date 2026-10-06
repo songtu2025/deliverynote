@@ -1,14 +1,11 @@
 """通过真实接口创建同步候选版本与使用 API 来源的批次。"""
 
-from io import BytesIO
 from pathlib import Path
-import time
 from typing import Any, cast
-
-from openpyxl import load_workbook
 
 from tests.support.api_docker import ApiDockerFixture
 from tests.support.inbound_scenario import InboundScenario
+from tests.support.sync_http import configure_sync, start_sync, sync_snapshot
 from tests.support.worker import WorkerCase
 
 SYNC = "/api/self-operated-inbound-sync"
@@ -20,19 +17,9 @@ class ApiScenario(InboundScenario):
         self.sync_jobs: list[dict[str, Any]] = []
 
     def sync(self, expected: str = "succeeded") -> dict[str, Any]:
-        identifier = self.request("POST", SYNC, 201).json()["id"]
-        deadline = time.monotonic() + 60
-        while True:
-            job = self.request("GET", SYNC).json()["job"]
-            assert job["id"] == identifier
-            if job["status"] == expected:
-                self.sync_jobs.append(job)
-                return cast(dict[str, Any], job)
-            if job["status"] in {"succeeded", "blocked", "failed"}:
-                raise AssertionError(f"同步状态与预期 {expected} 不符：{job}")
-            if time.monotonic() >= deadline:
-                raise AssertionError(f"同步未完成：{job}")
-            time.sleep(0.1)
+        job = start_sync(self, SYNC, expected)
+        self.sync_jobs.append(job)
+        return job
 
     def activate(self, job: dict[str, Any], expected: int = 200) -> dict[str, Any]:
         return cast(
@@ -66,15 +53,7 @@ class ApiScenario(InboundScenario):
             201,
             json={"name": "API 恢复超收5件", "allowance": 5},
         )
-        self.request(
-            "PUT",
-            "/api/admin/integrations/gerpgo",
-            json={
-                "base_url": "http://erp-stub:8000",
-                "app_id": "fixture-app",
-                "app_key": "fixture-key",
-            },
-        )
+        configure_sync(self)
         self.activate(self.sync())
         self.create_api_batch()
         fixture.set_case(12)
@@ -86,24 +65,5 @@ class ApiScenario(InboundScenario):
 
     def snapshot(self) -> dict[str, Any]:
         result = super().snapshot()
-        result["configuration"] = self.request(
-            "GET", "/api/admin/integrations/gerpgo"
-        ).json()
-        result["sync_status"] = self.request("GET", SYNC).json()
-        reports = {}
-        for job in self.sync_jobs:
-            prefix = f"{SYNC}/{job['id']}"
-            issues = self.request("GET", prefix + "/issues").json()
-            report = {"issues": issues}
-            if job["candidate_version_id"] is not None:
-                report["preview"] = self.request("GET", prefix + "/preview").json()
-            if issues:
-                workbook = load_workbook(
-                    BytesIO(self.request("GET", prefix + "/issues/download").content),
-                    data_only=True,
-                )
-                report["workbook"] = list(workbook.worksheets[0].values)
-                workbook.close()
-            reports[job["id"]] = report
-        result["reports"] = reports
+        result.update(sync_snapshot(self, SYNC, self.sync_jobs))
         return result

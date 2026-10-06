@@ -43,9 +43,12 @@ class ApiDockerFixture(BusinessDockerFixture):
             shared = SelfOperatedInboundMappingTests.order(site="共享")
             shared["orderNo"] = "IN-SHARED"
             rows.append(shared)
+        self._write_case({"rows": rows, "fail": fail})
+
+    def _write_case(self, case: dict[str, Any]) -> None:
         path = self.root / "stub" / "case.json"
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"rows": rows, "fail": fail}), encoding="utf-8")
+        temporary.write_text(json.dumps(case), encoding="utf-8")
         temporary.replace(path)
 
     def _configuration(self, backend_image: str, port: int) -> dict[str, Any]:

@@ -23,7 +23,12 @@ SPLIT_PARTS = [
 
 
 def assert_delivery_exports(
-    case: unittest.TestCase, merged_payload: bytes, archive_payload: bytes
+    case: unittest.TestCase,
+    merged_payload: bytes,
+    archive_payload: bytes,
+    *,
+    balance: int = 100,
+    resolved: int = 25,
 ) -> None:
     merged_book = load_workbook(BytesIO(merged_payload), data_only=True)
     merged_import_sheet = merged_book["交货导入"]
@@ -39,14 +44,14 @@ def assert_delivery_exports(
             cast(int, merged_import_sheet.cell(row, 4).value or 0)
             for row in range(4, merged_import_sheet.max_row + 1)
         ),
-        125,
+        balance + resolved,
     )
     case.assertEqual(
         sum(
             cast(int, merged_pending_sheet.cell(row, 4).value or 0)
             for row in range(3, merged_pending_sheet.max_row + 1)
         ),
-        35,
+        160 - balance - resolved,
     )
     merged_import_notes = [
         cast(str, merged_import_sheet.cell(row, 6).value)
@@ -86,13 +91,16 @@ def assert_delivery_exports(
         cast(int, pending_sheet.cell(row, 4).value or 0)
         for row in range(3, pending_sheet.max_row + 1)
     )
-    case.assertEqual((import_total, pending_total), (45, 35))
+    case.assertEqual(
+        (import_total, pending_total),
+        (balance - 80 + resolved, 160 - balance - resolved),
+    )
     import_records = [
         [import_sheet.cell(row, column).value for column in range(1, 8)]
         for row in range(4, import_sheet.max_row + 1)
     ]
     case.assertEqual(len(import_records), 1)
-    case.assertEqual(import_records[0][3], 45)
-    case.assertEqual(import_records[0][6], "超出采购未交量：60")
+    case.assertEqual(import_records[0][3], balance - 80 + resolved)
+    case.assertEqual(import_records[0][6], f"超出采购未交量：{160 - balance}")
     merged_book.close()
     second_book.close()

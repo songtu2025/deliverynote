@@ -14,11 +14,11 @@ from delivery_note.self_operated_inbound_sync import (
 class PurchaseMappingTests(unittest.TestCase):
     @staticmethod
     def detail(
-        balance=12,
-        site="SEEKWAY:US",
-        supplier_code="GYS-023",
-        supplier_name="KuangBiao",
-    ):
+        balance: int = 12,
+        site: str = "SEEKWAY:US",
+        supplier_code: str = "GYS-023",
+        supplier_name: str = "KuangBiao",
+    ) -> dict[str, Any]:
         return {
             "warehouseProcureItemVos": [
                 {
