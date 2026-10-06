@@ -110,6 +110,8 @@ jobs:
           python -m ruff format --check tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py tests/workers/test_inbound_site_choice.py
           python -m mypy --strict tests/support/inbound_recovery.py
           python -m ruff format --check tests/support/inbound_recovery.py
+          python -m mypy --strict tests/support/erp_stub.py tests/support/api_docker.py tests/support/api_scenario.py tests/test_recovery_api_docker.py
+          python -m ruff format --check tests/support/erp_stub.py tests/support/api_docker.py tests/support/api_scenario.py tests/test_recovery_api_docker.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
@@ -215,3 +217,9 @@ jobs:
           BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
           RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
         run: python -m unittest tests.test_recovery_inbound_docker -v
+      - name: 隔离真实 ERP HTTP 同步与 API 来源恢复演练
+        env:
+          RECOVERY_API_DOCKER_TESTS: "1"
+          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
+          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
+        run: python -m unittest tests.test_recovery_api_docker -v

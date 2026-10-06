@@ -139,7 +139,7 @@ class InboundScenario(DeliveryScenario):
                     "GET", f"/api/input-versions/{version['id']}/inspection"
                 ).json()
                 for version in versions
-                if version["active"]
+                if version["active"] and version["kind"] != "self_operated_inbound"
             },
             "rules": self.request(
                 "GET", "/api/self-operated-overreceipt-rule-versions"

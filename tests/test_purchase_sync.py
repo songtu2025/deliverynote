@@ -1,4 +1,5 @@
 import unittest
+from typing import Any
 
 from delivery_note.purchase_sync import (
     compare_purchase_frames,
@@ -138,7 +139,9 @@ class PurchaseMappingTests(unittest.TestCase):
 
 class SelfOperatedInboundMappingTests(unittest.TestCase):
     @staticmethod
-    def order(site="SEEKWAY:US", supplier_name="KuangBiao"):
+    def order(
+        site: str = "SEEKWAY:US", supplier_name: str = "KuangBiao"
+    ) -> dict[str, Any]:
         return {
             "orderNo": "IN-1",
             "orderType": "purchase",

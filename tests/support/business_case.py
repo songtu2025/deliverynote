@@ -13,16 +13,17 @@ from tests.support.business_scenario import DeliveryScenario
 
 class RecoveryCase(unittest.TestCase):
     scenario: DeliveryScenario
+    fixture_type: type[BusinessDockerFixture] = BusinessDockerFixture
 
     def setUp(self) -> None:
-        self.fixture = BusinessDockerFixture(
+        self.fixture = self.fixture_type(
             os.environ["RELEASE_WEB_IMAGE"], os.environ["BACKUP_API_IMAGE"]
         )
         self.addCleanup(self.fixture.close)
         self.fixture.start()
 
     def empty_target(self) -> BusinessDockerFixture:
-        target = BusinessDockerFixture(
+        target = self.fixture_type(
             os.environ["RELEASE_WEB_IMAGE"],
             os.environ["BACKUP_API_IMAGE"],
             restore_target=True,
