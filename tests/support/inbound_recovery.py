@@ -28,15 +28,16 @@ def inbound_records(fixture: BusinessDockerFixture) -> dict[str, Any]:
 
 class InboundRecoveryCase(RecoveryCase):
     scenario: InboundScenario
+    scenario_type: type[InboundScenario] = InboundScenario
 
     def setUp(self) -> None:
         super().setUp()
-        self.scenario = InboundScenario(self.fixture.url, self.fixture.root)
+        self.scenario = self.scenario_type(self.fixture.url, self.fixture.root)
         self.addCleanup(self.scenario.client.close)
 
     def backup_baseline(self) -> tuple[Path, dict[str, Any]]:
         self.scenario.login()
-        self.scenario.create_inbound_baseline()
+        self.create_baseline()
         snapshot = self.scenario.snapshot()
         self.remember_source()
         self.source_inbound_records = inbound_records(self.fixture)
@@ -44,11 +45,14 @@ class InboundRecoveryCase(RecoveryCase):
         self.assertEqual(result["status"], "complete")
         return Path(str(result["backup_directory"])), snapshot
 
+    def create_baseline(self) -> None:
+        self.scenario.create_inbound_baseline()
+
     def restored_scenario(
         self, target: BusinessDockerFixture, directory: Path
     ) -> InboundScenario:
         target.restore_from(self.fixture, directory)
-        scenario = InboundScenario(target.url, target.root)
+        scenario = self.scenario_type(target.url, target.root)
         self.addCleanup(scenario.client.close)
         self.assertEqual(scenario.login()["username"], "admin")
         scenario.batch_ids = self.scenario.batch_ids.copy()
