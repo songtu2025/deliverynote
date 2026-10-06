@@ -72,17 +72,7 @@ class RecoveryBusinessDockerTests(RecoveryCase):
         query = f"SELECT zip_path FROM batches WHERE id={restored.batch_id}"
         old_archive = target.database_query(query)
         merged = Path(old_archive).with_name(f"batch-{restored.batch_id}-merged.xlsx")
-        target.compose(
-            "exec",
-            "-T",
-            "api",
-            "python",
-            "-c",
-            f"from pathlib import Path; p=Path({str(merged)!r}); "
-            "assert p.is_relative_to("
-            f"'/data/storage/batches/{restored.batch_id}/exports'); "
-            "p.unlink()",
-        )
+        target.remove_restored_file(restored.batch_id, merged, "exports")
         restored.request(
             "GET", f"/api/batches/{restored.batch_id}/download-merged", 404
         )

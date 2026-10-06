@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import unittest
 
 from scripts.backup.database import critical_table_counts
@@ -73,4 +74,87 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
         )
         for record in (multi, selected):
             assert_inbound_exports(self, record)
+        self.assert_source_unchanged(snapshot)
+
+    def test_restored_workers_recompute_regenerate_and_start_fresh_balances(
+        self,
+    ) -> None:
+        target = self.empty_target()
+        directory, snapshot = self.backup_baseline()
+        restored = self.restored_scenario(target, directory)
+        multi, ambiguous, selected = restored.batch_ids
+        restored.batch_id = ambiguous
+        before = restored.batch()
+        record = snapshot["batches"][ambiguous]["exceptions"][0]
+        restored.request(
+            "PUT",
+            f"/api/exceptions/{record['id']}/self-operated-site",
+            400,
+            json={"full_site": "AMAZON:OTHER:US"},
+        )
+        self.assertEqual(restored.batch(), before)
+        job = restored.choose_site()
+        self.assertEqual(job["id"], before["jobs"]["compute"]["id"])
+        self.assertNotEqual(
+            job["finished_at"], before["jobs"]["compute"]["finished_at"]
+        )
+        restored.export()
+
+        restored.batch_id = multi
+        query = f"SELECT zip_path FROM batches WHERE id={multi}"
+        previous = target.database_query(query)
+        merged = Path(previous).with_name(f"batch-{multi}-merged.xlsx")
+        target.remove_restored_file(multi, merged, "exports")
+        restored.request("GET", f"/api/batches/{multi}/download-merged", 404)
+        restored.export()
+        self.assertNotEqual(target.database_query(query), previous)
+        self.assertEqual(
+            restored.batch()["jobs"]["export"]["id"],
+            snapshot["batches"][multi]["batch"]["jobs"]["export"]["id"],
+        )
+
+        restored.create_inbound_batch()
+        fresh = restored.batch()
+        self.assertEqual(fresh["summary"]["manual_total"], 18)
+        self.assertEqual(fresh["version_ids"], before["version_ids"])
+        self.assertNotEqual(fresh["jobs"]["compute"]["id"], job["id"])
+        restored.choose_site()
+        restored.export()
+        after = restored.snapshot()
+        for identifier in (multi, ambiguous, fresh["id"]):
+            record = after["batches"][identifier]
+            self.assertEqual(
+                record["batch"]["summary"],
+                {
+                    "delivery_total": 18,
+                    "import_total": 15,
+                    "manual_total": 3,
+                    "conserved": True,
+                },
+            )
+            self.assertEqual(record["exceptions"][0]["manual_quantity"], 3)
+            assert_inbound_exports(self, record)
+        self.assertEqual(after["batches"][selected], snapshot["batches"][selected])
+        self.assert_source_unchanged(snapshot)
+
+    def test_missing_restored_inbound_file_fails_real_worker_without_export(
+        self,
+    ) -> None:
+        target = self.empty_target()
+        directory, snapshot = self.backup_baseline()
+        restored = self.restored_scenario(target, directory)
+        restored.batch_id = restored.batch_ids[1]
+        path = target.database_query(
+            "SELECT inbound_storage_path FROM self_operated_batches "
+            f"WHERE batch_id={restored.batch_id}"
+        )
+        target.remove_restored_file(restored.batch_id, Path(path), "inputs")
+        job = restored.choose_site(expected_status="failed")
+        self.assertIn("自营仓收货入库单不存在", job["error_message"])
+        batch = restored.batch()
+        self.assertEqual(batch["status"], "failed")
+        self.assertFalse(batch["download_ready"])
+        self.assertFalse(batch["merged_download_ready"])
+        self.assertTrue(all(not source["download_ready"] for source in batch["files"]))
+        restored.request("GET", f"/api/batches/{restored.batch_id}/download", 404)
         self.assert_source_unchanged(snapshot)

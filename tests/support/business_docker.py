@@ -1,6 +1,6 @@
 """在既有隔离环境中运行真实 API 和三类 Worker。"""
 
-from typing import Any
+from typing import Any, Literal
 from pathlib import Path
 
 from tests.support.backup_docker import BackupDockerFixture
@@ -28,6 +28,22 @@ class BusinessDockerFixture(BackupDockerFixture):
 
         restore_business_backup(source, self, directory)
         self.start_services()
+
+    def remove_restored_file(
+        self, batch_id: int, path: Path, section: Literal["inputs", "exports"]
+    ) -> None:
+        if not self.restore_target:
+            raise ValueError("故障注入仅允许独立恢复目标")
+        self.compose(
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-c",
+            f"from pathlib import Path; p=Path({str(path)!r}); "
+            f"assert p.is_relative_to('/data/storage/batches/{batch_id}/{section}'); "
+            "p.unlink()",
+        )
 
     def _configuration(self, backend_image: str, port: int) -> dict[str, Any]:
         document = super()._configuration(backend_image, port)

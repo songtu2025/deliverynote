@@ -16,30 +16,9 @@ def assert_inbound_exports(case: unittest.TestCase, record: dict[str, Any]) -> N
     site = "AMAZON:RIVMOUNT:US" if batch["site_resolutions"] else "AMAZON:SEEKWAY:US"
     for source in batch["files"]:
         data = record["exports"][source["original_name"]]
-        workbook = load_workbook(BytesIO(data), data_only=True)
-        sheet = workbook["批量入库"]
-        case.assertEqual([cell.value for cell in sheet[1]], INBOUND_TEMPLATE_COLUMNS)
-        case.assertEqual(
-            sum(sheet.cell(row, 17).value for row in range(2, sheet.max_row + 1)),
-            source["import_total"],
+        assert_inbound_workbook(
+            case, data, site, source["import_total"], bool(source["manual_total"])
         )
-        for index, row in enumerate(sheet.iter_rows(min_row=2), start=2):
-            case.assertEqual(row[7].value, site)
-            case.assertEqual(row[11].value, 10)
-            case.assertEqual(row[17].value, "未分配库位")
-            case.assertIsNone(row[18].value)
-            for cell in row:
-                case.assertEqual(cell.font.name, "宋体")
-                case.assertEqual(cell.font.sz, 10)
-                case.assertEqual(cell.fill.fgColor.rgb, "00FFF2CC")
-                case.assertEqual(cell.number_format, "0")
-            case.assertEqual(sheet.row_dimensions[index].height, 26)
-        if source["manual_total"]:
-            case.assertIn(
-                "规则允许超收：5",
-                [sheet.cell(row, 20).value for row in range(2, sheet.max_row + 1)],
-            )
-        workbook.close()
     if len(batch["files"]) == 1:
         case.assertEqual(record["download"], next(iter(record["exports"].values())))
         case.assertIsNone(record["merged"])
@@ -52,8 +31,40 @@ def assert_inbound_exports(case: unittest.TestCase, record: dict[str, Any]) -> N
         case.assertEqual(set(archive.namelist()), set(expected))
         for name, data in expected.items():
             case.assertEqual(archive.read(name), data)
-    workbook = load_workbook(BytesIO(record["merged"]), data_only=True)
+    assert_inbound_workbook(case, record["merged"], site, 15, True)
+
+
+def assert_inbound_workbook(
+    case: unittest.TestCase, data: bytes, site: str, total: int, overreceipt: bool
+) -> None:
+    workbook = load_workbook(BytesIO(data), data_only=True)
     sheet = workbook["批量入库"]
+    case.assertEqual([cell.value for cell in sheet[1]], INBOUND_TEMPLATE_COLUMNS)
     case.assertEqual(sheet.max_row, 2)
-    case.assertEqual(sheet.cell(2, 17).value, 15)
+    expected = {
+        1: "IN-R" if site == "AMAZON:RIVMOUNT:US" else "IN-S",
+        3: "自营仓",
+        5: "SKU-A",
+        8: site,
+        9: f"PO-20260801-{site}",
+        10: "LN2608179025",
+        12: 10,
+        17: total,
+        18: "未分配库位",
+        19: None,
+        20: "规则允许超收：5" if overreceipt else None,
+    }
+    for column, value in expected.items():
+        case.assertEqual(sheet.cell(2, column).value, value)
+    for cell in sheet[2]:
+        case.assertEqual(cell.font.name, "宋体")
+        case.assertEqual(cell.font.sz, 10)
+        case.assertEqual(cell.fill.fgColor.rgb, "00FFF2CC")
+        case.assertEqual(cell.number_format, "0")
+        case.assertEqual(cell.alignment.horizontal, "center")
+        case.assertEqual(cell.alignment.vertical, "center")
+        case.assertTrue(cell.alignment.wrap_text)
+        for name in ("left", "right", "top", "bottom"):
+            case.assertEqual(getattr(cell.border, name).style, "thin")
+    case.assertEqual(sheet.row_dimensions[2].height, 26)
     workbook.close()

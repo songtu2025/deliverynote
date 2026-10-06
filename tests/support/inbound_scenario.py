@@ -1,7 +1,7 @@
 """以真实 HTTP 构建待入库文件、歧义及已选站点批次。"""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import unquote
 
 from tests.support.business_scenario import DeliveryScenario
@@ -78,7 +78,9 @@ class InboundScenario(DeliveryScenario):
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
         self.wait_job(job.json()["id"])
 
-    def choose_site(self) -> dict[str, Any]:
+    def choose_site(
+        self, *, expected_status: Literal["succeeded", "failed"] = "succeeded"
+    ) -> dict[str, Any]:
         record = self.request("GET", f"/api/batches/{self.batch_id}/exceptions").json()[
             0
         ]
@@ -88,7 +90,7 @@ class InboundScenario(DeliveryScenario):
             202,
             json={"full_site": "AMAZON:RIVMOUNT:US"},
         )
-        return self.wait_job(job.json()["id"])
+        return self.wait_job(job.json()["id"], expected_status=expected_status)
 
     def snapshot(self) -> dict[str, Any]:
         # 一次捕获所有批次，保留各自锁定资料和规则版本。
