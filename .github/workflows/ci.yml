@@ -131,6 +131,11 @@ jobs:
           python -m mypy --strict scripts/audit_storage.py
           python -m mypy --check-untyped-defs tests/test_storage_audit.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
           python -m ruff format --check scripts/audit_storage.py tests/test_storage_audit.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
+      - name: 历史合并导出恢复类型与格式检查
+        run: |
+          python -m mypy --strict scripts/merged_export_checks.py scripts/merged_export_recovery.py
+          python -m mypy --check-untyped-defs tests/support/merged_recovery.py tests/test_merged_export_recovery.py
+          python -m ruff format --check scripts/merged_export_checks.py scripts/merged_export_recovery.py tests/support/merged_recovery.py tests/test_merged_export_recovery.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
