@@ -136,6 +136,11 @@ jobs:
           python -m mypy --strict scripts/merged_export_checks.py scripts/merged_export_recovery.py
           python -m mypy --check-untyped-defs tests/support/merged_recovery.py tests/test_merged_export_recovery.py
           python -m ruff format --check scripts/merged_export_checks.py scripts/merged_export_recovery.py tests/support/merged_recovery.py tests/test_merged_export_recovery.py
+      - name: 历史导出隔离类型与格式检查
+        run: |
+          python -m mypy --strict scripts/quarantine_files.py scripts/storage_quarantine.py
+          python -m mypy --check-untyped-defs tests/support/storage_quarantine.py tests/test_storage_quarantine.py tests/test_storage_quarantine_safety.py
+          python -m ruff format --check scripts/quarantine_files.py scripts/storage_quarantine.py tests/support/storage_quarantine.py tests/test_storage_quarantine.py tests/test_storage_quarantine_safety.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
