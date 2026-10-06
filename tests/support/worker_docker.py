@@ -97,6 +97,8 @@ class WorkerDockerFixture(PurchaseDockerFixture):
         for kind in TASKS:
             self.release(kind)
             self.release(kind + ".finalize")
+        for point in ("export.published", "export.registered"):
+            self.release(point)
         super().close()
 
     def recover(self, kind: str) -> int:

@@ -12,17 +12,21 @@ from typing import Any, Callable
 sys.path.insert(0, str(Path.cwd()))
 
 from delivery_note import worker  # noqa: E402
-from delivery_note.workers import scheduler  # noqa: E402
+from delivery_note.workers import export_delivery, export_inbound, scheduler  # noqa: E402
 
 
-def pause(kind: str, identifier: int, claim: str) -> None:
+def pause(kind: str, identifier: int, claim: str, *, path: Path | None = None) -> None:
     control = Path(os.environ["WORKER_TEST_CONTROL"])
     hold = control / (kind + ".hold")
     if not hold.exists():
         return
     marker = control / (kind + ".arrived")
     temporary = marker.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"id": identifier, "claim": claim}))
+    temporary.write_text(
+        json.dumps(
+            {"id": identifier, "claim": claim, "path": str(path) if path else None}
+        )
+    )
     temporary.replace(marker)
     deadline = time.monotonic() + 120
     while hold.exists():
@@ -54,7 +58,30 @@ def gated(kind: str, execute: Callable[..., Any]) -> Callable[..., Any]:
     return call
 
 
+def gated_registration(register: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(register)
+    def call(*args: Any, **kwargs: Any) -> Any:
+        context, _, publication = args
+        for point in ("published", "registered"):
+            if point == "registered":
+                register(*args, **kwargs)
+            pause(
+                "export." + point,
+                context.job_id,
+                context.claim_token,
+                path=publication.directory,
+            )
+
+    return call
+
+
 if __name__ == "__main__":
+    for module in (export_delivery, export_inbound):
+        setattr(
+            module,
+            "_register_export",
+            gated_registration(getattr(module, "_register_export")),
+        )
     for name, kind in (
         ("_execute_compute", "compute"),
         ("_execute_export", "export"),
