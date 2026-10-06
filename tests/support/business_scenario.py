@@ -91,7 +91,7 @@ class DeliveryScenario:
                     files={"file": (path.name, upload)},
                 )
 
-    def create_delivery_batch(self) -> None:
+    def create_delivery_batch(self, *, wait: bool = True) -> int:
         self.batch_id = self.request(
             "POST", "/api/batches", 201, json={"name": "恢复业务基线"}
         ).json()["id"]
@@ -108,7 +108,10 @@ class DeliveryScenario:
                 )
         self.request("POST", f"/api/batches/{self.batch_id}/preflight")
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
-        self.wait_job(job.json()["id"])
+        identifier = int(job.json()["id"])
+        if wait:
+            self.wait_job(identifier)
+        return identifier
 
     def batch(self) -> dict[str, Any]:
         return cast(
@@ -129,9 +132,12 @@ class DeliveryScenario:
         )
         self.export()
 
-    def export(self) -> None:
+    def export(self, *, wait: bool = True) -> int:
         job = self.request("POST", f"/api/batches/{self.batch_id}/export", 202)
-        self.wait_job(job.json()["id"])
+        identifier = int(job.json()["id"])
+        if wait:
+            self.wait_job(identifier)
+        return identifier
 
     def downloads(self) -> tuple[bytes, bytes]:
         prefix = f"/api/batches/{self.batch_id}"

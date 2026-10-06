@@ -22,9 +22,16 @@ def configure_sync(scenario: DeliveryScenario) -> None:
 
 
 def start_sync(
-    scenario: DeliveryScenario, path: str, expected: str = "succeeded"
+    scenario: DeliveryScenario,
+    path: str,
+    expected: str = "succeeded",
+    *,
+    wait: bool = True,
 ) -> dict[str, Any]:
-    identifier = scenario.request("POST", path, 201).json()["id"]
+    created = scenario.request("POST", path, 201).json()
+    identifier = created["id"]
+    if not wait:
+        return cast(dict[str, Any], created)
     deadline = time.monotonic() + 60
     while True:
         job = scenario.request("GET", path).json()["job"]
