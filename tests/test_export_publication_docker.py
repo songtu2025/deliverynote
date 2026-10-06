@@ -124,6 +124,12 @@ class ExportPublicationDockerTests(RecoveryCase):
         fixture.release("export." + point)
         if point == "registered":
             fixture.compose("start", "worker")
+            once = fixture.once("export")
+            wait_until(
+                lambda: not fixture.state(once)["Running"],
+                "成功登记后的领取检查未结束",
+            )
+            self.assertEqual(fixture.state(once)["ExitCode"], 0)
         wait_until(
             lambda: fixture.job("export", identifier)["status"] == "succeeded",
             "发布中断后的导出未完成登记",
