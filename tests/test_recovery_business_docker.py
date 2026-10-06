@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.support.business_docker import BusinessDockerFixture
+from tests.support.business_case import RecoveryCase
 from tests.support.business_scenario import DeliveryScenario
 from tests.support.delivery_exports import assert_delivery_exports
 from scripts.backup.workflow import create_backup
@@ -20,35 +21,11 @@ from scripts.backup.services import REQUIRED_SERVICES
     os.environ.get("RECOVERY_BUSINESS_DOCKER_TESTS") == "1",
     "需显式启用隔离 Docker 业务恢复演练",
 )
-class RecoveryBusinessDockerTests(unittest.TestCase):
+class RecoveryBusinessDockerTests(RecoveryCase):
     def setUp(self) -> None:
-        self.fixture = BusinessDockerFixture(
-            os.environ["RELEASE_WEB_IMAGE"], os.environ["BACKUP_API_IMAGE"]
-        )
-        self.addCleanup(self.fixture.close)
-        self.fixture.start()
+        super().setUp()
         self.scenario = DeliveryScenario(self.fixture.url, self.fixture.root)
         self.addCleanup(self.scenario.client.close)
-
-    def empty_target(self) -> BusinessDockerFixture:
-        target = BusinessDockerFixture(
-            os.environ["RELEASE_WEB_IMAGE"],
-            os.environ["BACKUP_API_IMAGE"],
-            restore_target=True,
-        )
-        self.addCleanup(target.close)
-        target.start()
-        self.assertEqual(
-            target.database_query(
-                "SELECT datname FROM pg_database WHERE datname='delivery_note'",
-                "postgres",
-            ),
-            "",
-        )
-        self.assertEqual(
-            target.compose("ps", "--status", "running", "--services"), "db"
-        )
-        return target
 
     def backup_baseline(self) -> tuple[Path, dict[str, Any]]:
         self.scenario.login()

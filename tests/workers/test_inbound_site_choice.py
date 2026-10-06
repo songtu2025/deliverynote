@@ -1,7 +1,8 @@
 from tests.support.worker import WorkerCase
 from io import BytesIO
 
-from openpyxl import Workbook, load_workbook
+from openpyxl import load_workbook
+from tests.support.inbound_inputs import create_ambiguous_product
 from sqlalchemy import select
 
 from delivery_note.web.models import (
@@ -112,13 +113,7 @@ class WorkerIntegrationTests(WorkerCase):
     def _prepare_site_choice_inputs(
         self,
     ):
-        product = self.root / "product-ambiguous.xlsx"
-        workbook = Workbook()
-        sheet = workbook.active
-        sheet.append(["SKU", "店铺/站点", "品类A", "锁仓MKSU"])
-        sheet.append(["SKU-A", "RIVMOUNT:US", "水鞋", "锁"])
-        sheet.append(["SKU-A", "SEEKWAY:US", "水鞋", "锁"])
-        workbook.save(product)
+        product = create_ambiguous_product(self.root / "product-ambiguous.xlsx")
         with product.open("rb") as upload:
             product_version = self.client.post(
                 "/api/input-versions/product",

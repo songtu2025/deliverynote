@@ -48,12 +48,25 @@ class DeliveryScenario:
             time.sleep(0.1)
 
     def create_baseline(self) -> None:
+        self.activate_inputs()
+        self.create_delivery_batch()
+
+    def activate_inputs(self) -> None:
         inputs = WorkerCase.create_master_inputs(self.root)
         workbook = load_workbook(inputs["template"])
         for cell in workbook.worksheets[0][3]:
             cell.font = Font(name="宋体", size=10, color="808080")
             cell.fill = PatternFill("solid", fgColor="FFF2CC")
         workbook.save(inputs["template"])
+        workbook.close()
+        workbook = load_workbook(inputs["inbound_template"])
+        sheet = workbook.worksheets[0]
+        sheet.row_dimensions[2].height = 26
+        for cell in sheet[2]:
+            cell.font = Font(name="宋体", size=10, color="808080")
+            cell.fill = PatternFill("solid", fgColor="FFF2CC")
+            cell.number_format = "0"
+        workbook.save(inputs["inbound_template"])
         workbook.close()
         for kind, path in inputs.items():
             with path.open("rb") as upload:
@@ -64,7 +77,6 @@ class DeliveryScenario:
                     data={"name": f"{kind}-v1", "activate": "true"},
                     files={"file": (path.name, upload)},
                 )
-        self.create_delivery_batch()
 
     def create_delivery_batch(self) -> None:
         self.batch_id = self.request(

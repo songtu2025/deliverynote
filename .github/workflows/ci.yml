@@ -106,6 +106,8 @@ jobs:
           python -m ruff format --check tests/backup/test_completion.py tests/backup/test_operational_lock.py
           python -m mypy --strict tests/support/business_docker.py tests/support/business_restore.py tests/support/business_scenario.py tests/support/delivery_exports.py tests/test_recovery_business_docker.py
           python -m ruff format --check tests/support/business_docker.py tests/support/business_restore.py tests/support/business_scenario.py tests/support/delivery_exports.py tests/test_recovery_business_docker.py tests/workers/test_delivery_end_to_end.py
+          python -m mypy --strict tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py
+          python -m ruff format --check tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py tests/workers/test_inbound_site_choice.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
@@ -205,3 +207,9 @@ jobs:
           BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
           RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
         run: python -m unittest tests.test_recovery_business_docker -v
+      - name: 隔离真实自营仓业务演练
+        env:
+          RECOVERY_INBOUND_DOCKER_TESTS: "1"
+          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
+          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
+        run: python -m unittest tests.test_recovery_inbound_docker -v
