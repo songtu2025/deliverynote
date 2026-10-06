@@ -123,8 +123,22 @@ class InboundScenario(DeliveryScenario):
                 if batch["merged_download_ready"]
                 else None,
             }
+        versions = self.request("GET", "/api/input-versions").json()
         return {
-            "versions": self.request("GET", "/api/input-versions").json(),
+            "versions": versions,
+            "input_files": {
+                version["id"]: self.request(
+                    "GET", f"/api/input-versions/{version['id']}/download"
+                ).content
+                for version in versions
+            },
+            "inspection": {
+                version["id"]: self.request(
+                    "GET", f"/api/input-versions/{version['id']}/inspection"
+                ).json()
+                for version in versions
+                if version["active"]
+            },
             "rules": self.request(
                 "GET", "/api/self-operated-overreceipt-rule-versions"
             ).json(),

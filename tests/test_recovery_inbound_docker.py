@@ -1,8 +1,9 @@
 import os
 import unittest
 
-from tests.support.business_case import RecoveryCase
-from tests.support.inbound_scenario import InboundScenario
+from scripts.backup.database import critical_table_counts
+from scripts.backup.runtime import SubprocessRunner
+from tests.support.inbound_recovery import InboundRecoveryCase, inbound_records
 from tests.support.inbound_exports import assert_inbound_exports
 
 
@@ -10,10 +11,9 @@ from tests.support.inbound_exports import assert_inbound_exports
     os.environ.get("RECOVERY_INBOUND_DOCKER_TESTS") == "1",
     "需显式启用隔离 Docker 自营仓恢复演练",
 )
-class RecoveryInboundDockerTests(RecoveryCase):
+class RecoveryInboundDockerTests(InboundRecoveryCase):
     def test_real_workers_preserve_order_allowance_and_site_choice(self) -> None:
-        scenario = InboundScenario(self.fixture.url, self.fixture.root)
-        self.addCleanup(scenario.client.close)
+        scenario = self.scenario
         self.assertEqual(scenario.login()["username"], "admin")
         identifiers = scenario.create_inbound_baseline()
         snapshot = scenario.snapshot()
@@ -55,3 +55,22 @@ class RecoveryInboundDockerTests(RecoveryCase):
             multi["batch"]["version_ids"]["product"],
             selected["batch"]["version_ids"]["product"],
         )
+
+    def test_complete_backup_restores_inbound_records_and_original_exports(
+        self,
+    ) -> None:
+        target = self.empty_target()
+        directory, snapshot = self.backup_baseline()
+        restored = self.restored_scenario(target, directory)
+        self.assertEqual(
+            critical_table_counts(target.config, SubprocessRunner(), "delivery_note"),
+            self.source_counts,
+        )
+        self.assertEqual(inbound_records(target), self.source_inbound_records)
+        self.assertEqual(restored.snapshot(), snapshot)
+        multi, _, selected = (
+            snapshot["batches"][identifier] for identifier in restored.batch_ids
+        )
+        for record in (multi, selected):
+            assert_inbound_exports(self, record)
+        self.assert_source_unchanged(snapshot)

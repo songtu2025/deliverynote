@@ -14,7 +14,6 @@ from scripts.backup.workflow import create_backup
 from scripts.backup.archive import sha256
 from scripts.backup.database import _restore_database, critical_table_counts
 from scripts.backup.runtime import BackupError, SubprocessRunner
-from scripts.backup.services import REQUIRED_SERVICES
 
 
 @unittest.skipUnless(
@@ -39,31 +38,10 @@ class RecoveryBusinessDockerTests(RecoveryCase):
             ],
             [(25, True), (35, False)],
         )
-        self.source_counts = critical_table_counts(
-            self.fixture.config, SubprocessRunner(), "delivery_note"
-        )
-        self.source_containers = {
-            service: self.fixture.inspect(service)[0]["Id"]
-            for service in REQUIRED_SERVICES
-        }
+        self.remember_source()
         result = create_backup(self.fixture.config)
         self.assertEqual(result["status"], "complete")
         return Path(str(result["backup_directory"])), snapshot
-
-    def assert_source_unchanged(self, snapshot: dict[str, Any]) -> None:
-        self.assertEqual(self.scenario.snapshot(), snapshot)
-        self.assertEqual(
-            critical_table_counts(
-                self.fixture.config, SubprocessRunner(), "delivery_note"
-            ),
-            self.source_counts,
-        )
-        for service, identifier in self.source_containers.items():
-            record = self.fixture.inspect(service)[0]
-            self.assertEqual(record["Id"], identifier)
-            self.assertEqual(record["State"]["Status"], "running")
-            self.assertEqual(record["RestartCount"], 0)
-        self.fixture.wait_ready()
 
     def test_complete_backup_restores_real_business_in_empty_environment(self) -> None:
         target = self.empty_target()

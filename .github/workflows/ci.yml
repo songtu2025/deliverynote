@@ -108,6 +108,8 @@ jobs:
           python -m ruff format --check tests/support/business_docker.py tests/support/business_restore.py tests/support/business_scenario.py tests/support/delivery_exports.py tests/test_recovery_business_docker.py tests/workers/test_delivery_end_to_end.py
           python -m mypy --strict tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py
           python -m ruff format --check tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py tests/workers/test_inbound_site_choice.py
+          python -m mypy --strict tests/support/inbound_recovery.py
+          python -m ruff format --check tests/support/inbound_recovery.py
       - name: 后端测试
         run: python -m unittest discover -s tests -v
       - name: Python 依赖检查
