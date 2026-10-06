@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 import shutil
 import tarfile
@@ -34,34 +33,35 @@ def create_data_archive(
     backup_directory: Path,
     timeout_seconds: int,
 ) -> Path:
-    runner.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "--user",
-            f"{os.getuid()}:{os.getgid()}",
-            "--network",
-            "none",
-            "--volume",
-            f"{data_volume}:/source:ro",
-            "--volume",
-            f"{backup_directory.resolve()}:/backup",
-            api_image,
-            "tar",
-            "--numeric-owner",
-            "-czf",
-            "/backup/delivery_data.tar.gz",
-            "-C",
-            "/source",
-            ".",
-        ],
-        timeout_seconds=timeout_seconds,
-    )
     target = backup_directory / "delivery_data.tar.gz"
+    # 容器读取私有文件，宿主执行者拥有归档，不放宽源凭据权限。
+    with target.open("xb") as output:
+        target.chmod(0o600)
+        runner.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--user",
+                "0:0",
+                "--network",
+                "none",
+                "--volume",
+                f"{data_volume}:/source:ro",
+                api_image,
+                "tar",
+                "--numeric-owner",
+                "-czf",
+                "-",
+                "-C",
+                "/source",
+                ".",
+            ],
+            stdout=output,
+            timeout_seconds=timeout_seconds,
+        )
     if not target.is_file() or target.stat().st_size == 0:
         raise BackupError("文件卷备份为空或未生成")
-    target.chmod(0o600)
     return target
 
 

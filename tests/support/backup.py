@@ -72,7 +72,7 @@ class FakeRunner:
         if command[:3] == ("docker", "volume", "ls"):
             return "deliverynote_delivery_data\n"
         if command[:2] == ("docker", "run"):
-            return self._archive(command)
+            return self._archive(command, stdout)
         if any(
             name in command
             for name in ("pg_dump", "createdb", "pg_restore", "dropdb", "psql")
@@ -120,20 +120,16 @@ class FakeRunner:
         )
         return "".join(f"{table}={counts[table]}\n" for table in CRITICAL_TABLES)
 
-    def _archive(self, command: tuple[str, ...]) -> str:
+    def _archive(self, command: tuple[str, ...], stdout: BinaryIO | None) -> str:
         if "tar" not in command:
             return ""
         self._fail(self.fail_archive, "模拟文件卷归档失败")
-        mount = next(
-            command[index + 1]
-            for index, value in enumerate(command)
-            if value == "--volume" and command[index + 1].endswith(":/backup")
-        )
-        target = Path(mount.removesuffix(":/backup")) / "delivery_data.tar.gz"
+        if stdout is None:
+            raise AssertionError("文件卷归档必须直接写入宿主文件")
         payload = b"delivery-data"
         info = tarfile.TarInfo("storage/example.bin")
         info.size = len(payload)
-        with tarfile.open(target, "w:gz") as archive:
+        with tarfile.open(fileobj=stdout, mode="w:gz") as archive:
             archive.addfile(info, io.BytesIO(payload))
         return ""
 

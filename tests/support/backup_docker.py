@@ -29,6 +29,7 @@ for name, content in {files}.items():
     target = Path('/data') / name
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content)
+    target.chmod(0o600)
 database = Database(os.environ['DATABASE_URL'])
 try:
     with database.session() as session:
