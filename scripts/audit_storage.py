@@ -24,7 +24,11 @@ from delivery_note.web.models import (
     SelfOperatedBatch,
     SelfOperatedInboundSyncJob,
 )
-from scripts.storage_paths import artifact_owner, path_state, scan_paths
+from scripts.storage_paths import (
+    artifact_owner as artifact_owner,
+    path_state as path_state,
+    scan_paths,
+)
 from scripts.storage_resources import (
     ResourceDetails,
     builtin_reference_paths,
