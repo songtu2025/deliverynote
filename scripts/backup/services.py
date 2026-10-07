@@ -17,6 +17,7 @@ class Environment(TypedDict):
 
 
 DOCKER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
+IMAGE_ID_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 WORKER_SERVICES = ("worker", "purchase-sync-worker", "inbound-sync-worker")
@@ -103,10 +104,10 @@ def _resolve_volume(config: BackupConfig, runner: Runner) -> str:
     return _single_output_line(output, "delivery_data 卷")
 
 
-def _resolve_image(runner: Runner, container: str) -> str:
+def resolve_container_image(runner: Runner, container: str) -> str:
     output = runner.run(["docker", "inspect", "--format", "{{.Image}}", container])
     image = output.strip()
-    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+    if not IMAGE_ID_PATTERN.fullmatch(image):
         raise BackupError("无法确定实际运行 API 镜像身份")
     return image
 
@@ -149,7 +150,7 @@ def inspect_environment(config: BackupConfig, runner: Runner) -> Environment:
         "running_services": sorted(running),
         "active_jobs": active_job_count(config, runner),
         "data_volume": _resolve_volume(config, runner),
-        "api_image": _resolve_image(runner, containers["api"]),
+        "api_image": resolve_container_image(runner, containers["api"]),
         "service_containers": containers,
         "health_url": health_url,
     }

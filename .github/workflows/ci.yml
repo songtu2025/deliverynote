@@ -104,6 +104,8 @@ jobs:
           python -m ruff format --check tests/support/backup_docker.py tests/test_backup_docker.py tests/backup/test_restore.py
           python -m mypy --strict tests/backup/test_resources.py
           python -m ruff format --check tests/backup/test_resources.py
+          python -m mypy --strict scripts/check_restore.py tests/support/restore_manifest.py tests/backup/test_manifest.py tests/backup/test_restore_checks.py tests/backup/test_restore_cli.py tests/test_recovery_validation_docker.py
+          python -m ruff format --check scripts/check_restore.py tests/support/restore_manifest.py tests/backup/test_manifest.py tests/backup/test_restore_checks.py tests/backup/test_restore_cli.py tests/test_recovery_validation_docker.py
           python -m mypy --strict tests/backup/test_completion.py tests/backup/test_operational_lock.py tests/backup/test_cli.py
           python -m ruff format --check tests/backup/test_completion.py tests/backup/test_operational_lock.py
           python -m mypy --strict tests/support/business_docker.py tests/support/business_restore.py tests/support/business_scenario.py tests/support/delivery_exports.py tests/test_recovery_business_docker.py
@@ -242,7 +244,7 @@ jobs:
           RECOVERY_BUSINESS_DOCKER_TESTS: "1"
           BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
           RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_recovery_business_docker -v
+        run: python -m unittest tests.test_recovery_business_docker tests.test_recovery_validation_docker -v
       - name: 隔离真实自营仓业务演练
         env:
           RECOVERY_INBOUND_DOCKER_TESTS: "1"

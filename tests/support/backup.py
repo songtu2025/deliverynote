@@ -85,9 +85,13 @@ class FakeRunner:
         if command[:2] == ("docker", "run"):
             if "scripts.backup.resource_probe" in command:
                 report = {
-                    "/data/storage/config/gerpgo.json": {"validation": "absent"},
+                    "/data/storage/config/gerpgo.json": {
+                        "validation": "absent",
+                        "recovery_source": "data_volume",
+                    },
                     "/data/storage/cache/purchase-details-v1.json": {
-                        "validation": "absent"
+                        "validation": "absent",
+                        "recovery_source": "data_volume",
                     },
                 }
                 if self.resource_changed and any(

@@ -1,12 +1,17 @@
 """将完整备份恢复到测试生成的独立空环境。"""
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from scripts.backup.archive import sha256, validate_data_archive
-from scripts.backup.database import _restore_database, critical_table_counts
+from scripts.backup.database import _restore_database
+from scripts.backup.manifest import read_manifest, verify_image
+from scripts.backup.resources import (
+    container_resource_context,
+    extract_resource_archive,
+)
+from scripts.backup.restore_checks import check_empty_target, check_restored_target
 from scripts.backup.runtime import BackupError, SubprocessRunner
+from scripts.backup.services import resolve_container_image
 
 if TYPE_CHECKING:
     from tests.support.business_docker import BusinessDockerFixture
@@ -23,62 +28,23 @@ def restore_business_backup(
         or source.volume == target.volume
     ):
         raise BackupError("恢复目标必须是不同项目的独立空环境")
-    metadata = json.loads((directory / "BACKUP-METADATA.json").read_text())
+    manifest = read_manifest(directory)
     if (
-        not (directory / "READY").is_file()
-        or metadata["status"] != "complete"
-        or metadata["compose_project"] != source.project
-        or metadata["data_volume"] != source.volume
+        manifest.source_project != source.project
+        or manifest.source_volume != source.volume
     ):
         raise BackupError("完整备份标记或来源不匹配")
-    checksums = ""
-    for key, name in (
-        ("database", "database.dump"),
-        ("data_archive", "delivery_data.tar.gz"),
-    ):
-        path = directory / name
-        entry = metadata[key]
-        digest = sha256(path)
-        if (
-            entry["filename"] != name
-            or entry["bytes"] != path.stat().st_size
-            or entry["sha256"] != digest
-        ):
-            raise BackupError(f"备份校验和或大小不一致：{name}")
-        checksums += f"{digest}  {name}\n"
-    if (directory / "SHA256SUMS").read_text() != checksums:
-        raise BackupError("备份校验和清单不一致")
-    validate_data_archive(directory / "delivery_data.tar.gz")
-    if target.database_query(
-        "SELECT datname FROM pg_database WHERE datname='delivery_note'", "postgres"
-    ):
-        raise BackupError("恢复目标数据库必须为空")
     runner = SubprocessRunner()
+    container = target.compose("ps", "--all", "--quiet", "api")
+    image = verify_image(manifest, runner, resolve_container_image(runner, container))
+    context = container_resource_context(runner, container, image)
+    if context.root != manifest.storage_root:
+        raise BackupError("恢复目标存储目录与备份不匹配")
+    check_empty_target(target.config, runner, target.volume, image)
     _restore_database(
         target.config, runner, directory / "database.dump", "delivery_note"
     )
-    with (directory / "delivery_data.tar.gz").open("rb") as archive:
-        runner.run(
-            [
-                "docker",
-                "run",
-                "--rm",
-                "-i",
-                "--network",
-                "none",
-                "--volume",
-                f"{target.volume}:/target",
-                target.api_image,
-                "tar",
-                "-xzf",
-                "-",
-                "-C",
-                "/target",
-            ],
-            stdin=archive,
-        )
-    if (
-        critical_table_counts(target.config, runner, "delivery_note")
-        != metadata["database"]["source_row_counts"]
-    ):
-        raise BackupError("恢复目标关键表行数不一致")
+    extract_resource_archive(
+        target.config, runner, image, directory / "delivery_data.tar.gz", target.volume
+    )
+    check_restored_target(target.config, runner, manifest, context, target.volume)

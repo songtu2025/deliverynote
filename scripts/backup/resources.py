@@ -24,13 +24,21 @@ class ResourceContext:
 
 
 def resource_context(runner: Runner, environment: Environment) -> ResourceContext:
+    return container_resource_context(
+        runner, environment["service_containers"]["api"], environment["api_image"]
+    )
+
+
+def container_resource_context(
+    runner: Runner, container: str, api_image: str
+) -> ResourceContext:
     raw = runner.run(
         [
             "docker",
             "inspect",
             "--format",
             "{{json .Config.Env}}",
-            environment["service_containers"]["api"],
+            container,
         ]
     )
     values = dict(value.split("=", 1) for value in json.loads(raw))
@@ -46,7 +54,7 @@ def resource_context(runner: Runner, environment: Environment) -> ResourceContex
                     "inspect",
                     "--format",
                     "{{json .Config.Labels}}",
-                    environment["api_image"],
+                    api_image,
                 ]
             )
         )
@@ -59,7 +67,7 @@ def resource_context(runner: Runner, environment: Environment) -> ResourceContex
             for name in ("GERPGO_API_BASE_URL", "GERPGO_APP_ID", "GERPGO_APP_KEY")
         },
         labels.get("org.opencontainers.image.revision"),
-        environment["api_image"],
+        api_image,
     )
 
 
