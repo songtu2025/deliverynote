@@ -28,7 +28,7 @@ class BackupWorkflowTests(BackupTestCase):
             (backup / "BACKUP-METADATA.json").read_text(encoding="utf-8")
         )
         self.assertEqual(metadata["status"], "complete")
-        self.assertEqual(metadata["schema_version"], 2)
+        self.assertEqual(metadata["schema_version"], 3)
         self.assertEqual(metadata["data_archive"]["files"], 1)
         self.assertEqual(metadata["active_jobs_before_maintenance"], 0)
         self.assertEqual(

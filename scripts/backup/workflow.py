@@ -1,12 +1,9 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import time
-from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
-from pathlib import Path
 from typing import Callable
 
 from scripts.backup.archive import (
@@ -21,6 +18,13 @@ from scripts.backup.database import (
     critical_table_counts,
     validate_database_restore,
 )
+from scripts.backup.resources import (
+    ResourceRestore,
+    probe_resources,
+    resource_context,
+    resource_references,
+)
+from scripts.backup.snapshot import Snapshot, prepare_snapshot
 from scripts.backup.runtime import (
     BackupConfig,
     BackupError,
@@ -38,37 +42,6 @@ from scripts.backup.services import (
     resume_services,
     wait_for_jobs_to_drain,
 )
-
-
-@dataclass
-class Snapshot:
-    directory: Path
-    started_at: datetime
-    source_counts: dict[str, int] = field(default_factory=dict)
-    restored_counts: dict[str, int] = field(default_factory=dict)
-    archive_entries: int = 0
-    archive_files: int = 0
-
-    @property
-    def database_path(self) -> Path:
-        return self.directory / "database.dump"
-
-    @property
-    def archive_path(self) -> Path:
-        return self.directory / "delivery_data.tar.gz"
-
-
-def _prepare_snapshot(config: BackupConfig, started_at: datetime) -> Snapshot:
-    config.destination.mkdir(parents=True, exist_ok=True, mode=0o700)
-    config.destination.chmod(0o700)
-    backup_name = started_at.strftime("%Y%m%d-%H%M%S")
-    if (config.destination / backup_name).exists():
-        raise BackupError(f"目标备份目录已存在：{config.destination / backup_name}")
-    directory = Path(
-        tempfile.mkdtemp(prefix=f".incomplete-{backup_name}-", dir=config.destination)
-    )
-    directory.chmod(0o700)
-    return Snapshot(directory, started_at)
 
 
 def _take_snapshot(
@@ -105,6 +78,17 @@ def _take_snapshot(
         if active_job_count(config, runner) != 0:
             raise BackupError("Worker 停止后仍存在活动任务")
         snapshot.source_counts = critical_table_counts(config, runner, "delivery_note")
+        snapshot.resource_context = resource_context(runner, environment)
+        snapshot.resource_references = resource_references(
+            config, runner, "delivery_note"
+        )
+        snapshot.source_resources = probe_resources(
+            config,
+            runner,
+            context=snapshot.resource_context,
+            volume=environment["data_volume"],
+            references=snapshot.resource_references,
+        )
         create_database_dump(config, runner, snapshot.database_path)
         create_data_archive(
             runner,
@@ -135,14 +119,28 @@ def _take_snapshot(
 
 
 def _verify_snapshot(config: BackupConfig, runner: Runner, snapshot: Snapshot) -> None:
+    snapshot.archive_entries, snapshot.archive_files = validate_data_archive(
+        snapshot.archive_path
+    )
+
+    def verify_resources(database: str) -> None:
+        if snapshot.resource_context is None:
+            raise BackupError("缺少运行资源快照")
+        restore = ResourceRestore(
+            config,
+            runner,
+            snapshot.resource_context,
+            snapshot.resource_references,
+            snapshot.source_resources,
+        )
+        snapshot.restored_resources = restore.verify(snapshot.archive_path, database)
+
     snapshot.restored_counts = validate_database_restore(
         config,
         runner,
         database_path=snapshot.database_path,
         source_counts=snapshot.source_counts,
-    )
-    snapshot.archive_entries, snapshot.archive_files = validate_data_archive(
-        snapshot.archive_path
+        verify_resources=verify_resources,
     )
 
 
@@ -157,13 +155,24 @@ def _complete_backup(
     database_sha256 = sha256(database_path)
     archive_sha256 = sha256(archive_path)
     metadata = {
-        "schema_version": 2,
+        "schema_version": 3,
         "status": "complete",
         "created_at": snapshot.started_at.isoformat(),
         "completed_at": completed_at.isoformat(),
         "compose_project": config.project_name,
         "active_jobs_before_maintenance": environment["active_jobs"],
         "data_volume": environment["data_volume"],
+        "application_image": {
+            "id": environment["api_image"],
+            "revision": snapshot.resource_context.image_revision
+            if snapshot.resource_context
+            else None,
+        },
+        "resources": {
+            "status": "passed",
+            "source": snapshot.source_resources,
+            "restored": snapshot.restored_resources,
+        },
         "database": {
             "filename": database_path.name,
             "format": "postgresql_custom",
@@ -208,6 +217,7 @@ def _complete_backup(
         "backup_directory": str(final_directory),
         "database_bytes": database_bytes,
         "database_restore_verified": True,
+        "resources_restore_verified": True,
         "data_archive_bytes": data_archive_bytes,
         "data_archive_files": snapshot.archive_files,
         "pruned_backups": pruned,
@@ -227,7 +237,7 @@ def create_backup(
     config.validate()
     with restricted_umask(0o077), exclusive_lock(config.lock_file):
         environment = inspect_environment(config, runner)
-        snapshot = _prepare_snapshot(config, now())
+        snapshot = prepare_snapshot(config, now())
         try:
             _take_snapshot(
                 config,

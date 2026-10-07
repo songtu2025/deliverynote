@@ -103,9 +103,12 @@ def _resolve_volume(config: BackupConfig, runner: Runner) -> str:
     return _single_output_line(output, "delivery_data 卷")
 
 
-def _resolve_image(config: BackupConfig, runner: Runner, service: str) -> str:
-    output = runner.run(compose(config, "images", "--quiet", service))
-    return _single_output_line(output, f"{service} 镜像")
+def _resolve_image(runner: Runner, container: str) -> str:
+    output = runner.run(["docker", "inspect", "--format", "{{.Image}}", container])
+    image = output.strip()
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", image):
+        raise BackupError("无法确定实际运行 API 镜像身份")
+    return image
 
 
 def _resolve_service_containers(
@@ -146,7 +149,7 @@ def inspect_environment(config: BackupConfig, runner: Runner) -> Environment:
         "running_services": sorted(running),
         "active_jobs": active_job_count(config, runner),
         "data_volume": _resolve_volume(config, runner),
-        "api_image": _resolve_image(config, runner, "api"),
+        "api_image": _resolve_image(runner, containers["api"]),
         "service_containers": containers,
         "health_url": health_url,
     }

@@ -2,6 +2,7 @@
 
 import json
 import os
+from collections.abc import Iterable
 from pathlib import Path
 import stat
 from typing import TypedDict
@@ -48,14 +49,18 @@ def runtime_paths(root: Path) -> dict[Path, str]:
 
 def builtin_reference_paths(session: Session) -> frozenset[Path]:
     """内置资源必须同时匹配程序定义及数据库登记的类型与路径。"""
-    known = {(template.kind, str(template.path)) for template in BUILTIN_TEMPLATES}
-    return frozenset(
-        Path(path)
+    return builtin_paths_from_rows(
+        (kind, path)
         for kind, path in session.execute(
             select(InputVersion.kind, InputVersion.storage_path)
         )
-        if (kind, path) in known
     )
+
+
+def builtin_paths_from_rows(rows: Iterable[tuple[str, str]]) -> frozenset[Path]:
+    """复用内置资源的类型与路径判定，允许备份从只读查询传入登记记录。"""
+    known = {(template.kind, str(template.path)) for template in BUILTIN_TEMPLATES}
+    return frozenset(Path(path) for kind, path in rows if (kind, path) in known)
 
 
 def _settings(root: Path) -> GerpgoSettings:

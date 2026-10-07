@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import secrets
 from pathlib import Path
+from typing import Callable
 
 from scripts.backup.runtime import BackupConfig, BackupError, Runner, compose
 
@@ -178,6 +179,7 @@ def validate_database_restore(
     *,
     database_path: Path,
     source_counts: dict[str, int],
+    verify_resources: Callable[[str], None] | None = None,
 ) -> dict[str, int]:
     database_name = _temporary_restore_database_name()
     primary_error: Exception | None = None
@@ -192,6 +194,8 @@ def validate_database_restore(
                 if source_counts[table] != restored_counts[table]
             )
             raise BackupError(f"恢复库关键表行数与快照不一致：{differences}")
+        if verify_resources is not None:
+            verify_resources(database_name)
     except Exception as error:
         primary_error = error
     finally:

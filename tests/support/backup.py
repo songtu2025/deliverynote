@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import hashlib
+import json
 import tarfile
 import tempfile
 import unittest
@@ -55,6 +56,8 @@ class FakeRunner:
         self.restored_counts = dict(self.source_counts)
         self.restored_payload: bytes | None = None
         self.commands: list[tuple[str, ...]] = []
+        self.resource_changed = False
+        self.fail_resource_cleanup = False
 
     def run(
         self,
@@ -66,12 +69,34 @@ class FakeRunner:
     ) -> str:
         command = tuple(arguments)
         self.commands.append(command)
+        if command[:2] == ("docker", "inspect") and "{{.Image}}" in command:
+            return "sha256:" + "a" * 64
+        if command[:2] == ("docker", "inspect") and "{{json .Config.Env}}" in command:
+            return '["STORAGE_ROOT=/data/storage"]'
+        if command[:3] == ("docker", "image", "inspect"):
+            return "{}"
+        if command[:3] == ("docker", "volume", "rm"):
+            self._fail(self.fail_resource_cleanup, "模拟恢复卷清理失败")
         if command[:2] == ("docker", "exec") and "sha256sum" in command:
             path = command[-1].removeprefix("/usr/share/nginx/html")
             return hashlib.sha256(self.web_contents[path]).hexdigest() + "  " + path
         if command[:3] == ("docker", "volume", "ls"):
             return "deliverynote_delivery_data\n"
         if command[:2] == ("docker", "run"):
+            if "scripts.backup.resource_probe" in command:
+                report = {
+                    "/data/storage/config/gerpgo.json": {"validation": "absent"},
+                    "/data/storage/cache/purchase-details-v1.json": {
+                        "validation": "absent"
+                    },
+                }
+                if self.resource_changed and any(
+                    "deliverynote-resource-restore-" in x for x in command
+                ):
+                    report["/data/storage/config/gerpgo.json"]["validation"] = "passed"
+                return json.dumps(report)
+            if "-xzf" in command:
+                return ""
             return self._archive(command, stdout)
         if any(
             name in command
@@ -109,6 +134,8 @@ class FakeRunner:
 
     def _counts(self, command: tuple[str, ...]) -> str:
         query = command[command.index("-c") + 1]
+        if "json_agg" in query:
+            return "[]"
         if "UNION ALL" not in query or "public.users" not in query:
             return "0\n"
         database = command[command.index("-d") + 1]
@@ -142,8 +169,6 @@ class FakeRunner:
             and ("up" in command or "start" in command),
             "模拟新 Compose 镜像尚不存在",
         )
-        if "images" in command and "--quiet" in command:
-            return f"sha256:{command[-1]}-image\n"
         if "ps" in command and "--quiet" in command:
             return f"deliverynote-{command[-1]}-1\n"
         if "ps" in command and "--status" in command and "--services" in command:

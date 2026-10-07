@@ -12,6 +12,7 @@ from scripts.backup.database import (
     critical_table_counts,
 )
 from scripts.backup.runtime import BackupConfig, BackupError, Runner, SubprocessRunner
+from scripts.backup.resources import extract_resource_archive
 from scripts.backup.services import REQUIRED_SERVICES
 from scripts.backup.workflow import create_backup
 from tests.support.backup_docker import FILES, BackupDockerFixture
@@ -39,6 +40,29 @@ class BackupDockerTests(unittest.TestCase):
         self.counts = critical_table_counts(
             self.fixture.config, self.runner, "delivery_note"
         )
+        self.restore_volumes = self.fixture.run(
+            "docker",
+            "volume",
+            "ls",
+            "--quiet",
+            "--filter",
+            "name=deliverynote-resource-restore-",
+        )
+        self.resource_state = self.runtime_state()
+
+    def runtime_state(self) -> str:
+        return self.fixture.compose(
+            "exec",
+            "-T",
+            "api",
+            "python",
+            "-c",
+            "import hashlib,json; from pathlib import Path; "
+            "paths=[Path('/data/storage/config/gerpgo.json'),"
+            "Path('/data/storage/cache/purchase-details-v1.json')]; "
+            "print(json.dumps({str(p):[hashlib.sha256(p.read_bytes()).hexdigest(),"
+            "p.stat().st_mode,p.stat().st_uid,p.stat().st_gid] for p in paths}))",
+        )
 
     def assert_source_and_services_unchanged(self) -> None:
         fixture = self.fixture
@@ -58,6 +82,18 @@ class BackupDockerTests(unittest.TestCase):
             "",
         )
         fixture.wait_ready()
+        self.assertEqual(self.runtime_state(), self.resource_state)
+        self.assertEqual(
+            fixture.run(
+                "docker",
+                "volume",
+                "ls",
+                "--quiet",
+                "--filter",
+                "name=deliverynote-resource-restore-",
+            ),
+            self.restore_volumes,
+        )
 
     def test_real_database_and_file_volume_backup_restore_all_seven_tables(
         self,
@@ -68,6 +104,20 @@ class BackupDockerTests(unittest.TestCase):
         self.assertEqual(result["status"], "complete")
         self.assertTrue(result["database_restore_verified"])
         self.assertTrue((directory / "READY").is_file())
+        self.assertEqual(metadata["schema_version"], 3)
+        self.assertEqual(
+            metadata["application_image"]["id"], self.fixture.inspect("api")[0]["Image"]
+        )
+        resources = metadata["resources"]
+        self.assertEqual(resources["status"], "passed")
+        self.assertEqual(resources["source"], resources["restored"])
+        self.assertEqual(len(resources["restored"]), 4)
+        self.assertTrue(
+            all(
+                entry["validation"] == "passed"
+                for entry in resources["restored"].values()
+            )
+        )
         self.assertEqual(len(self.counts), 7)
         self.assertTrue(all(count > 0 for count in self.counts.values()))
         database = metadata["database"]
@@ -93,6 +143,84 @@ class BackupDockerTests(unittest.TestCase):
                 with stream:
                     self.assertEqual(stream.read(), expected)
         self.assert_source_and_services_unchanged()
+
+    def assert_tampered_restore(self, script: str, message: str) -> None:
+        fixture = self.fixture
+
+        def tamper(
+            config: BackupConfig, runner: Runner, image: str, archive: Path, volume: str
+        ) -> None:
+            self.assertTrue(volume.startswith("deliverynote-resource-restore-"))
+            self.assertNotEqual(volume, fixture.volume)
+            extract_resource_archive(config, runner, image, archive, volume)
+            runner.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    "none",
+                    "--volume",
+                    f"{volume}:/data",
+                    image,
+                    "python",
+                    "-c",
+                    script,
+                ]
+            )
+
+        with patch(
+            "scripts.backup.resources.extract_resource_archive", side_effect=tamper
+        ):
+            with self.assertRaisesRegex(BackupError, message):
+                create_backup(fixture.config, runner=self.runner)
+        self.assertFalse(any(fixture.config.destination.glob("*/READY")))
+        incomplete = list(fixture.config.destination.glob(".incomplete-*"))
+        self.assertEqual(len(incomplete), 1)
+        self.assertTrue((incomplete[0] / "FAILED.txt").is_file())
+        self.assert_source_and_services_unchanged()
+
+    def test_same_size_valid_config_tampering_cannot_mark_ready(self) -> None:
+        self.assert_tampered_restore(
+            "from pathlib import Path; p=Path('/data/storage/config/gerpgo.json'); "
+            "p.write_bytes(p.read_bytes().replace("
+            "b'backup-private-key', b'broken-private-key'))",
+            "资源恢复结果与快照不一致",
+        )
+
+    def test_corrupt_cache_in_actual_restored_volume_cannot_mark_ready(self) -> None:
+        self.assert_tampered_restore(
+            "from pathlib import Path; "
+            "Path('/data/storage/cache/purchase-details-v1.json').write_text('[]')",
+            "资源校验失败",
+        )
+
+    def test_cache_source_mismatch_in_actual_restored_volume_cannot_mark_ready(
+        self,
+    ) -> None:
+        self.assert_tampered_restore(
+            "import json; from pathlib import Path; "
+            "p=Path('/data/storage/cache/purchase-details-v1.json'); "
+            "v=json.loads(p.read_text()); v['source_identity']='wrong'; "
+            "p.write_text(json.dumps(v))",
+            "资源校验失败",
+        )
+
+    def test_changed_config_permissions_in_restored_volume_cannot_mark_ready(
+        self,
+    ) -> None:
+        self.assert_tampered_restore(
+            "from pathlib import Path; "
+            "Path('/data/storage/config/gerpgo.json').chmod(0o644)",
+            "资源恢复结果与快照不一致",
+        )
+
+    def test_relative_config_symlink_in_restored_volume_cannot_mark_ready(self) -> None:
+        self.assert_tampered_restore(
+            "from pathlib import Path; p=Path('/data/storage/config/gerpgo.json'); "
+            "p.rename(p.with_suffix('.private')); p.symlink_to('gerpgo.private')",
+            "资源校验失败",
+        )
 
     def test_missing_sync_rows_in_actual_restore_database_cannot_mark_ready(
         self,

@@ -25,6 +25,20 @@ from delivery_note.web.models import (
     User, InputVersion, Batch, BatchFile, Job,
     PurchaseSyncJob, SelfOperatedInboundSyncJob,
 )
+from delivery_note.gerpgo import GerpgoSettings, save_gerpgo_settings
+from delivery_note.purchase_detail_cache import (
+    build_purchase_detail_cache, purchase_cache_source_identity,
+    purchase_detail_cache_path, write_purchase_detail_cache,
+)
+from delivery_note.web.input_versions import BUILTIN_TEMPLATES
+settings = GerpgoSettings('https://example.test/api', 'backup-app',
+    'backup-private-key', 'managed')
+save_gerpgo_settings('/data/storage', settings)
+write_purchase_detail_cache(purchase_detail_cache_path('/data/storage'),
+    build_purchase_detail_cache(
+        purchase_cache_source_identity(settings.base_url, settings.app_id),
+        [({{'code': 'PO-1'}}, {{'poCode': 'PO-1', 'quantity': 12}})],
+    ))
 for name, content in {files}.items():
     target = Path('/data') / name
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -36,6 +50,10 @@ try:
         user = User(username='backup-test', password_hash='test-only')
         session.add(user)
         session.flush()
+        for template in BUILTIN_TEMPLATES:
+            session.add(InputVersion(kind=template.kind, name=template.name,
+                original_name=template.original_name,
+                storage_path=str(template.path), created_by=user.id))
         versions = {{}}
         for kind in ('product', 'supplier'):
             version = InputVersion(kind=kind, name=kind, original_name=kind+'.bin',

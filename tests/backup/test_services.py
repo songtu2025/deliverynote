@@ -21,7 +21,7 @@ class QueueRunner(FakeRunner):
 
     def _counts(self, command: tuple[str, ...]) -> str:
         query = command[command.index("-c") + 1]
-        if "public.users" in query:
+        if "public.users" in query or "json_agg" in query:
             return super()._counts(command)
         return str(self.database.execute(query).fetchone()[0])
 

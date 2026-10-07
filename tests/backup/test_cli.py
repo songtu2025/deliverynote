@@ -111,7 +111,7 @@ class BackupCliTests(BackupTestCase):
         for arguments, directory in launchers:
             with self.subTest(arguments=arguments):
                 completed = subprocess.run(
-                    [sys.executable, *arguments, "--help"],
+                    [sys.executable, "-S", *arguments, "--help"],
                     cwd=directory,
                     check=True,
                     capture_output=True,
