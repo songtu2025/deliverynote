@@ -128,9 +128,10 @@ jobs:
           python -m ruff format --check delivery_note/workers/sync_results.py delivery_note/workers/sync_purchase.py delivery_note/workers/sync_inbound.py tests/workers/test_sync_file_cleanup.py
       - name: 存储审计类型与格式检查
         run: |
-          python -m mypy --strict scripts/audit_storage.py
+          python -m mypy --strict scripts/audit_storage.py scripts/storage_paths.py scripts/storage_resources.py
           python -m mypy --check-untyped-defs tests/test_storage_audit.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
-          python -m ruff format --check scripts/audit_storage.py tests/test_storage_audit.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
+          python -m ruff format --check scripts/audit_storage.py scripts/storage_paths.py scripts/storage_resources.py tests/test_storage_audit.py tests/test_storage_resources.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
+          python -m mypy --check-untyped-defs tests/test_storage_resources.py
       - name: 历史合并导出恢复类型与格式检查
         run: |
           python -m mypy --strict scripts/merged_export_checks.py scripts/merged_export_recovery.py

@@ -6,8 +6,8 @@ from pathlib import Path
 import stat
 from typing import TypedDict
 
-from scripts.audit_storage import path_state
 from scripts.backup.archive import sha256
+from scripts.storage_paths import path_state
 
 
 class FileState(TypedDict):

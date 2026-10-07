@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import TypedDict, cast
 
-from scripts.audit_storage import artifact_owner, audit_storage
+from scripts.audit_storage import audit_storage
 from scripts.backup.archive import write_private_text
 from scripts.backup.runtime import DEFAULT_LOCK_FILE, exclusive_lock
 from scripts.quarantine_files import (
@@ -15,6 +15,7 @@ from scripts.quarantine_files import (
     move_without_replace,
     safe_path,
 )
+from scripts.storage_paths import artifact_owner
 
 
 class QuarantineEntry(TypedDict):
