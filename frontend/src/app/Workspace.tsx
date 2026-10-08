@@ -166,7 +166,10 @@ export default function Workspace({ user, onLogout }: { user: User; onLogout: ()
         <Layout.Sider width={236} breakpoint="lg" collapsedWidth={72} theme="light">
           <div className="brand">
             <span className="brand-mark">DN</span>
-            <span className="brand-name">单据处理</span>
+            <span className="brand-name">
+              单据处理
+              <small>DeliveryNote</small>
+            </span>
           </div>
           <Menu
             mode="inline"
@@ -179,10 +182,14 @@ export default function Workspace({ user, onLogout }: { user: User; onLogout: ()
               });
             }}
           />
+          <div className="sidebar-caption">供应链工作台</div>
         </Layout.Sider>
       )}
       <Layout>
         <Layout.Header className="app-header">
+          <span className="workspace-context">
+            DeliveryNote <span>/</span> 供应链工作台
+          </span>
           <div className="account-controls" role="group" aria-label="当前用户">
             <div className="account-identity">
               <span className="account-avatar" aria-hidden="true">

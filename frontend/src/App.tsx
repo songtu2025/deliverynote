@@ -10,12 +10,26 @@ export default function App() {
         token: {
           colorPrimary: "#055247",
           colorInfo: "#055247",
-          colorText: "#141b18",
-          colorTextSecondary: "#63736e",
-          colorBgLayout: "#fbfcfb",
-          colorBorder: "#dfe6e3",
-          borderRadius: 8,
-          fontFamily: "Inter, Microsoft YaHei, sans-serif"
+          colorText: "#202a27",
+          colorTextSecondary: "#707b76",
+          colorBgLayout: "#f6f8f7",
+          colorBorder: "#e3e8e5",
+          borderRadius: 6,
+          controlHeight: 36,
+          fontFamily: '"PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif'
+        },
+        components: {
+          Button: { primaryShadow: "none", defaultShadow: "none" },
+          Menu: {
+            itemHeight: 44,
+            itemMarginInline: 12,
+            itemMarginBlock: 6,
+            itemColor: "#707b76",
+            itemSelectedColor: "#055247",
+            itemSelectedBg: "#edf4f0",
+            itemHoverBg: "#f6f8f7",
+            activeBarBorderWidth: 0
+          }
         }
       }}
     >

@@ -1,9 +1,12 @@
 .summary-metric.import,
 .overreceipt-effect-notice,
-.input-data-context,
+.input-data-context {
+  background: var(--dn-surface-muted);
+  border-color: var(--dn-border);
+}
 .purchase-sync-card {
-  background: var(--dn-primary-soft);
-  border-color: var(--dn-primary-border);
+  background: var(--dn-surface);
+  border-color: var(--dn-border);
 }
 .next-action,
 .job-indicator,
@@ -67,7 +70,7 @@
   background: var(--dn-surface-muted);
 }
 .overreceipt-metric.is-accent {
-  background: var(--dn-primary-soft);
+  background: var(--dn-surface-muted);
 }
 .overreceipt-metric.is-accent > strong {
   color: var(--dn-primary);

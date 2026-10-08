@@ -1,205 +1,141 @@
 .login-shell {
+  display: grid;
   min-height: 100vh;
   min-height: 100svh;
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(480px, 2fr);
-  background: #fff;
+  grid-template-columns: minmax(0, 1fr) minmax(440px, 1fr);
+  background: var(--dn-surface);
 }
-
 .login-story {
   position: relative;
+  display: flex;
   min-width: 0;
-  min-height: 100vh;
   min-height: 100svh;
+  flex-direction: column;
+  justify-content: center;
   overflow: hidden;
-  color: #f8fdfb;
-  background: linear-gradient(180deg, #123f36 0%, #142b23 100%);
+  padding: 140px clamp(40px, 5vw, 88px) 64px;
+  border-right: 1px solid var(--dn-border);
+  background: #edf3ef;
 }
-
 .login-brand-lockup {
   position: absolute;
-  top: 54px;
-  left: 72px;
+  top: 48px;
+  left: clamp(40px, 5vw, 88px);
   display: flex;
-  height: 36px;
+  height: 30px;
   align-items: center;
-  gap: 18px;
+  gap: 16px;
   white-space: nowrap;
 }
-
 .login-company-mark {
-  color: #fff;
-  font-family: Inter, Arial, sans-serif;
-  font-size: 22px;
+  color: var(--dn-primary);
+  font-size: 18px;
   font-weight: 700;
-  letter-spacing: 4px;
-  line-height: normal;
+  letter-spacing: 2px;
 }
-
 .login-brand-divider {
   width: 1px;
-  height: 28px;
-  background: rgba(134, 214, 189, 0.68);
+  height: 20px;
+  background: #c3d2c8;
 }
-
 .login-product-name {
-  color: #f2fbf8;
-  font-family: Inter, Arial, sans-serif;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.2px;
-  line-height: normal;
+  color: var(--dn-muted);
+  font-size: 14px;
 }
-
-.login-story-copy {
-  position: absolute;
-  top: 210px;
-  left: 72px;
-}
-
 .login-story-copy h1 {
-  width: 650px;
   margin: 0;
-  color: #f8fdfb;
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 48px;
-  font-weight: 700;
-  letter-spacing: -1.2px;
-  line-height: 66px;
+  color: #183e31;
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  line-height: 1.6;
 }
-
 .login-story-copy p {
-  width: 570px;
-  margin: 24px 0 0;
-  color: #a6d9c8;
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 18px;
-  font-weight: 400;
-  letter-spacing: 0.2px;
-  line-height: 32px;
+  margin: 22px 0 0;
+  color: #64766b;
+  font-size: 15px;
+  line-height: 1.9;
 }
-
 .login-story-illustration {
-  position: absolute;
-  bottom: 40px;
-  left: 72px;
-  width: min(700px, calc(100% - 144px));
+  width: min(540px, 100%);
   height: auto;
+  margin-top: 44px;
   aspect-ratio: 700 / 340;
 }
-
 .login-panel {
   position: relative;
+  display: flex;
   min-width: 0;
-  min-height: 100vh;
   min-height: 100svh;
-  overflow: hidden;
-  background: #fff;
+  align-items: center;
+  justify-content: center;
+  padding: 96px 40px;
+  background: var(--dn-surface);
 }
-
 .login-form-wrap {
-  position: absolute;
-  top: calc(50% - 228px);
-  left: 50%;
-  width: 380px;
-  transform: translateX(-50%);
+  width: 360px;
+  max-width: 100%;
 }
-
 .login-form-header {
   margin-bottom: 36px;
 }
-
 .login-form-header h2 {
   margin: 0;
-  color: #141b18;
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 36px;
-  font-weight: 700;
-  letter-spacing: -0.6px;
-  line-height: 48px;
+  color: var(--dn-ink);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1.5;
 }
-
 .login-form-header p {
   margin: 10px 0 0;
-  color: #63736e;
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-}
-
-.login-form .ant-form-item {
-  margin-bottom: 22px;
-}
-
-.login-form .ant-form-item-label {
-  height: 28px !important;
-  padding: 0 0 8px;
-}
-
-.login-form .ant-form-item-label > label {
-  height: 20px !important;
-  color: #141b18;
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: var(--dn-muted);
   font-size: 14px;
-  font-weight: 500;
-  line-height: 20px !important;
+  line-height: 1.6;
 }
-
+.login-form .ant-form-item {
+  margin-bottom: 24px;
+}
+.login-form .ant-form-item-label {
+  padding-bottom: 8px;
+}
+.login-form .ant-form-item-label > label {
+  color: var(--dn-ink);
+  font-size: 13px;
+}
 .login-form .ant-input-affix-wrapper {
-  height: 56px;
-  padding: 0 16px;
-  border-color: #cbd6d2 !important;
-  border-radius: 12px;
+  height: 48px;
+  padding-inline: 14px;
+  border-radius: 6px;
 }
-
-.login-form .ant-input-affix-wrapper:hover {
-  border-color: #9ebbb2 !important;
-}
-
-.login-form .ant-input-affix-wrapper-focused {
-  border-color: #055247 !important;
-}
-
 .login-form .ant-input-prefix {
   margin-inline-end: 12px;
 }
-
 .login-form .ant-input-prefix .anticon,
 .login-form .ant-input-password-icon {
-  color: #6f817b;
-  font-size: 20px;
-}
-
-.login-form .ant-input {
-  color: #141b18;
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
-  font-size: 15px;
-  line-height: 22px;
-}
-
-.login-form .ant-input::placeholder {
-  color: #919d99;
-}
-
-.login-form .ant-btn {
-  height: 56px;
-  border-radius: 12px;
-  box-shadow: 0 8px 20px -6px rgba(5, 82, 71, 0.18);
-  font-family: "Noto Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", "PingFang SC", sans-serif;
+  color: var(--dn-muted);
   font-size: 16px;
-  font-weight: 700;
 }
-
+.login-form .ant-input {
+  font-size: 14px;
+}
+.login-form .ant-input::placeholder {
+  color: #8a958f;
+}
+.login-form .ant-btn {
+  height: 48px;
+  margin-top: 8px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 500;
+}
 .login-footer {
   position: absolute;
-  right: 0;
-  bottom: 45px;
-  left: 0;
-  color: #74807c;
-  font-family: Inter, "Microsoft YaHei", sans-serif;
-  font-size: 12px;
-  font-weight: 400;
-  letter-spacing: 0.1px;
-  line-height: normal;
+  right: 20px;
+  bottom: 32px;
+  left: 20px;
+  color: var(--dn-muted);
+  font-size: 11px;
+  line-height: 1.6;
   text-align: center;
 }

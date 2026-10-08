@@ -7,7 +7,7 @@
 .purchase-sync-card--compact,
 .batch-list-page > .self-operated-sync-card {
   gap: 12px;
-  padding: 18px;
+  padding: 20px;
   border-color: var(--dn-border);
 }
 
@@ -22,15 +22,14 @@
 .purchase-sync-eyebrow {
   display: block;
   margin-bottom: 5px;
-  color: var(--dn-primary);
+  color: var(--dn-muted);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 400;
 }
 
 .purchase-sync-card--compact .purchase-sync-heading h5,
 .batch-list-page > .self-operated-sync-card .purchase-sync-heading h5 {
-  font-size: 18px !important;
+  font-size: 16px !important;
 }
 
 .purchase-sync-card--compact .purchase-sync-heading > .ant-btn,

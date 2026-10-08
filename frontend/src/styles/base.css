@@ -1,21 +1,20 @@
 :root {
-  --dn-canvas: #fbfcfb;
+  --dn-canvas: #f6f8f7;
   --dn-surface: #ffffff;
-  --dn-surface-muted: #f3f8f6;
-  --dn-ink: #141b18;
-  --dn-muted: #63736e;
-  --dn-border: #dfe6e3;
-  --dn-border-strong: #cbd6d2;
-  --dn-sidebar: #123f36;
-  --dn-sidebar-hover: #174f43;
+  --dn-surface-muted: #f7f9f8;
+  --dn-ink: #202a27;
+  --dn-muted: #707b76;
+  --dn-border: #e3e8e5;
+  --dn-border-strong: #d3dcd6;
   --dn-primary: #055247;
-  --dn-primary-soft: #e8f5f1;
-  --dn-primary-border: #c2dfd6;
+  --dn-primary-soft: #edf4f0;
+  --dn-primary-border: #d3e3da;
   --dn-success: #2f7d63;
   --dn-warning: #b7791f;
   --dn-danger: #c2414a;
   color: var(--dn-ink);
   background: var(--dn-canvas);
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
 }
@@ -32,4 +31,9 @@ body {
 button,
 input {
   font: inherit;
+}
+
+:where(button, a, input, [role="button"]):focus-visible {
+  outline: 2px solid var(--dn-primary);
+  outline-offset: 3px;
 }

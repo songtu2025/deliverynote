@@ -1,96 +1,6 @@
-/* 深松绿与冷灰白：跨工作台的统一视觉基线。 */
-.app-layout {
-  background: var(--dn-canvas);
-}
-.app-layout .ant-layout-sider {
-  background: var(--dn-sidebar) !important;
-  border-right: 0;
-}
-.app-layout .ant-menu,
-.app-layout .ant-menu-light,
-.app-layout .ant-menu-light .ant-menu-submenu-title,
-.app-layout .ant-menu-light > .ant-menu {
-  background: var(--dn-sidebar) !important;
-  color: #b8cec8;
-}
-.app-layout .ant-menu-light .ant-menu-item,
-.app-layout .ant-menu-light .ant-menu-submenu-title {
-  color: #b8cec8;
-}
-.app-layout .ant-menu-light .ant-menu-item:hover,
-.app-layout .ant-menu-light .ant-menu-submenu-title:hover {
-  color: #fff !important;
-  background: var(--dn-sidebar-hover) !important;
-}
-.app-layout .ant-menu-light .ant-menu-item-selected {
-  color: #fff !important;
-  background: var(--dn-primary) !important;
-}
-.app-layout .ant-menu-light .ant-menu-item-selected::after {
-  border-inline-end-color: var(--dn-primary-border);
-}
-.brand {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-.brand-name {
-  color: #f7fbfa;
-  font-weight: 650;
-}
-.brand-mark,
-.account-avatar {
-  background: var(--dn-primary);
-  border-radius: 9px;
-}
-.app-header {
-  height: 64px;
-  background: rgba(255, 255, 255, 0.94) !important;
-  border-bottom-color: var(--dn-border);
-  box-shadow: 0 1px 2px rgba(20, 64, 54, 0.03);
-}
-.app-content {
-  background: var(--dn-canvas);
-  padding: 28px 32px;
-}
-.page-shell {
-  max-width: 1920px;
-}
-.page-heading,
-.batch-heading {
-  margin-bottom: 24px;
-}
-.page-heading h2,
-.batch-heading h2 {
-  color: var(--dn-ink);
-  font-weight: 680;
-  letter-spacing: -0.025em;
-}
-.muted,
-.ant-typography.ant-typography-secondary {
-  color: var(--dn-muted);
-}
-.account-identity,
-.account-logout {
-  border-color: var(--dn-border);
-  box-shadow: none;
-}
-.account-identity {
-  background: var(--dn-surface);
-}
-.account-copy strong {
-  color: var(--dn-ink);
-}
-.account-copy small {
-  color: var(--dn-muted);
-}
-.account-logout:hover {
-  color: var(--dn-primary) !important;
-  border-color: var(--dn-primary-border) !important;
-  background: var(--dn-primary-soft) !important;
-}
-
+/* 统一控件与内容表面，使用留白区分层级。 */
 .ant-btn-primary {
-  box-shadow: 0 1px 2px rgba(5, 82, 71, 0.18);
-  font-weight: 600;
+  font-weight: 500;
 }
 .ant-btn-default {
   border-color: var(--dn-border-strong);
@@ -106,19 +16,20 @@
 .input-data-status-header,
 .input-data-kind-switcher {
   border-color: var(--dn-border);
-  box-shadow: 0 1px 2px rgba(20, 64, 54, 0.035);
+  box-shadow: none;
 }
 .ant-card {
   border-radius: 10px;
 }
 .ant-card-head {
-  border-bottom-color: #edf2f0;
+  border-bottom-color: var(--dn-border);
+  font-weight: 600;
 }
 .ant-tabs .ant-tabs-nav::before {
   border-bottom-color: var(--dn-border);
 }
 .ant-tabs .ant-tabs-tab {
-  color: #596a65;
+  color: var(--dn-muted);
 }
 .ant-tabs .ant-tabs-tab:hover,
 .ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
@@ -146,21 +57,22 @@
 .ant-select-focused .ant-select-selector,
 .ant-input-number-focused {
   border-color: var(--dn-primary) !important;
-  box-shadow: 0 0 0 3px rgba(5, 82, 71, 0.12) !important;
+  box-shadow: 0 0 0 3px rgba(5, 82, 71, 0.08) !important;
 }
 .ant-table-wrapper .ant-table {
   border-color: var(--dn-border);
 }
 .ant-table-wrapper .ant-table-thead > tr > th {
-  color: #4c5d57;
-  background: #f5f8f7 !important;
   border-bottom-color: var(--dn-border);
+  background: var(--dn-surface-muted) !important;
+  color: var(--dn-muted);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 500;
 }
 .ant-table-wrapper .ant-table-tbody > tr > td {
-  border-bottom-color: #edf2f0;
+  border-bottom-color: #eef1ef;
+  font-variant-numeric: tabular-nums;
 }
 .ant-table-wrapper .ant-table-tbody > tr:hover > td {
-  background: #f3f9f7 !important;
+  background: #f7faf8 !important;
 }

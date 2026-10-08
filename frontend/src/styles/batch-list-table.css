@@ -53,11 +53,11 @@
 .batch-list-toolbar {
   grid-area: toolbar;
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) minmax(200px, 260px) 150px;
+  grid-template-columns: minmax(140px, 1fr) minmax(160px, 240px) 140px;
   align-items: end;
   gap: 12px;
-  margin-bottom: -14px;
-  padding: 12px 16px;
+  margin-bottom: -20px;
+  padding: 18px 20px;
   border: 1px solid var(--dn-border);
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
@@ -88,8 +88,8 @@
   font-size: 16px;
 }
 .batch-list-toolbar.is-selecting {
-  border-color: #b8d8cf;
-  background: linear-gradient(90deg, #f1f8f6 0%, #fff 48%);
+  border-color: var(--dn-primary-border);
+  background: var(--dn-primary-soft);
 }
 
 .batch-list-toolbar .batch-result-count {
@@ -147,7 +147,7 @@
   color: #415c55;
 }
 
-@media (max-width: 1320px) {
+@media (max-width: 1480px) {
   .batch-list-page {
     grid-template-columns: 1fr;
     grid-template-areas:

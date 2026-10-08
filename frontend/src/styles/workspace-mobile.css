@@ -21,6 +21,9 @@
   .app-content {
     padding: 14px 12px;
   }
+  .batch-focus-layout .app-content {
+    padding: 14px 12px;
+  }
   .page-heading {
     gap: 14px;
     margin-bottom: 16px;
