@@ -4,9 +4,11 @@ from unittest.mock import patch
 
 from scripts.backup.runtime import BackupError
 from scripts.backup.services import (
+    API_HEALTH_FORMAT,
     RESUMED_SERVICES,
     active_job_count,
     resume_services,
+    wait_for_api,
 )
 from scripts.backup.workflow import create_backup
 from tests.support.backup import BackupTestCase, FakeRunner
@@ -27,6 +29,46 @@ class QueueRunner(FakeRunner):
 
 
 class BackupServicesTests(BackupTestCase):
+    def test_http_ready_waits_for_container_health(self) -> None:
+        runner = FakeRunner()
+        original = runner.run
+        states = iter(["starting", "starting", "healthy"])
+
+        def readiness(arguments: list[str], **kwargs: object) -> str:
+            if API_HEALTH_FORMAT in arguments:
+                return next(states)
+            return original(arguments)
+
+        with (
+            patch.object(runner, "run", side_effect=readiness),
+            patch("scripts.backup.services.time.sleep") as sleep,
+        ):
+            wait_for_api(self.config, runner, "api-id")
+        self.assertEqual(sleep.call_count, 2)
+        self.assertTrue(
+            any(command[:2] == ("docker", "exec") for command in runner.commands)
+        )
+
+    def test_container_health_timeout_refuses_recovery(self) -> None:
+        runner = FakeRunner()
+        original = runner.run
+
+        def readiness(arguments: list[str], **kwargs: object) -> str:
+            return "starting" if API_HEALTH_FORMAT in arguments else original(arguments)
+
+        with (
+            patch.object(runner, "run", side_effect=readiness),
+            patch("scripts.backup.services.time.monotonic", side_effect=[0, 2]),
+            patch("scripts.backup.services.time.sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(BackupError, "健康状态等待超时"):
+                wait_for_api(
+                    replace(self.config, service_wait_timeout_seconds=1),
+                    runner,
+                    "api-id",
+                )
+        sleep.assert_not_called()
+
     def test_each_queue_counts_active_states_and_excludes_finished_jobs(self) -> None:
         for table in ("jobs", "purchase_sync_jobs", "self_operated_inbound_sync_jobs"):
             for status in ("queued", "running", "succeeded", "failed"):

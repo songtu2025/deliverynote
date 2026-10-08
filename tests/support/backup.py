@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from scripts.backup.database import CRITICAL_TABLES, RESTORE_DATABASE_PATTERN
 from scripts.backup.runtime import BackupConfig, BackupError
+from scripts.backup.services import API_HEALTH_FORMAT
 from scripts.backup.workflow import create_backup
 
 
@@ -69,6 +70,8 @@ class FakeRunner:
     ) -> str:
         command = tuple(arguments)
         self.commands.append(command)
+        if command[:2] == ("docker", "inspect") and API_HEALTH_FORMAT in command:
+            return "healthy"
         if command[:2] == ("docker", "inspect") and "{{.Image}}" in command:
             return "sha256:" + "a" * 64
         if command[:2] == ("docker", "inspect") and "{{json .Config.Env}}" in command:

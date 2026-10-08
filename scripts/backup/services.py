@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import Callable, Protocol, TypedDict
 
 from scripts.backup.runtime import (
@@ -45,6 +46,10 @@ RESUMED_SERVICES = ("api", *WORKER_SERVICES, "web")
 
 
 REQUIRED_SERVICES = frozenset({"db", "api", "web", *WORKER_SERVICES})
+
+API_HEALTH_FORMAT = (
+    "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}"
+)
 
 
 API_READINESS_PROBE = """\
@@ -203,6 +208,16 @@ def wait_for_api(config: WebVerificationConfig, runner: Runner, container: str) 
         ],
         timeout_seconds=config.wait_seconds + 10,
     )
+    deadline = time.monotonic() + config.wait_seconds
+    while True:
+        status = runner.run(
+            ["docker", "inspect", "--format", API_HEALTH_FORMAT, container]
+        ).strip()
+        if status in {"healthy", "running"}:
+            return
+        if time.monotonic() >= deadline:
+            raise BackupError(f"API 容器健康状态等待超时：{status}")
+        time.sleep(1)
 
 
 def resume_services(

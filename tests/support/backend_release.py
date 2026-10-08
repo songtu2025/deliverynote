@@ -76,6 +76,8 @@ class BackendRunner(ReleaseRunner):
                 if name + "-id" in args:
                     self.running[name] = True
         elif args[:2] == ["docker", "inspect"]:
+            if "--format" in args:
+                return "healthy" if self.running["api"] else "exited"
             return self.inspect(args[2:])
         elif args[:2] == ["docker", "run"]:
             files = self.runtime_files if self.tampered_candidate else self.target_files

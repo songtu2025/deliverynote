@@ -58,6 +58,8 @@ class BackendDockerFixture(WorkerDockerFixture):
         original = self.backend_image("backend-old", self.old_revision)
         self.backend_candidate = self.backend_image("backend-candidate", self.revision)
         document = json.loads(self.compose_file.read_text())
+        # 保持正式环境的检查间隔，覆盖 HTTP 就绪早于 Docker 健康的窗口。
+        document["services"]["api"]["healthcheck"]["interval"] = "10s"
         for name in BACKEND_SERVICES:
             tag = self.project + ":" + name
             self.images.append(tag)
