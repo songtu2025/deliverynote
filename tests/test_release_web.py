@@ -184,7 +184,7 @@ class ReleaseCITests(unittest.TestCase):
             result = {**passed, **replacement}
             with self.subTest(replacement=replacement):
                 with patch(
-                    "scripts.release_web.urlopen",
+                    "scripts.release_common.urlopen",
                     side_effect=[
                         io.BytesIO(json.dumps(result).encode()),
                         io.BytesIO(json.dumps(jobs).encode()),
@@ -208,7 +208,7 @@ class ReleaseCITests(unittest.TestCase):
             jobs = {"jobs": [{"conclusion": conclusion}], "total_count": 1}
             with self.subTest(conclusion=conclusion):
                 with patch(
-                    "scripts.release_web.urlopen",
+                    "scripts.release_common.urlopen",
                     side_effect=[
                         io.BytesIO(json.dumps(run).encode()),
                         io.BytesIO(json.dumps(jobs).encode()),

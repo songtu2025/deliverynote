@@ -55,6 +55,13 @@ def service_snapshot(
     return result
 
 
+def verify_source_checkout(root: Path, revision: str, runner: Runner) -> None:
+    head = runner.run(["git", "-C", str(root), "rev-parse", "HEAD"]).strip()
+    dirty = runner.run(["git", "-C", str(root), "status", "--porcelain"]).strip()
+    if head != revision or dirty:
+        raise BackupError("正式源码提交不匹配或工作区存在未提交修改")
+
+
 def verify_deployment(
     config: DeploymentVerificationConfig,
     runner: Runner,
@@ -69,10 +76,7 @@ def verify_deployment(
         for value in (config.revision, *config.retained.values())
     ):
         raise BackupError("目标版本和保留版本必须使用完整提交 SHA")
-    head = runner.run(["git", "-C", str(config.root), "rev-parse", "HEAD"]).strip()
-    dirty = runner.run(["git", "-C", str(config.root), "status", "--porcelain"]).strip()
-    if head != config.revision or dirty:
-        raise BackupError("正式源码提交不匹配或工作区存在未提交修改")
+    verify_source_checkout(config.root, config.revision, runner)
     records = records if records is not None else service_snapshot(config, runner)
     report: dict[str, object] = {}
     for service, record in records.items():

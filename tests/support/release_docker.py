@@ -98,13 +98,10 @@ class ReleaseDockerFixture:
         ):
             self.run("git", *arguments)
         (self.root / ".gitignore").write_text(
-            "*\n!.gitignore\n!version.py\n!delivery_note/\n!delivery_note/probe.py\n!requirements.lock\n",
+            "*\n!.gitignore\n!version.py\n!delivery_note/\n!delivery_note/**\n!requirements.lock\n",
             encoding="utf-8",
         )
-        package = self.root / "delivery_note"
-        package.mkdir()
-        (package / "probe.py").write_text("version = 1\n", encoding="utf-8")
-        (self.root / "requirements.lock").write_text("", encoding="utf-8")
+        self.prepare_sources()
         version = self.root / "version.py"
         version.write_text("version = 1\n", encoding="utf-8")
         self.run(
@@ -133,6 +130,12 @@ class ReleaseDockerFixture:
         self.compose_file.write_text(
             json.dumps(self._configuration(backend_image, port)), encoding="utf-8"
         )
+
+    def prepare_sources(self) -> None:
+        package = self.root / "delivery_note"
+        package.mkdir()
+        (package / "probe.py").write_text("version = 1\n", encoding="utf-8")
+        (self.root / "requirements.lock").write_text("", encoding="utf-8")
 
     def start_services(self) -> None:
         self.compose("up", "-d", "--wait", "--wait-timeout", "30")

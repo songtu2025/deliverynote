@@ -82,13 +82,49 @@ def source_files(
 def verify_backend_source(
     root: Path, container: str, revision: str, target: str, runner: Runner
 ) -> dict[str, object]:
-    expected, dependencies = source_files(root, revision, runner)
     probe = cast(
         dict[str, dict[str, str]],
         json.loads(
             runner.run(["docker", "exec", container, "python", "-c", RUNTIME_PROBE])
         ),
     )
+    return _verify_probe(root, revision, target, runner, probe)
+
+
+def verify_backend_image(
+    root: Path, image: str, revision: str, runner: Runner
+) -> dict[str, object]:
+    probe = cast(
+        dict[str, dict[str, str]],
+        json.loads(
+            runner.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    "none",
+                    "--read-only",
+                    "--entrypoint",
+                    "python",
+                    image,
+                    "-c",
+                    RUNTIME_PROBE,
+                ]
+            )
+        ),
+    )
+    return _verify_probe(root, revision, revision, runner, probe)
+
+
+def _verify_probe(
+    root: Path,
+    revision: str,
+    target: str,
+    runner: Runner,
+    probe: dict[str, dict[str, str]],
+) -> dict[str, object]:
+    expected, dependencies = source_files(root, revision, runner)
     actual = probe["files"]
     different = sorted(
         name
@@ -115,3 +151,20 @@ def verify_backend_source(
             if latest.get(name) != actual.get(name)
         ),
     }
+
+
+def verify_schema_unchanged(
+    root: Path, revision: str, target: str, runner: Runner
+) -> None:
+    old, _ = source_files(root, revision, runner)
+    new, _ = source_files(root, target, runner)
+    changed = sorted(
+        name
+        for name in set(old) | set(new)
+        if name.startswith(("delivery_note/migrations/", "delivery_note/web/models/"))
+        and old.get(name) != new.get(name)
+    )
+    if changed:
+        raise BackupError(
+            "发布涉及模型或数据库迁移变更，需另行制定方案：" + ", ".join(changed)
+        )

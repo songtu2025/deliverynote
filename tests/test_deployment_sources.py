@@ -10,7 +10,12 @@ from typing import BinaryIO, Sequence
 import unittest
 
 from scripts.backup.runtime import BackupError, SubprocessRunner
-from scripts.deployment_sources import RUNTIME_PROBE, verify_backend_source
+from scripts.deployment_sources import (
+    RUNTIME_PROBE,
+    verify_backend_image,
+    verify_backend_source,
+    verify_schema_unchanged,
+)
 
 
 class SourceRunner(SubprocessRunner):
@@ -25,7 +30,7 @@ class SourceRunner(SubprocessRunner):
         stdout: BinaryIO | None = None,
         timeout_seconds: int = 300,
     ) -> str:
-        if list(arguments[:2]) == ["docker", "exec"]:
+        if list(arguments[:2]) in (["docker", "exec"], ["docker", "run"]):
             probe = RUNTIME_PROBE.replace(
                 "Path('/app')", "Path(" + repr(str(self.runtime)) + ")"
             )
@@ -109,3 +114,31 @@ class DeploymentSourceTests(unittest.TestCase):
     def test_probe_does_not_expose_environment_credentials(self) -> None:
         report = json.loads(self.runner.run(["docker", "exec"]))
         self.assertEqual(set(report), {"files", "versions"})
+
+    def test_candidate_image_uses_the_same_file_and_dependency_checks(self) -> None:
+        report = verify_backend_image(
+            self.root, "candidate", self.revision, self.runner
+        )
+        self.assertTrue(report["source_matches_revision"])
+        (self.runtime / "delivery_note" / "probe.py").write_bytes(b"wrong = True\n")
+        with self.assertRaisesRegex(BackupError, "probe.py"):
+            verify_backend_image(self.root, "candidate", self.revision, self.runner)
+
+    def test_schema_changes_require_a_separate_release_plan(self) -> None:
+        original = self.revision
+        verify_schema_unchanged(self.root, original, original, self.runner)
+        for directory in ("migrations", "web/models"):
+            with self.subTest(directory=directory):
+                path = self.root / "delivery_note" / directory / "new.py"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"new = True\n")
+                self.runner.run(["git", "-C", str(self.root), "add", "."])
+                self.runner.run(
+                    ["git", "-C", str(self.root), "commit", "-qm", "schema"]
+                )
+                target = self.runner.run(
+                    ["git", "-C", str(self.root), "rev-parse", "HEAD"]
+                ).strip()
+                with self.assertRaisesRegex(BackupError, "另行制定方案"):
+                    verify_schema_unchanged(self.root, original, target, self.runner)
+                original = target

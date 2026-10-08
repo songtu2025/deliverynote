@@ -1,10 +1,28 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, TypedDict
+from typing import Callable, Protocol, TypedDict
 
-from scripts.backup.runtime import BackupConfig, BackupError, Runner, compose
-from scripts.web_verification import resolve_web_url, verify_served_web
+from scripts.backup.runtime import (
+    BackupConfig,
+    BackupError,
+    ComposeConfig,
+    Runner,
+    compose,
+)
+from scripts.web_verification import (
+    WebVerificationConfig,
+    resolve_web_url,
+    verify_served_web,
+)
+
+
+class JobDrainConfig(ComposeConfig, Protocol):
+    @property
+    def job_drain_timeout_seconds(self) -> int: ...
+
+    @property
+    def job_poll_seconds(self) -> int: ...
 
 
 class Environment(TypedDict):
@@ -48,12 +66,12 @@ while True:
 """
 
 
-def _running_services(config: BackupConfig, runner: Runner) -> set[str]:
+def _running_services(config: ComposeConfig, runner: Runner) -> set[str]:
     output = runner.run(compose(config, "ps", "--status", "running", "--services"))
     return {line.strip() for line in output.splitlines() if line.strip()}
 
 
-def active_job_count(config: BackupConfig, runner: Runner) -> int:
+def active_job_count(config: ComposeConfig, runner: Runner) -> int:
     output = runner.run(
         compose(
             config,
@@ -157,7 +175,7 @@ def inspect_environment(config: BackupConfig, runner: Runner) -> Environment:
 
 
 def wait_for_jobs_to_drain(
-    config: BackupConfig,
+    config: JobDrainConfig,
     runner: Runner,
     *,
     sleep: Callable[[float], None],
@@ -173,8 +191,22 @@ def wait_for_jobs_to_drain(
         sleep(config.job_poll_seconds)
 
 
+def wait_for_api(config: WebVerificationConfig, runner: Runner, container: str) -> None:
+    runner.run(
+        [
+            "docker",
+            "exec",
+            container,
+            "python",
+            "-c",
+            API_READINESS_PROBE.format(timeout=config.wait_seconds),
+        ],
+        timeout_seconds=config.wait_seconds + 10,
+    )
+
+
 def resume_services(
-    config: BackupConfig,
+    config: WebVerificationConfig,
     runner: Runner,
     service_containers: dict[str, str],
     *,
@@ -190,19 +222,9 @@ def resume_services(
     # 阻断旧生产版本在备份窗口后的恢复。
     runner.run(
         ["docker", "start", *container_ids],
-        timeout_seconds=config.service_wait_timeout_seconds + 60,
+        timeout_seconds=config.wait_seconds + 60,
     )
-    runner.run(
-        [
-            "docker",
-            "exec",
-            service_containers["api"],
-            "python",
-            "-c",
-            API_READINESS_PROBE.format(timeout=config.service_wait_timeout_seconds),
-        ],
-        timeout_seconds=config.service_wait_timeout_seconds + 10,
-    )
+    wait_for_api(config, runner, service_containers["api"])
     missing = sorted(REQUIRED_SERVICES - _running_services(config, runner))
     if missing:
         raise BackupError(f"备份后服务未全部恢复：{', '.join(missing)}")
