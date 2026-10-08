@@ -1,12 +1,12 @@
 """发布已通过 CI 的 Web 镜像，失败时恢复并验证原镜像。"""
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 import json
 from pathlib import Path
 import re
 import sys
-from typing import Any, cast
+from typing import Any, Mapping, cast
 from urllib.request import Request, urlopen
 
 from scripts.backup.runtime import (
@@ -18,10 +18,9 @@ from scripts.backup.runtime import (
     exclusive_lock,
 )
 from scripts.backup.services import REQUIRED_SERVICES
-from scripts.web_verification import verify_served_web
-
-
-REVISION_LABEL = "org.opencontainers.image.revision"
+from scripts.check_deployment import add_deployment_arguments, retained_versions
+from scripts.deployment_sources import REVISION_LABEL
+from scripts.deployment_verification import service_snapshot, verify_deployment
 
 
 @dataclass(frozen=True)
@@ -35,6 +34,7 @@ class ReleaseConfig:
     health_url: str
     wait_seconds: int = 120
     lock_file: Path = DEFAULT_LOCK_FILE
+    retained: Mapping[str, str] = field(default_factory=dict)
 
 
 def verify_ci(revision: str, run_id: int) -> None:
@@ -65,29 +65,6 @@ def verify_ci(revision: str, run_id: int) -> None:
         raise BackupError("CI 包含未完成、失败或跳过的任务，拒绝发布")
 
 
-def _snapshot(config: ReleaseConfig, runner: Runner) -> dict[str, dict[str, Any]]:
-    services = sorted(REQUIRED_SERVICES)
-    containers = [
-        runner.run(compose(config, "ps", "--quiet", service)).strip()
-        for service in services
-    ]
-    if any(not identifier for identifier in containers):
-        raise BackupError("发布前后必须具备全部常驻服务")
-    records = cast(
-        list[dict[str, Any]], json.loads(runner.run(["docker", "inspect", *containers]))
-    )
-    result = dict(zip(services, records, strict=True))
-    for service, record in result.items():
-        state = record["State"]
-        if (
-            state["Status"] != "running"
-            or record["RestartCount"] != 0
-            or state.get("Health", {}).get("Status", "healthy") != "healthy"
-        ):
-            raise BackupError(f"服务状态未通过验收：{service}")
-    return result
-
-
 def _unchanged(
     before: dict[str, dict[str, Any]], after: dict[str, dict[str, Any]]
 ) -> None:
@@ -111,12 +88,13 @@ def _update_web(config: ReleaseConfig, runner: Runner) -> None:
         ),
         timeout_seconds=config.wait_seconds + 60,
     )
-    verify_served_web(config, runner)
 
 
 def publish_web(config: ReleaseConfig, *, runner: Runner) -> dict[str, object]:
     if not re.fullmatch(r"[0-9a-f]{40}", config.revision) or config.wait_seconds <= 0:
         raise BackupError("发布必须指定完整提交 SHA 和正数等待时间")
+    if "web" in config.retained:
+        raise BackupError("Web 发布不能将 Web 声明为保留版本")
     with exclusive_lock(config.lock_file):
         head = runner.run(["git", "-C", str(config.root), "rev-parse", "HEAD"]).strip()
         dirty = runner.run(
@@ -143,27 +121,40 @@ def publish_web(config: ReleaseConfig, *, runner: Runner) -> dict[str, object]:
                 "-t",
             ]
         )
-        before = _snapshot(config, runner)
-        verify_served_web(config, runner)
+        before = service_snapshot(config, runner)
         original = before["web"]
+        previous_image = json.loads(
+            runner.run(["docker", "image", "inspect", original["Image"]])
+        )[0]
+        previous_revision = (previous_image["Config"].get("Labels") or {}).get(
+            REVISION_LABEL
+        )
+        if not isinstance(previous_revision, str):
+            raise BackupError("原 Web 镜像缺少提交标记，无法核验保留版本")
+        previous_config = replace(
+            config, retained={**config.retained, "web": previous_revision}
+        )
+        verify_deployment(previous_config, runner, records=before)
         target = original["Config"]["Image"]
         backup = f"{config.project_name}-web:before-{config.revision[:7]}"
         runner.run(["docker", "image", "tag", original["Image"], backup])
         try:
             runner.run(["docker", "image", "tag", candidate["Id"], target])
             _update_web(config, runner)
-            after = _snapshot(config, runner)
+            after = service_snapshot(config, runner)
             _unchanged(before, after)
             if after["web"]["Image"] != candidate["Id"]:
                 raise BackupError("更新后的 Web 未运行候选镜像")
+            deployment = verify_deployment(config, runner, records=after)
         except Exception as failure:
             try:
                 runner.run(["docker", "image", "tag", original["Image"], target])
                 _update_web(config, runner)
-                recovered = _snapshot(config, runner)
+                recovered = service_snapshot(config, runner)
                 if recovered["web"]["Image"] != original["Image"]:
                     raise BackupError("回退后的镜像仍不匹配")
                 _unchanged(before, recovered)
+                verify_deployment(previous_config, runner, records=recovered)
             except Exception as recovery:
                 raise BackupError(
                     f"发布失败且回退未通过：{failure}; {recovery}"
@@ -174,19 +165,15 @@ def publish_web(config: ReleaseConfig, *, runner: Runner) -> dict[str, object]:
             "updated_services": ["web"],
             "other_five_containers_unchanged": True,
             "rollback_image": backup,
+            "deployment": deployment,
         }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="仅发布已通过 CI 的 Web 镜像。")
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--compose-file", type=Path, default=Path("compose.yaml"))
-    parser.add_argument("--env-file", type=Path, default=Path(".env"))
-    parser.add_argument("--project-name", default="deliverynote")
+    add_deployment_arguments(parser, health_required=True)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--revision", required=True)
     parser.add_argument("--ci-run", type=int, required=True)
-    parser.add_argument("--health-url", required=True)
     parser.add_argument("--wait-seconds", type=int, default=120)
     parser.add_argument("--lock-file", type=Path, default=DEFAULT_LOCK_FILE)
     arguments = parser.parse_args()
@@ -202,6 +189,7 @@ def main() -> int:
         lock_file=arguments.lock_file,
     )
     try:
+        config = replace(config, retained=retained_versions(arguments.retain))
         verify_ci(config.revision, arguments.ci_run)
         result = publish_web(config, runner=SubprocessRunner())
     except (BackupError, OSError, ValueError) as error:

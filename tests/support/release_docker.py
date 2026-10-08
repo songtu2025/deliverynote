@@ -41,7 +41,7 @@ HTTPServer(('0.0.0.0', 8000), Handler).serve_forever()
 
 
 class ReleaseDockerFixture:
-    def __init__(self, image: str) -> None:
+    def __init__(self, image: str, *, verify_sources: bool = False) -> None:
         self.temporary = TemporaryDirectory(prefix="deliverynote-release-test-")
         self.root = Path(self.temporary.name)
         self.project = "deliverynote-release-test-" + uuid.uuid4().hex[:12]
@@ -52,6 +52,7 @@ class ReleaseDockerFixture:
         self.env_file = self.root / ".env"
         self.env_file.write_text("", encoding="utf-8")
         self.parent_image = image
+        self.verify_sources = verify_sources
         self.url = ""
 
     def run(self, *arguments: str) -> str:
@@ -97,11 +98,23 @@ class ReleaseDockerFixture:
         ):
             self.run("git", *arguments)
         (self.root / ".gitignore").write_text(
-            "*\n!.gitignore\n!version.py\n", encoding="utf-8"
+            "*\n!.gitignore\n!version.py\n!delivery_note/\n!delivery_note/probe.py\n!requirements.lock\n",
+            encoding="utf-8",
         )
+        package = self.root / "delivery_note"
+        package.mkdir()
+        (package / "probe.py").write_text("version = 1\n", encoding="utf-8")
+        (self.root / "requirements.lock").write_text("", encoding="utf-8")
         version = self.root / "version.py"
         version.write_text("version = 1\n", encoding="utf-8")
-        self.run("git", "add", ".gitignore", "version.py")
+        self.run(
+            "git",
+            "add",
+            ".gitignore",
+            "version.py",
+            "delivery_note",
+            "requirements.lock",
+        )
         self.run("git", "commit", "--quiet", "-m", "old")
         self.old_revision = self.run("git", "rev-parse", "HEAD")
         version.write_text("version = 2\n", encoding="utf-8")
@@ -129,6 +142,29 @@ class ReleaseDockerFixture:
         self.wait_ready()
 
     def _configuration(self, backend_image: str, port: int) -> dict[str, Any]:
+        if self.verify_sources:
+            # 核验测试使用真实源码文件与提交标签，不依赖无标记的基础镜像。
+            backend_tag = self.project + ":backend"
+            self.images.append(backend_tag)
+            (self.root / "Dockerfile.backend").write_text(
+                f"FROM {backend_image}\nWORKDIR /app\n"
+                "COPY delivery_note /app/delivery_note\n"
+                "COPY requirements.lock /app/requirements.lock\n",
+                encoding="utf-8",
+            )
+            self.run(
+                "docker",
+                "build",
+                "-q",
+                "-f",
+                str(self.root / "Dockerfile.backend"),
+                "--label",
+                "org.opencontainers.image.revision=" + self.old_revision,
+                "-t",
+                backend_tag,
+                str(self.root),
+            )
+            backend_image = backend_tag
         services = {
             "api": {
                 "image": backend_image,

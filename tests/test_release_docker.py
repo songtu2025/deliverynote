@@ -14,7 +14,7 @@ from tests.support.release_docker import ReleaseDockerFixture
 class ReleaseDockerTests(unittest.TestCase):
     def setUp(self) -> None:
         image = os.environ["RELEASE_WEB_IMAGE"]
-        self.fixture = ReleaseDockerFixture(image)
+        self.fixture = ReleaseDockerFixture(image, verify_sources=True)
         self.addCleanup(self.fixture.close)
         self.fixture.start()
 
@@ -78,6 +78,15 @@ class ReleaseDockerTests(unittest.TestCase):
             health_url=fixture.url,
             wait_seconds=3,
             lock_file=fixture.root / "release.lock",
+            retained={
+                name: fixture.old_revision
+                for name in (
+                    "api",
+                    "worker",
+                    "purchase-sync-worker",
+                    "inbound-sync-worker",
+                )
+            },
         )
         with self.assertRaisesRegex(BackupError, "已恢复原镜像"):
             publish_web(config, runner=SubprocessRunner())

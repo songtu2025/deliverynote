@@ -4,99 +4,17 @@ import json
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
-from typing import Sequence
 import unittest
 from unittest.mock import patch
 
 from scripts.release_web import (
-    REVISION_LABEL,
     ReleaseConfig,
     main,
     publish_web,
     verify_ci,
 )
 from scripts.backup.runtime import BackupError
-
-
-SHA = "1" * 40
-OLD_SHA = "2" * 40
-
-
-def container(service: str, image: str = "old-image") -> dict[str, object]:
-    return {
-        "Id": service + "-id",
-        "Image": image,
-        "Config": {
-            "Image": "web-current",
-            "Labels": {
-                "org.opencontainers.image.revision": OLD_SHA,
-            },
-        },
-        "State": {"Status": "running"},
-        "RestartCount": 0,
-    }
-
-
-class ReleaseRunner:
-    def __init__(self) -> None:
-        self.commands: list[list[str]] = []
-        self.current_image = "old-image"
-        self.dirty = False
-        self.image_revision = SHA
-        self.failed_rollback = False
-        self.recreated_api = False
-
-    def run(self, arguments: Sequence[str], **kwargs: object) -> str:
-        arguments = list(arguments)
-        self.commands.append(list(arguments))
-        if arguments[0] == "git":
-            if "rev-parse" in arguments:
-                return SHA
-            return " M source.py" if self.dirty else ""
-        if arguments[:3] == ["docker", "image", "inspect"]:
-            return json.dumps(
-                [
-                    {
-                        "Id": "candidate-image",
-                        "Config": {
-                            "Labels": {
-                                REVISION_LABEL: self.image_revision,
-                            }
-                        },
-                    }
-                ]
-            )
-        if "ps" in arguments:
-            return arguments[-1] + "-id"
-        if arguments[:2] == ["docker", "inspect"]:
-            return self.inspect(arguments[2:])
-        if arguments[:3] == ["docker", "image", "tag"]:
-            if arguments[3] == "candidate-image":
-                self.current_image = "candidate-image"
-            elif arguments[-1] == "web-current":
-                if self.failed_rollback:
-                    raise BackupError("恢复镜像失败")
-                self.current_image = "old-image"
-        return ""
-
-    def inspect(self, identifiers: Sequence[str]) -> str:
-        records = []
-        for identifier in identifiers:
-            record = container(identifier.removesuffix("-id"))
-            if identifier == "web-id":
-                record = container("web", self.current_image)
-                record["Config"] = {
-                    "Image": "web-current",
-                    "Labels": {
-                        REVISION_LABEL: (
-                            SHA if self.current_image == "candidate-image" else OLD_SHA
-                        )
-                    },
-                }
-            if identifier == "api-id" and self.recreated_api:
-                record["Id"] = "unexpected-api-id"
-            records.append(record)
-        return json.dumps(records)
+from tests.support.release import SHA, OLD_SHA, ReleaseRunner
 
 
 class WebReleaseTests(unittest.TestCase):
@@ -113,6 +31,15 @@ class WebReleaseTests(unittest.TestCase):
             revision=SHA,
             health_url="http://127.0.0.1:18080",
             wait_seconds=2,
+            retained={
+                name: OLD_SHA
+                for name in (
+                    "api",
+                    "worker",
+                    "purchase-sync-worker",
+                    "inbound-sync-worker",
+                )
+            },
         )
         self.runner = ReleaseRunner()
 
@@ -121,10 +48,11 @@ class WebReleaseTests(unittest.TestCase):
             return publish_web(self.config, runner=self.runner)
 
     def test_success_keeps_other_containers_and_backup_image(self) -> None:
-        with patch("scripts.release_web.verify_served_web") as verify:
+        with patch("scripts.deployment_verification.verify_served_web") as verify:
             result = self.publish()
         self.assertEqual(result["revision"], SHA)
         self.assertEqual(self.runner.current_image, "candidate-image")
+        self.assertIn("deployment", result)
         self.assertEqual(verify.call_count, 2)
         self.assertTrue(
             any(
@@ -139,7 +67,7 @@ class WebReleaseTests(unittest.TestCase):
 
     def test_failed_validation_restores_old_image_and_validates_recovery(self) -> None:
         with patch(
-            "scripts.release_web.verify_served_web",
+            "scripts.deployment_verification.verify_served_web",
             side_effect=[
                 None,
                 BackupError("候选页面失败"),
@@ -154,7 +82,7 @@ class WebReleaseTests(unittest.TestCase):
     def test_rollback_failure_reports_both_errors(self) -> None:
         self.runner.failed_rollback = True
         with patch(
-            "scripts.release_web.verify_served_web",
+            "scripts.deployment_verification.verify_served_web",
             side_effect=[
                 None,
                 BackupError("候选页面失败"),
@@ -175,17 +103,25 @@ class WebReleaseTests(unittest.TestCase):
                 )
 
     def test_unrelated_container_replacement_fails_release(self) -> None:
-        self.runner.recreated_api = True
-        # 首次快照后模拟外部任务重建 API。
-        self.runner.recreated_api = False
-
-        def validate(*args: object) -> None:
-            if self.runner.current_image == "candidate-image":
-                self.runner.recreated_api = True
-
-        with patch("scripts.release_web.verify_served_web", side_effect=validate):
+        # 发布期间模拟外部任务重建 API。
+        self.runner.replace_api_on_update = True
+        with patch("scripts.deployment_verification.verify_served_web"):
             with self.assertRaisesRegex(BackupError, "未发布服务.*api"):
                 self.publish()
+
+    def test_undeclared_old_backend_blocks_release_before_image_changes(self) -> None:
+        from dataclasses import replace
+
+        self.config = replace(self.config, retained={})
+        with self.assertRaisesRegex(BackupError, "服务版本不匹配：api"):
+            self.publish()
+        self.assertFalse(any("tag" in command for command in self.runner.commands))
+
+    def test_modified_backend_blocks_release_before_image_changes(self) -> None:
+        self.runner.runtime_files["delivery_note/probe.py"] = "modified"
+        with self.assertRaisesRegex(BackupError, "运行源码.*不一致"):
+            self.publish()
+        self.assertFalse(any("tag" in command for command in self.runner.commands))
 
 
 class ReleaseCITests(unittest.TestCase):
