@@ -47,6 +47,9 @@ describe("BatchesPage", () => {
     expect(screen.queryByRole("region", { name: "统一批次流程" })).not.toBeInTheDocument();
     expect(screen.getByText("审校待处理")).toBeInTheDocument();
     expect(screen.getByText("2 个文件 · 交货 160")).toBeInTheDocument();
+    expect(screen.getByText("批次 #7")).toBeInTheDocument();
+    expect(screen.getByText(/可导入 100/)).toHaveTextContent("可导入 100 · 待处理 60");
+    expect(screen.getByRole("button", { name: "2026-07-21 交货批次" })).toHaveAttribute("title", "2026-07-21 交货批次");
     expect(screen.getAllByText("短尾超收 V1").length).toBeGreaterThan(0);
     expect(container.querySelector(".ant-pagination")).not.toBeInTheDocument();
 

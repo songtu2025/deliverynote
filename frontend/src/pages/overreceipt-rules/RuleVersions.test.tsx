@@ -103,9 +103,7 @@ describe("OverreceiptRulesPage", () => {
     await screen.findByText(selfOperatedRule.name);
     if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
     const button = () =>
-      screen.getByRole("button", {
-        name: `重新启用 ${scope === "delivery" ? previousRule.name : previousSelfOperatedRule.name}`
-      });
+      screen.getByLabelText(`重新启用 ${scope === "delivery" ? previousRule.name : previousSelfOperatedRule.name}`);
     fireEvent.click(button());
     await waitFor(() =>
       expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith("/activate"))).toHaveLength(1)

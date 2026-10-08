@@ -22,16 +22,18 @@ export default function BatchListTable({
 }) {
   const { batches, loading, query, statusFilter, page, setPage, batchTotal } = list;
   const { selectedBatchIds, setSelectedBatchIds, deletingBatchIds, deleteSelectedBatches } = deletion;
+  const delivery = workflow === "delivery";
   return (
     <Table<Batch>
       className="batch-list-table"
       rowKey="id"
+      tableLayout={delivery ? "fixed" : undefined}
       rowSelection={
         canDeleteBatches
           ? {
               selectedRowKeys: selectedBatchIds,
               preserveSelectedRowKeys: true,
-              columnWidth: 52,
+              columnWidth: delivery ? 44 : 52,
               onChange: (keys) => {
                 setSelectedBatchIds(keys.map(Number));
               },
@@ -64,17 +66,21 @@ export default function BatchListTable({
       columns={[
         {
           title: "批次",
+          className: "batch-identity-cell",
           dataIndex: "name",
           render: (value: string, batch) => (
-            <Button className="batch-name-link" type="link" onClick={() => onOpen(batch.id)}>
-              {value}
-            </Button>
+            <div className="batch-identity">
+              <Button className="batch-name-link" type="link" title={value} onClick={() => onOpen(batch.id)}>
+                {value}
+              </Button>
+              {delivery && <span className="batch-id">批次 #{batch.id}</span>}
+            </div>
           )
         },
         {
           title: "状态",
           dataIndex: "status",
-          width: 130,
+          width: delivery ? 104 : 130,
           render: (value: string) => (
             <div className="batch-table-value">
               <span className="batch-cell-label">状态</span>
@@ -84,7 +90,7 @@ export default function BatchListTable({
         },
         {
           title: "文件 / 数量",
-          width: 190,
+          width: delivery ? 186 : 190,
           render: (_, batch) => (
             <div className="batch-table-value">
               <span className="batch-cell-label">文件 / 数量</span>
@@ -94,12 +100,17 @@ export default function BatchListTable({
                   : `${batch.file_count} 个文件`}
                 {batch.summary && batch.summary.delivery_total > 0 ? " · 交货 " + batch.summary.delivery_total : ""}
               </span>
+              {delivery && batch.summary && (
+                <span className="batch-allocation">
+                  可导入 {batch.summary.import_total} · <span>待处理 {batch.summary.manual_total}</span>
+                </span>
+              )}
             </div>
           )
         },
         {
           title: "下一步",
-          width: 170,
+          width: delivery ? 120 : 170,
           render: (_, batch) => (
             <div className="batch-table-value">
               <span className="batch-cell-label">下一步</span>
@@ -110,7 +121,7 @@ export default function BatchListTable({
         {
           title: "更新时间",
           dataIndex: "updated_at",
-          width: 190,
+          width: delivery ? 168 : 190,
           render: (value: string) => (
             <div className="batch-table-value">
               <span className="batch-cell-label">更新时间</span>
@@ -120,7 +131,7 @@ export default function BatchListTable({
         },
         {
           title: "操作",
-          width: canDeleteBatches ? 170 : 100,
+          width: canDeleteBatches ? (delivery ? 124 : 170) : 100,
           render: (_, batch) => (
             <Space className="batch-row-actions" size={0}>
               <Button

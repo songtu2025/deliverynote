@@ -91,23 +91,27 @@ function batchFileColumns({
       title: "供应商",
       dataIndex: "supplier_name",
       width: 150,
+      ellipsis: !selfOperated,
       render: (value: string) => value || <span className="muted">预检后识别</span>
     },
     {
       title: "交货",
       dataIndex: "delivery_total",
+      align: selfOperated ? undefined : ("right" as const),
       width: 90,
       render: (value: number) => (computed ? value : "—")
     },
     {
       title: "可导入",
       dataIndex: "import_total",
+      align: selfOperated ? undefined : ("right" as const),
       width: 90,
       render: (value: number) => (computed ? <span className="import-value">{value}</span> : "—")
     },
     {
       title: "待处理",
       dataIndex: "manual_total",
+      align: selfOperated ? undefined : ("right" as const),
       width: 100,
       render: (value: number) => (computed ? <span className={value ? "pending-value" : ""}>{value}</span> : "—")
     },

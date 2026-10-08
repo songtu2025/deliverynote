@@ -24,6 +24,7 @@ type OverviewProps = {
 export default function BatchOverview(props: OverviewProps) {
   const { batch, activeJob, onBack } = props;
   const { computed, totals } = batchPresentation(batch);
+  const selfOperated = batch.workflow === "self_operated_inbound";
   const currentStep = currentBatchStep(batch);
   const workflowItems = [
     {
@@ -43,7 +44,9 @@ export default function BatchOverview(props: OverviewProps) {
             返回批次列表
           </Button>
           <div className="batch-title-row">
-            <Typography.Title level={2}>{batch.name}</Typography.Title>
+            <Typography.Title level={2} title={batch.name}>
+              {batch.name}
+            </Typography.Title>
             <StatusTag status={batch.status} />
           </div>
           <Typography.Text type="secondary">
@@ -53,8 +56,9 @@ export default function BatchOverview(props: OverviewProps) {
         <BatchPrimaryActions {...props} />
       </div>
 
-      <div className="workflow-surface">
+      <div className="workflow-surface" role="group" aria-label="批次处理流程">
         <Steps
+          size={selfOperated ? undefined : "small"}
           current={currentStep}
           status={batch.status === "failed" ? "error" : "process"}
           responsive={false}
@@ -101,7 +105,7 @@ function BatchPrimaryActions({ batch, activeJob, action, fileActions, tasks }: O
         </Button>
       )}
       {activeJob && (
-        <span className="job-indicator">
+        <span className="job-indicator" role="status">
           <Spin size="small" /> {activeJob.kind === "compute" ? "正在计算" : "正在导出"}
         </span>
       )}

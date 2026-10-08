@@ -159,7 +159,7 @@ describe("BatchesPageDeletion", () => {
   });
   it("returns to the previous page when deleting the entire final page", async () => {
     setFourteenBatches(state);
-    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />, { wrapper: AntApp });
+    render(<BatchesPage canDeleteBatches onOpen={vi.fn()} />, { wrapper: FocusTestApp });
     await screen.findByText("14 个批次");
     fireEvent.click(screen.getByTitle("2"));
     fireEvent.click(await screen.findByRole("checkbox", { name: "选择批次 交货批次 13" }));

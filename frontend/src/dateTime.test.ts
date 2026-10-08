@@ -15,7 +15,8 @@ describe("Beijing time formatting", () => {
       month: "07",
       day: "22",
       hour: "00",
-      minute: "30"
+      minute: "30",
+      second: "00"
     });
   });
 

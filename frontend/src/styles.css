@@ -24,3 +24,5 @@
 @import "./styles/batch-list-layout.css";
 @import "./styles/batch-sync-compact.css";
 @import "./styles/batch-list-table.css";
+@import "./styles/delivery-batch-list.css";
+@import "./styles/delivery-batch-detail.css";

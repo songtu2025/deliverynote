@@ -7,6 +7,8 @@ import BatchesPage from "./BatchesPage";
 describe("BatchesPageCreation", () => {
   setupBatchesPageTests();
   it("creates a self-operated batch with multiple quality delivery files", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-08T06:26:35Z"));
     const onOpen = vi.fn();
     let submittedFiles: FormDataEntryValue[] = [];
     const loadFetch = vi.mocked(fetch);
@@ -28,6 +30,7 @@ describe("BatchesPageCreation", () => {
     await screen.findByText("4 / 4 已就绪");
     fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));
     const dialog = await screen.findByRole("dialog", { name: "新建自营仓入库批次" });
+    expect(within(dialog).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-08 自营仓入库批次");
 
     expect(within(dialog).getByText("质检交货单")).toBeInTheDocument();
     expect(within(dialog).queryByText("自营仓收货入库单")).not.toBeInTheDocument();
@@ -72,11 +75,13 @@ describe("BatchesPageCreation", () => {
     const originalFetch = fetch;
     const onOpen = vi.fn();
     let submittedFiles: FormDataEntryValue[] = [];
+    let submittedName: FormDataEntryValue | null = null;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         if (String(input).endsWith("/api/batches/with-files") && init?.method === "POST") {
           submittedFiles = (init.body as FormData).getAll("files");
+          submittedName = (init.body as FormData).get("name");
           return jsonResponse({ id: 89 });
         }
         return originalFetch(input, init);
@@ -85,6 +90,9 @@ describe("BatchesPageCreation", () => {
     render(<BatchesPage onOpen={onOpen} />, { wrapper: AntApp });
     fireEvent.click(await screen.findByRole("button", { name: /新建批次/ }));
     const dialog = await screen.findByRole("dialog", { name: "新建交货批次" });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /批次名称/ }), {
+      target: { value: "手工复核批次" }
+    });
     const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
     fireEvent.change(input!, { target: { files: [new File(["second"], "B.xlsx"), new File(["first"], "A.xlsx")] } });
     const submit = within(dialog).getByRole("button", { name: "创建并上传文件" });
@@ -92,6 +100,21 @@ describe("BatchesPageCreation", () => {
     fireEvent.click(submit);
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(89));
     expect(submittedFiles.map((file) => (file as File).name)).toEqual(["B.xlsx", "A.xlsx"]);
+    expect(submittedName).toBe("手工复核批次");
+  });
+  it("regenerates a Beijing timestamp including seconds on each open across midnight", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-08T15:59:58Z"));
+    render(<BatchesPage onOpen={vi.fn()} />, { wrapper: FocusTestApp });
+    fireEvent.click(await screen.findByRole("button", { name: /新建批次/ }));
+    const first = await screen.findByRole("dialog", { name: "新建交货批次" });
+    expect(within(first).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-08 交货批次 23:59:58");
+    fireEvent.click(within(first).getByRole("button", { name: /取\s*消/ }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    vi.setSystemTime(new Date("2026-10-08T16:00:03Z"));
+    fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));
+    const second = await screen.findByRole("dialog", { name: "新建交货批次" });
+    expect(within(second).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-09 交货批次 00:00:03");
   });
   it("keeps batch name labels associated after both workflow dialogs have been opened", async () => {
     render(

@@ -17,17 +17,19 @@ export default function BatchExportActions({
   tasks: ReturnType<typeof useBatchTasks>;
   focusReview: () => void;
 }) {
-  const { totals, needsReview, needsMergedGeneration } = batchPresentation(batch);
+  const { needsReview, needsMergedGeneration } = batchPresentation(batch);
   const exportJob = batch.jobs?.export;
   const { downloadResult, startExport } = tasks;
+  const delivery = batch.workflow !== "self_operated_inbound";
+  const { stageTitle, stageDescription } = exportStageCopy(batch);
   return (
     <section className="stage-actions" aria-labelledby="current-stage-title">
       <div className="stage-actions-copy">
-        <strong id="current-stage-title">{needsReview ? `待处理 ${totals.manual_total} 件` : "结果可下载"}</strong>
-        <span>{needsReview ? "处理完成后生成最终结果。" : "可生成或下载结果文件。"}</span>
+        <strong id="current-stage-title">{stageTitle}</strong>
+        <span>{stageDescription}</span>
       </div>
       {needsReview && (
-        <Button aria-label="处理异常" type="primary" size="large" onClick={focusReview}>
+        <Button aria-label="处理异常" type="primary" size={delivery ? "middle" : "large"} onClick={focusReview}>
           处理异常
         </Button>
       )}
@@ -48,6 +50,29 @@ export default function BatchExportActions({
       </div>
     </section>
   );
+}
+
+function exportStageCopy(batch: Batch) {
+  const { totals, needsReview, needsMergedGeneration } = batchPresentation(batch);
+  const resultReady = batch.download_ready && !needsMergedGeneration;
+  if (batch.workflow === "self_operated_inbound") {
+    return {
+      stageTitle: needsReview ? `待处理 ${totals.manual_total} 件` : "结果可下载",
+      stageDescription: needsReview ? "处理完成后生成最终结果。" : "可生成或下载结果文件。"
+    };
+  }
+  if (needsReview) {
+    return {
+      stageTitle: `待处理 ${totals.manual_total} 件`,
+      stageDescription: resultReady
+        ? "现有结果仍可下载；审校保存后按提示重新生成。"
+        : "可生成当前结果；审校保存后按提示重新生成。"
+    };
+  }
+  return {
+    stageTitle: resultReady ? "结果可下载" : "需要生成结果",
+    stageDescription: "可生成或下载结果文件。"
+  };
 }
 
 function ResultDownloadButtons({

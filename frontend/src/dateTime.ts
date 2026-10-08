@@ -8,6 +8,7 @@ export interface BeijingDateTimeParts {
   day: string;
   hour: string;
   minute: string;
+  second: string;
 }
 
 function parseApiDateTime(value: string): Date {
@@ -43,6 +44,7 @@ export function beijingDateTimeParts(date = new Date()): BeijingDateTimeParts {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false
   }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
@@ -51,6 +53,7 @@ export function beijingDateTimeParts(date = new Date()): BeijingDateTimeParts {
     month: values.month,
     day: values.day,
     hour: values.hour,
-    minute: values.minute
+    minute: values.minute,
+    second: values.second
   };
 }

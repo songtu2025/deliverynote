@@ -1,0 +1,300 @@
+/* 第一轮仅调整交货批次工作台，自营仓和管理员页面继续使用原布局。 */
+.delivery-batch-list-page {
+  --dn-muted: #56645e;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "heading" "status" "sync" "toolbar" "table";
+  gap: 12px;
+}
+.delivery-batch-list-page > .page-heading {
+  align-items: center;
+  margin-bottom: 0;
+}
+.delivery-batch-list-page .page-heading h2 {
+  margin-bottom: 4px !important;
+  font-size: 24px;
+  letter-spacing: 0;
+}
+.delivery-batch-list-page .page-heading .ant-typography-secondary {
+  font-size: 13px;
+}
+.delivery-batch-list-page .batch-status-strip {
+  padding-block: 0;
+}
+.delivery-batch-list-page .batch-status-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  justify-content: start;
+  min-height: 56px;
+  gap: 3px 10px;
+  padding: 8px 16px;
+}
+.delivery-batch-list-page .batch-status-item::before {
+  content: none;
+}
+.delivery-batch-list-page .batch-status-item > strong {
+  font-size: 13px;
+}
+.delivery-batch-list-page .batch-status-item > small {
+  grid-column: 1 / -1;
+  font-size: 12px;
+}
+.delivery-batch-list-page .purchase-sync-card--compact {
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 6px;
+  box-shadow: none;
+}
+.delivery-batch-list-page .purchase-sync-heading {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+.delivery-batch-list-page .purchase-sync-heading h5 {
+  font-size: 14px !important;
+}
+.delivery-batch-list-page .purchase-sync-heading > .ant-btn {
+  width: auto;
+}
+.delivery-batch-list-page .purchase-sync-scope-tag {
+  color: var(--dn-muted);
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+}
+.delivery-batch-list-page .purchase-sync-card--summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  align-items: center;
+  gap: 16px;
+}
+.delivery-batch-list-page .purchase-sync-card > .ant-alert {
+  grid-column: 1 / -1;
+}
+.delivery-batch-list-page .purchase-sync-result.is-collapsed {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "copy action";
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 0 16px;
+  border: 0;
+  border-left: 1px solid var(--dn-border);
+  border-radius: 0;
+  background: transparent;
+}
+.delivery-batch-list-page .purchase-sync-result-copy .ant-typography {
+  overflow-wrap: anywhere;
+}
+.delivery-batch-list-page .purchase-sync-result-copy strong {
+  font-size: 13px;
+}
+.delivery-batch-list-page .purchase-sync-actions {
+  width: auto;
+  justify-self: end;
+}
+.delivery-batch-list-page .purchase-sync-progress {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(100px, 1fr) minmax(0, 1fr);
+  align-items: center;
+}
+.delivery-batch-list-page .purchase-sync-diff {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.delivery-batch-list-page .purchase-sync-result > .ant-alert .ant-alert-description {
+  display: block;
+}
+.delivery-batch-list-page .batch-list-toolbar {
+  grid-template-columns: minmax(0, 1fr) 280px 176px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: -12px;
+  padding: 12px 16px;
+  border-radius: 6px 6px 0 0;
+}
+.delivery-batch-list-page .batch-list-toolbar-heading {
+  grid-column: auto;
+  padding: 0;
+  white-space: normal;
+}
+.delivery-batch-list-page .batch-list-toolbar-heading strong {
+  font-size: 14px;
+}
+.delivery-batch-list-page .table-filter-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.delivery-batch-list-page .table-filter-field label {
+  flex-shrink: 0;
+}
+.delivery-batch-list-page .table-filter-field > .ant-select,
+.delivery-batch-list-page .table-filter-field > .ant-input-affix-wrapper {
+  min-width: 0;
+  width: 100%;
+}
+.delivery-batch-list-page .batch-list-table .ant-table {
+  border-radius: 0 0 6px 6px;
+}
+.delivery-batch-list-page .batch-list-table .ant-table-cell {
+  padding: 12px 10px;
+  font-size: 13px;
+}
+.delivery-batch-list-page .batch-list-table .ant-table-thead > tr > th {
+  color: var(--dn-muted);
+  font-weight: 500;
+}
+.delivery-batch-list-page .batch-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.delivery-batch-list-page .batch-name-link {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: hidden;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+}
+.delivery-batch-list-page .batch-name-link > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.delivery-batch-list-page .batch-id {
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+.delivery-batch-list-page .batch-allocation {
+  display: block;
+  margin-top: 3px;
+  color: var(--dn-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-batch-list-page .batch-allocation > span,
+.delivery-batch-list-page .purchase-sync-warning-summary {
+  color: #895d16;
+}
+.delivery-batch-list-page .batch-row-actions {
+  flex-wrap: nowrap;
+}
+.delivery-batch-list-page .batch-row-actions .ant-btn {
+  padding-inline: 4px;
+  font-size: 13px;
+}
+.delivery-batch-list-page .batch-list-table .ant-tag.ant-tag-warning {
+  color: #895d16;
+}
+.delivery-batch-list-page .batch-list-table .ant-tag.ant-tag-error {
+  color: #b52c35;
+}
+.delivery-batch-list-page .batch-list-table .ant-tag.ant-tag-cyan {
+  color: #176572;
+}
+.delivery-batch-list-page .batch-list-table .ant-tag.ant-tag-blue,
+.delivery-batch-list-page .batch-list-table .ant-tag.ant-tag-processing {
+  color: #1759a3;
+}
+.delivery-batch-list-page .ant-btn-dangerous:not(:disabled) {
+  color: var(--dn-danger);
+}
+.delivery-batch-list-page .ant-input::placeholder,
+.delivery-batch-list-page .ant-select-placeholder,
+.delivery-batch-list-page .ant-select-selection-placeholder {
+  color: var(--dn-muted);
+}
+.delivery-batch-creation-modal {
+  --dn-muted: #56645e;
+}
+.delivery-batch-creation-modal .ant-form-item-extra {
+  color: var(--dn-muted);
+}
+.delivery-batch-creation-modal .locked-version-preview strong {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+@media (max-width: 1100px) {
+  .delivery-batch-list-page .purchase-sync-card--summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .delivery-batch-list-page .purchase-sync-result.is-collapsed {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .delivery-batch-list-page .batch-list-toolbar {
+    grid-template-columns: minmax(0, 1fr) 240px 150px;
+  }
+}
+@media (max-width: 700px) {
+  .delivery-batch-list-page .batch-list-toolbar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .delivery-batch-list-page .batch-list-toolbar-heading {
+    grid-column: 1 / -1;
+  }
+  .delivery-batch-list-page .purchase-sync-progress {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 600px) {
+  .delivery-batch-list-page .batch-status-item {
+    min-height: 50px;
+  }
+  .delivery-batch-list-page .purchase-sync-heading {
+    flex-wrap: wrap;
+  }
+  .delivery-batch-list-page .purchase-sync-heading > .ant-btn {
+    width: 100%;
+  }
+  .delivery-batch-list-page .purchase-sync-result.is-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "copy" "action";
+  }
+  .delivery-batch-list-page .purchase-sync-actions {
+    justify-self: start;
+  }
+  .delivery-batch-list-page .batch-list-toolbar {
+    margin-bottom: 0;
+    border-radius: 6px;
+  }
+  .delivery-batch-list-page .table-filter-field {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .delivery-batch-list-page .batch-list-table .ant-table {
+    border-radius: 6px;
+  }
+  .delivery-batch-list-page .batch-identity-cell {
+    grid-column: 1 / -1;
+  }
+  .delivery-batch-list-page .ant-table-row {
+    position: relative;
+  }
+  .delivery-batch-list-page .batch-list-table td.ant-table-selection-column {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+  }
+  .delivery-batch-list-page .batch-identity {
+    padding-right: 26px;
+  }
+  .delivery-batch-list-page .batch-name-link {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .delivery-batch-list-page .batch-open-action {
+    width: auto;
+  }
+  .delivery-batch-list-page .batch-row-actions {
+    justify-content: space-between;
+    width: 100%;
+  }
+  .delivery-batch-list-page .batch-cell-label {
+    color: var(--dn-muted);
+  }
+}

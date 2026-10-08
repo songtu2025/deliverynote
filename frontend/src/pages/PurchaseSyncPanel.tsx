@@ -60,7 +60,7 @@ export default function PurchaseSyncPanel({
   return (
     <>
       <section
-        className={`purchase-sync-card${compact ? " purchase-sync-card--compact" : ""}`}
+        className={`purchase-sync-card${compact ? " purchase-sync-card--compact" : ""}${compact && syncJob?.status === "succeeded" && !detailsOpen ? " purchase-sync-card--summary" : ""}`}
         aria-label="积加采购数据同步"
       >
         <div className="purchase-sync-heading">
@@ -93,7 +93,14 @@ export default function PurchaseSyncPanel({
                 {syncJob.processed_orders}/{syncJob.total_orders || "—"} 张采购单
               </span>
             </div>
-            <div className="purchase-sync-progress-track" aria-valuenow={progress} role="progressbar">
+            <div
+              className="purchase-sync-progress-track"
+              aria-label="采购同步进度"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={progress}
+              role="progressbar"
+            >
               <span style={{ width: `${progress}%` }} />
             </div>
             <Typography.Text type="secondary">
@@ -138,6 +145,11 @@ export default function PurchaseSyncPanel({
                     ? `接口明细 ${syncJob.raw_detail_count} 行，保留 ${syncJob.eligible_detail_count} 行，过滤已交清 ${syncJob.filtered_detail_count} 行`
                     : `保留 ${syncJob.eligible_detail_count} 行 · ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
                 </Typography.Text>
+                {compact && !detailsOpen && syncJob.warning_count > 0 && (
+                  <Typography.Text className="purchase-sync-warning-summary">
+                    含 {syncJob.warning_count} 条“共享”站点数据，请展开复核
+                  </Typography.Text>
+                )}
               </div>
             </div>
             {detailsOpen && <SyncDifference diff={syncJob.diff} changeLabel="余额变化项" totalLabel="候选未交总量" />}
@@ -160,7 +172,7 @@ export default function PurchaseSyncPanel({
               />
             )}
             <Space className="purchase-sync-actions" size={8} wrap>
-              <Button type="link" onClick={() => setDetailsOpen((value) => !value)}>
+              <Button type="link" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((value) => !value)}>
                 {detailsOpen ? "收起同步详情" : "查看同步详情"}
               </Button>
               {detailsOpen && syncCandidate && (

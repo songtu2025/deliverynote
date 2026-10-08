@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Alert, Button, Card } from "antd";
 import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
 import BatchOverview from "./batch-detail/BatchOverview";
@@ -80,9 +81,8 @@ export default function BatchDetail({
     reviewSection.current?.focus({ preventScroll: true });
   };
 
-  return (
-    <div className="page-shell batch-workbench">
-      {loadFailure}
+  const taskContent = (
+    <>
       <BatchOverview
         batch={batch}
         activeJob={activeJob}
@@ -106,7 +106,11 @@ export default function BatchDetail({
       )}
 
       <BatchSummary batch={batch} />
+    </>
+  );
 
+  return (
+    <BatchWorkbench selfOperated={selfOperated} notice={loadFailure} taskContent={taskContent}>
       <BatchFileTable
         batch={batch}
         files={files}
@@ -137,6 +141,32 @@ export default function BatchDetail({
       )}
 
       <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
+    </BatchWorkbench>
+  );
+}
+
+function BatchWorkbench({
+  selfOperated,
+  notice,
+  taskContent,
+  children
+}: {
+  selfOperated: boolean;
+  notice: ReactNode;
+  taskContent: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`page-shell batch-workbench${selfOperated ? "" : " delivery-batch-detail"}`}>
+      {notice}
+      {selfOperated ? (
+        taskContent
+      ) : (
+        <section className="delivery-batch-task" aria-label="当前批次任务">
+          {taskContent}
+        </section>
+      )}
+      {children}
     </div>
   );
 }

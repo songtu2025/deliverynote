@@ -9,7 +9,7 @@ describe("AppNavigation", () => {
     state.authenticatedUser = operatorUser;
     window.history.replaceState({}, "", "/admin");
     render(<App />);
-    await screen.findByRole("heading", { name: "交货批次" });
+    await screen.findByText("交货批次", { selector: "h2" });
     expect(window.location.pathname).toBe("/batches");
     expect(screen.queryByRole("menuitem", { name: /管理员维护/ })).not.toBeInTheDocument();
     const requestedUrls = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
@@ -72,8 +72,8 @@ describe("AppNavigation", () => {
 
     render(<App />);
 
-    await screen.findByRole("heading", { name: "交货批次" });
-    const listHeader = screen.getByRole("group", { name: "当前用户" }).closest(".app-header") as HTMLElement;
+    await screen.findByText("交货批次", { selector: "h2" });
+    const listHeader = screen.getByLabelText("当前用户").closest(".app-header") as HTMLElement;
     const listStyle = getComputedStyle(listHeader);
     const listAppearance = {
       position: listStyle.position,
@@ -85,9 +85,9 @@ describe("AppNavigation", () => {
       paddingRight: listStyle.paddingRight
     };
 
-    fireEvent.click(await screen.findByRole("button", { name: "路由测试批次" }));
-    await screen.findByRole("heading", { name: "路由测试批次" });
-    const account = screen.getByRole("group", { name: "当前用户" });
+    fireEvent.click(await screen.findByLabelText("打开 路由测试批次"));
+    await screen.findByText("路由测试批次", { selector: "h2" });
+    const account = screen.getByLabelText("当前用户");
     const header = account.closest(".app-header") as HTMLElement;
     const detailStyle = getComputedStyle(header);
 

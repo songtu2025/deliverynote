@@ -26,6 +26,10 @@ export default function BatchLockedVersions({
   refreshSupplierVersion: () => Promise<void>;
 }) {
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
+  const descriptionsLayout =
+    batch.workflow === "self_operated_inbound"
+      ? { layout: "horizontal" as const, column: { xs: 1, sm: 2, lg: 6 } }
+      : { layout: "vertical" as const, column: { xs: 1, sm: 2, lg: 3 } };
   const canAdoptCurrentSupplier = Boolean(
     canRefreshSupplierVersion &&
     batch.status === "draft" &&
@@ -63,10 +67,14 @@ export default function BatchLockedVersions({
       }
     >
       {lockedDataOpen && (
-        <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 6 }}>
+        <Descriptions size="small" {...descriptionsLayout}>
           {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
             <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
-              <Tooltip title={version.original_name}>{version.name}</Tooltip>
+              <Tooltip title={version.original_name}>
+                <span title={version.name} className="locked-version-name">
+                  {version.name}
+                </span>
+              </Tooltip>
             </Descriptions.Item>
           ))}
           <Descriptions.Item label="超收规则">

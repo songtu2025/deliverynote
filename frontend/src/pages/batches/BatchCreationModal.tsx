@@ -24,6 +24,7 @@ export default function BatchCreationModal({
     creation;
   return (
     <Modal
+      className={workflow === "delivery" ? "delivery-batch-creation-modal" : undefined}
       title={workflow === "self_operated_inbound" ? "新建自营仓入库批次" : "新建交货批次"}
       open={creating}
       onCancel={closeCreate}
@@ -35,10 +36,17 @@ export default function BatchCreationModal({
       }}
     >
       <Form name={`batch-create-${workflow}`} form={form} layout="vertical">
-        <Form.Item label="批次名称" name="name" rules={[{ required: true, message: "请输入批次名称" }]}>
+        <Form.Item
+          label="批次名称"
+          name="name"
+          rules={[{ required: true, message: "请输入批次名称" }]}
+          extra={workflow === "delivery" ? "默认包含北京时间，精确到秒；可按需修改。" : undefined}
+        >
           <Input
             placeholder={
-              workflow === "self_operated_inbound" ? "例如：2026-08-21 自营仓入库批次" : "例如：2026-07-21 交货批次"
+              workflow === "self_operated_inbound"
+                ? "例如：2026-08-21 自营仓入库批次"
+                : "例如：2026-10-08 交货批次 14:26:35"
             }
           />
         </Form.Item>

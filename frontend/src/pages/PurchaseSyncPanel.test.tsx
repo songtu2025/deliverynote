@@ -119,6 +119,27 @@ describe("PurchaseSyncPanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps warnings visible in the compact summary and expands inspection controls", async () => {
+    render(
+      <PurchaseSyncPanel
+        compact
+        versions={[activeVersion, candidateVersion]}
+        canActivate={false}
+        refreshVersions={vi.fn(async () => [activeVersion, candidateVersion])}
+      />,
+      { wrapper: AntApp }
+    );
+    expect(await screen.findByText("含 1 条“共享”站点数据，请展开复核")).toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: "查看同步详情" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: /预览候选数据/ })).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "收起同步详情" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("包含 1 条“共享”站点数据")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /预览候选数据/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "启用最新数据" })).not.toBeInTheDocument();
+  });
+
   it("lets operators preview candidate data and issues without activating the candidate", async () => {
     render(
       <PurchaseSyncPanel

@@ -1,0 +1,266 @@
+.delivery-batch-detail {
+  --detail-muted: #53605d;
+  min-width: 0;
+  color: var(--dn-ink);
+}
+
+.delivery-batch-detail .delivery-batch-task {
+  margin-bottom: 16px;
+  padding: 16px 20px 0;
+  border: 1px solid var(--dn-border);
+  border-radius: 8px;
+  background: var(--dn-surface);
+}
+
+.delivery-batch-detail .batch-heading {
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.delivery-batch-detail .batch-heading > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.delivery-batch-detail .batch-title-row {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.delivery-batch-detail .batch-title-row h2 {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.delivery-batch-detail .batch-title-row .ant-tag {
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.delivery-batch-detail .batch-heading .ant-typography-secondary,
+.delivery-batch-detail .stage-actions-copy span {
+  color: var(--detail-muted);
+  font-size: 12px;
+}
+
+.delivery-batch-detail .batch-primary-actions {
+  flex: 0 1 auto;
+  max-width: 50%;
+}
+
+.delivery-batch-detail .workflow-surface {
+  margin-bottom: 12px;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--dn-border);
+  border-radius: 0;
+}
+
+.delivery-batch-detail .workflow-surface .ant-steps-item-content {
+  color: var(--detail-muted) !important;
+  font-size: 12px;
+}
+
+.delivery-batch-detail .workflow-surface .ant-steps-item-wait .ant-steps-item-title,
+.delivery-batch-detail .workflow-surface .ant-steps-item-wait .ant-steps-item-icon-number {
+  color: var(--detail-muted);
+}
+
+.delivery-batch-detail .pending-value,
+.delivery-batch-detail .summary-metric.pending strong {
+  color: #8a4b00;
+}
+
+.delivery-batch-detail .stage-actions {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.delivery-batch-detail .stage-actions:has(> .ant-btn) {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.delivery-batch-detail .stage-actions-copy strong {
+  font-size: 15px;
+}
+
+.delivery-batch-detail .stage-actions-export {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.delivery-batch-detail .summary-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(240px, 1.4fr);
+  margin: 0 -20px;
+  border: 0;
+  border-top: 1px solid var(--dn-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.delivery-batch-detail .summary-metric,
+.delivery-batch-detail .summary-equation {
+  min-width: 0;
+  min-height: 68px;
+  padding: 10px 20px;
+  border-top: 0;
+}
+
+.delivery-batch-detail .summary-metric span,
+.delivery-batch-detail .summary-equation span {
+  margin-bottom: 4px;
+  color: var(--detail-muted);
+  font-size: 12px;
+}
+
+.delivery-batch-detail .summary-metric strong,
+.delivery-batch-detail .summary-equation strong {
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.delivery-batch-detail .summary-pending strong {
+  color: var(--detail-muted) !important;
+}
+
+.delivery-batch-detail .file-order-card,
+.delivery-batch-detail .locked-data-card {
+  margin-bottom: 16px;
+  border-radius: 8px;
+}
+
+.delivery-batch-detail .file-order-card .ant-card-body,
+.delivery-batch-detail .locked-data-card .ant-card-body {
+  padding-inline: 16px;
+}
+
+.delivery-batch-detail .file-order-card .ant-table-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.delivery-batch-detail .file-order-card .ant-table-thead > tr > th {
+  color: var(--detail-muted);
+}
+
+.delivery-batch-detail .file-order-card .inline-alert {
+  margin-bottom: 8px;
+  padding-block: 8px;
+}
+
+.delivery-batch-detail .file-order-card .muted,
+.delivery-batch-detail .locked-overreceipt-rule small,
+.delivery-batch-detail .locked-data-card .ant-descriptions-item-label {
+  color: var(--detail-muted);
+}
+
+.delivery-batch-detail .locked-data-card .ant-descriptions-item-label {
+  padding-bottom: 2px;
+  font-size: 12px;
+}
+
+.delivery-batch-detail .locked-overreceipt-rule small {
+  font-size: 12px;
+}
+
+.delivery-batch-detail .locked-data-card .ant-descriptions-item-content {
+  min-width: 0;
+  padding-bottom: 8px;
+  font-size: 13px;
+}
+
+.delivery-batch-detail .locked-version-name,
+.delivery-batch-detail .locked-overreceipt-rule {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+@media (max-width: 900px) {
+  .delivery-batch-detail .batch-heading {
+    align-items: stretch;
+  }
+  .delivery-batch-detail .batch-primary-actions {
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+  .delivery-batch-detail .workflow-surface {
+    overflow-x: auto;
+    padding-bottom: 12px;
+  }
+  .delivery-batch-detail .stage-actions,
+  .delivery-batch-detail .stage-actions:has(> .ant-btn) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .delivery-batch-detail .stage-actions > .ant-btn {
+    width: auto;
+    justify-self: start;
+  }
+  .delivery-batch-detail .summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .delivery-batch-detail .summary-equation {
+    grid-column: 1 / -1;
+    min-height: 52px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px 16px;
+    border-left: 0;
+    border-top: 1px solid var(--dn-border);
+  }
+  .delivery-batch-detail .summary-equation span {
+    margin: 0;
+  }
+  .delivery-batch-detail .locked-data-card .ant-card-head-wrapper {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .delivery-batch-detail .delivery-batch-task {
+    padding-inline: 12px;
+  }
+  .delivery-batch-detail .batch-title-row h2 {
+    font-size: 22px;
+  }
+  .delivery-batch-detail .summary-strip {
+    margin-inline: -12px;
+  }
+  .delivery-batch-detail .summary-metric,
+  .delivery-batch-detail .summary-equation {
+    padding-inline: 12px;
+  }
+  .delivery-batch-detail .summary-metric {
+    border-top: 0;
+    border-left: 1px solid var(--dn-border);
+  }
+  .delivery-batch-detail .summary-metric:first-child {
+    border-left: 0;
+  }
+  .delivery-batch-detail .summary-metric strong,
+  .delivery-batch-detail .summary-equation strong {
+    font-size: 20px;
+  }
+  .delivery-batch-detail .file-order-card .ant-card-head {
+    padding-inline: 16px;
+  }
+  .delivery-batch-detail .file-order-card .ant-card-extra {
+    padding-bottom: 8px;
+  }
+  .delivery-batch-detail .locked-data-card .ant-card-extra {
+    margin-inline-start: 0;
+  }
+}

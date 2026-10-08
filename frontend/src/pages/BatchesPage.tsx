@@ -53,10 +53,11 @@ export default function BatchesPage({
   const activeOverreceiptRule = overreceiptRules.find((rule) => rule.active);
   const activeSelfOperatedRule = selfOperatedRules.find((rule) => rule.active);
   const ready = missingKinds.length === 0;
+  const pageClassName = `page-shell batch-list-page${workflow === "delivery" ? " delivery-batch-list-page" : ""}`;
   if (loading && !initialized) {
     return (
       <div
-        className="page-shell batch-list-page"
+        className={pageClassName}
         aria-busy="true"
         aria-label={workflow === "self_operated_inbound" ? "正在加载自营仓入库" : "正在加载交货批次"}
       >
@@ -66,7 +67,7 @@ export default function BatchesPage({
     );
   }
   return (
-    <div className="page-shell batch-list-page">
+    <div className={pageClassName}>
       <div className="page-heading">
         <div>
           <Typography.Title level={2}>
