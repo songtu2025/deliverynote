@@ -157,15 +157,6 @@ describe("BatchDetailWorkbench", () => {
 
   it("shows a running export and prevents another generation request", async () => {
     state.batch.jobs = { export: fixtureJob({ kind: "export" }) };
-    const originalFetch = fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).endsWith("/api/jobs/88")
-          ? Promise.resolve(jsonResponse(state.batch.jobs.export))
-          : originalFetch(input, init)
-      )
-    );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("button", { name: /生成导出/ })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("正在生成结果");

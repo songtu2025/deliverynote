@@ -93,6 +93,7 @@ export function setupBatchDetailTest() {
           return jsonResponse(state.batch);
         }
         if (url.endsWith("/api/batches/7")) return jsonResponse(state.batch);
+        if (url.endsWith("/api/jobs/88")) return jsonResponse(state.batch.jobs.compute ?? state.batch.jobs.export);
         const splitMatch = url.match(/\/api\/exceptions\/(\d+)\/split$/);
         if (splitMatch && init?.method === "PUT") {
           const exceptionId = Number(splitMatch[1]);

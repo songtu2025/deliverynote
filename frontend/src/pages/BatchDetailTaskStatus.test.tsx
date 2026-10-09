@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { fixtureJob } from "./batch-detail/detailFixtures";
-import { jsonResponse } from "./admin/positionDraftTestSupport";
+import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
 describe("交货批次任务状态条", () => {
   const { state } = setupBatchDetailTest();
@@ -15,15 +15,6 @@ describe("交货批次任务状态条", () => {
     ["export", "running", "正在生成结果", true]
   ] as const)("刷新后恢复 %s/%s 的真实状态", async (kind, status, title, spinning) => {
     state.batch.jobs = { [kind]: fixtureJob({ kind, status }) };
-    const originalFetch = fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).endsWith("/api/jobs/88")
-          ? Promise.resolve(jsonResponse(state.batch.jobs[kind]))
-          : originalFetch(input, init)
-      )
-    );
     const { container, unmount } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("status")).toHaveTextContent(title);
     expect(Boolean(container.querySelector(".batch-task-spinner"))).toBe(spinning);
@@ -59,22 +50,19 @@ describe("交货批次任务状态条", () => {
   });
 
   it("统计加载前和加载失败时不显示虚假的零条未完成", async () => {
-    let finish: (response: Response) => void = () => undefined;
-    const pending = new Promise<Response>((resolve) => {
-      finish = resolve;
-    });
+    const pending = deferred<Response>();
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).includes("/exceptions?") ? pending : originalFetch(input, init)
+        String(input).includes("/exceptions?") ? pending.promise : originalFetch(input, init)
       )
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
     expect(task.getByText("正在读取审校统计…")).toBeInTheDocument();
     expect(task.queryByText(/0 条未完成/)).not.toBeInTheDocument();
-    finish(new Response(JSON.stringify({ detail: "统计读取失败" }), { status: 500 }));
+    pending.resolve(new Response(JSON.stringify({ detail: "统计读取失败" }), { status: 500 }));
     expect(await screen.findByText("统计读取失败")).toBeInTheDocument();
     expect(task.getByText("审校统计暂不可用，请重试读取批次。")).toBeInTheDocument();
     expect(task.queryByText(/0 条未完成/)).not.toBeInTheDocument();
@@ -91,21 +79,18 @@ describe("交货批次任务状态条", () => {
 
   it("计算任务完成后更新审校状态并停止加载标记", async () => {
     state.batch.jobs = { compute: fixtureJob() };
-    let finish: (response: Response) => void = () => undefined;
-    const pending = new Promise<Response>((resolve) => {
-      finish = resolve;
-    });
+    const pending = deferred<Response>();
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
       vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).endsWith("/api/jobs/88") ? pending : originalFetch(input, init)
+        String(input).endsWith("/api/jobs/88") ? pending.promise : originalFetch(input, init)
       )
     );
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("status")).toHaveTextContent("正在计算");
     state.batch.jobs = { compute: fixtureJob({ status: "succeeded" }) };
-    finish(jsonResponse(state.batch.jobs.compute));
+    pending.resolve(jsonResponse(state.batch.jobs.compute));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("等待人工审校"));
     expect(container.querySelector(".batch-task-spinner")).not.toBeInTheDocument();
   });
