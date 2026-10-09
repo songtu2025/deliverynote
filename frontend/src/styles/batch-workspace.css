@@ -61,6 +61,12 @@
   color: #176b5b;
   font-weight: 650;
 }
+.delivery-batch-list-page .batch-result-availability {
+  display: block;
+  margin-top: 3px;
+  color: var(--dn-muted);
+  font-size: 12px;
+}
 
 .locked-version-preview {
   border-top: 1px solid #e5ebe9;

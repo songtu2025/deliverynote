@@ -111,12 +111,18 @@ export default function BatchListTable({
         {
           title: "下一步",
           width: delivery ? 120 : 170,
-          render: (_, batch) => (
-            <div className="batch-table-value">
-              <span className="batch-cell-label">下一步</span>
-              <span className="next-action">{nextAction(batch)}</span>
-            </div>
-          )
+          render: (_, batch) => {
+            const action = nextAction(batch, workflow);
+            return (
+              <div className="batch-table-value">
+                <span className="batch-cell-label">下一步</span>
+                <span className="next-action">{action}</span>
+                {delivery && batch.download_ready && action === "查看待处理" && (
+                  <span className="batch-result-availability">结果可下载</span>
+                )}
+              </div>
+            );
+          }
         },
         {
           title: "更新时间",
