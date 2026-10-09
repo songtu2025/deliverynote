@@ -42,33 +42,9 @@
   margin-top: 5px;
 }
 
-.delivery-batch-detail .batch-heading .ant-typography-secondary,
-.delivery-batch-detail .stage-actions-copy span {
+.delivery-batch-detail .batch-heading .ant-typography-secondary {
   color: var(--detail-muted);
   font-size: 12px;
-}
-
-.delivery-batch-detail .batch-primary-actions {
-  flex: 0 1 auto;
-  max-width: 50%;
-}
-
-.delivery-batch-detail .workflow-surface {
-  margin-bottom: 12px;
-  padding: 0 0 12px;
-  border: 0;
-  border-bottom: 1px solid var(--dn-border);
-  border-radius: 0;
-}
-
-.delivery-batch-detail .workflow-surface .ant-steps-item-content {
-  color: var(--detail-muted) !important;
-  font-size: 12px;
-}
-
-.delivery-batch-detail .workflow-surface .ant-steps-item-wait .ant-steps-item-title,
-.delivery-batch-detail .workflow-surface .ant-steps-item-wait .ant-steps-item-icon-number {
-  color: var(--detail-muted);
 }
 
 .delivery-batch-detail .pending-value,
@@ -76,26 +52,80 @@
   color: #8a4b00;
 }
 
-.delivery-batch-detail .stage-actions {
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 16px;
+.delivery-batch-detail .batch-task-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 8px 24px;
   margin-bottom: 12px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
 }
-
-.delivery-batch-detail .stage-actions:has(> .ant-btn) {
-  grid-template-columns: minmax(0, 1fr) auto auto;
+.delivery-batch-detail .batch-task-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  transition: color 180ms ease-out;
 }
-
-.delivery-batch-detail .stage-actions-copy strong {
-  font-size: 15px;
+.delivery-batch-detail .batch-task-copy > .anticon {
+  margin-top: 3px;
+  font-size: 18px;
 }
-
+.delivery-batch-detail .batch-task-copy strong,
+.delivery-batch-detail .batch-task-copy span:not(.anticon) {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.delivery-batch-detail .batch-task-copy strong {
+  font-size: 16px;
+  line-height: 24px;
+}
+.delivery-batch-detail .batch-task-copy span:not(.anticon),
+.delivery-batch-detail .batch-task-result {
+  color: var(--detail-muted);
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.delivery-batch-detail .batch-task-review {
+  color: #8a4b00;
+}
+.delivery-batch-detail .batch-task-ready,
+.delivery-batch-detail .batch-task-running {
+  color: var(--dn-primary);
+}
+.delivery-batch-detail .batch-task-error {
+  color: #b42318;
+}
+.delivery-batch-detail .batch-task-actions,
+.delivery-batch-detail .batch-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.delivery-batch-detail .batch-task-actions .batch-primary-actions:empty {
+  display: none;
+}
 .delivery-batch-detail .stage-actions-export {
   padding-left: 0;
   border-left: 0;
+}
+.delivery-batch-detail .batch-task-result {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .delivery-batch-detail .batch-task-copy {
+    transition: none;
+  }
+  .delivery-batch-detail .batch-task-spinner {
+    animation: none;
+  }
 }
 
 .delivery-batch-detail .summary-strip {
@@ -189,21 +219,12 @@
   .delivery-batch-detail .batch-heading {
     align-items: stretch;
   }
-  .delivery-batch-detail .batch-primary-actions {
-    max-width: 100%;
-    justify-content: flex-start;
-  }
-  .delivery-batch-detail .workflow-surface {
-    overflow-x: auto;
-    padding-bottom: 12px;
-  }
-  .delivery-batch-detail .stage-actions,
-  .delivery-batch-detail .stage-actions:has(> .ant-btn) {
+  .delivery-batch-detail .batch-task-bar {
     grid-template-columns: minmax(0, 1fr);
   }
-  .delivery-batch-detail .stage-actions > .ant-btn {
-    width: auto;
-    justify-self: start;
+  .delivery-batch-detail .batch-task-actions,
+  .delivery-batch-detail .batch-result-actions {
+    justify-content: flex-start;
   }
   .delivery-batch-detail .summary-strip {
     grid-template-columns: repeat(3, minmax(0, 1fr));

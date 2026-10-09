@@ -22,12 +22,8 @@ export default function BatchExportActions({
   const { downloadResult, startExport } = tasks;
   const delivery = batch.workflow !== "self_operated_inbound";
   const { stageTitle, stageDescription } = exportStageCopy(batch);
-  return (
-    <section className="stage-actions" aria-labelledby="current-stage-title">
-      <div className="stage-actions-copy">
-        <strong id="current-stage-title">{stageTitle}</strong>
-        <span>{stageDescription}</span>
-      </div>
+  const controls = (
+    <>
       {needsReview && (
         <Button aria-label="处理异常" type="primary" size={delivery ? "middle" : "large"} onClick={focusReview}>
           处理异常
@@ -48,30 +44,25 @@ export default function BatchExportActions({
           )}
         </div>
       </div>
+    </>
+  );
+  if (delivery) return <div className="batch-result-actions">{controls}</div>;
+  return (
+    <section className="stage-actions" aria-labelledby="current-stage-title">
+      <div className="stage-actions-copy">
+        <strong id="current-stage-title">{stageTitle}</strong>
+        <span>{stageDescription}</span>
+      </div>
+      {controls}
     </section>
   );
 }
 
 function exportStageCopy(batch: Batch) {
-  const { totals, needsReview, needsMergedGeneration } = batchPresentation(batch);
-  const resultReady = batch.download_ready && !needsMergedGeneration;
-  if (batch.workflow === "self_operated_inbound") {
-    return {
-      stageTitle: needsReview ? `待处理 ${totals.manual_total} 件` : "结果可下载",
-      stageDescription: needsReview ? "处理完成后生成最终结果。" : "可生成或下载结果文件。"
-    };
-  }
-  if (needsReview) {
-    return {
-      stageTitle: `待处理 ${totals.manual_total} 件`,
-      stageDescription: resultReady
-        ? "现有结果仍可下载；审校保存后按提示重新生成。"
-        : "可生成当前结果；审校保存后按提示重新生成。"
-    };
-  }
+  const { totals, needsReview } = batchPresentation(batch);
   return {
-    stageTitle: resultReady ? "结果可下载" : "需要生成结果",
-    stageDescription: "可生成或下载结果文件。"
+    stageTitle: needsReview ? `待处理 ${totals.manual_total} 件` : "结果可下载",
+    stageDescription: needsReview ? "处理完成后生成最终结果。" : "可生成或下载结果文件。"
   };
 }
 

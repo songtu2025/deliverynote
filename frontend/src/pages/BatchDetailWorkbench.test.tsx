@@ -24,7 +24,8 @@ describe("BatchDetailWorkbench", () => {
     expect(within(task).queryByRole("button", { name: /执行预检/ }) !== null).toBe(preflight);
     expect(within(task).queryByRole("button", { name: /启动计算|重新计算/ }) !== null).toBe(compute);
     expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(preflight || compute);
-    expect(within(task).getByRole("group", { name: "批次处理流程" })).toBeInTheDocument();
+    expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
+    expect(within(task).queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
     if (status !== "succeeded") expect(within(task).getByText("尚未计算")).toBeInTheDocument();
   });
 
@@ -45,6 +46,8 @@ describe("BatchDetailWorkbench", () => {
     expect(container.querySelector(".delivery-batch-detail")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "当前批次任务" })).not.toBeInTheDocument();
     expect(screen.getByText("质检合格总量")).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "批次处理流程" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "批次任务状态" })).not.toBeInTheDocument();
   });
 
   it("keeps locked versions expanded and supports the existing toggle", async () => {
@@ -98,22 +101,26 @@ describe("BatchDetailWorkbench", () => {
     state.batch.download_ready = true;
     state.batch.merged_download_ready = true;
     state.batch.files = state.batch.files.map((file) => ({ ...file, download_ready: true }));
+    state.exceptions = pending ? [state.exceptions[0]] : [];
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByText(state.batch.name);
     const task = within(screen.getByRole("region", { name: "当前批次任务" }));
     expect(task.getByRole("button", { name: /下载合并结果/ })).toBeEnabled();
     expect(task.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
     if (pending) {
-      expect(screen.getByText("现有结果仍可下载；审校保存后按提示重新生成。")).toBeInTheDocument();
+      expect(await task.findByText("1 条未完成 · 待处理 60 件")).toBeInTheDocument();
+      expect(task.getByText("等待人工审校")).toBeInTheDocument();
       const scroll = vi.fn();
       Object.defineProperty(container.querySelector(".review-section-anchor"), "scrollIntoView", { value: scroll });
       fireEvent.click(task.getByRole("button", { name: "处理异常" }));
       expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
       expect(document.activeElement).toHaveClass("review-section-anchor");
     } else {
-      expect(screen.getByText("结果可下载")).toBeInTheDocument();
+      expect(await task.findByText("审校已完成")).toBeInTheDocument();
       expect(task.queryByRole("button", { name: "处理异常" })).not.toBeInTheDocument();
     }
+    expect(task.getByText("当前结果文件已生成，可下载")).toBeInTheDocument();
+    expect(container.querySelector(".batch-task-spinner")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -136,8 +143,12 @@ describe("BatchDetailWorkbench", () => {
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const button = await screen.findByRole("button", { name: new RegExp(label) });
-    expect(screen.getByText("需要生成结果")).toBeInTheDocument();
-    expect(screen.queryByText("结果可下载")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        stale ? "审校已更新，需要重新生成结果" : ready ? "单文件结果已生成，需要生成合并结果" : "需要生成结果"
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText("当前结果文件已生成，可下载")).not.toBeInTheDocument();
     fireEvent.click(button);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith("/api/batches/7/export", expect.objectContaining({ method: "POST" }))
@@ -157,7 +168,7 @@ describe("BatchDetailWorkbench", () => {
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("button", { name: /生成导出/ })).toBeDisabled();
-    expect(screen.getByRole("status")).toHaveTextContent("正在导出");
+    expect(screen.getByRole("status")).toHaveTextContent("正在生成结果");
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });

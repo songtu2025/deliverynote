@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Alert, Button, Card } from "antd";
 import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
 import BatchOverview from "./batch-detail/BatchOverview";
-import BatchExportActions from "./batch-detail/BatchExportActions";
 import BatchSummary from "./batch-detail/BatchSummary";
 import BatchLockedVersions from "./batch-detail/BatchLockedVersions";
 import { batchPresentation } from "./batch-detail/batchPresentation";
@@ -15,6 +14,7 @@ import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
 import ExceptionReviewDrawer from "./batch-detail/ExceptionReviewDrawer";
 import { useExceptionEditor } from "./batch-detail/useExceptionEditor";
 import { useBatchDetailData } from "./batch-detail/useBatchDetailData";
+import type { BatchDetailData } from "./batch-detail/useBatchDetailData";
 import { useBatchJob } from "./batch-detail/useBatchJob";
 import { useBatchTasks } from "./batch-detail/useBatchTasks";
 
@@ -90,16 +90,10 @@ export default function BatchDetail({
         fileActions={fileActions}
         tasks={tasks}
         onBack={onBack}
+        focusReview={focusReview}
+        reviewStats={availableReviewStats(data)}
+        reviewError={Boolean(loadError)}
       />
-      {computed && (
-        <BatchExportActions
-          batch={batch}
-          activeJob={activeJob}
-          action={action}
-          tasks={tasks}
-          focusReview={focusReview}
-        />
-      )}
 
       {batch.error_message && (
         <Alert type="error" showIcon title="任务执行失败" description={batch.error_message} className="section-card" />
@@ -143,6 +137,10 @@ export default function BatchDetail({
       <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
     </BatchWorkbench>
   );
+}
+
+function availableReviewStats(data: BatchDetailData) {
+  return data.review.exceptionsLoading || data.loadError ? undefined : data.review.reviewStats;
 }
 
 function BatchWorkbench({
