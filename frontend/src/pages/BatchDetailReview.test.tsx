@@ -12,9 +12,10 @@ describe("BatchDetailReview", () => {
 
     await screen.findByText("160 = 100 + 60");
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
-    expect(screen.getByText("异常审校").closest(".ant-steps-item")).toHaveClass("ant-steps-item-process");
+    const task = within(screen.getByRole("region", { name: "批次任务状态" }));
+    expect(await task.findByText("等待人工审校")).toBeInTheDocument();
     expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
-    expect(screen.getByText("待处理 60 件")).toBeInTheDocument();
+    expect(task.getByText("4 条未完成 · 待处理 107 件")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "处理异常" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
