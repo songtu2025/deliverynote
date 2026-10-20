@@ -5,7 +5,7 @@ from .models import _require_columns
 
 
 def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
-    """把交货单明细转换为 SKU、原始站点、交货量。"""
+    """把首个合计行之前的交货明细转换为 SKU、原始站点、交货量。"""
     columns = ["积加SKU", "数量", "站点"]
     _require_columns(sheet, set(columns), "交货单明细表")
     data = sheet[columns].reset_index(drop=True)
@@ -13,8 +13,6 @@ def normalize_delivery_sheet(sheet: pd.DataFrame) -> pd.DataFrame:
     footer = sku.isin({"合计", "总计", "Grand Total"})
     if footer.any():
         footer_index = int(footer.to_numpy().argmax())
-        if data.iloc[footer_index + 1 :][["数量", "站点"]].notna().any().any():
-            raise ValueError("交货单明细表合计行之后仍有交货数据")
         data = data.iloc[:footer_index].copy()
         sku = sku.iloc[:footer_index]
 

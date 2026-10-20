@@ -29,7 +29,7 @@ class DeliveryNormalizationTests(unittest.TestCase):
 
     def test_normalize_detail_rejects_incomplete_row(self):
         sheet = pd.DataFrame(
-            [["SKU-A", 12, "US站"], ["SKU-B", None, "US站"]],
+            [["SKU-A", 12, "US站"], ["SKU-B", None, "US站"], ["合计", None, None]],
             columns=["积加SKU", "数量", "站点"],
         )
 
@@ -38,9 +38,44 @@ class DeliveryNormalizationTests(unittest.TestCase):
 
     def test_normalize_detail_rejects_fractional_quantity(self):
         sheet = pd.DataFrame(
-            [["SKU-A", 1.5, "US站"]],
+            [["SKU-A", 1.5, "US站"], ["合计", None, None]],
             columns=["积加SKU", "数量", "站点"],
         )
 
         with self.assertRaisesRegex(ValueError, "第 5 行"):
             normalize_delivery_sheet(sheet)
+
+    def test_normalize_detail_ignores_everything_after_first_total(self):
+        for marker in ("合计", "总计", "Grand Total"):
+            with self.subTest(marker=marker):
+                sheet = pd.DataFrame(
+                    [
+                        ["SKU-A", 12, "US站"],
+                        [marker, 12, None],
+                        ["次品问题描述", "标签错码", "质检附加信息"],
+                        ["次品问题对应数量", 4, None],
+                        ["SKU-B", 999, "CA站"],
+                        ["合计", 999, None],
+                    ],
+                    columns=["积加SKU", "数量", "站点"],
+                )
+
+                result = normalize_delivery_sheet(sheet)
+
+                self.assertEqual(
+                    result.to_dict("records"),
+                    [{"SKU": "SKU-A", "原始站点": "US", "交货量": 12}],
+                )
+
+    def test_normalize_detail_without_total_keeps_all_rows(self):
+        sheet = pd.DataFrame(
+            [["SKU-A", 12, "US站"], ["SKU-A", 5, "US站"]],
+            columns=["积加SKU", "数量", "站点"],
+        )
+
+        result = normalize_delivery_sheet(sheet)
+
+        self.assertEqual(
+            result.to_dict("records"),
+            [{"SKU": "SKU-A", "原始站点": "US", "交货量": 17}],
+        )
