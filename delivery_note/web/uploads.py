@@ -73,7 +73,10 @@ async def _save_upload(
                 if bytes_written > max_bytes:
                     raise HTTPException(
                         status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                        detail=f"上传文件不能超过 {max_bytes} 字节",
+                        detail=(
+                            f"单个文件不能超过 {max_bytes / (1024 * 1024):g} MiB，"
+                            "请缩小文件后重试。"
+                        ),
                     )
                 await run_in_threadpool(output.write, chunk)
         finally:

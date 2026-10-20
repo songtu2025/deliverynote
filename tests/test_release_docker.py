@@ -1,9 +1,11 @@
 from dataclasses import replace
 import json
 import os
+import socket
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
 
 from tests.support.release_docker import ReleaseDockerFixture
 
@@ -58,6 +60,26 @@ class ReleaseDockerTests(unittest.TestCase):
                 error.close()
         self.assertEqual(codes[0], 401)
         self.assertIn(429, codes)
+
+    def test_upload_request_size_boundary(self) -> None:
+        address = urlsplit(self.fixture.url)
+        for extra, expected in ((0, b"100 Continue"), (1, b"413")):
+            with (
+                self.subTest(extra=extra),
+                socket.create_connection(
+                    (address.hostname or "127.0.0.1", address.port or 80), timeout=5
+                ) as connection,
+            ):
+                request = (
+                    "POST /api/echo HTTP/1.1\r\n"
+                    f"Host: {address.netloc}\r\n"
+                    f"Content-Length: {200 * 1024 * 1024 + extra}\r\n"
+                    "Expect: 100-continue\r\n"
+                    "Connection: close\r\n\r\n"
+                )
+                connection.sendall(request.encode())
+                with connection.makefile("rb") as response:
+                    self.assertIn(expected, response.readline())
 
     def test_failed_web_release_restores_old_image_and_proxy(self) -> None:
         from scripts.backup.runtime import BackupError, SubprocessRunner

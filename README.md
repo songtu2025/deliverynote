@@ -93,7 +93,7 @@ ADMIN_PASSWORD=replace-with-a-strong-password
 | `WEB_PORT` | `8080` | Web 在宿主机回环地址上的端口 |
 | `CORS_ORIGINS` | `http://localhost:8080` | 允许访问 API 的 Web 来源 |
 | `SESSION_COOKIE_SECURE` | `false` | 会话 Cookie 是否仅通过 HTTPS 发送；正式 HTTPS 环境应设为 `true` |
-| `MAX_UPLOAD_BYTES` | `20971520` | 单次上传大小上限，单位为字节 |
+| `MAX_UPLOAD_BYTES` | `52428800` | 单文件上限为 50 MiB，配置单位为字节；Nginx 单次请求体上限为 200 MiB（含表单开销） |
 | `MAX_CONCURRENT_UPLOAD_PARSES` | `2` | 单个 API 进程并发解析 Excel 的数量，必须大于 0 |
 | `MAX_BATCH_UPLOAD_FILES` | `50` | 单个交货或自营仓批次最多上传的来源文件数，必须大于 0 |
 | `IMPORT_CANDIDATE_TTL_SECONDS` | `900` | 库位导入预览有效时间 |

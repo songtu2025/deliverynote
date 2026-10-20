@@ -57,6 +57,9 @@ export async function api<T>(path: string, init: RequestInit = {}, options: ApiO
         ? "登录尝试过于频繁，请稍后再试"
         : `请求失败（${response.status}）`;
     let code: string | null = null;
+    if (response.status === 413 && init.body instanceof FormData) {
+      message = "本次上传请求不能超过 200 MiB，请减少文件或分批上传。";
+    }
     try {
       const payload = (await response.json()) as { detail?: unknown; code?: unknown };
       if (typeof payload.detail === "string") {
@@ -66,7 +69,7 @@ export async function api<T>(path: string, init: RequestInit = {}, options: ApiO
         code = payload.code;
       }
     } catch {
-      // Keep the status-based message when the body is not JSON.
+      // 非 JSON 响应沿用状态码对应的提示。
     }
     throw new ApiError(response.status, message, code);
   }

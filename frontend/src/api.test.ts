@@ -84,4 +84,29 @@ describe("browser API authentication", () => {
       code: "draft_revision_conflict"
     } satisfies Partial<ApiError>);
   });
+
+  it("explains the request limit when an upload gateway returns HTML", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<h1>413</h1>", { status: 413 }))
+    );
+
+    await expect(api("/api/batches/with-files", { method: "POST", body: new FormData() })).rejects.toMatchObject({
+      status: 413,
+      message: "本次上传请求不能超过 200 MiB，请减少文件或分批上传。"
+    });
+    await expect(api("/api/example", { method: "POST" })).rejects.toThrow("请求失败（413）");
+  });
+
+  it.each(["单个文件不能超过 50 MiB，请缩小文件后重试。", "单批次最多上传 50 份交货文件"])(
+    "preserves the specific upload rejection: %s",
+    async (detail) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(JSON.stringify({ detail }), { status: 413 }))
+      );
+
+      await expect(api("/api/batches/with-files", { method: "POST", body: new FormData() })).rejects.toThrow(detail);
+    }
+  );
 });
