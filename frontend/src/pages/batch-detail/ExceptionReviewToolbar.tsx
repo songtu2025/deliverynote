@@ -8,7 +8,15 @@ function filterOptions(values: string[]) {
     .map((value) => ({ value, label: value }));
 }
 
-export default function ExceptionReviewToolbar({ review, onReset }: { review: ExceptionReview; onReset: () => void }) {
+export default function ExceptionReviewToolbar({
+  selfOperated,
+  review,
+  onReset
+}: {
+  selfOperated: boolean;
+  review: ExceptionReview;
+  onReset: () => void;
+}) {
   const {
     reviewStats,
     reviewScope,
@@ -78,7 +86,7 @@ export default function ExceptionReviewToolbar({ review, onReset }: { review: Ex
           </button>
         </div>
       </section>
-      <div className="table-toolbar exception-toolbar">
+      <div className={`table-toolbar exception-toolbar${selfOperated ? " exception-toolbar--inbound" : ""}`}>
         <div className="exception-filter-field exception-search-field">
           <label htmlFor="exception-search">搜索</label>
           <Input
@@ -86,7 +94,7 @@ export default function ExceptionReviewToolbar({ review, onReset }: { review: Ex
             aria-label="搜索待处理记录"
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="搜索来源、SKU、站点或目的仓"
+            placeholder={selfOperated ? "搜索来源、SKU、站点或入库仓" : "搜索来源、SKU、站点或目的仓"}
             value={query}
             onChange={(event) => {
               changeQuery(event.target.value);
@@ -111,40 +119,44 @@ export default function ExceptionReviewToolbar({ review, onReset }: { review: Ex
             }}
           />
         </div>
-        <div className="exception-filter-field">
-          <label htmlFor="exception-scale-filter">规模定位</label>
-          <Select
-            id="exception-scale-filter"
-            aria-label="规模定位筛选"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            placeholder="全部规模定位"
-            options={scaleOptions}
-            value={scaleFilter}
-            onChange={(value) => {
-              changeFilter("scale", value);
-              onReset();
-            }}
-          />
-        </div>
-        <div className="exception-filter-field">
-          <label htmlFor="exception-stocking-filter">备货定位</label>
-          <Select
-            id="exception-stocking-filter"
-            aria-label="备货定位筛选"
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            placeholder="全部备货定位"
-            options={stockingOptions}
-            value={stockingFilter}
-            onChange={(value) => {
-              changeFilter("stocking", value);
-              onReset();
-            }}
-          />
-        </div>
+        {!selfOperated && (
+          <>
+            <div className="exception-filter-field">
+              <label htmlFor="exception-scale-filter">规模定位</label>
+              <Select
+                id="exception-scale-filter"
+                aria-label="规模定位筛选"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="全部规模定位"
+                options={scaleOptions}
+                value={scaleFilter}
+                onChange={(value) => {
+                  changeFilter("scale", value);
+                  onReset();
+                }}
+              />
+            </div>
+            <div className="exception-filter-field">
+              <label htmlFor="exception-stocking-filter">备货定位</label>
+              <Select
+                id="exception-stocking-filter"
+                aria-label="备货定位筛选"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="全部备货定位"
+                options={stockingOptions}
+                value={stockingFilter}
+                onChange={(value) => {
+                  changeFilter("stocking", value);
+                  onReset();
+                }}
+              />
+            </div>
+          </>
+        )}
         <div className="exception-filter-field">
           <label htmlFor="exception-reason-filter">原因</label>
           <Select

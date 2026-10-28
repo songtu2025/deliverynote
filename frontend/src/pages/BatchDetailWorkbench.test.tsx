@@ -19,7 +19,7 @@ describe("BatchDetailWorkbench", () => {
     state.batch.status = status;
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByText(state.batch.name);
-    expect(container.querySelector(".delivery-batch-detail")).toBeInTheDocument();
+    expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     const task = screen.getByRole("region", { name: "当前批次任务" });
     expect(within(task).queryByRole("button", { name: /执行预检/ }) !== null).toBe(preflight);
     expect(within(task).queryByRole("button", { name: /启动计算|重新计算/ }) !== null).toBe(compute);
@@ -39,15 +39,15 @@ describe("BatchDetailWorkbench", () => {
     expect(screen.getByText("请先上传一个或多个交货 Excel")).toBeInTheDocument();
   });
 
-  it("leaves the self-operated workbench outside delivery styling", async () => {
+  it("shares the compact workbench with self-operated batches", async () => {
     state.batch.workflow = "self_operated_inbound";
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByText(state.batch.name);
-    expect(container.querySelector(".delivery-batch-detail")).not.toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "当前批次任务" })).not.toBeInTheDocument();
+    expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "当前批次任务" })).toBeInTheDocument();
     expect(screen.getByText("质检合格总量")).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "批次处理流程" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "批次任务状态" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
   });
 
   it("keeps locked versions expanded and supports the existing toggle", async () => {

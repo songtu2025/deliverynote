@@ -190,3 +190,12 @@
   color: #334a44;
   overflow-wrap: anywhere;
 }
+
+.exception-toolbar--inbound {
+  grid-template-columns: minmax(200px, 2fr) repeat(2, minmax(140px, 1fr));
+}
+@media (max-width: 900px) {
+  .exception-toolbar--inbound .exception-search-field {
+    grid-column: 1 / -1;
+  }
+}

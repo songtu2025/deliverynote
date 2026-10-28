@@ -9,7 +9,6 @@
   border-color: var(--dn-border);
 }
 .next-action,
-.job-indicator,
 .import-value,
 .conservation-ok,
 .input-data-kind-button .anticon,
@@ -30,22 +29,6 @@
 .audit-action-warning {
   color: var(--dn-warning);
 }
-.workflow-surface .ant-steps-item-process .ant-steps-item-icon {
-  background: var(--dn-primary);
-  border-color: var(--dn-primary);
-}
-.workflow-surface .ant-steps-item-finish .ant-steps-item-icon {
-  border-color: var(--dn-primary);
-}
-.workflow-surface .ant-steps-item-finish .ant-steps-icon,
-.workflow-surface .ant-steps-item-process .ant-steps-item-title,
-.workflow-surface .ant-steps-item-finish .ant-steps-item-title {
-  color: var(--dn-primary);
-}
-.workflow-surface .ant-steps-item-finish .ant-steps-item-tail::after {
-  background-color: var(--dn-primary-border);
-}
-
 .overreceipt-scope-switcher,
 .overreceipt-current-card,
 .overreceipt-history-card,

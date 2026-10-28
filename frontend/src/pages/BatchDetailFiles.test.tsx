@@ -81,7 +81,7 @@ describe("BatchDetailFiles", () => {
 
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("2 份质检单 + 1 份待入库数据")).toBeInTheDocument();
+    expect(await screen.findByText("2 份质检交货单 · 请确认处理顺序后执行预检。")).toBeInTheDocument();
     expect(screen.getByText("序号越小，越先扣减待入库余额和超收额度")).toBeInTheDocument();
     const uploadInput = container.querySelector<HTMLInputElement>('.batch-primary-actions input[type="file"]');
     expect(uploadInput).toHaveAttribute("multiple");

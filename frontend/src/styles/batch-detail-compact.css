@@ -1,0 +1,283 @@
+.batch-detail--compact {
+  --detail-muted: #53605d;
+  min-width: 0;
+  color: var(--dn-ink);
+}
+
+.batch-detail--compact .batch-task-surface {
+  margin-bottom: 16px;
+  padding: 16px 20px 0;
+  border: 1px solid var(--dn-border);
+  border-radius: 8px;
+  background: var(--dn-surface);
+}
+
+.batch-detail--compact .batch-heading {
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.batch-detail--compact .batch-heading > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.batch-detail--compact .batch-title-row {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.batch-detail--compact .batch-title-row h2 {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  letter-spacing: -0.02em;
+}
+
+.batch-detail--compact .batch-title-row .ant-tag {
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.batch-detail--compact .batch-heading .ant-typography-secondary {
+  color: var(--detail-muted);
+  font-size: 12px;
+}
+
+.batch-detail--compact .pending-value,
+.batch-detail--compact .summary-metric.pending strong {
+  color: #8a4b00;
+}
+
+.batch-detail--compact .batch-task-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto;
+  align-items: center;
+  gap: 8px 24px;
+  margin-bottom: 12px;
+}
+.batch-detail--compact .batch-task-copy {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  transition: color 180ms ease-out;
+}
+.batch-detail--compact .batch-task-copy > .anticon {
+  margin-top: 3px;
+  font-size: 18px;
+}
+.batch-detail--compact .batch-task-copy strong,
+.batch-detail--compact .batch-task-copy span:not(.anticon) {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.batch-detail--compact .batch-task-copy strong {
+  font-size: 16px;
+  line-height: 24px;
+}
+.batch-detail--compact .batch-task-copy span:not(.anticon),
+.batch-detail--compact .batch-task-result {
+  color: var(--detail-muted);
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.batch-detail--compact .batch-task-review {
+  color: #8a4b00;
+}
+.batch-detail--compact .batch-task-ready,
+.batch-detail--compact .batch-task-running {
+  color: var(--dn-primary);
+}
+.batch-detail--compact .batch-task-error {
+  color: #b42318;
+}
+.batch-detail--compact .batch-task-actions,
+.batch-detail--compact .batch-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.batch-detail--compact .batch-task-actions .batch-primary-actions:empty {
+  display: none;
+}
+.batch-detail--compact .batch-task-result {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .batch-detail--compact .batch-task-copy {
+    transition: none;
+  }
+  .batch-detail--compact .batch-task-spinner {
+    animation: none;
+  }
+}
+
+.batch-detail--compact .summary-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(240px, 1.4fr);
+  margin: 0 -20px;
+  border: 0;
+  border-top: 1px solid var(--dn-border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.batch-detail--compact .summary-metric,
+.batch-detail--compact .summary-equation {
+  min-width: 0;
+  min-height: 68px;
+  padding: 10px 20px;
+  border-top: 0;
+}
+
+.batch-detail--compact .summary-metric span,
+.batch-detail--compact .summary-equation span {
+  margin-bottom: 4px;
+  color: var(--detail-muted);
+  font-size: 12px;
+}
+
+.batch-detail--compact .summary-metric strong,
+.batch-detail--compact .summary-equation strong {
+  overflow-wrap: anywhere;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.batch-detail--compact .summary-pending strong {
+  color: var(--detail-muted) !important;
+}
+
+.batch-detail--compact .file-order-card,
+.batch-detail--compact .locked-data-card {
+  margin-bottom: 16px;
+  border-radius: 8px;
+}
+
+.batch-detail--compact .file-order-card .ant-card-body,
+.batch-detail--compact .locked-data-card .ant-card-body {
+  padding-inline: 16px;
+}
+
+.batch-detail--compact .file-order-card .ant-table-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.batch-detail--compact .file-order-card .ant-table-thead > tr > th {
+  color: var(--detail-muted);
+}
+
+.batch-detail--compact .file-order-card .inline-alert {
+  margin-bottom: 8px;
+  padding-block: 8px;
+}
+
+.batch-detail--compact .file-order-card .muted,
+.batch-detail--compact .locked-overreceipt-rule small,
+.batch-detail--compact .locked-data-card .ant-descriptions-item-label {
+  color: var(--detail-muted);
+}
+
+.batch-detail--compact .locked-data-card .ant-descriptions-item-label {
+  padding-bottom: 2px;
+  font-size: 12px;
+}
+
+.batch-detail--compact .locked-overreceipt-rule small {
+  font-size: 12px;
+}
+
+.batch-detail--compact .locked-data-card .ant-descriptions-item-content {
+  min-width: 0;
+  padding-bottom: 8px;
+  font-size: 13px;
+}
+
+.batch-detail--compact .locked-version-name,
+.batch-detail--compact .locked-overreceipt-rule {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+@media (max-width: 900px) {
+  .batch-detail--compact .batch-heading {
+    align-items: stretch;
+  }
+  .batch-detail--compact .batch-task-bar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .batch-detail--compact .batch-task-actions,
+  .batch-detail--compact .batch-result-actions {
+    justify-content: flex-start;
+  }
+  .batch-detail--compact .summary-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .batch-detail--compact .summary-equation {
+    grid-column: 1 / -1;
+    min-height: 52px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px 16px;
+    border-left: 0;
+    border-top: 1px solid var(--dn-border);
+  }
+  .batch-detail--compact .summary-equation span {
+    margin: 0;
+  }
+  .batch-detail--compact .locked-data-card .ant-card-head-wrapper {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-block: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .batch-detail--compact .batch-task-surface {
+    padding-inline: 12px;
+  }
+  .batch-detail--compact .batch-title-row h2 {
+    font-size: 22px;
+  }
+  .batch-detail--compact .summary-strip {
+    margin-inline: -12px;
+  }
+  .batch-detail--compact .summary-metric,
+  .batch-detail--compact .summary-equation {
+    padding-inline: 12px;
+  }
+  .batch-detail--compact .summary-metric {
+    border-top: 0;
+    border-left: 1px solid var(--dn-border);
+  }
+  .batch-detail--compact .summary-metric:first-child {
+    border-left: 0;
+  }
+  .batch-detail--compact .summary-metric strong,
+  .batch-detail--compact .summary-equation strong {
+    font-size: 20px;
+  }
+  .batch-detail--compact .file-order-card .ant-card-head {
+    padding-inline: 16px;
+  }
+  .batch-detail--compact .file-order-card .ant-card-extra {
+    padding-bottom: 8px;
+  }
+  .batch-detail--compact .locked-data-card .ant-card-extra {
+    margin-inline-start: 0;
+  }
+}

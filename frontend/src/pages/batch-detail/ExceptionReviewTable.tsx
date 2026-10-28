@@ -13,6 +13,7 @@ import {
 import ExceptionReviewToolbar from "./ExceptionReviewToolbar";
 
 export default function ExceptionReviewTable({
+  selfOperated,
   review,
   fileById,
   hasOverreceiptRule,
@@ -20,6 +21,7 @@ export default function ExceptionReviewTable({
   onReset,
   sectionRef
 }: {
+  selfOperated: boolean;
   review: ExceptionReview;
   fileById: Record<number, BatchFile>;
   hasOverreceiptRule: boolean;
@@ -36,7 +38,7 @@ export default function ExceptionReviewTable({
         className="section-card exception-review-card"
         loading={exceptionsLoading}
       >
-        <ExceptionReviewToolbar review={review} onReset={onReset} />
+        <ExceptionReviewToolbar selfOperated={selfOperated} review={review} onReset={onReset} />
         <Table<DeliveryException>
           rowKey="id"
           dataSource={exceptions}
@@ -51,7 +53,7 @@ export default function ExceptionReviewTable({
                 }
               : false
           }
-          scroll={{ x: 1260 }}
+          scroll={{ x: selfOperated ? 1175 : 1260 }}
           locale={{
             emptyText: (
               <Empty
@@ -89,20 +91,24 @@ export default function ExceptionReviewTable({
                 <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
               )
             },
-            { title: "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
-            {
-              title: "规模定位",
-              dataIndex: "scale_position",
-              width: 85,
-              ellipsis: true,
-              render: (value: string | number, record) => (
-                <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
-                  <span>
-                    <PositionValue value={value} />
-                  </span>
-                </Tooltip>
-              )
-            },
+            { title: selfOperated ? "入库仓" : "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
+            ...(!selfOperated
+              ? [
+                  {
+                    title: "规模定位",
+                    dataIndex: "scale_position",
+                    width: 85,
+                    ellipsis: true,
+                    render: (value: string | number, record: DeliveryException) => (
+                      <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
+                        <span>
+                          <PositionValue value={value} />
+                        </span>
+                      </Tooltip>
+                    )
+                  }
+                ]
+              : []),
             {
               title: "待处理量",
               dataIndex: "manual_quantity",

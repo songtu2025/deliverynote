@@ -50,7 +50,7 @@ export default function ExceptionReviewDrawer({
     >
       {splitTarget && (
         <>
-          <ExceptionSourceSummary splitTarget={splitTarget} fileById={fileById} />
+          <ExceptionSourceSummary selfOperated={selfOperated} splitTarget={splitTarget} fileById={fileById} />
 
           <ReasonGuidance
             exception={splitTarget}
@@ -84,9 +84,11 @@ export default function ExceptionReviewDrawer({
 }
 
 function ExceptionSourceSummary({
+  selfOperated,
   splitTarget,
   fileById
 }: {
+  selfOperated: boolean;
   splitTarget: DeliveryException;
   fileById: Record<number, BatchFile>;
 }) {
@@ -94,13 +96,17 @@ function ExceptionSourceSummary({
     <Descriptions className="split-source" size="small" column={1}>
       <Descriptions.Item label="来源文件">{fileById[splitTarget.batch_file_id]?.original_name}</Descriptions.Item>
       <Descriptions.Item label="站点">{splitTarget.full_site || "—"}</Descriptions.Item>
-      <Descriptions.Item label="目的仓">{splitTarget.destination || "—"}</Descriptions.Item>
-      <Descriptions.Item label="规模定位">
-        <PositionValue value={splitTarget.scale_position} />
-      </Descriptions.Item>
-      <Descriptions.Item label="备货定位">
-        <PositionValue value={splitTarget.stocking_position} />
-      </Descriptions.Item>
+      <Descriptions.Item label={selfOperated ? "入库仓" : "目的仓"}>{splitTarget.destination || "—"}</Descriptions.Item>
+      {!selfOperated && (
+        <>
+          <Descriptions.Item label="规模定位">
+            <PositionValue value={splitTarget.scale_position} />
+          </Descriptions.Item>
+          <Descriptions.Item label="备货定位">
+            <PositionValue value={splitTarget.stocking_position} />
+          </Descriptions.Item>
+        </>
+      )}
       <Descriptions.Item label="异常原因">
         <Tag color="warning">{splitTarget.reason}</Tag>
       </Descriptions.Item>

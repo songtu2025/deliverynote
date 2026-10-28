@@ -100,7 +100,7 @@ describe("BatchDetailGuidance", () => {
 
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("自营仓入库单：自营仓收货入库单.xlsx")).toBeInTheDocument();
+    expect(await screen.findByText("待入库数据（手动上传）：自营仓收货入库单.xlsx")).toBeInTheDocument();
     expect(screen.getByText("每个供应商 + SKU + 站点共享 +5")).toBeInTheDocument();
     const ambiguousRow = screen.getByText("SKU-C").closest("tr");
     const overreceiptRow = screen.getByText("SKU-D").closest("tr");

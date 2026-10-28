@@ -32,7 +32,7 @@ export default function BatchFileTable({
         </span>
       }
     >
-      {selfOperated && <InboundFileStatus inboundFile={batch.inbound_file} />}
+      {selfOperated && <InboundFileStatus batch={batch} />}
       {canEditFiles && files.length > 1 && (
         <Alert
           className="inline-alert"
@@ -91,27 +91,27 @@ function batchFileColumns({
       title: "供应商",
       dataIndex: "supplier_name",
       width: 150,
-      ellipsis: !selfOperated,
+      ellipsis: true,
       render: (value: string) => value || <span className="muted">预检后识别</span>
     },
     {
-      title: "交货",
+      title: selfOperated ? "质检合格" : "交货",
       dataIndex: "delivery_total",
-      align: selfOperated ? undefined : ("right" as const),
+      align: "right" as const,
       width: 90,
       render: (value: number) => (computed ? value : "—")
     },
     {
-      title: "可导入",
+      title: selfOperated ? "可入库" : "可导入",
       dataIndex: "import_total",
-      align: selfOperated ? undefined : ("right" as const),
+      align: "right" as const,
       width: 90,
       render: (value: number) => (computed ? <span className="import-value">{value}</span> : "—")
     },
     {
       title: "待处理",
       dataIndex: "manual_total",
-      align: selfOperated ? undefined : ("right" as const),
+      align: "right" as const,
       width: 100,
       render: (value: number) => (computed ? <span className={value ? "pending-value" : ""}>{value}</span> : "—")
     },
@@ -182,14 +182,24 @@ function batchFileColumns({
   ];
 }
 
-function InboundFileStatus({ inboundFile }: { inboundFile: Batch["inbound_file"] }) {
+function InboundFileStatus({ batch }: { batch: Batch }) {
+  const inboundFile = batch.inbound_file;
+  const apiSource = Boolean(batch.version_ids.self_operated_inbound);
   return (
     <Alert
       className="inline-alert"
       type={inboundFile?.uploaded ? "success" : "warning"}
       showIcon
-      title={inboundFile?.uploaded ? `自营仓入库单：${inboundFile.original_name}` : "尚未上传自营仓入库单"}
-      description="提供交货单、PO、SKU、站点和应收货数据；每个批次一份。"
+      title={
+        inboundFile?.uploaded
+          ? `待入库数据（${apiSource ? "API锁定" : "手动上传"}）：${inboundFile.original_name}`
+          : "待入库数据尚未就绪"
+      }
+      description={
+        apiSource
+          ? "本批次使用锁定的API数据；列表启用新版本不会改变本批次。"
+          : "每个批次使用一份待入库文件，提供交货单、PO、SKU、站点和应收货数据。"
+      }
     />
   );
 }

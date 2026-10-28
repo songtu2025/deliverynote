@@ -19,13 +19,6 @@ export function batchPresentation(batch: Batch) {
   };
 }
 
-export function currentBatchStep(batch: Batch) {
-  const { computed, needsReview } = batchPresentation(batch);
-  if (computed) return needsReview ? 3 : 4;
-  if (batch.status === "queued" || batch.status === "running") return 2;
-  return batch.status === "preflight_ready" ? 1 : 0;
-}
-
 type ReviewStats = Pick<ExceptionReview["reviewStats"], "unfinishedCount" | "unfinishedQuantity">;
 
 export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats) {
@@ -42,12 +35,33 @@ export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats
 }
 
 function preparedTaskPresentation(batch: Batch) {
+  const selfOperated = batch.workflow === "self_operated_inbound";
+  const copy = selfOperated
+    ? {
+        emptyTitle: "等待上传质检交货单",
+        upload: "上传一份或多份质检交货单，按顺序处理。",
+        unit: "份质检交货单",
+        compute: "按当前质检单顺序连续扣减待入库余额和超收额度。"
+      }
+    : {
+        emptyTitle: "等待上传交货文件",
+        upload: "上传一个或多个交货 Excel，按顺序处理。",
+        unit: "个来源文件",
+        compute: "按当前文件顺序连续扣减采购余额。"
+      };
   if (batch.status === "preflight_ready")
-    return { title: "预检通过，可以计算", description: "按当前文件顺序连续扣减采购余额。", tone: "ready", busy: false };
+    return {
+      title: "预检通过，可以计算",
+      description: copy.compute,
+      tone: "ready",
+      busy: false
+    };
+  if (selfOperated && !batch.inbound_file?.uploaded)
+    return { title: "待入库数据尚未就绪", description: "请补齐待入库数据后执行预检。", tone: "waiting", busy: false };
   const count = batch.files?.length ?? 0;
   return {
-    title: count ? "文件已准备，等待预检" : "等待上传交货文件",
-    description: count ? `${count} 个来源文件 · 请确认处理顺序后执行预检。` : "上传一个或多个交货 Excel，按顺序处理。",
+    title: count ? "文件已准备，等待预检" : copy.emptyTitle,
+    description: count ? `${count} ${copy.unit} · 请确认处理顺序后执行预检。` : copy.upload,
     tone: "waiting",
     busy: false
   };

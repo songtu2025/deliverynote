@@ -9,7 +9,8 @@ const VERSION_LABELS: Record<string, string> = {
   supplier: "供应商资料",
   position: "MSKU定位",
   template: "导出模板",
-  inbound_template: "积加入库模板"
+  inbound_template: "积加入库模板",
+  self_operated_inbound: "待入库 API 数据"
 };
 
 export default function BatchLockedVersions({
@@ -26,10 +27,6 @@ export default function BatchLockedVersions({
   refreshSupplierVersion: () => Promise<void>;
 }) {
   const [lockedDataOpen, setLockedDataOpen] = useState(true);
-  const descriptionsLayout =
-    batch.workflow === "self_operated_inbound"
-      ? { layout: "horizontal" as const, column: { xs: 1, sm: 2, lg: 6 } }
-      : { layout: "vertical" as const, column: { xs: 1, sm: 2, lg: 3 } };
   const canAdoptCurrentSupplier = Boolean(
     canRefreshSupplierVersion &&
     batch.status === "draft" &&
@@ -67,7 +64,7 @@ export default function BatchLockedVersions({
       }
     >
       {lockedDataOpen && (
-        <Descriptions size="small" {...descriptionsLayout}>
+        <Descriptions size="small" layout="vertical" column={{ xs: 1, sm: 2, lg: 3 }}>
           {Object.entries(batch.versions ?? {}).map(([kind, version]) => (
             <Descriptions.Item key={kind} label={VERSION_LABELS[kind] ?? kind}>
               <Tooltip title={version.original_name}>

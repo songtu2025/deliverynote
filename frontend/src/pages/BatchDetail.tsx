@@ -104,7 +104,7 @@ export default function BatchDetail({
   );
 
   return (
-    <BatchWorkbench selfOperated={selfOperated} notice={loadFailure} taskContent={taskContent}>
+    <BatchWorkbench notice={loadFailure} taskContent={taskContent}>
       <BatchFileTable
         batch={batch}
         files={files}
@@ -125,6 +125,7 @@ export default function BatchDetail({
 
       {computed && (
         <ExceptionReviewTable
+          selfOperated={selfOperated}
           review={review}
           fileById={fileById}
           hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
@@ -144,26 +145,20 @@ function availableReviewStats(data: BatchDetailData) {
 }
 
 function BatchWorkbench({
-  selfOperated,
   notice,
   taskContent,
   children
 }: {
-  selfOperated: boolean;
   notice: ReactNode;
   taskContent: ReactNode;
   children: ReactNode;
 }) {
   return (
-    <div className={`page-shell batch-workbench${selfOperated ? "" : " delivery-batch-detail"}`}>
+    <div className="page-shell batch-workbench batch-detail--compact">
       {notice}
-      {selfOperated ? (
-        taskContent
-      ) : (
-        <section className="delivery-batch-task" aria-label="当前批次任务">
-          {taskContent}
-        </section>
-      )}
+      <section className="batch-task-surface" aria-label="当前批次任务">
+        {taskContent}
+      </section>
       {children}
     </div>
   );
