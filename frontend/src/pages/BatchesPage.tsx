@@ -53,7 +53,7 @@ export default function BatchesPage({
   const activeOverreceiptRule = overreceiptRules.find((rule) => rule.active);
   const activeSelfOperatedRule = selfOperatedRules.find((rule) => rule.active);
   const ready = missingKinds.length === 0;
-  const pageClassName = `page-shell batch-list-page${workflow === "delivery" ? " delivery-batch-list-page" : ""}`;
+  const pageClassName = "page-shell batch-list-page batch-list-page--compact";
   if (loading && !initialized) {
     return (
       <div

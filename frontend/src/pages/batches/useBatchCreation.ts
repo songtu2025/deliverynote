@@ -10,7 +10,7 @@ function todayBatchName(workflow: "delivery" | "self_operated_inbound"): string 
   const parts = beijingDateTimeParts();
   const suffix = workflow === "self_operated_inbound" ? "自营仓入库批次" : "交货批次";
   const name = `${parts.year}-${parts.month}-${parts.day} ${suffix}`;
-  return workflow === "delivery" ? `${name} ${parts.hour}:${parts.minute}:${parts.second}` : name;
+  return `${name} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
 export function useBatchCreation(workflow: BatchWorkflow, onOpen: (id: number) => void) {

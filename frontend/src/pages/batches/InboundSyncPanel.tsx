@@ -39,14 +39,16 @@ export default function InboundSyncPanel({
   const { openPreview: openInboundPreview, openIssues: openInboundIssues } = inspection;
   return (
     <>
-      <section className="purchase-sync-card self-operated-sync-card" aria-label="积加待入库数据同步">
+      <section
+        className={`purchase-sync-card purchase-sync-card--compact self-operated-sync-card${syncJob?.status === "succeeded" && !syncDetailsOpen ? " purchase-sync-card--summary" : ""}`}
+        aria-label="积加待入库数据同步"
+      >
         <div className="purchase-sync-heading">
           <div>
             <Space size={8} wrap>
               <Typography.Title level={5}>积加待入库数据</Typography.Title>
-              <Tag color="processing">待入库 + 部分入库</Tag>
+              <Tag className="purchase-sync-scope-tag">待入库 + 部分入库</Tag>
             </Space>
-            <Typography.Text type="secondary">同步待入库和部分入库采购单；启用后用于新批次。</Typography.Text>
           </div>
           <Button
             type="primary"
@@ -110,6 +112,11 @@ export default function InboundSyncPanel({
                     ? `接口明细 ${syncJob.raw_detail_count} 行，保留 ${syncJob.eligible_detail_count} 行，过滤已全部入库 ${syncJob.filtered_detail_count} 行`
                     : `保留 ${syncJob.eligible_detail_count} 行 · ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
                 </Typography.Text>
+                {!syncDetailsOpen && syncJob.warning_count > 0 && (
+                  <Typography.Text className="purchase-sync-warning-summary">
+                    含 {syncJob.warning_count} 条“共享”站点数据，请展开复核
+                  </Typography.Text>
+                )}
               </div>
             </div>
             {syncDetailsOpen && (
@@ -134,7 +141,7 @@ export default function InboundSyncPanel({
               />
             )}
             <Space className="purchase-sync-actions" size={8} wrap>
-              <Button type="link" onClick={() => setSyncDetailsOpen((value) => !value)}>
+              <Button type="link" aria-expanded={syncDetailsOpen} onClick={() => setSyncDetailsOpen((value) => !value)}>
                 {syncDetailsOpen ? "收起同步详情" : "查看同步详情"}
               </Button>
               {syncDetailsOpen && (

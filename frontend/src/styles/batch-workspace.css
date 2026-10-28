@@ -61,7 +61,7 @@
   color: #176b5b;
   font-weight: 650;
 }
-.delivery-batch-list-page .batch-result-availability {
+.batch-list-page--compact .batch-result-availability {
   display: block;
   margin-top: 3px;
   color: var(--dn-muted);

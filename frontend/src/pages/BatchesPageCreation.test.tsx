@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { App as AntApp } from "antd";
 import { describe, expect, it, vi } from "vitest";
-import { setupBatchesPageTests, jsonResponse, FocusTestApp } from "./batchesPageTestSupport";
+import { setupBatchesPageTests, jsonResponse, FocusTestApp, rejectBatchRequest } from "./batchesPageTestSupport";
 import BatchesPage from "./BatchesPage";
 
 describe("BatchesPageCreation", () => {
@@ -11,6 +11,7 @@ describe("BatchesPageCreation", () => {
     vi.setSystemTime(new Date("2026-10-08T06:26:35Z"));
     const onOpen = vi.fn();
     let submittedFiles: FormDataEntryValue[] = [];
+    let submittedName: FormDataEntryValue | null = null;
     const loadFetch = vi.mocked(fetch);
     vi.stubGlobal(
       "fetch",
@@ -18,6 +19,7 @@ describe("BatchesPageCreation", () => {
         if (String(input).endsWith("/api/self-operated-batches") && init.method === "POST") {
           const body = init.body as FormData;
           submittedFiles = body.getAll("delivery_file");
+          submittedName = body.get("name");
           return jsonResponse({ id: 88 });
         }
         return loadFetch(input, init);
@@ -30,7 +32,10 @@ describe("BatchesPageCreation", () => {
     await screen.findByText("4 / 4 已就绪");
     fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));
     const dialog = await screen.findByRole("dialog", { name: "新建自营仓入库批次" });
-    expect(within(dialog).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-08 自营仓入库批次");
+    expect(within(dialog).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-08 自营仓入库批次 14:26:35");
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /批次名称/ }), {
+      target: { value: "自营仓手工批次" }
+    });
 
     expect(within(dialog).getByText("质检交货单")).toBeInTheDocument();
     expect(within(dialog).queryByText("自营仓收货入库单")).not.toBeInTheDocument();
@@ -58,6 +63,7 @@ describe("BatchesPageCreation", () => {
     await waitFor(() => expect(submittedFiles).toHaveLength(2));
     expect(submittedFiles.map((file) => (file as File).name)).toEqual(["A质检交货单.xlsx", "B质检交货单.xlsx"]);
     expect(onOpen).toHaveBeenCalledWith(88);
+    expect(submittedName).toBe("自营仓手工批次");
   });
 
   it("requires a delivery file before creating a delivery batch", async () => {
@@ -102,19 +108,41 @@ describe("BatchesPageCreation", () => {
     expect(submittedFiles.map((file) => (file as File).name)).toEqual(["B.xlsx", "A.xlsx"]);
     expect(submittedName).toBe("手工复核批次");
   });
-  it("regenerates a Beijing timestamp including seconds on each open across midnight", async () => {
+  it.each([
+    ["delivery", "交货批次"],
+    ["self_operated_inbound", "自营仓入库批次"]
+  ] as const)("regenerates a Beijing timestamp for %s on each open across midnight", async (workflow, label) => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-08T15:59:58Z"));
-    render(<BatchesPage onOpen={vi.fn()} />, { wrapper: FocusTestApp });
+    render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />, { wrapper: FocusTestApp });
     fireEvent.click(await screen.findByRole("button", { name: /新建批次/ }));
-    const first = await screen.findByRole("dialog", { name: "新建交货批次" });
-    expect(within(first).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-08 交货批次 23:59:58");
+    const first = await screen.findByRole("dialog", { name: `新建${label}` });
+    expect(within(first).getByRole("textbox", { name: /批次名称/ })).toHaveValue(`2026-10-08 ${label} 23:59:58`);
     fireEvent.click(within(first).getByRole("button", { name: /取\s*消/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     vi.setSystemTime(new Date("2026-10-08T16:00:03Z"));
     fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));
-    const second = await screen.findByRole("dialog", { name: "新建交货批次" });
-    expect(within(second).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-09 交货批次 00:00:03");
+    const second = await screen.findByRole("dialog", { name: `新建${label}` });
+    expect(within(second).getByRole("textbox", { name: /批次名称/ })).toHaveValue(`2026-10-09 ${label} 00:00:03`);
+  });
+  it("preserves the self-operated name and selected files after a failed upload", async () => {
+    const onOpen = vi.fn();
+    rejectBatchRequest(422, "合成上传校验失败", "POST");
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: FocusTestApp });
+    fireEvent.click(await screen.findByRole("button", { name: /新建批次/ }));
+    const dialog = await screen.findByRole("dialog", { name: "新建自营仓入库批次" });
+    const name = within(dialog).getByRole("textbox", { name: /批次名称/ });
+    fireEvent.change(name, { target: { value: "保留手工入库名称" } });
+    const input = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input!, { target: { files: [new File(["synthetic"], "质检失败样本.xlsx")] } });
+    const submit = within(dialog).getByRole("button", { name: "创建批次" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+
+    expect(await screen.findByText("合成上传校验失败")).toBeInTheDocument();
+    expect(name).toHaveValue("保留手工入库名称");
+    expect(within(dialog).getByText("质检失败样本.xlsx")).toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
   });
   it("keeps batch name labels associated after both workflow dialogs have been opened", async () => {
     render(

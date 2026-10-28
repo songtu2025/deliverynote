@@ -16,8 +16,11 @@ describe("BatchesPageInboundSync", () => {
     expect(within(status).getByText("待入库数据")).toBeInTheDocument();
     expect(screen.getByText("待入库 + 部分入库")).toBeInTheDocument();
     expect(screen.getByText("数据已启用")).toBeInTheDocument();
+    expect(screen.getByText("含 2 条“共享”站点数据，请展开复核")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看同步详情" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("候选剩余应收总量")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看同步详情" }));
+    expect(screen.getByRole("button", { name: "收起同步详情" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("候选剩余应收总量")).toBeInTheDocument();
     expect(screen.getByText(/包含 2 条“共享”站点数据/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "下载提醒清单" })).toBeInTheDocument();
