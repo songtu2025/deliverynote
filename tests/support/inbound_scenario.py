@@ -102,9 +102,13 @@ class InboundScenario(DeliveryScenario):
                 "full_site": "AMAZON:RIVMOUNT:US",
             },
         ).json()
-        self.wait_job(prepared["jobs"]["prepare"]["id"])
+        prepared_job = self.wait_job(
+            prepared["jobs"]["prepare"]["id"], expected_status=expected_status
+        )
+        if expected_status == "failed":
+            return prepared_job
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
-        return self.wait_job(job.json()["id"], expected_status=expected_status)
+        return self.wait_job(job.json()["id"])
 
     def snapshot(self) -> dict[str, Any]:
         # 一次捕获所有批次，保留各自锁定资料和规则版本。
