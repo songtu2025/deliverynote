@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { describe } from "vitest";
 import BatchDetail from "./BatchDetail";
@@ -85,7 +85,8 @@ describe("BatchDetailFiles", () => {
     expect(screen.getByText("序号越小，越先扣减待入库余额和超收额度")).toBeInTheDocument();
     const uploadInput = container.querySelector<HTMLInputElement>('.batch-primary-actions input[type="file"]');
     expect(uploadInput).toHaveAttribute("multiple");
-    fireEvent.click(screen.getByRole("button", { name: "下移 KuangBiao-A交货单.xlsx" }));
+    const fileTable = within(container.querySelector(".file-order-card") as HTMLElement);
+    fireEvent.click(fileTable.getByLabelText("下移 KuangBiao-A交货单.xlsx"));
 
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith(

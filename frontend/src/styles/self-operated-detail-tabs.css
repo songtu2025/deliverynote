@@ -1,0 +1,112 @@
+.app-content:has(.self-operated-detail-tabs) {
+  overflow: visible;
+}
+
+.self-operated-detail-tabs {
+  min-width: 0;
+  overflow: visible;
+}
+
+.self-operated-detail-tabs > .ant-tabs-nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin-bottom: 16px;
+  padding-inline: 16px;
+  border: 1px solid var(--dn-border);
+  border-radius: 8px;
+  background: var(--dn-surface);
+}
+
+.self-operated-detail-tabs .detail-tab-count {
+  margin-left: 6px;
+  color: var(--detail-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.self-operated-detail-tabs .review-section-anchor {
+  scroll-margin-top: 72px;
+}
+
+.self-operated-detail-tabs .review-overview {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.self-operated-detail-tabs .review-overview-copy {
+  display: none;
+}
+
+.self-operated-detail-tabs .review-scope-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.self-operated-detail-tabs .review-scope-card {
+  min-width: 0;
+  padding-block: 8px;
+}
+
+.self-operated-detail-tabs .ant-card-body {
+  padding: 16px;
+}
+
+.batch-detail--compact:has(.self-operated-detail-tabs) .summary-equation {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px 16px;
+  padding-block: 8px;
+}
+
+.batch-detail--compact:has(.self-operated-detail-tabs) .summary-equation span {
+  margin: 0;
+}
+
+.batch-detail--compact:has(.self-operated-detail-tabs) .summary-equation strong {
+  font-size: 18px;
+}
+
+.batch-detail--compact:has(.self-operated-detail-tabs) .batch-heading {
+  margin-bottom: 8px;
+}
+
+.batch-detail--compact:has(.self-operated-detail-tabs) .summary-pending .summary-metric.pending strong {
+  font-size: 18px;
+}
+
+@media (max-width: 600px) {
+  .self-operated-detail-tabs > .ant-tabs-nav {
+    padding-inline: 8px;
+  }
+
+  .self-operated-detail-tabs .ant-tabs-tab {
+    margin-left: 12px !important;
+    font-size: 12px;
+  }
+
+  .self-operated-detail-tabs .ant-tabs-tab:first-child {
+    margin-left: 0 !important;
+  }
+
+  .self-operated-detail-tabs .detail-tab-count {
+    display: none;
+  }
+
+  .self-operated-detail-tabs .review-scope-card {
+    gap: 4px;
+    padding-inline: 8px;
+  }
+
+  .self-operated-detail-tabs .review-scope-card strong {
+    font-size: 14px;
+  }
+
+  .self-operated-detail-tabs .ant-card-body {
+    padding: 12px;
+  }
+}

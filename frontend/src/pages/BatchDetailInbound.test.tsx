@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
@@ -38,8 +38,10 @@ describe("自营仓批次详情", () => {
     expect(task.getByText("本次申请")).toBeInTheDocument();
     expect(task.getByText("160 = 100 + 60")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "业务文件" }));
     expect(screen.getByRole("columnheader", { name: "本次申请" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "可入库" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /待处理审校/ }));
     expect(screen.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("备货定位筛选")).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "规模定位" })).not.toBeInTheDocument();
@@ -66,10 +68,14 @@ describe("自营仓批次详情", () => {
       delete state.batch.versions.self_operated_inbound;
     }
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "业务文件" }));
     expect(
       await screen.findByText(new RegExp(`待入库数据（${apiSource ? "API锁定" : "手动上传"}）`))
     ).toBeInTheDocument();
-    if (apiSource) expect(screen.getByText("待入库 API 数据")).toBeInTheDocument();
+    if (apiSource) {
+      fireEvent.click(screen.getByRole("tab", { name: "锁定版本" }));
+      expect(screen.getByText("待入库 API 数据")).toBeInTheDocument();
+    }
   });
 
   it("缺少待入库数据时保留上传能力并禁止预检", async () => {

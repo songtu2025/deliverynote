@@ -68,7 +68,7 @@ describe("累计实收核对", () => {
     expect(within(drawer).getByText("交货单号：LN1")).toBeInTheDocument();
     expect(within(drawer).getByText("入库单：WV1")).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByTitle("2"));
+    fireEvent.click(screen.getAllByTitle("2")[0]);
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("page=2"), expect.anything()));
   });
 

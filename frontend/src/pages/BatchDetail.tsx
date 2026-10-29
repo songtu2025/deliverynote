@@ -18,6 +18,7 @@ import type { BatchDetailData } from "./batch-detail/useBatchDetailData";
 import { useBatchJob } from "./batch-detail/useBatchJob";
 import { useBatchTasks } from "./batch-detail/useBatchTasks";
 import ReceiptReview from "./batch-detail/ReceiptReview";
+import SelfOperatedDetailTabs from "./batch-detail/SelfOperatedDetailTabs";
 
 export default function BatchDetail({
   batchId,
@@ -31,6 +32,7 @@ export default function BatchDetail({
   const { action, runAction } = useBatchAction();
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const reviewSection = useRef<HTMLDivElement | null>(null);
+  const [detailTabs, setDetailTabs] = useState<Record<number, string>>({});
   const data = useBatchDetailData(batchId, Boolean(canRefreshSupplierVersion), setSplitTarget);
   const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
   const activeJob = useBatchJob(batch, load);
@@ -76,10 +78,17 @@ export default function BatchDetail({
   }
 
   const { canEditFiles, computed } = batchPresentation(batch);
+  const selectDetailTab = (key: string) => setDetailTabs((current) => ({ ...current, [batchId]: key }));
 
   const focusReview = () => {
-    reviewSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    reviewSection.current?.focus({ preventScroll: true });
+    const focus = () => {
+      reviewSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      reviewSection.current?.focus({ preventScroll: true });
+    };
+    if (selfOperated) {
+      selectDetailTab("review");
+      requestAnimationFrame(focus);
+    } else focus();
   };
 
   const taskContent = (
@@ -102,37 +111,57 @@ export default function BatchDetail({
     </>
   );
 
+  const fileContent = (
+    <BatchFileTable
+      batch={batch}
+      files={files}
+      loading={loading}
+      computed={computed}
+      canEditFiles={canEditFiles}
+      actions={fileActions}
+      downloadResult={downloadResult}
+    />
+  );
+  const versionContent = (
+    <BatchLockedVersions
+      batch={batch}
+      activeSupplierVersion={activeSupplierVersion}
+      canRefreshSupplierVersion={Boolean(canRefreshSupplierVersion)}
+      action={action}
+      refreshSupplierVersion={refreshSupplierVersion}
+    />
+  );
+  const reviewContent = computed && (
+    <ExceptionReviewTable
+      selfOperated={selfOperated}
+      review={review}
+      fileById={fileById}
+      hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
+      onOpen={openSplit}
+      onReset={() => setSplitTarget(null)}
+      sectionRef={reviewSection}
+    />
+  );
+
   return (
     <BatchWorkbench notice={loadFailure} taskContent={taskContent}>
-      <BatchFileTable
-        batch={batch}
-        files={files}
-        loading={loading}
-        computed={computed}
-        canEditFiles={canEditFiles}
-        actions={fileActions}
-        downloadResult={downloadResult}
-      />
-
-      <BatchLockedVersions
-        batch={batch}
-        activeSupplierVersion={activeSupplierVersion}
-        canRefreshSupplierVersion={Boolean(canRefreshSupplierVersion)}
-        action={action}
-        refreshSupplierVersion={refreshSupplierVersion}
-      />
-      {selfOperated && <ReceiptReview batch={batch} runAction={runAction} load={load} />}
-
-      {computed && (
-        <ExceptionReviewTable
-          selfOperated={selfOperated}
-          review={review}
-          fileById={fileById}
-          hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
-          onOpen={openSplit}
-          onReset={() => setSplitTarget(null)}
-          sectionRef={reviewSection}
+      {selfOperated ? (
+        <SelfOperatedDetailTabs
+          batch={batch}
+          activeKey={detailTabs[batchId]}
+          onChange={selectDetailTab}
+          reviewStats={availableReviewStats(data)}
+          files={fileContent}
+          versions={versionContent}
+          receipts={<ReceiptReview batch={batch} runAction={runAction} load={load} />}
+          review={reviewContent}
         />
+      ) : (
+        <>
+          {fileContent}
+          {versionContent}
+          {reviewContent}
+        </>
       )}
 
       <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />

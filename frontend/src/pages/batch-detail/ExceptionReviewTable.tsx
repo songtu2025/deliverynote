@@ -49,6 +49,7 @@ export default function ExceptionReviewTable({
                   pageSize: REVIEW_PAGE_SIZE,
                   total: exceptionTotal,
                   showSizeChanger: false,
+                  placement: selfOperated ? ["topEnd", "bottomEnd"] : ["bottomEnd"],
                   onChange: setReviewPage
                 }
               : false

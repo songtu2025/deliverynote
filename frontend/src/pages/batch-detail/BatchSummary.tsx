@@ -1,14 +1,14 @@
 import type { Batch } from "../../types";
 import { batchPresentation } from "./batchPresentation";
 
-function summaryMetrics(batch: Batch) {
+function summaryMetrics(batch: Batch, pendingLabel: string) {
   const { totals, computed } = batchPresentation(batch);
   const known = computed && Boolean(batch.summary);
   const selfOperated = batch.workflow === "self_operated_inbound";
   const metrics = [
     { label: selfOperated ? "本次申请" : "交货总量", value: known ? totals.delivery_total : "—", tone: "" },
     { label: selfOperated ? "可入库" : "可导入", value: known ? totals.import_total : "—", tone: "import" },
-    { label: "待处理", value: known ? totals.manual_total : "—", tone: "pending" }
+    { label: "待处理", value: known ? totals.manual_total : pendingLabel, tone: "pending" }
   ];
   if (!selfOperated) return metrics;
   metrics[0].value = receiptValue(batch, "requested_total");
@@ -29,7 +29,7 @@ export default function BatchSummary({ batch }: { batch: Batch }) {
   const receiptClass = batch.workflow === "self_operated_inbound" ? "summary-receipts" : "";
   return (
     <div className={`summary-strip ${known ? "" : "summary-pending"} ${receiptClass}`}>
-      {summaryMetrics(batch).map((metric) => (
+      {summaryMetrics(batch, receiptClass ? "计算后生成" : "—").map((metric) => (
         <div className={`summary-metric ${metric.tone}`} key={metric.label}>
           <span>{metric.label}</span>
           <strong>{metric.value}</strong>

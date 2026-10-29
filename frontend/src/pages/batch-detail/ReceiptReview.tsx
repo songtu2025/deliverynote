@@ -104,7 +104,14 @@ export default function ReceiptReview({
             loading={loading || busy}
             dataSource={rows}
             scroll={{ x: 1100 }}
-            pagination={{ current: page, pageSize: 20, total, showSizeChanger: false, onChange: setPage }}
+            pagination={{
+              current: page,
+              pageSize: 20,
+              total,
+              showSizeChanger: false,
+              placement: ["topEnd", "bottomEnd"],
+              onChange: setPage
+            }}
             columns={[
               { title: "文件", dataIndex: "filename", ellipsis: true, width: 200 },
               { title: "SKU", dataIndex: "sku", width: 170 },
