@@ -112,6 +112,7 @@ class RecoveryApiDockerTests(ApiRecoveryCase):
         first, second, _, _ = restored.sync_jobs
         historical_id = restored.batch_ids[0]
         restored.activate(second)
+        target.set_case(12)
         restored.create_api_batch()
         after = restored.snapshot()
         historical = after["batches"][historical_id]

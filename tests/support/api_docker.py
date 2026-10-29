@@ -30,18 +30,21 @@ class ApiDockerFixture(BusinessDockerFixture):
         # 复用映射测试的接口样本，只调整本演练所需的数量和匹配键。
         order = SelfOperatedInboundMappingTests.order()
         order.update(
+            id="inbound-1",
             orderNo="IN-S",
             purchaseCode="PO-20260801-AMAZON:SEEKWAY:US",
             releatedCode="LN2608179025",
         )
         detail = order["orderItemResultList"][0]
-        detail.update(arriveNum=quantity, maxReceiveNum=quantity + 5)
+        detail.update(arriveNum=quantity, maxReceiveNum=quantity + 5, exceptionNum=0)
         if blocked:
             detail["sku"] = ""
         rows = [order]
         if warning:
             shared = SelfOperatedInboundMappingTests.order(site="共享")
             shared["orderNo"] = "IN-SHARED"
+            shared["id"] = "inbound-shared"
+            shared["orderItemResultList"][0]["id"] = 1002
             rows.append(shared)
         self._write_case({"rows": rows, "fail": fail})
 

@@ -40,7 +40,10 @@ class ApiScenario(InboundScenario):
                 files={"delivery_file": (path.name, upload)},
             ).json()["id"]
         self.batch_ids.append(self.batch_id)
-        self.request("POST", f"/api/batches/{self.batch_id}/preflight")
+        prepared = self.request(
+            "POST", f"/api/batches/{self.batch_id}/preflight"
+        ).json()
+        self.wait_job(prepared["jobs"]["prepare"]["id"])
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
         self.wait_job(job.json()["id"])
         self.export()

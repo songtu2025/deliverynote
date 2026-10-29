@@ -31,13 +31,30 @@ class Handler(BaseHTTPRequestHandler):
             self.purchase(payload, case)
             return
         assert self.path == "/fulfillment/store/selfInboundListAndDetail/page"
-        assert payload["orderStatusList"] == ["WAIT_INBOUND", "PART_INBOUND"]
+        history = "billCodes" in payload
+        statuses = ["WAIT_INBOUND", "PART_INBOUND"]
+        if history:
+            assert payload["billType"] == "3"
+            statuses += ["COMPLETED", "CANCELLED"]
+        assert payload["orderStatusList"] == statuses
         assert payload["page"] == 1 and payload["pagesize"] == 500
-        assert (payload["rnType"], payload["orderType"]) in {
-            ("0", "purchase"),
-            ("1", "transfer"),
-        }
-        rows = case["rows"] if payload["rnType"] == "0" else []
+        scopes = (
+            {
+                (str(warehouse), kind)
+                for warehouse in (0, 1, 3, 4)
+                for kind in ("purchase", "transfer")
+            }
+            if history
+            else {("0", "purchase"), ("1", "transfer")}
+        )
+        assert (payload["rnType"], payload["orderType"]) in scopes
+        rows = (
+            case["rows"]
+            if (payload["rnType"], payload["orderType"]) == ("0", "purchase")
+            else []
+        )
+        if history:
+            rows = [row for row in rows if row["releatedCode"] in payload["billCodes"]]
         self.reply(200, {"code": 200, "data": {"rows": rows, "total": len(rows)}})
 
     def purchase(self, payload: dict[str, Any], case: dict[str, Any]) -> None:

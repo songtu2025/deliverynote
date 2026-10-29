@@ -162,5 +162,5 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
         self.assertFalse(batch["download_ready"])
         self.assertFalse(batch["merged_download_ready"])
         self.assertTrue(all(not source["download_ready"] for source in batch["files"]))
-        restored.request("GET", f"/api/batches/{restored.batch_id}/download", 404)
+        restored.request("GET", f"/api/batches/{restored.batch_id}/download", 409)
         self.assert_source_unchanged(snapshot)

@@ -14,6 +14,24 @@ from tests.support.worker import WorkerCase
 
 
 class ReceiptWorkerTests(WorkerCase):
+    def test_missing_source_fails_preparation_and_blocks_compute_and_download(self):
+        batch_id = self.create_receipt_batch()
+        with self.app.state.database.session() as session:
+            profile = session.get(SelfOperatedBatch, batch_id)
+            Path(profile.inbound_storage_path).unlink()
+        with self.assertLogs("delivery_note.worker", level="ERROR"):
+            batch = self.preflight(batch_id)
+        self.assertEqual(batch["status"], "failed")
+        self.assertEqual(batch["jobs"]["prepare"]["status"], "failed")
+        self.assertNotIn("compute", batch["jobs"])
+        self.assertIn("自营仓收货入库单不存在", batch["error_message"])
+        self.assertFalse(batch["download_ready"])
+        for method, endpoint in (("POST", "compute"), ("GET", "download")):
+            response = self.client.request(
+                method, f"/api/batches/{batch_id}/{endpoint}", headers=self.headers
+            )
+            self.assertEqual(response.status_code, 409, response.text)
+
     def test_zero_new_quantity_exports_headers_without_a_fake_product_row(self):
         batch_id = self.create_receipt_batch(cumulative=3, history=3)
         batch = self.preflight(batch_id)
