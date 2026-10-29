@@ -23,6 +23,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--job-drain-timeout-seconds", type=int, default=1800)
     parser.add_argument("--job-poll-seconds", type=int, default=5)
     parser.add_argument("--stop-timeout-seconds", type=int, default=60)
+    parser.add_argument(
+        "--receipt-migration", action="store_true", help="显式执行已审核的累计实收迁移"
+    )
+    parser.add_argument("--web-image", help="与后端一同切换的 Web 候选镜像")
     arguments = parser.parse_args(argv)
     try:
         base = release_config(arguments)
@@ -32,6 +36,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             job_drain_timeout_seconds=arguments.job_drain_timeout_seconds,
             job_poll_seconds=arguments.job_poll_seconds,
             stop_timeout_seconds=arguments.stop_timeout_seconds,
+            receipt_migration=arguments.receipt_migration,
+            web_image=arguments.web_image,
         )
         verify_ci(config.revision, arguments.ci_run)
         report = publish_backend(

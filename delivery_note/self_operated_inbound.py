@@ -15,6 +15,7 @@ from .inbound.models import (
     SelfOperatedInboundRequest,
     SelfOperatedInboundResult,
 )
+from .inbound.receipts import allocation_frame
 from .processing.allocation import AllocationSummary
 from .processing.delivery_sites import resolve_delivery_sites
 from .processing.models import OverreceiptAllowance, OverreceiptKey
@@ -66,7 +67,10 @@ def process_self_operated_inbound(
         )
     )
     for _, row in groups.iterrows():
-        candidates, reason = select_inbound_candidates(inbound, row, supplier_name)
+        if int(row["交货量"]) == 0:
+            continue
+        available = allocation_frame(inbound) if "入库状态" in inbound else inbound
+        candidates, reason = select_inbound_candidates(available, row, supplier_name)
         allocator.allocate(row, candidates, reason)
     return allocator.result(int(resolved["交货量"].sum()))
 
@@ -78,6 +82,8 @@ def process_self_operated_inbound_batch(
     *,
     overreceipt_limit: int = 0,
     site_overrides: Mapping[tuple[str, str], str] | None = None,
+    file_site_overrides: Mapping[str | int, Mapping[tuple[str, str], str]]
+    | None = None,
 ) -> SelfOperatedInboundBatchResult:
     """按用户顺序处理质检单，并共享待入库余额与超收额度。"""
 
@@ -94,7 +100,9 @@ def process_self_operated_inbound_batch(
             inbound_rows,
             delivery.supplier_name,
             overreceipt_allowances=overreceipt_allowances,
-            site_overrides=site_overrides,
+            site_overrides=(file_site_overrides or {}).get(
+                delivery.source_id, site_overrides
+            ),
             overreceipt_limit=overreceipt_limit,
             receivable_balances=receivable_balances,
         )

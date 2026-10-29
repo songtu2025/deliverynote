@@ -3,11 +3,10 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 from tests.support.inbound_inputs import create_ambiguous_product
-from sqlalchemy import select
 
 from delivery_note.web.models import (
     Batch,
-    SelfOperatedSiteResolution,
+    BatchFile,
 )
 
 from delivery_note.worker import (
@@ -50,48 +49,37 @@ class WorkerIntegrationTests(WorkerCase):
             headers=self.headers,
         )
         self.assertEqual(preflight.status_code, 200, preflight.text)
+        run_once(self.database_url, self.storage_root)
+        rows = self.client.get(
+            f"/api/batches/{batch_id}/receipts", headers=self.headers
+        ).json()["items"]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("站点不唯一", rows[0]["issue"])
+        self.assertIsNone(rows[0]["requested"])
+        blocked = self.client.post(
+            f"/api/batches/{batch_id}/compute", headers=self.headers
+        )
+        self.assertEqual(blocked.status_code, 409)
+        endpoint = f"/api/batches/{batch_id}/files/{rows[0]['file_id']}/receipt-site"
+        payload = {
+            "sku": "SKU-A",
+            "original_site": "US",
+            "full_site": "AMAZON:OTHER:US",
+        }
+        rejected = self.client.put(endpoint, headers=self.headers, json=payload)
+        self.assertEqual(rejected.status_code, 400)
+        payload["full_site"] = "AMAZON:RIVMOUNT:US"
+        selected = self.client.put(endpoint, headers=self.headers, json=payload)
+        self.assertEqual(selected.status_code, 200, selected.text)
+        run_once(self.database_url, self.storage_root)
+        with self.app.state.database.session() as session:
+            source = session.get(BatchFile, rows[0]["file_id"])
+            self.assertEqual(source.receipt_sites, {"SKU-A\tUS": "AMAZON:RIVMOUNT:US"})
         compute = self.client.post(
-            f"/api/batches/{batch_id}/compute",
-            headers=self.headers,
+            f"/api/batches/{batch_id}/compute", headers=self.headers
         )
         self.assertEqual(compute.status_code, 202, compute.text)
-        self.assertEqual(
-            run_once(self.database_url, self.storage_root),
-            compute.json()["id"],
-        )
-
-        exceptions = self.client.get(
-            f"/api/batches/{batch_id}/exceptions",
-            headers=self.headers,
-        ).json()
-        self.assertEqual(len(exceptions), 1)
-        self.assertEqual(exceptions[0]["reason"], "产品信息站点不唯一")
-        self.assertIn("AMAZON:RIVMOUNT:US", exceptions[0]["full_site"])
-        self.assertIn("AMAZON:SEEKWAY:US", exceptions[0]["full_site"])
-        rejected = self.client.put(
-            f"/api/exceptions/{exceptions[0]['id']}/self-operated-site",
-            headers=self.headers,
-            json={"full_site": "AMAZON:OTHER:US"},
-        )
-        self.assertEqual(rejected.status_code, 400)
-        with self.app.state.database.session() as session:
-            self.assertIsNone(
-                session.scalar(
-                    select(SelfOperatedSiteResolution).where(
-                        SelfOperatedSiteResolution.batch_id == batch_id
-                    )
-                )
-            )
-        selected = self.client.put(
-            f"/api/exceptions/{exceptions[0]['id']}/self-operated-site",
-            headers=self.headers,
-            json={"full_site": "AMAZON:RIVMOUNT:US"},
-        )
-        self.assertEqual(selected.status_code, 202, selected.text)
-        self.assertEqual(
-            run_once(self.database_url, self.storage_root),
-            selected.json()["id"],
-        )
+        run_once(self.database_url, self.storage_root)
 
         batch = self.client.get(
             f"/api/batches/{batch_id}",

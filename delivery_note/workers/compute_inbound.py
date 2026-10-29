@@ -1,21 +1,20 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
 
-from ..config import resolve_supplier
+import pandas as pd
+
 from ..excel_io import (
     read_product_workbook,
-    read_self_operated_delivery_workbook,
-    read_self_operated_inbound_workbook,
-    read_supplier_workbook,
 )
 from ..exception_reasons import ExceptionReason, exception_reason_code
 from ..inbound.models import (
     SelfOperatedInboundBatchResult,
-    SelfOperatedInboundRequest,
 )
+from ..inbound.receipts import prepare_receipts
 from ..self_operated_inbound import (
     process_self_operated_inbound_batch,
 )
@@ -29,6 +28,7 @@ from .compute_records import (
     update_compute_source,
 )
 from .leases import JobContext, _heartbeat
+from .receipt_inputs import read_receipt_sources
 
 
 def _save_inbound_compute(
@@ -98,38 +98,30 @@ def _execute_self_operated_compute(
     job_id = context.job_id
     claim_token = context.claim_token
     version_paths = inputs.version_paths
-    sources = inputs.sources
     self_operated_data = cast(dict[str, Any], inputs.self_operated_data)
-    supplier_rows = read_supplier_workbook(version_paths["supplier"])
     product_rows = read_product_workbook(version_paths["product"])
-    inbound_rows = read_self_operated_inbound_workbook(
-        self_operated_data["inbound_path"]
+    snapshot = self_operated_data["receipt_snapshot"]
+    if not snapshot:
+        raise ValueError("请先预检并获取完整入库历史")
+    payload = json.loads(Path(snapshot["path"]).read_text(encoding="utf-8"))
+    inbound_rows = pd.DataFrame(payload["rows"], columns=payload["columns"])
+    originals, identities, choices = read_receipt_sources(inputs)
+    contexts, requests = prepare_receipts(
+        originals, product_rows, inbound_rows, choices
     )
-    identities = {}
-    deliveries = {}
-    requests = []
-    for source in sources:
-        _heartbeat(database, job_id, claim_token)
-        if not source["path"].is_file():
-            raise FileNotFoundError(f"交货文件不存在：{source['path']}")
-        supplier = resolve_supplier(Path(source["original_name"]), supplier_rows)
-        delivery = read_self_operated_delivery_workbook(source["path"])
-        identities[source["id"]] = supplier
-        deliveries[source["id"]] = delivery
-        requests.append(
-            SelfOperatedInboundRequest(
-                source_id=source["id"],
-                delivery_lines=delivery.delivery_lines,
-                delivery_numbers=delivery.delivery_numbers,
-                supplier_name=supplier.name,
-            )
-        )
+    if len(requests) != len(originals):
+        raise ValueError("累计实收存在待核对记录，请重新预检")
+    for request in requests:
+        for row in contexts[request.source_id]["rows"]:
+            choices[request.source_id][(row["sku"], row["original_site"])] = row[
+                "full_site"
+            ]
     batch_result = process_self_operated_inbound_batch(
         requests,
         product_rows,
         inbound_rows,
         overreceipt_limit=self_operated_data["overreceipt_limit"],
-        site_overrides=self_operated_data["site_overrides"],
+        file_site_overrides=choices,
     )
     _heartbeat(database, job_id, claim_token)
     payloads: list[dict[str, Any]] = []
@@ -140,7 +132,7 @@ def _execute_self_operated_compute(
             {
                 "source_id": source_id,
                 "supplier": identities[source_id],
-                "delivery_numbers": deliveries[source_id].delivery_numbers,
+                "delivery_numbers": item.delivery_numbers,
                 "delivery_total": result.qualified_total,
                 "import_total": result.import_total,
                 "manual_total": result.pending_total,

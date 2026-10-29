@@ -1,5 +1,5 @@
 import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
-import { Descriptions, Drawer, Form, Radio, Tag } from "antd";
+import { Descriptions, Drawer, Tag } from "antd";
 import type { Batch, BatchFile, DeliveryException } from "../../types";
 import type { ExceptionEditor } from "./useExceptionEditor";
 import { ExceptionStatusTag, PositionValue } from "./ExceptionEvidence";
@@ -18,17 +18,7 @@ export default function ExceptionReviewDrawer({
   fileById: Record<number, BatchFile>;
   action: string | null;
 }) {
-  const {
-    splitTarget,
-    setSplitTarget,
-    currentReviewIndex,
-    reviewPage,
-    exceptionTotal,
-    selfOperatedSiteSelection,
-    splitForm,
-    setReviewDirty,
-    splitCandidateSites
-  } = editor;
+  const { splitTarget, setSplitTarget, currentReviewIndex, reviewPage, exceptionTotal } = editor;
   const selfOperated = batch.workflow === "self_operated_inbound";
   return (
     <Drawer
@@ -58,25 +48,7 @@ export default function ExceptionReviewDrawer({
             selfOperated={selfOperated}
           />
 
-          {selfOperatedSiteSelection ? (
-            <Form form={splitForm} layout="vertical" onValuesChange={() => setReviewDirty(true)}>
-              <Form.Item
-                name={["parts", 0, "site"]}
-                label="选择正确的完整站点"
-                rules={[{ required: true, message: "请选择一个候选站点" }]}
-              >
-                <Radio.Group className="candidate-site-options">
-                  {splitCandidateSites.map((site) => (
-                    <Radio key={site} value={site}>
-                      {site}
-                    </Radio>
-                  ))}
-                </Radio.Group>
-              </Form.Item>
-            </Form>
-          ) : (
-            <SplitPartsForm editor={editor} />
-          )}
+          {!selfOperated && <SplitPartsForm editor={editor} />}
         </>
       )}
     </Drawer>

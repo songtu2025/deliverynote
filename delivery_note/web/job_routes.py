@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from .batch_preflight import preflight_batch_record
 from .dependencies import RequestDependencies
-from .models import AuditLog, Batch, Job, User
+from .models import AuditLog, Batch, Job, SelfOperatedBatch, User
+from .receipt_routes import queue_receipt_preflight, register_receipt_routes
+from .receipt_state import require_receipts
 from .serializers import job_json, utc_isoformat
 
 
@@ -68,6 +70,7 @@ def register_job_routes(
     current_user = dependencies.current_user
     admin_user = dependencies.admin_user
     get_batch_or_404 = dependencies.get_batch_or_404
+    register_receipt_routes(app, dependencies, queue_job, audit)
 
     @app.post("/api/batches/{batch_id}/preflight", response_model=None)
     def preflight_batch(
@@ -75,6 +78,9 @@ def register_job_routes(
         user: Annotated[User, Depends(current_user)],
         session: Annotated[Session, Depends(get_session)],
     ) -> dict[str, object]:
+        if session.get(SelfOperatedBatch, batch_id) is not None:
+            batch = get_batch_or_404(batch_id, session, for_update=True)
+            return queue_receipt_preflight(session, batch, user, queue_job)
         return preflight_batch_record(
             session, batch_id, user.id, get_batch_or_404, audit
         )
@@ -90,6 +96,7 @@ def register_job_routes(
         session: Annotated[Session, Depends(get_session)],
     ) -> dict[str, object]:
         batch = get_batch_or_404(batch_id, session, for_update=True)
+        require_receipts(session, batch)
         existing = session.scalar(
             select(Job).where(Job.batch_id == batch.id, Job.kind == "compute")
         )

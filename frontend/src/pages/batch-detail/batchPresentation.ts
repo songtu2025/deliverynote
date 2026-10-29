@@ -1,9 +1,10 @@
 import type { Batch, Job } from "../../types";
 import type { ExceptionReview } from "./useExceptionReview";
+import { receiptReady } from "../../receipt";
 
 export function batchPresentation(batch: Batch) {
   const totals = batch.summary ?? { delivery_total: 0, import_total: 0, manual_total: 0, conserved: true };
-  const computed = batch.status === "succeeded" || batch.download_ready;
+  const computed = computedBatch(batch);
   const needsReview = computed && totals.manual_total > 0;
   const hasMultipleFiles = (batch.files?.length ?? 0) > 1;
   const mergedDownloadReady = hasMultipleFiles && batch.merged_download_ready;
@@ -13,10 +14,14 @@ export function batchPresentation(batch: Batch) {
     needsReview,
     hasMultipleFiles,
     canPreflight: ["draft", "failed"].includes(batch.status),
-    canCompute: ["preflight_ready", "failed"].includes(batch.status),
+    canCompute: ["preflight_ready", "failed"].includes(batch.status) && receiptReady(batch),
     canEditFiles: ["draft", "preflight_ready", "failed"].includes(batch.status),
     needsMergedGeneration: batch.download_ready && hasMultipleFiles && !mergedDownloadReady
   };
+}
+
+function computedBatch(batch: Batch) {
+  return (batch.status === "succeeded" || batch.download_ready) && receiptReady(batch);
 }
 
 type ReviewStats = Pick<ExceptionReview["reviewStats"], "unfinishedCount" | "unfinishedQuantity">;
@@ -24,14 +29,27 @@ type ReviewStats = Pick<ExceptionReview["reviewStats"], "unfinishedCount" | "unf
 export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats) {
   const { computed, needsReview } = batchPresentation(batch);
   if (activeJob) return jobTaskPresentation(activeJob);
+  const failure = failureTaskPresentation(batch);
+  if (failure) return failure;
   if (batch.status === "queued" || batch.status === "running")
     return jobTaskPresentation({ kind: "compute", status: batch.status });
+  if (computed) return reviewTaskPresentation(needsReview, reviewStats);
+  return preparedTaskPresentation(batch);
+}
+
+function failureTaskPresentation(batch: Batch) {
+  if (batch.receipt?.issue_count)
+    return {
+      title: "累计实收待核对",
+      description: "请查看下方累计实收核对明细，修正问题后重新预检。",
+      tone: "error",
+      busy: false
+    };
   if (batch.status === "failed")
     return { title: "任务执行失败", description: "查看下方错误信息，修正后重试。", tone: "error", busy: false };
   if (batch.jobs?.export?.status === "failed")
     return { title: "结果生成失败", description: "可重新生成导出；已有审校记录仍然保留。", tone: "error", busy: false };
-  if (computed) return reviewTaskPresentation(needsReview, reviewStats);
-  return preparedTaskPresentation(batch);
+  return null;
 }
 
 function preparedTaskPresentation(batch: Batch) {
@@ -69,6 +87,13 @@ function preparedTaskPresentation(batch: Batch) {
 
 function jobTaskPresentation(job: Pick<Job, "kind" | "status">) {
   const queued = job.status === "queued";
+  if (job.kind === "prepare")
+    return {
+      title: queued ? "历史核对排队中" : "正在获取历史并核对累计实收",
+      description: "按本批交货单号取数，完成后显示累计实收、历史已入库与本次申请。",
+      tone: queued ? "waiting" : "running",
+      busy: !queued
+    };
   const compute = job.kind === "compute";
   return {
     title: queued ? (compute ? "计算任务排队中" : "导出任务排队中") : compute ? "正在计算" : "正在生成结果",

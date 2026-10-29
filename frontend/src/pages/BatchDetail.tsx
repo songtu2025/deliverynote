@@ -17,6 +17,7 @@ import { useBatchDetailData } from "./batch-detail/useBatchDetailData";
 import type { BatchDetailData } from "./batch-detail/useBatchDetailData";
 import { useBatchJob } from "./batch-detail/useBatchJob";
 import { useBatchTasks } from "./batch-detail/useBatchTasks";
+import ReceiptReview from "./batch-detail/ReceiptReview";
 
 export default function BatchDetail({
   batchId,
@@ -47,7 +48,7 @@ export default function BatchDetail({
     setSplitTarget(record);
   };
 
-  const editor = useExceptionEditor({ splitTarget, setSplitTarget, review, selfOperated, runAction, load });
+  const editor = useExceptionEditor({ splitTarget, setSplitTarget, review, runAction, load });
 
   const loadFailure = loadError && (
     <Alert
@@ -95,9 +96,7 @@ export default function BatchDetail({
         reviewError={Boolean(loadError)}
       />
 
-      {batch.error_message && (
-        <Alert type="error" showIcon title="任务执行失败" description={batch.error_message} className="section-card" />
-      )}
+      <BatchErrorNotice batch={batch} />
 
       <BatchSummary batch={batch} />
     </>
@@ -122,6 +121,7 @@ export default function BatchDetail({
         action={action}
         refreshSupplierVersion={refreshSupplierVersion}
       />
+      {selfOperated && <ReceiptReview batch={batch} runAction={runAction} load={load} />}
 
       {computed && (
         <ExceptionReviewTable
@@ -161,5 +161,18 @@ function BatchWorkbench({
       </section>
       {children}
     </div>
+  );
+}
+
+function BatchErrorNotice({ batch }: { batch: import("../types").Batch }) {
+  if (!batch.error_message) return null;
+  return (
+    <Alert
+      type="error"
+      showIcon
+      title={batch.receipt?.issue_count ? "累计实收待核对" : "任务执行失败"}
+      description={batch.error_message}
+      className="section-card"
+    />
   );
 }

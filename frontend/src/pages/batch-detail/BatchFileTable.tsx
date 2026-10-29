@@ -95,11 +95,12 @@ function batchFileColumns({
       render: (value: string) => value || <span className="muted">预检后识别</span>
     },
     {
-      title: selfOperated ? "质检合格" : "交货",
+      title: selfOperated ? "本次申请" : "交货",
       dataIndex: "delivery_total",
       align: "right" as const,
       width: 90,
-      render: (value: number) => (computed ? value : "—")
+      render: (value: number, file: BatchFile) =>
+        selfOperated ? (file.receipt ? (file.receipt.requested_total ?? "待核对") : "—") : computed ? value : "—"
     },
     {
       title: selfOperated ? "可入库" : "可导入",
@@ -197,8 +198,8 @@ function InboundFileStatus({ batch }: { batch: Batch }) {
       }
       description={
         apiSource
-          ? "本批次使用锁定的API数据；列表启用新版本不会改变本批次。"
-          : "每个批次使用一份待入库文件，提供交货单、PO、SKU、站点和应收货数据。"
+          ? "此版本记录创建来源；预检按本批交货单号获取并冻结完整历史与余额，计算使用同一份快照。"
+          : "上传文件须包含原始应收货、已入库、入库状态和唯一积加明细ID；缺少历史时不能计算。"
       }
     />
   );

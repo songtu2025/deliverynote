@@ -80,7 +80,8 @@ export default function BatchCreationModal({
               </Upload>
             </Form.Item>
             <Typography.Text type="secondary">
-              可同时选择多份；系统将按列表顺序共享扣减待入库余额和超收额度。
+              「实收数量」填写单份 Excel
+              内的累计实收，包含历史已入库。系统先扣除历史，再按文件顺序分配本次入库和共享超收额度。
             </Typography.Text>
             <Alert
               className="self-operated-version-lock"

@@ -3,6 +3,7 @@ import { RightOutlined } from "@ant-design/icons";
 import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import StatusTag from "../../BatchStatusTag";
+import { receiptReady } from "../../receipt";
 import { canDeleteBatch, nextAction } from "./batchWorkspace";
 import type { BatchWorkflow } from "./batchWorkspace";
 import type { useBatchList } from "./useBatchList";
@@ -94,25 +95,27 @@ export default function BatchListTable({
         {
           title: "文件 / 数量",
           width: 186,
-          render: (_, batch) => (
-            <div className="batch-table-value">
-              <span className="batch-cell-label">文件 / 数量</span>
-              <span className="batch-volume">
-                {!delivery ? `${batch.file_count} 份质检单` : `${batch.file_count} 个文件`}
-                {batch.summary && (!delivery || batch.summary.delivery_total > 0)
-                  ? ` · ${delivery ? "交货" : "质检合格"} ${batch.summary.delivery_total}`
-                  : ""}
-              </span>
-              {batch.summary ? (
-                <span className="batch-allocation">
-                  {delivery ? "可导入" : "可入库"} {batch.summary.import_total} ·{" "}
-                  <span>待处理 {batch.summary.manual_total}</span>
+          render: (_, batch) => {
+            const summary = delivery || receiptReady(batch) ? batch.summary : undefined;
+            return (
+              <div className="batch-table-value">
+                <span className="batch-cell-label">文件 / 数量</span>
+                <span className="batch-volume">
+                  {!delivery ? `${batch.file_count} 份质检单` : `${batch.file_count} 个文件`}
+                  {summary && (!delivery || summary.delivery_total > 0)
+                    ? ` · ${delivery ? "交货" : "本次申请"} ${summary.delivery_total}`
+                    : ""}
                 </span>
-              ) : !delivery ? (
-                <span className="batch-allocation">尚未计算</span>
-              ) : null}
-            </div>
-          )
+                {summary ? (
+                  <span className="batch-allocation">
+                    {delivery ? "可导入" : "可入库"} {summary.import_total} · <span>待处理 {summary.manual_total}</span>
+                  </span>
+                ) : !delivery ? (
+                  <span className="batch-allocation">尚未计算</span>
+                ) : null}
+              </div>
+            );
+          }
         },
         {
           title: "下一步",

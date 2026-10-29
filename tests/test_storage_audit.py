@@ -14,11 +14,24 @@ from delivery_note.web.models import (
     Job,
     PurchaseSyncJob,
     SelfOperatedInboundSyncJob,
+    SelfOperatedBatch,
 )
 from tests.support.storage_audit import StorageAuditCase
 
 
 class StorageAuditTests(StorageAuditCase):
+    def test_receipt_snapshot_is_a_registered_business_reference(self) -> None:
+        self.seed_outputs()
+        path = self.file(f"batches/{self.batch_id}/history/snapshot.json")
+        with self.app.state.database.session() as session:
+            profile = session.get(SelfOperatedBatch, self.batch_id)
+            profile.receipt_snapshot = {"path": str(path)}
+            session.commit()
+        self.assertEqual(
+            self.categories()[path.relative_to(self.storage).as_posix()],
+            "normal_reference",
+        )
+
     def categories(self) -> dict[str, str]:
         report = audit_storage(self.url, self.storage)
         self.assertEqual(report["status"], "complete")

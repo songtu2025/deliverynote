@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     JSON,
@@ -60,6 +61,7 @@ class SelfOperatedBatch(Base):
     )
     inbound_original_name: Mapped[str] = mapped_column(String(255), default="")
     inbound_storage_path: Mapped[str] = mapped_column(Text, default="")
+    receipt_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -108,6 +110,8 @@ class BatchFile(Base):
     manual_total: Mapped[int] = mapped_column(Integer, default=0)
     import_rows: Mapped[list[dict[str, object]]] = mapped_column(JSON, default=list)
     result_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    receipt_context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    receipt_sites: Mapped[dict[str, str] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

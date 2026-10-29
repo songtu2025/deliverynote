@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .dependencies import BatchLookup
 from .models import Batch, BatchFile, Job, User
+from .receipt_state import require_receipts
 
 
 def register_batch_export_routes(
@@ -40,6 +41,7 @@ def register_batch_export_routes(
             raise HTTPException(status_code=404, detail="批次不存在")
         if batch.status != "succeeded":
             raise HTTPException(status_code=409, detail="批次尚未计算成功")
+        require_receipts(session, batch)
         source_count = session.execute(
             select(func.count())
             .select_from(BatchFile)
@@ -75,6 +77,7 @@ def register_batch_export_routes(
         session: Annotated[Session, Depends(get_session)],
     ) -> FileResponse:
         batch = get_batch_or_404(batch_id, session)
+        require_receipts(session, batch)
         if not batch.zip_path or not Path(batch.zip_path).is_file():
             raise HTTPException(status_code=404, detail="批次导出尚未生成")
         return FileResponse(batch.zip_path, filename=Path(batch.zip_path).name)
@@ -86,6 +89,7 @@ def register_batch_export_routes(
         session: Annotated[Session, Depends(get_session)],
     ) -> FileResponse:
         batch = get_batch_or_404(batch_id, session)
+        require_receipts(session, batch)
         source_count = session.execute(
             select(func.count())
             .select_from(BatchFile)
@@ -103,6 +107,8 @@ def register_batch_export_routes(
         session: Annotated[Session, Depends(get_session)],
     ) -> FileResponse:
         source = session.get(BatchFile, file_id)
+        if source is not None:
+            require_receipts(session, get_batch_or_404(source.batch_id, session))
         if (
             source is None
             or not source.result_path

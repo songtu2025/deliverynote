@@ -117,7 +117,7 @@ class WebApiTests(WebApiCase):
             headers=headers,
         )
         self.assertEqual(preflight.status_code, 200, preflight.text)
-        self.assertEqual(preflight.json()["status"], "preflight_ready")
+        self.assertEqual(preflight.json()["status"], "queued")
         self.assertEqual(preflight.json()["file_count"], 2)
 
     def test_self_operated_preflight_validates_every_delivery_file(self):
@@ -151,8 +151,16 @@ class WebApiTests(WebApiCase):
             headers=headers,
         )
 
-        self.assertEqual(preflight.status_code, 400, preflight.text)
-        self.assertIn("第二份", preflight.json()["detail"])
+        self.assertEqual(preflight.status_code, 200, preflight.text)
+        from delivery_note.worker import run_once
+
+        with self.assertLogs("delivery_note.worker", level="ERROR"):
+            run_once(
+                str(self.app.state.database.engine.url), self.app.state.storage_root
+            )
+        batch = self.client.get(f"/api/batches/{batch_id}", headers=headers).json()
+        self.assertEqual(batch["status"], "failed")
+        self.assertIsNone(batch["receipt"])
 
     def test_inbound_replacement_succeeds_when_old_file_cleanup_fails(self):
         headers = self.login("admin", "admin-pass")

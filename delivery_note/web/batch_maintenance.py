@@ -10,6 +10,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from .batch_views import batch_json
+from .receipt_state import invalidate_receipts
 from .dependencies import RequestDependencies
 from .models import (
     Batch,
@@ -219,6 +220,7 @@ class BatchMaintenance:
 
         previous_version_id = batch.supplier_version_id
         batch.supplier_version_id = active_supplier.id
+        invalidate_receipts(session, batch)
         self.audit(
             session,
             user_id,

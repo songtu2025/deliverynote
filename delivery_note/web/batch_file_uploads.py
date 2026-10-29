@@ -16,6 +16,7 @@ from ..excel_io import read_self_operated_inbound_workbook
 from .batch_views import batch_json, file_json
 from .dependencies import RequestDependencies
 from .models import BatchFile, SelfOperatedBatch
+from .receipt_state import invalidate_receipts
 from .uploads import UploadParser, _safe_filename, _save_upload, _unlink_after_commit
 
 
@@ -84,6 +85,7 @@ class BatchFileUploader:
             )
             profile.inbound_original_name = original_name
             profile.inbound_storage_path = str(destination)
+            invalidate_receipts(session, batch, refresh=True)
             batch.status = "draft"
             batch.error_message = None
             batch.zip_path = None
@@ -191,6 +193,7 @@ class BatchFileUploader:
                     file_order=current_max + 1,
                 )
                 session.add(source)
+                invalidate_receipts(session, batch)
                 batch.status = "draft"
                 batch.error_message = None
                 session.flush()

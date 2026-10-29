@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..processing.models import (OverreceiptPolicy)
+from ..processing.models import OverreceiptPolicy
 from ..web.database import Database
 from ..web.models import (
     Batch,
@@ -17,7 +17,6 @@ from ..web.models import (
     OverreceiptRuleVersion,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
-    SelfOperatedSiteResolution,
 )
 
 from ..web.batch_versions import VERSION_FIELDS
@@ -76,6 +75,8 @@ def _load_compute_inputs(database: Database, batch_id: int) -> ComputeInputs:
                 "path": Path(source.storage_path),
                 "original_name": source.original_name,
                 "file_order": source.file_order,
+                "receipt_context": source.receipt_context,
+                "receipt_sites": source.receipt_sites or {},
             }
             for source in sources
         ]
@@ -107,21 +108,13 @@ def _load_compute_inputs(database: Database, batch_id: int) -> ComputeInputs:
                 if profile.rule_version_id is not None
                 else None
             )
-            resolutions = session.scalars(
-                select(SelfOperatedSiteResolution).where(
-                    SelfOperatedSiteResolution.batch_id == batch.id
-                )
-            ).all()
             self_operated_data = {
+                "receipt_snapshot": profile.receipt_snapshot,
                 "inbound_path": inbound_path,
                 "template_path": Path(template.storage_path),
                 "overreceipt_limit": inbound_rule.allowance
                 if inbound_rule is not None
                 else 0,
-                "site_overrides": {
-                    (resolution.sku, resolution.original_site): resolution.full_site
-                    for resolution in resolutions
-                },
             }
     return ComputeInputs(
         version_paths, source_data, overreceipt_policy, self_operated_data

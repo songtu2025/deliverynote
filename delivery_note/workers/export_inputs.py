@@ -17,6 +17,7 @@ from ..web.models import (
 )
 from ..workers.compute_inputs import _version_paths
 from ..web.serializers import exception_row
+from ..web.receipt_state import require_receipts
 
 
 def _load_export_inputs(
@@ -119,6 +120,7 @@ def _load_inbound_export_inputs(
         profile = session.get(SelfOperatedBatch, batch_id)
         if batch is None or batch.status != "succeeded" or profile is None:
             raise RuntimeError("自营仓入库批次尚未计算成功")
+        require_receipts(session, batch)
         template = session.get(InputVersion, profile.template_version_id)
         if template is None or not Path(template.storage_path).is_file():
             raise FileNotFoundError("批次锁定的积加入库模板不存在")

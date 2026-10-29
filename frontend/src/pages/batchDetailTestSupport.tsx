@@ -107,10 +107,6 @@ export function setupBatchDetailTest() {
           state.exceptions = state.exceptions.map((item) => (item.id === exceptionId ? updated : item));
           return jsonResponse(updated);
         }
-        const selfOperatedSiteMatch = url.match(/\/api\/exceptions\/(\d+)\/self-operated-site$/);
-        if (selfOperatedSiteMatch && init?.method === "PUT") {
-          return jsonResponse({ id: 99, kind: "compute", status: "queued" });
-        }
         if (url.endsWith("/api/batches/7/download-merged")) {
           return new Response("merged", { status: 200 });
         }

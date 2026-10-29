@@ -34,7 +34,7 @@ def _recover_batch_jobs(session: Session, cutoff: datetime, max_attempts: int) -
             )
             if batch is not None:
                 batch.error_message = job.error_message
-                if job.kind == "compute":
+                if job.kind in {"compute", "prepare"}:
                     batch.status = "failed"
         else:
             job.status = "queued"
@@ -42,7 +42,7 @@ def _recover_batch_jobs(session: Session, cutoff: datetime, max_attempts: int) -
             job.heartbeat_at = None
             job.finished_at = None
             job.error_message = "任务运行超时，已自动重试"
-            if batch is not None and job.kind == "compute":
+            if batch is not None and job.kind in {"compute", "prepare"}:
                 batch.status = "queued"
                 batch.error_message = job.error_message
         job.claim_token = None

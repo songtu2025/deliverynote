@@ -104,12 +104,25 @@ describe("BatchesPage", () => {
   );
 
   it.each([true, false])("preserves self-operated next actions with download readiness %s", async (downloadReady) => {
-    Object.assign(state.batchRows[0], { workflow: "self_operated_inbound", download_ready: downloadReady });
+    Object.assign(state.batchRows[0], {
+      workflow: "self_operated_inbound",
+      download_ready: downloadReady,
+      receipt: { cumulative_total: 163, history_total: 3, requested_total: 160, issue_count: 0 }
+    });
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
     expect(within(row).getByText(downloadReady ? "下载结果" : "审校待处理")).toBeInTheDocument();
     expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
+  });
+
+  it("requires a new history snapshot before using old self-operated results", async () => {
+    Object.assign(state.batchRows[0], { workflow: "self_operated_inbound", receipt: undefined, download_ready: true });
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
+    const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
+    expect(within(row).getByText("重新取数并核对")).toBeInTheDocument();
+    expect(within(row).getByText("尚未计算")).toBeInTheDocument();
+    expect(within(row).queryByText(/可入库 100/)).not.toBeInTheDocument();
   });
 
   it("loads batch pages and applies search on the server", async () => {

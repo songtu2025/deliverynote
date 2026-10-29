@@ -118,6 +118,9 @@ def read_snapshot(database_url: str) -> ReferenceSnapshot:
                 Path(value) for value in session.scalars(select(column)) if value
             )
         source_counts = Counter(session.scalars(select(BatchFile.batch_id)))
+        for snapshot in session.scalars(select(SelfOperatedBatch.receipt_snapshot)):
+            if snapshot and snapshot.get("path"):
+                paths.add(Path(snapshot["path"]))
         for batch in session.scalars(select(Batch)):
             merged = merged_export_path(batch)
             if source_counts[batch.id] > 1 and merged is not None:

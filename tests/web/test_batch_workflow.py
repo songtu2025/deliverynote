@@ -31,7 +31,7 @@ class WebApiTests(WebApiCase):
             self_operated=True,
         )
         self.assertEqual(ambiguous["reason_code"], "ambiguous_product_site")
-        self.assertEqual(ambiguous["allowed_actions"], ["resolve_site"])
+        self.assertEqual(ambiguous["allowed_actions"], [])
 
         exception.reason_code = "ambiguous_product_site"
         exception.reason = "更新后的展示文案"
@@ -41,7 +41,7 @@ class WebApiTests(WebApiCase):
             self_operated=True,
         )
         self.assertEqual(renamed["reason_code"], "ambiguous_product_site")
-        self.assertEqual(renamed["allowed_actions"], ["resolve_site"])
+        self.assertEqual(renamed["allowed_actions"], [])
 
         exception.reason_code = None
         exception.reason = "历史批次的未知原因"

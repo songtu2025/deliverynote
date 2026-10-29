@@ -9,9 +9,10 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
   const { load, setBatch } = data;
   const preflight = () =>
     runAction("preflight", async () => {
-      await preflightBatch(batchId);
+      const result = await preflightBatch(batchId);
       await load(true);
-      message.success("所有基础资料和交货文件均已通过预检");
+      if (result.workflow === "self_operated_inbound") message.info("已提交后台预检，正在获取历史并核对累计实收");
+      else message.success("所有基础资料和交货文件均已通过预检");
     });
 
   const refreshSupplierVersion = () =>

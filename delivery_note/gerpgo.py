@@ -263,34 +263,13 @@ class GerpgoClient:
         )
         return response.get("data") or {}
 
-    def list_self_operated_inbound_orders(self) -> list[dict[str, Any]]:
+    def list_self_operated_inbound_orders(
+        self,
+        *,
+        bill_codes: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """分页读取国内仓待入库和部分入库单及共享调拨明细。"""
 
-        if not self.access_token:
-            self.authenticate()
-        orders: list[dict[str, Any]] = []
-        for rn_type, order_type in (("0", "purchase"), ("1", "transfer")):
-            page = 1
-            scope_count = 0
-            while True:
-                response = self._request(
-                    "/fulfillment/store/selfInboundListAndDetail/page",
-                    {
-                        "rnType": rn_type,
-                        "orderType": order_type,
-                        "orderStatusList": ["WAIT_INBOUND", "PART_INBOUND"],
-                        "page": page,
-                        "pagesize": 500,
-                    },
-                    group=f"self-operated-inbound-list-{order_type}",
-                    interval=0.5,
-                )
-                data = response.get("data") or {}
-                rows = data.get("rows") or []
-                orders.extend(rows)
-                scope_count += len(rows)
-                total = int(data.get("total") or 0)
-                if scope_count >= total:
-                    break
-                page += 1
-        return orders
+        from .inbound.history_api import list_inbound_orders
+
+        return list_inbound_orders(self, bill_codes)

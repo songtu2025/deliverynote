@@ -126,7 +126,7 @@ def _claim_job(database: Database) -> tuple[int, int, str, str] | None:
         batch = session.get(Batch, job.batch_id)
         if batch is None:
             raise RuntimeError("任务关联的批次不存在")
-        if job.kind == "compute":
+        if job.kind in {"compute", "prepare"}:
             batch.status = "running"
             batch.error_message = None
         session.commit()

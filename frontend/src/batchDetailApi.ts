@@ -71,10 +71,3 @@ export function saveExceptionSplit(exceptionId: number, parts: SplitPart[]) {
     body: JSON.stringify({ parts })
   });
 }
-
-export function resolveSelfOperatedSite(exceptionId: number, site: string) {
-  return api<Job>(`/api/exceptions/${exceptionId}/self-operated-site`, {
-    method: "PUT",
-    body: JSON.stringify({ full_site: site })
-  });
-}

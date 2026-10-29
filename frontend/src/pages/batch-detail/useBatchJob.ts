@@ -24,6 +24,7 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
   }, []);
   const activeJob = useMemo(() => {
     const jobs = batch?.jobs;
+    if (isActiveJob(jobs?.prepare)) return jobs.prepare;
     if (isActiveJob(jobs?.compute)) return jobs.compute;
     if (isActiveJob(jobs?.export)) return jobs.export;
     return undefined;
@@ -35,7 +36,13 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
     if (!announcedJobs.current.has(job.id)) {
       announcedJobs.current.add(job.id);
       if (job.status === "succeeded") {
-        message.success(job.kind === "compute" ? "批次计算完成" : "导出文件已生成");
+        message.success(
+          job.kind === "prepare"
+            ? "历史获取与累计核对完成，请查看核对结果"
+            : job.kind === "compute"
+              ? "批次计算完成"
+              : "导出文件已生成"
+        );
       } else {
         message.error(job.error_message ?? "后台任务失败");
       }

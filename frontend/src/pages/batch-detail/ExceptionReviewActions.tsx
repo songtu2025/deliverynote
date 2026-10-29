@@ -3,19 +3,17 @@ import type { ExceptionEditor } from "./useExceptionEditor";
 
 export default function ExceptionReviewActions({ editor, action }: { editor: ExceptionEditor; action: string | null }) {
   const {
-    selfOperatedSiteSelection,
     exceptionTotal,
     reviewNavigationLocked,
     canReviewPrevious,
     canReviewNext,
     navigateReview,
     setSplitTarget,
-    selfOperatedSiteValid,
-    saveSelfOperatedSite
+    splitTarget
   } = editor;
   return (
     <div className="drawer-footer">
-      {!selfOperatedSiteSelection && exceptionTotal > 1 && (
+      {exceptionTotal > 1 && (
         <div className="drawer-review-navigation">
           <Tooltip title={reviewNavigationLocked ? "当前有未保存修改，请先保存" : ""}>
             <span>
@@ -40,20 +38,7 @@ export default function ExceptionReviewActions({ editor, action }: { editor: Exc
         <Button aria-label="取消" onClick={() => setSplitTarget(null)}>
           取消
         </Button>
-        {selfOperatedSiteSelection ? (
-          <Tooltip title={selfOperatedSiteValid ? "" : "请选择一个候选站点"}>
-            <Button
-              type="primary"
-              disabled={!selfOperatedSiteValid}
-              loading={action === "site-resolution"}
-              onClick={() => void saveSelfOperatedSite()}
-            >
-              保存并重新计算
-            </Button>
-          </Tooltip>
-        ) : (
-          <SplitSaveActions editor={editor} action={action} />
-        )}
+        {splitTarget?.allowed_actions.includes("split") && <SplitSaveActions editor={editor} action={action} />}
       </div>
     </div>
   );

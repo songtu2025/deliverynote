@@ -163,12 +163,7 @@ def _exception_json(
 ) -> dict[str, object]:
     position_values = position_values or {}
     reason_code = exception.reason_code or exception_reason_code(exception.reason)
-    if self_operated:
-        allowed_actions = (
-            ["resolve_site"] if reason_code == "ambiguous_product_site" else []
-        )
-    else:
-        allowed_actions = ["split"]
+    allowed_actions = [] if self_operated else ["split"]
     return {
         "id": exception.id,
         "batch_file_id": exception.batch_file_id,

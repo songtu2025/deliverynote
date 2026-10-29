@@ -60,10 +60,6 @@ class SplitPayload(BaseModel):
     parts: list[SplitPartPayload]
 
 
-class SelfOperatedSiteResolutionPayload(BaseModel):
-    full_site: str = Field(min_length=1, max_length=300)
-
-
 class DraftMutationPayload(BaseModel):
     revision: int = Field(ge=1)
 

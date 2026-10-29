@@ -45,7 +45,7 @@ describe("BatchDetailWorkbench", () => {
     await screen.findByText(state.batch.name);
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "当前批次任务" })).toBeInTheDocument();
-    expect(screen.getByText("质检合格总量")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "当前批次任务" })).getByText("本次申请")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
   });

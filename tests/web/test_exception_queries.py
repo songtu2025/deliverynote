@@ -27,7 +27,7 @@ class WebApiTests(WebApiCase):
             ("/api/batches/{batch_id}/exceptions", "get", "200"),
             ("/api/batches/{batch_id}/exceptions/filters", "get", "200"),
             ("/api/exceptions/{exception_id}/split", "put", "200"),
-            ("/api/exceptions/{exception_id}/self-operated-site", "put", "202"),
+            ("/api/batches/{batch_id}/files/{file_id}/receipt-site", "put", "200"),
             ("/api/batches/{batch_id}/preflight", "post", "200"),
             ("/api/batches/{batch_id}/compute", "post", "202"),
             ("/api/jobs/{job_id}", "get", "200"),

@@ -39,6 +39,7 @@ class WorkerIntegrationTests(WorkerCase):
         second_path = self.create_self_operated_delivery(
             self.root / "260817-狂飙-B质检交货单.xlsx",
             8,
+            "LN2608179026",
         )
         uploaded = []
         for source_path in (first_path, second_path):
@@ -58,7 +59,7 @@ class WorkerIntegrationTests(WorkerCase):
         )
         self.assertEqual(reordered.status_code, 200, reordered.text)
         inbound_path = self.create_self_operated_inbound(
-            self.root / "自营仓多质检单待入库.xlsx"
+            self.root / "自营仓多质检单待入库.xlsx", multiple=True
         )
         with inbound_path.open("rb") as upload:
             inbound = self.client.post(
@@ -73,6 +74,7 @@ class WorkerIntegrationTests(WorkerCase):
             headers=self.headers,
         )
         self.assertEqual(preflight.status_code, 200, preflight.text)
+        run_once(self.database_url, self.storage_root)
         compute = self.client.post(
             f"/api/batches/{batch_id}/compute",
             headers=self.headers,
@@ -160,7 +162,7 @@ class WorkerIntegrationTests(WorkerCase):
         self.assertEqual(merged_response.status_code, 200, merged_response.text)
         merged_book = load_workbook(BytesIO(merged_response.content), data_only=True)
         merged_sheet = merged_book["批量入库"]
-        self.assertEqual(merged_sheet.max_row, 2)
+        self.assertEqual(merged_sheet.max_row, 3)
         self.assertEqual(
             sum(
                 merged_sheet.cell(row, 17).value or 0

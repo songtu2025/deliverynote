@@ -15,7 +15,6 @@ from .models import (
     OverreceiptRuleVersion,
     SelfOperatedBatch,
     SelfOperatedOverreceiptRuleVersion,
-    SelfOperatedSiteResolution,
     SplitRecord,
 )
 
@@ -53,6 +52,7 @@ def batch_sources(session: Session, batch_id: int) -> list[BatchFile]:
                     BatchFile.import_total,
                     BatchFile.manual_total,
                     BatchFile.result_path,
+                    BatchFile.receipt_context,
                 )
             )
         ).all()
@@ -217,17 +217,5 @@ def batch_jobs(session: Session, batch_id: int) -> list[Job]:
     return list(
         session.scalars(
             select(Job).where(Job.batch_id == batch_id).order_by(Job.id)
-        ).all()
-    )
-
-
-def batch_site_resolutions(
-    session: Session, batch_id: int
-) -> list[SelfOperatedSiteResolution]:
-    return list(
-        session.scalars(
-            select(SelfOperatedSiteResolution)
-            .where(SelfOperatedSiteResolution.batch_id == batch_id)
-            .order_by(SelfOperatedSiteResolution.id)
         ).all()
     )

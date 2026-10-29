@@ -34,6 +34,14 @@ class MigrationTests(PostgreSQLCase):
                 column["name"]
                 for column in inspector.get_columns(ExceptionRecord.__tablename__)
             }
+            receipt_columns = {
+                column["name"]: column
+                for column in inspector.get_columns("batch_files")
+            }
+            snapshot_columns = {
+                column["name"]: column
+                for column in inspector.get_columns("self_operated_batches")
+            }
         finally:
             database.dispose()
 
@@ -47,6 +55,9 @@ class MigrationTests(PostgreSQLCase):
         self.assertIn("purchase_allocated_quantity", exception_columns)
         self.assertIn("overreceipt_allocated_quantity", exception_columns)
         self.assertIn("overreceipt_remaining_quantity", exception_columns)
+        self.assertTrue(receipt_columns["receipt_context"]["nullable"])
+        self.assertTrue(receipt_columns["receipt_sites"]["nullable"])
+        self.assertTrue(snapshot_columns["receipt_snapshot"]["nullable"])
 
     def test_unified_migration_upgrades_legacy_schema_and_preserves_data(self):
         migrate_schema(self.database_url)
@@ -87,6 +98,14 @@ class MigrationTests(PostgreSQLCase):
                 exception_id = exception.id
 
             with database.engine.begin() as connection:
+                for table, column in (
+                    ("batch_files", "receipt_context"),
+                    ("batch_files", "receipt_sites"),
+                    ("self_operated_batches", "receipt_snapshot"),
+                ):
+                    connection.execute(
+                        text(f"ALTER TABLE {table} DROP COLUMN {column}")
+                    )
                 connection.execute(text("DROP TABLE batch_overreceipt_rules"))
                 connection.execute(text("DROP TABLE overreceipt_rule_versions"))
                 for column in (

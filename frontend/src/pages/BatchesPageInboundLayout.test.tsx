@@ -8,6 +8,7 @@ describe("自营仓紧凑列表", () => {
   beforeEach(() => {
     Object.assign(state.batchRows[0], {
       workflow: "self_operated_inbound",
+      receipt: { cumulative_total: 163, history_total: 3, requested_total: 160, issue_count: 0 },
       name: "自营仓合成批次",
       inbound_file: { uploaded: true, original_name: "锁定待入库版本 V1" }
     });
@@ -21,7 +22,7 @@ describe("自营仓紧凑列表", () => {
     expect(table.closest(".batch-list-page")).toHaveClass("batch-list-page--compact");
     expect(within(row).getByText(/批次 #7/)).toHaveTextContent("待入库数据已就绪");
     expect(within(row).getByTitle("锁定待入库版本 V1")).toBeInTheDocument();
-    expect(within(row).getByText(/2 份质检单/)).toHaveTextContent("质检合格 160");
+    expect(within(row).getByText(/2 份质检单/)).toHaveTextContent("本次申请 160");
     expect(within(row).getByText(/可入库 100/)).toHaveTextContent("待处理 60");
     expect(within(row).queryByText(/可导入|交货 160/)).not.toBeInTheDocument();
     expect(within(row).getByText("审校待处理")).toBeInTheDocument();
@@ -30,6 +31,7 @@ describe("自营仓紧凑列表", () => {
 
   it.each([true, false])("distinguishes computed zero quantities from missing results: %s", async (computed) => {
     Object.assign(state.batchRows[0], {
+      receipt: computed ? { cumulative_total: 0, history_total: 0, requested_total: 0, issue_count: 0 } : undefined,
       summary: computed ? { delivery_total: 0, import_total: 0, manual_total: 0, conserved: true } : undefined,
       inbound_file: { uploaded: false, original_name: "" }
     });
@@ -38,7 +40,7 @@ describe("自营仓紧凑列表", () => {
 
     expect(within(row).getByText(/批次 #7/)).toHaveTextContent("待入库数据未就绪");
     if (computed) {
-      expect(within(row).getByText(/质检合格 0/)).toBeInTheDocument();
+      expect(within(row).getByText(/本次申请 0/)).toBeInTheDocument();
       expect(within(row).getByText(/可入库 0/)).toHaveTextContent("待处理 0");
       expect(within(row).queryByText("尚未计算")).not.toBeInTheDocument();
     } else {

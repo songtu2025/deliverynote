@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
@@ -9,6 +9,7 @@ describe("自营仓批次详情", () => {
   beforeEach(() => {
     Object.assign(state.batch, {
       workflow: "self_operated_inbound",
+      receipt: { cumulative_total: 163, history_total: 3, requested_total: 160, issue_count: 0 },
       name: "合成自营仓详情",
       version_ids: { product: 2, supplier: 3, inbound_template: 6, self_operated_inbound: 7 },
       versions: {
@@ -24,7 +25,7 @@ describe("自营仓批次详情", () => {
         ...state.exceptions[2],
         delivery_quantity: 60,
         manual_quantity: 60,
-        allowed_actions: ["resolve_site"]
+        allowed_actions: []
       }
     ];
   });
@@ -34,18 +35,16 @@ describe("自营仓批次详情", () => {
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     expect(await task.findByText("1 条未完成 · 待处理 60 件")).toBeInTheDocument();
-    expect(task.getByText("质检合格总量")).toBeInTheDocument();
+    expect(task.getByText("本次申请")).toBeInTheDocument();
     expect(task.getByText("160 = 100 + 60")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "质检合格" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "本次申请" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "可入库" })).toBeInTheDocument();
     expect(screen.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("备货定位筛选")).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "规模定位" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "查看并处理" }));
-    const drawer = await screen.findByRole("dialog");
-    expect(within(drawer).queryByText("规模定位")).not.toBeInTheDocument();
-    expect(within(drawer).queryByText("备货定位")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看并处理" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存并重新计算" })).not.toBeInTheDocument();
   });
 
   it.each([
@@ -85,6 +84,9 @@ describe("自营仓批次详情", () => {
   it.each([true, false])("区分有效零值与缺失汇总：%s", async (hasSummary) => {
     state.batch.summary = hasSummary
       ? { delivery_total: 0, import_total: 0, manual_total: 0, conserved: true }
+      : undefined;
+    state.batch.receipt = hasSummary
+      ? { cumulative_total: 0, history_total: 0, requested_total: 0, issue_count: 0 }
       : undefined;
     state.exceptions = [];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);

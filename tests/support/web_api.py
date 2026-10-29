@@ -152,7 +152,10 @@ class WebApiCase(unittest.TestCase):
     def self_operated_inbound_bytes() -> bytes:
         workbook = Workbook()
         sheet = workbook.worksheets[0]
-        sheet.append(INBOUND_TEMPLATE_COLUMNS + ["供应商"])
+        sheet.append(
+            INBOUND_TEMPLATE_COLUMNS
+            + ["供应商", "原始应收货", "积加明细ID", "入库状态"]
+        )
         values: dict[str, Any] = {column: "" for column in INBOUND_TEMPLATE_COLUMNS}
         values.update(
             {
@@ -163,10 +166,13 @@ class WebApiCase(unittest.TestCase):
                 "关联采购单": "PO-20260801",
                 "关联交货单/调拨单": "LN2608179025",
                 "应收货": 10,
+                "已入库": 0,
+                "已退货": 0,
             }
         )
         sheet.append(
-            [values[column] for column in INBOUND_TEMPLATE_COLUMNS] + ["KuangBiao"]
+            [values[column] for column in INBOUND_TEMPLATE_COLUMNS]
+            + ["KuangBiao", 10, "IN-1-item", "WAIT_INBOUND"]
         )
         buffer = BytesIO()
         workbook.save(buffer)

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .batch_views import batch_json
 from .dependencies import RequestDependencies
 from .models import BatchFile, ExceptionRecord, SplitRecord
+from .receipt_state import invalidate_receipts
 from .schemas import FileOrderPayload
 from .uploads import _unlink_after_commit
 
@@ -51,6 +52,7 @@ class BatchFileEditor:
             )
         session.delete(source)
         session.flush()
+        invalidate_receipts(session, batch)
         remaining = session.scalars(
             select(BatchFile)
             .where(BatchFile.batch_id == batch.id)
@@ -99,6 +101,7 @@ class BatchFileEditor:
         session.flush()
         for file_order, source_id in enumerate(payload.file_ids, start=1):
             by_id[source_id].file_order = file_order
+        invalidate_receipts(session, batch)
         batch.status = "draft"
         self.audit(
             session,

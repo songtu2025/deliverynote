@@ -13,7 +13,6 @@ from .batch_queries import (
     batch_jobs,
     batch_metadata,
     batch_metadata_by_id,
-    batch_site_resolutions,
     batch_source_rows,
     batch_sources,
     batch_versions,
@@ -79,6 +78,11 @@ def file_json(
         "import_total": source.import_total if import_total is None else import_total,
         "manual_total": source.manual_total if manual_total is None else manual_total,
         "download_ready": bool(source.result_path),
+        "receipt": {
+            key: value for key, value in source.receipt_context.items() if key != "rows"
+        }
+        if source.receipt_context
+        else None,
     }
 
 
@@ -145,6 +149,15 @@ def _batch_base_json(
         "updated_at": utc_isoformat(batch.updated_at),
         "file_count": totals.file_count,
         "summary": totals.summary(),
+        "receipt": {
+            **self_operated.receipt_snapshot.get("summary", {}),
+            "captured_at": self_operated.receipt_snapshot.get("captured_at"),
+            "source": self_operated.receipt_snapshot.get("source"),
+        }
+        if self_operated is not None
+        and self_operated.receipt_snapshot
+        and "summary" in self_operated.receipt_snapshot
+        else None,
     }
 
 
@@ -170,18 +183,6 @@ def _batch_details(
             for kind, version in batch_versions(session, batch, metadata).items()
         },
         "jobs": {job.kind: job_json(job) for job in batch_jobs(session, batch.id)},
-        "site_resolutions": [
-            {
-                "id": resolution.id,
-                "sku": resolution.sku,
-                "original_site": resolution.original_site,
-                "full_site": resolution.full_site,
-                "updated_at": utc_isoformat(resolution.updated_at),
-            }
-            for resolution in batch_site_resolutions(session, batch.id)
-        ]
-        if metadata.self_operated is not None
-        else [],
     }
 
 

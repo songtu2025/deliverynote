@@ -121,36 +121,22 @@ class WebApiTests(WebApiCase):
         )
         self.assertEqual(created.status_code, 201, created.text)
         batch_id = created.json()["id"]
-        original_reader = batch_preflight_module.read_self_operated_delivery_workbook
-
-        def read_and_replace(path):
-            result = original_reader(path)
-            replaced = self.client.post(
-                f"/api/self-operated-batches/{batch_id}/inbound-file",
-                headers=headers,
-                files={
-                    "file": (
-                        "更新后的收货入库单.xlsx",
-                        BytesIO(self.self_operated_inbound_bytes()),
-                    )
-                },
-            )
-            self.assertEqual(replaced.status_code, 200, replaced.text)
-            return result
-
-        with patch.object(
-            batch_preflight_module,
-            "read_self_operated_delivery_workbook",
-            side_effect=read_and_replace,
-        ):
-            preflight = self.client.post(
-                f"/api/batches/{batch_id}/preflight", headers=headers
-            )
-        self.assertEqual(preflight.status_code, 409, preflight.text)
+        preflight = self.client.post(
+            f"/api/batches/{batch_id}/preflight", headers=headers
+        )
+        self.assertEqual(preflight.status_code, 200)
+        replacement = self.client.post(
+            f"/api/self-operated-batches/{batch_id}/inbound-file",
+            headers=headers,
+            files={
+                "file": ("新入库单.xlsx", BytesIO(self.self_operated_inbound_bytes()))
+            },
+        )
+        self.assertEqual(replacement.status_code, 409)
         batch = self.client.get(f"/api/batches/{batch_id}", headers=headers).json()
-        self.assertEqual(batch["status"], "draft")
+        self.assertEqual(batch["status"], "queued")
         self.assertEqual(
-            batch["inbound_file"]["original_name"], "更新后的收货入库单.xlsx"
+            batch["inbound_file"]["original_name"], "自营仓收货入库单.xlsx"
         )
 
     def test_preflight_rejects_invalid_excel_content(self):

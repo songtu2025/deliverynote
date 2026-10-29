@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from ..web.database import Database
 from .exception_reason_codes import migrate as migrate_exception_reason_codes
+from .inbound_receipts import migrate as migrate_inbound_receipts
 from .overreceipt_rules import migrate as migrate_overreceipt_rules
 from .position_draft_row_index import migrate as migrate_position_draft_row_index
 from .purchase_sync_optional_versions import (
@@ -24,6 +25,7 @@ MIGRATIONS: tuple[Callable[[str], None], ...] = (
     migrate_purchase_sync_optional_versions,
     migrate_position_draft_row_index,
     migrate_exception_reason_codes,
+    migrate_inbound_receipts,
 )
 
 

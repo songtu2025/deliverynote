@@ -1,6 +1,15 @@
 import type { InputVersion } from "./inputVersions";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "./rules";
 
+interface ReceiptTotals {
+  cumulative_total?: number;
+  history_total?: number | null;
+  requested_total?: number | null;
+  issue_count?: number;
+  captured_at?: string;
+  source?: "api" | "upload";
+}
+
 export interface BatchFile {
   id: number;
   batch_id: number;
@@ -13,6 +22,7 @@ export interface BatchFile {
   import_total: number;
   manual_total: number;
   download_ready: boolean;
+  receipt?: ReceiptTotals | null;
 }
 
 export interface Batch {
@@ -36,8 +46,8 @@ export interface Batch {
   file_count: number;
   files?: BatchFile[];
   versions?: Record<string, InputVersion>;
-  jobs?: Partial<Record<"compute" | "export", Job>>;
-  site_resolutions?: SelfOperatedSiteResolution[];
+  jobs?: Partial<Record<"compute" | "export" | "prepare", Job>>;
+  receipt?: ReceiptTotals | null;
   summary?: {
     delivery_total: number;
     import_total: number;
@@ -46,18 +56,10 @@ export interface Batch {
   };
 }
 
-interface SelfOperatedSiteResolution {
-  id: number;
-  sku: string;
-  original_site: string;
-  full_site: string;
-  updated_at: string;
-}
-
 export interface Job {
   id: number;
   batch_id: number;
-  kind: "compute" | "export";
+  kind: "compute" | "export" | "prepare";
   status: string;
   attempts: number;
   error_message: string | null;
@@ -107,7 +109,7 @@ export interface DeliveryException {
   manual_quantity: number;
   reason: string;
   reason_code: ExceptionReasonCode;
-  allowed_actions: ("split" | "resolve_site")[];
+  allowed_actions: "split"[];
   status: string;
   scale_position: string | number;
   stocking_position: string | number;

@@ -2,7 +2,7 @@ import type { BatchAction } from "./useBatchAction";
 import { useEffect, useState } from "react";
 import { App as AntApp, Form } from "antd";
 import type { DeliveryException, SplitPart } from "../../types";
-import { REVIEW_PAGE_SIZE, saveExceptionSplit, resolveSelfOperatedSite } from "../../batchDetailApi";
+import { REVIEW_PAGE_SIZE, saveExceptionSplit } from "../../batchDetailApi";
 import type { ExceptionReview } from "./useExceptionReview";
 import type { ExceptionPage } from "../../batchDetailApi";
 import { candidateSites, initialSplitPart, reviewNeighbors, summarizeSplit } from "./reviewDraft";
@@ -13,14 +13,12 @@ export function useExceptionEditor({
   splitTarget,
   setSplitTarget,
   review,
-  selfOperated,
   runAction,
   load
 }: {
   splitTarget: DeliveryException | null;
   setSplitTarget: (target: DeliveryException | null) => void;
   review: ExceptionReview;
-  selfOperated: boolean;
   runAction: BatchAction;
   load: (silent?: boolean) => Promise<ExceptionPage | null>;
 }) {
@@ -61,10 +59,6 @@ export function useExceptionEditor({
   const splitValid = split.valid;
   const splitCandidateSites =
     splitTarget?.reason_code === "ambiguous_product_site" ? candidateSites(splitTarget.full_site) : [];
-  const selfOperatedSiteSelection = Boolean(selfOperated && splitTarget?.allowed_actions.includes("resolve_site"));
-  const selectedSelfOperatedSite = String(splitParts[0]?.site ?? "").trim();
-  const selfOperatedSiteValid = splitCandidateSites.includes(selectedSelfOperatedSite);
-
   const continueReview = (savedId: number, savedIndex: number, refreshed: ExceptionPage | null, advance: boolean) => {
     if (advance && refreshed) {
       const savedStillVisible = refreshed.items.findIndex((item) => item.id === savedId);
@@ -99,18 +93,6 @@ export function useExceptionEditor({
     });
   };
 
-  const saveSelfOperatedSite = async () => {
-    if (!splitTarget || !selfOperatedSiteValid) return;
-    await splitForm.validateFields([["parts", 0, "site"]]);
-    await runAction("site-resolution", async () => {
-      await resolveSelfOperatedSite(splitTarget.id, selectedSelfOperatedSite);
-      setSplitTarget(null);
-      splitForm.resetFields();
-      await load(true);
-      message.info("站点已保存，系统正在按新站点重新计算整个批次");
-    });
-  };
-
   return {
     splitTarget,
     setSplitTarget,
@@ -127,10 +109,7 @@ export function useExceptionEditor({
     splitRemaining,
     splitValid,
     splitCandidateSites,
-    selfOperatedSiteSelection,
-    selfOperatedSiteValid,
-    saveSplit,
-    saveSelfOperatedSite
+    saveSplit
   };
 }
 export type ExceptionEditor = ReturnType<typeof useExceptionEditor>;

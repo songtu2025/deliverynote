@@ -115,7 +115,9 @@ class WorkerCase(unittest.TestCase):
         return path
 
     @staticmethod
-    def create_self_operated_delivery(path: Path, quantity: int) -> Path:
+    def create_self_operated_delivery(
+        path: Path, quantity: int, number: str = "LN2608179025"
+    ) -> Path:
         workbook = Workbook()
         sheet = workbook.worksheets[0]
         sheet.title = "明细"
@@ -123,36 +125,52 @@ class WorkerCase(unittest.TestCase):
         sheet.append([])
         sheet.append([])
         sheet.append(["积加SKU", "实收数量", "站点", "交货单号"])
-        sheet.append(["SKU-A", quantity, "US站", "LN2608179025"])
+        sheet.append(["SKU-A", quantity, "US站", number])
         workbook.save(path)
         return path
 
     @staticmethod
-    def create_self_operated_inbound(path: Path) -> Path:
+    def create_self_operated_inbound(path: Path, *, multiple: bool = False) -> Path:
         workbook = Workbook()
         sheet = workbook.worksheets[0]
         source_columns = [
             column for column in INBOUND_TEMPLATE_COLUMNS if column != "最大可收货"
         ]
-        sheet.append(source_columns + ["供应商"])
-        for site, inbound_number in (
-            ("AMAZON:RIVMOUNT:US", "IN-R"),
-            ("AMAZON:SEEKWAY:US", "IN-S"),
-        ):
-            values: dict[str, Any] = {column: "" for column in INBOUND_TEMPLATE_COLUMNS}
-            values.update(
-                {
-                    "入库单号": inbound_number,
-                    "入库仓": "自营仓",
-                    "SKU": "SKU-A",
-                    "平台站点": site,
-                    "关联采购单": f"PO-20260801-{site}",
-                    "关联交货单/调拨单": "LN2608179025",
-                    "应收货": 10,
+        sheet.append(
+            source_columns + ["供应商", "原始应收货", "积加明细ID", "入库状态"]
+        )
+        scopes = (
+            (("LN2608179025", 7, ""), ("LN2608179026", 3, "-second"))
+            if multiple
+            else (("LN2608179025", 10, ""),)
+        )
+        for number, remaining, suffix in scopes:
+            for site, inbound_number in (
+                ("AMAZON:RIVMOUNT:US", "IN-R"),
+                ("AMAZON:SEEKWAY:US", "IN-S"),
+            ):
+                values: dict[str, Any] = {
+                    column: "" for column in INBOUND_TEMPLATE_COLUMNS
                 }
-            )
-            sheet.append([values[column] for column in source_columns] + ["KuangBiao"])
+                values.update(
+                    {
+                        "入库单号": inbound_number + suffix,
+                        "入库仓": "自营仓",
+                        "SKU": "SKU-A",
+                        "平台站点": site,
+                        "关联采购单": f"PO-20260801-{site}",
+                        "关联交货单/调拨单": number,
+                        "应收货": remaining,
+                        "已入库": 0,
+                        "已退货": 0,
+                    }
+                )
+                sheet.append(
+                    [values[column] for column in source_columns]
+                    + ["KuangBiao", remaining, inbound_number + suffix, "WAIT_INBOUND"]
+                )
         workbook.save(path)
+        workbook.close()
         return path
 
     def upload_versions(self):

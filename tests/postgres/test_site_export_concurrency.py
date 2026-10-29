@@ -1,4 +1,4 @@
-"""验证站点选择与导出在同一批次上互斥。"""
+"""验证重新取数与导出在同一批次上互斥。"""
 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -9,11 +9,11 @@ from sqlalchemy import event, select, text
 
 from delivery_note.web.models import (
     Batch,
-    ExceptionRecord,
+    BatchFile,
     Job,
     SelfOperatedBatch,
-    SelfOperatedSiteResolution,
 )
+from delivery_note.web.receipt_state import receipt_signature
 from delivery_note.workers.leases import _claim_job
 from tests.support.postgres import PostgreSQLCase
 
@@ -22,27 +22,19 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
     def _seed_site_choice(self, app, batch_id, file_id):
         with app.state.database.session() as session:
             batch = session.get(Batch, batch_id)
-            session.add(
-                SelfOperatedBatch(
-                    batch_id=batch_id,
-                    template_version_id=batch.product_version_id,
-                )
+            profile = SelfOperatedBatch(
+                batch_id=batch_id, template_version_id=batch.product_version_id
             )
+            session.add(profile)
+            source = session.get(BatchFile, file_id)
+            source.receipt_context = {"issue_count": 0, "requested_total": 1}
+            session.flush()
+            profile.receipt_snapshot = {
+                "signature": receipt_signature(batch, profile, [source])
+            }
             session.add(Job(batch_id=batch_id, kind="compute", status="succeeded"))
-            record = ExceptionRecord(
-                batch_file_id=file_id,
-                sku="SKU-A",
-                original_site="US",
-                full_site="AMAZON:SEEKWAY:US、AMAZON:RIVMOUNT:US",
-                delivery_quantity=1,
-                allocated_quantity=0,
-                manual_quantity=1,
-                reason="产品信息站点不唯一",
-                reason_code="ambiguous_product_site",
-            )
-            session.add(record)
             session.commit()
-            return record.id
+            return file_id
 
     @contextmanager
     def _batch_waiter(self, database):
@@ -85,20 +77,20 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
             bid,
             files,
         ):
-            rid = self._seed_site_choice(app, bid, files[0])
+            self._seed_site_choice(app, bid, files[0])
             database = app.state.database
             with (
                 self._batch_waiter(database) as waiter,
-                self.paused_sql(
-                    database.engine, "INSERT INTO SELF_OPERATED_SITE_RESOLUTIONS"
-                ) as (entered, resume),
+                self.paused_sql(database.engine, "UPDATE SELF_OPERATED_BATCHES") as (
+                    entered,
+                    resume,
+                ),
             ):
                 with ThreadPoolExecutor(max_workers=2) as executor:
                     choice = executor.submit(
-                        client.put,
-                        f"/api/exceptions/{rid}/self-operated-site",
+                        client.post,
+                        f"/api/batches/{bid}/receipts/refresh",
                         headers=headers,
-                        json={"full_site": "AMAZON:SEEKWAY:US"},
                     )
                     try:
                         self.assertTrue(entered.wait(10))
@@ -112,13 +104,14 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
                         self._assert_blocked(database, export, waiter)
                     finally:
                         resume.set()
-                    self.assertEqual(choice.result(10).status_code, 202)
+                    self.assertEqual(choice.result(10).status_code, 200)
                     self.assertEqual(export.result(10).status_code, 409)
             with database.session() as session:
                 self.assertEqual(session.get(Batch, bid).status, "queued")
                 jobs = session.scalars(select(Job).where(Job.batch_id == bid)).all()
                 self.assertEqual(
-                    [(job.kind, job.status) for job in jobs], [("compute", "queued")]
+                    [(job.kind, job.status) for job in jobs],
+                    [("compute", "stale"), ("prepare", "queued")],
                 )
                 self.assertIsNone(session.get(Batch, bid).zip_path)
 
@@ -130,7 +123,7 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
             bid,
             files,
         ):
-            rid = self._seed_site_choice(app, bid, files[0])
+            self._seed_site_choice(app, bid, files[0])
             database = app.state.database
             with (
                 self._batch_waiter(database) as waiter,
@@ -148,10 +141,9 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
                         waiter[0].clear()
                         waiter[1].clear()
                         choice = executor.submit(
-                            client.put,
-                            f"/api/exceptions/{rid}/self-operated-site",
+                            client.post,
+                            f"/api/batches/{bid}/receipts/refresh",
                             headers=headers,
-                            json={"full_site": "AMAZON:SEEKWAY:US"},
                         )
                         self._assert_blocked(database, choice, waiter)
                     finally:
@@ -163,7 +155,9 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
     def _assert_export_unchanged(self, database, batch_id, expected_status):
         with database.session() as session:
             self.assertEqual(session.get(Batch, batch_id).status, "succeeded")
-            self.assertIsNone(session.scalar(select(SelfOperatedSiteResolution)))
+            self.assertIsNotNone(
+                session.get(SelfOperatedBatch, batch_id).receipt_snapshot
+            )
             job = session.scalar(
                 select(Job).where(Job.batch_id == batch_id, Job.kind == "export")
             )
@@ -177,7 +171,7 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
             bid,
             files,
         ):
-            rid = self._seed_site_choice(app, bid, files[0])
+            self._seed_site_choice(app, bid, files[0])
             export = client.post(f"/api/batches/{bid}/export", headers=headers)
             self.assertEqual(export.status_code, 202)
             for status in ("queued", "running"):
@@ -185,10 +179,9 @@ class SiteExportConcurrencyTests(PostgreSQLCase):
                     if status == "running":
                         claim = _claim_job(app.state.database)
                         self.assertEqual(claim[0], export.json()["id"])
-                    response = client.put(
-                        f"/api/exceptions/{rid}/self-operated-site",
+                    response = client.post(
+                        f"/api/batches/{bid}/receipts/refresh",
                         headers=headers,
-                        json={"full_site": "AMAZON:SEEKWAY:US"},
                     )
                     self.assertEqual(response.status_code, 409)
                     self._assert_export_unchanged(app.state.database, bid, status)

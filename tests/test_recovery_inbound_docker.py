@@ -31,11 +31,13 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
                 ("260817-狂飙-A质检交货单.xlsx", 7, 3),
             ],
         )
-        self.assertEqual(ambiguous["batch"]["summary"]["manual_total"], 18)
-        self.assertEqual(ambiguous["batch"]["site_resolutions"], [])
-        self.assertEqual(ambiguous["exceptions"][0]["reason"], "产品信息站点不唯一")
+        self.assertIsNone(ambiguous["batch"]["receipt"]["requested_total"])
+        self.assertEqual(ambiguous["batch"]["receipt"]["issue_count"], 1)
         self.assertEqual(
-            selected["batch"]["site_resolutions"][0]["full_site"], "AMAZON:RIVMOUNT:US"
+            ambiguous["receipts"]["items"][0]["issue"], "产品信息站点不唯一"
+        )
+        self.assertEqual(
+            selected["receipts"]["items"][0]["full_site"], "AMAZON:RIVMOUNT:US"
         )
         for record in (multi, selected):
             self.assertEqual(
@@ -85,19 +87,20 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
         multi, ambiguous, selected = restored.batch_ids
         restored.batch_id = ambiguous
         before = restored.batch()
-        record = snapshot["batches"][ambiguous]["exceptions"][0]
+        record = snapshot["batches"][ambiguous]["receipts"]["items"][0]
         restored.request(
             "PUT",
-            f"/api/exceptions/{record['id']}/self-operated-site",
+            f"/api/batches/{ambiguous}/files/{record['file_id']}/receipt-site",
             400,
-            json={"full_site": "AMAZON:OTHER:US"},
+            json={
+                "sku": record["sku"],
+                "original_site": record["original_site"],
+                "full_site": "AMAZON:OTHER:US",
+            },
         )
         self.assertEqual(restored.batch(), before)
         job = restored.choose_site()
-        self.assertEqual(job["id"], before["jobs"]["compute"]["id"])
-        self.assertNotEqual(
-            job["finished_at"], before["jobs"]["compute"]["finished_at"]
-        )
+        self.assertEqual(job["status"], "succeeded")
         restored.export()
 
         restored.batch_id = multi
@@ -115,9 +118,9 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
 
         restored.create_inbound_batch()
         fresh = restored.batch()
-        self.assertEqual(fresh["summary"]["manual_total"], 18)
+        self.assertIsNone(fresh["receipt"]["requested_total"])
         self.assertEqual(fresh["version_ids"], before["version_ids"])
-        self.assertNotEqual(fresh["jobs"]["compute"]["id"], job["id"])
+        self.assertNotEqual(fresh["jobs"]["prepare"]["id"], job["id"])
         restored.choose_site()
         restored.export()
         after = restored.snapshot()

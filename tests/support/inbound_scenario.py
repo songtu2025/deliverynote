@@ -50,7 +50,9 @@ class InboundScenario(DeliveryScenario):
         uploaded = []
         for letter, quantity in (("A", 10), ("B", 8)) if multiple else (("A", 18),):
             path = WorkerCase.create_self_operated_delivery(
-                self.root / f"260817-狂飙-{letter}质检交货单.xlsx", quantity
+                self.root / f"260817-狂飙-{letter}质检交货单.xlsx",
+                quantity,
+                "LN2608179026" if letter == "B" else "LN2608179025",
             )
             with path.open("rb") as upload:
                 uploaded.append(
@@ -67,29 +69,41 @@ class InboundScenario(DeliveryScenario):
                 f"/api/batches/{self.batch_id}/files/order",
                 json={"file_ids": list(reversed(uploaded))},
             )
-        inbound = WorkerCase.create_self_operated_inbound(self.root / "待入库.xlsx")
+        inbound = WorkerCase.create_self_operated_inbound(
+            self.root / "待入库.xlsx", multiple=multiple
+        )
         with inbound.open("rb") as upload:
             self.request(
                 "POST",
                 f"/api/self-operated-batches/{self.batch_id}/inbound-file",
                 files={"file": (inbound.name, upload)},
             )
-        self.request("POST", f"/api/batches/{self.batch_id}/preflight")
+        prepared = self.request(
+            "POST", f"/api/batches/{self.batch_id}/preflight"
+        ).json()
+        self.wait_job(prepared["jobs"]["prepare"]["id"])
+        if self.batch()["receipt"]["issue_count"]:
+            return
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
         self.wait_job(job.json()["id"])
 
     def choose_site(
         self, *, expected_status: Literal["succeeded", "failed"] = "succeeded"
     ) -> dict[str, Any]:
-        record = self.request("GET", f"/api/batches/{self.batch_id}/exceptions").json()[
-            0
-        ]
-        job = self.request(
+        row = self.request("GET", f"/api/batches/{self.batch_id}/receipts").json()[
+            "items"
+        ][0]
+        prepared = self.request(
             "PUT",
-            f"/api/exceptions/{record['id']}/self-operated-site",
-            202,
-            json={"full_site": "AMAZON:RIVMOUNT:US"},
-        )
+            f"/api/batches/{self.batch_id}/files/{row['file_id']}/receipt-site",
+            json={
+                "sku": row["sku"],
+                "original_site": row["original_site"],
+                "full_site": "AMAZON:RIVMOUNT:US",
+            },
+        ).json()
+        self.wait_job(prepared["jobs"]["prepare"]["id"])
+        job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
         return self.wait_job(job.json()["id"], expected_status=expected_status)
 
     def snapshot(self) -> dict[str, Any]:
@@ -102,6 +116,7 @@ class InboundScenario(DeliveryScenario):
             batches[identifier] = {
                 "batch": batch,
                 "exceptions": self.request("GET", prefix + "/exceptions").json(),
+                "receipts": self.request("GET", prefix + "/receipts").json(),
                 "exports": {
                     source["original_name"]: self.download_file(
                         f"/api/batch-files/{source['id']}/download",

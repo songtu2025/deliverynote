@@ -28,6 +28,7 @@ from .leases import (
 from .sync_inbound import _execute_self_operated_inbound_sync
 from .sync_purchase import _execute_purchase_sync
 from .sync_results import _fail_sync_job
+from .prepare_inbound import execute_prepare_inbound
 
 LOGGER = logging.getLogger("delivery_note.worker")
 
@@ -50,7 +51,7 @@ def _fail_job(
         batch = session.get(Batch, job.batch_id)
         if batch is not None:
             batch.error_message = message
-            if job.kind == "compute":
+            if job.kind in {"compute", "prepare"}:
                 batch.status = "failed"
         session.add(
             AuditLog(
@@ -90,6 +91,11 @@ def _run_batch_job(
                     JobContext(database, job_id, claim_token, lease_keeper.stop),
                     batch_id,
                     Path(storage_root),
+                )
+            elif kind == "prepare":
+                execute_prepare_inbound(
+                    JobContext(database, job_id, claim_token, lease_keeper.stop),
+                    batch_id, Path(storage_root),
                 )
             else:
                 raise RuntimeError(f"未知任务类型：{kind}")

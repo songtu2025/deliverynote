@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .auth import SESSION_COOKIE_NAME, _deleted_session_cookie_header, hash_token
 from .caches import PositionFrameCache
 from .database import Database
-from .models import AuthSession, Batch, InputDraft, User
+from .models import AuthSession, Batch, InputDraft, Job, User
 from .position_draft_state import POSITION_FRAME_CACHE_SESSION_KEY
 
 
@@ -42,6 +42,15 @@ class RequestDependencies:
     ) -> Batch:
         """复用查询与锁，在各文件入口保持一致的可编辑状态。"""
         batch = self.get_batch_or_404(batch_id, session, for_update=for_update)
+        active = session.scalar(
+            select(Job.id).where(
+                Job.batch_id == batch_id, Job.status.in_(("queued", "running"))
+            )
+        )
+        if active:
+            raise HTTPException(
+                status_code=409, detail="后台任务进行中，请完成后再修改输入"
+            )
         if batch.status not in {"draft", "preflight_ready", "failed"}:
             raise HTTPException(status_code=409, detail=detail)
         return batch

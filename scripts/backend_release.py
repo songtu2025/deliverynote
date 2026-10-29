@@ -1,6 +1,6 @@
 """在任务排空后选择性发布后端，失败时恢复原镜像与入口。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import time
 from typing import Any, Callable
@@ -21,12 +21,14 @@ from scripts.deployment_sources import (
 from scripts.deployment_verification import service_snapshot, verify_deployment
 from scripts.release_common import (
     ReleaseConfig,
+    image_record,
     previous_config,
     retain_images,
     update_services,
     verify_release_inputs,
     verify_unchanged,
 )
+from scripts.receipt_release import migrate_receipts, verify_receipt_migration
 
 
 @dataclass(frozen=True)
@@ -35,6 +37,8 @@ class BackendReleaseConfig(ReleaseConfig):
     job_drain_timeout_seconds: int = 1800
     job_poll_seconds: int = 5
     stop_timeout_seconds: int = 60
+    receipt_migration: bool = False
+    web_image: str | None = None
 
 
 def selected_services(config: BackendReleaseConfig) -> tuple[str, ...]:
@@ -47,6 +51,12 @@ def selected_services(config: BackendReleaseConfig) -> tuple[str, ...]:
         raise BackupError("必须选择不重复的 API 或 Worker 服务")
     if selected & config.retained.keys():
         raise BackupError("更新服务不能同时声明为保留版本")
+    if config.receipt_migration and (
+        selected != BACKEND_SERVICES or not config.web_image
+    ):
+        raise BackupError("累计实收迁移必须同时更新全部后端及 Web")
+    if config.web_image and not config.receipt_migration:
+        raise BackupError("联合 Web 发布仅用于显式累计实收迁移")
     if (
         min(
             config.job_drain_timeout_seconds,
@@ -57,7 +67,9 @@ def selected_services(config: BackendReleaseConfig) -> tuple[str, ...]:
     ):
         raise BackupError("排空、轮询和停止时间必须为正数")
     # Worker 先切换，API 最后启动；入口在全部核验就绪后恢复。
-    return tuple(name for name in (*WORKER_SERVICES, "api") if name in selected)
+    return tuple(name for name in (*WORKER_SERVICES, "api") if name in selected) + (
+        ("web",) if config.web_image else ()
+    )
 
 
 def preflight(
@@ -74,7 +86,25 @@ def preflight(
         previous.retained.get(name, config.revision) for name in BACKEND_SERVICES
     }
     for revision in revisions:
-        verify_schema_unchanged(config.root, revision, config.revision, runner)
+        if config.receipt_migration:
+            verify_receipt_migration(config.root, revision, config.revision, runner)
+        else:
+            verify_schema_unchanged(config.root, revision, config.revision, runner)
+    if config.web_image:
+        verify_release_inputs(replace(config, image=config.web_image), runner)
+        runner.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--entrypoint",
+                "nginx",
+                config.web_image,
+                "-t",
+            ]
+        )
     for service in services:
         target = before[service]["Config"]["Image"]
         if any(
@@ -91,7 +121,7 @@ def preflight(
             .get("AUTO_MIGRATE_SCHEMA")
         )
         if str(automatic).lower() != "false":
-            raise BackupError("API 发布必须关闭自动迁移，本入口不执行数据库结构升级")
+            raise BackupError("API 发布必须关闭自动迁移")
     return candidate, before, previous, deployment
 
 
@@ -106,8 +136,13 @@ def restore_entry(
             ["docker", "start", api_id], timeout_seconds=config.wait_seconds + 60
         )
     wait_for_api(config, runner, api_id)
+    web_id = (
+        runner.run(compose(config, "ps", "--quiet", "web")).strip()
+        if config.web_image
+        else before["web"]["Id"]
+    )
     runner.run(
-        ["docker", "start", before["web"]["Id"]],
+        ["docker", "start", web_id],
         timeout_seconds=config.wait_seconds + 60,
     )
 
@@ -155,6 +190,7 @@ def publish_backend(
                 "deployment": deployment,
             }
         changed_images = False
+        migration_attempted = False
         original_images = {name: before[name]["Image"] for name in services}
         try:
             runner.run(
@@ -184,8 +220,13 @@ def publish_backend(
             if active_job_count(config, runner) != 0:
                 raise BackupError("Worker 停止后仍存在活动任务")
             rollback_images = retain_images(config, before, services, runner)
+            if config.receipt_migration:
+                migration_attempted = True
+                migrate_receipts(config, runner)
             changed_images = True
             updated_images = {name: candidate["Id"] for name in services}
+            if config.web_image:
+                updated_images["web"] = image_record(runner, config.web_image)["Id"]
             replace_images(config, before, updated_images, runner)
             restore_entry(config, before, runner)
             after = service_snapshot(config, runner)
@@ -210,9 +251,16 @@ def publish_backend(
                 verify_updated_images(recovered, original_images)
                 verify_deployment(previous, runner, records=recovered)
             except Exception as recovery:
+                if migration_attempted:
+                    runner.run(compose(config, "stop", "web", "api"))
                 raise BackupError(
                     f"发布失败且回退未通过：{failure}; {recovery}"
                 ) from recovery
+            if migration_attempted:
+                runner.run(compose(config, "stop", "web", "api"))
+                raise BackupError(
+                    f"累计实收发布失败，已回退镜像；入口保持维护，需核查后恢复：{failure}"
+                ) from failure
             raise BackupError(f"发布失败，已恢复原镜像并验收：{failure}") from failure
         return {
             "status": "complete",
