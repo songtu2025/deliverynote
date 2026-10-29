@@ -50,6 +50,59 @@ class ReceiptTests(InboundAllocationCase):
         self.assertIsNone(contexts["a"]["history_total"])
         self.assertEqual(requests, [])
 
+    def test_unmatched_sku_becomes_pending_without_blocking_matched_quantity(self):
+        inbound = self.inbound(
+            [
+                {
+                    "积加明细ID": "item-1",
+                    "已入库": 3,
+                    "原始应收货": 19,
+                    "入库状态": "PART_INBOUND",
+                }
+            ]
+        )
+        products = self.products()
+        other = products.copy()
+        other["SKU"] = "SKU-B"
+        products = pd.concat([products, other])
+        unmatched = self.delivery(4).copy()
+        unmatched["SKU"] = "SKU-B"
+        delivery = SelfOperatedInboundRequest(
+            "a", pd.concat([self.delivery(19), unmatched]), ("LN2608179011",), "Yu feng"
+        )
+        contexts, requests = prepare_receipts([delivery], products, inbound, {})
+        self.assertEqual(contexts["a"]["issue_count"], 0)
+        self.assertEqual(contexts["a"]["requested_total"], 20)
+        row = next(row for row in contexts["a"]["rows"] if row["sku"] == "SKU-B")
+        self.assertEqual((row["history"], row["requested"]), (0, 4))
+        self.assertIn("待处理", row["notice"])
+        result = process_self_operated_inbound_batch(
+            requests, products, inbound, overreceipt_limit=5
+        )
+        self.assertEqual((result.import_total, result.pending_total), (16, 4))
+        pending = result.items[0].result.pending_rows.iloc[0]
+        self.assertEqual(pending["SKU"], "SKU-B")
+        self.assertEqual(pending["规则内超收数量"], 0)
+
+    def test_missing_delivery_number_still_blocks_the_batch(self):
+        inbound = self.inbound(
+            [
+                {
+                    "积加明细ID": "item-1",
+                    "已入库": 0,
+                    "原始应收货": 19,
+                    "入库状态": "WAIT_INBOUND",
+                }
+            ]
+        )
+        delivery = SelfOperatedInboundRequest(
+            "a", self.delivery(19), ("LN0000000000",), "Yu feng"
+        )
+        contexts, requests = prepare_receipts([delivery], self.products(), inbound, {})
+        self.assertEqual(requests, [])
+        self.assertIsNone(contexts["a"]["history_total"])
+        self.assertIn("缺少交货单号", contexts["a"]["rows"][0]["issue"])
+
     def test_files_do_not_share_history_but_share_overreceipt(self):
         inbound = self.inbound(
             [

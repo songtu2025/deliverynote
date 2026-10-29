@@ -112,7 +112,12 @@ export default function ReceiptReview({
               { title: "累计实收", dataIndex: "cumulative", width: 90 },
               { title: "历史已入库", dataIndex: "history", width: 100, render: (value) => value ?? "待核对" },
               { title: "本次申请", dataIndex: "requested", width: 100, render: (value) => value ?? "待核对" },
-              { title: "核对结果", dataIndex: "issue", width: 240, render: (value) => value || "已核对" },
+              {
+                title: "核对结果",
+                dataIndex: "issue",
+                width: 240,
+                render: (value, row) => value || row.notice || "已核对"
+              },
               {
                 title: "操作",
                 width: 100,

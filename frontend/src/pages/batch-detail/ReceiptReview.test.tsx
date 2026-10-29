@@ -5,6 +5,7 @@ import BatchSummary from "./BatchSummary";
 import { createDetailBatch } from "./detailFixtures";
 import { renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
+import { batchPresentation } from "./batchPresentation";
 
 const fixtureRow = {
   file_id: 71,
@@ -118,5 +119,32 @@ describe("累计实收核对", () => {
     expect(screen.getAllByText("0")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "重新取数" })).toBeDisabled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("未匹配明细显示转待处理提示，允许继续计算", async () => {
+    const props = fixture();
+    props.batch.status = "preflight_ready";
+    const row = {
+      ...fixtureRow,
+      history: 0,
+      requested: 19,
+      notice: "未匹配到入库明细，该数量将进入待处理",
+      order_numbers: [],
+      purchase_numbers: [],
+      item_ids: [],
+      entries: []
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ items: [row], total: 1 }))
+    );
+    renderDetail(<ReceiptReview {...props} />);
+    expect(batchPresentation(props.batch).canCompute).toBe(true);
+    expect(await screen.findByText(row.notice)).toBeInTheDocument();
+    expect(screen.queryByText("已核对")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
+    const drawer = await screen.findByRole("dialog");
+    expect(within(drawer).getByText(row.notice)).toBeInTheDocument();
+    expect(within(drawer).getByText("入库单：未匹配")).toBeInTheDocument();
   });
 });

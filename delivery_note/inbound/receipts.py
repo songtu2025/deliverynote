@@ -35,7 +35,10 @@ def allocation_frame(inbound: pd.DataFrame) -> pd.DataFrame:
 
 def _history_for_row(row: dict, matches: pd.DataFrame) -> None:
     if matches.empty:
-        row["issue"] = "未找到对应供应商、SKU及完整站点的历史，请核对单号与资料"
+        # 单号范围已完整校验；无匹配明细的数量由分配器保留为待处理。
+        row["history"] = 0
+        row["requested"] = row["cumulative"]
+        row["notice"] = "未匹配到入库明细，该数量将进入待处理"
         return
     try:
         for _, item in matches.iterrows():

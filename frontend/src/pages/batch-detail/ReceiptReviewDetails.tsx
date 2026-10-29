@@ -11,6 +11,7 @@ export interface ReceiptRow {
   history: number | null;
   requested: number | null;
   issue: string;
+  notice?: string;
   candidates: string[];
   delivery_numbers: string[];
   order_numbers: string[];
@@ -53,9 +54,9 @@ export default function ReceiptReviewDetails({
             {target.requested ?? "待核对"}
           </div>
           <div>交货单号：{target.delivery_numbers.join("、")}</div>
-          <div>入库单：{target.order_numbers.join("、") || "尚未确认"}</div>
-          <div>采购单：{target.purchase_numbers.join("、") || "尚未确认"}</div>
-          <div>积加商品明细 ID：{target.item_ids.join("、") || "尚未确认"}</div>
+          <div>入库单：{referenceText(target.order_numbers, target.notice)}</div>
+          <div>采购单：{referenceText(target.purchase_numbers, target.notice)}</div>
+          <div>积加商品明细 ID：{referenceText(target.item_ids, target.notice)}</div>
           <Table
             rowKey="item_id"
             size="small"
@@ -71,6 +72,7 @@ export default function ReceiptReviewDetails({
             ]}
           />
           {target.issue && <Alert type="warning" title={target.issue} />}
+          {target.notice && <Alert type="info" title={target.notice} />}
           {target.issue && target.candidates.length > 1 && (
             <Select
               aria-label="选择该文件的完整站点"
@@ -85,4 +87,8 @@ export default function ReceiptReviewDetails({
       )}
     </Drawer>
   );
+}
+
+function referenceText(values: string[], notice?: string) {
+  return values.join("、") || (notice ? "未匹配" : "尚未确认");
 }

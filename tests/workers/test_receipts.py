@@ -14,6 +14,42 @@ from tests.support.worker import WorkerCase
 
 
 class ReceiptWorkerTests(WorkerCase):
+    def test_unmatched_receipt_can_compute_and_export_without_importing_it(self):
+        batch_id = self.create_receipt_batch(managed=True)
+        order = inbound_order()
+        order.update(supplierName="KuangBiao", releatedCode="LN2608179025")
+        order["orderItemResultList"][0]["sku"] = "OTHER-SKU"
+        with patch(
+            "delivery_note.workers.prepare_inbound.GerpgoClient.from_config"
+        ) as factory:
+            factory.return_value.list_self_operated_inbound_orders.return_value = [
+                order
+            ]
+            batch = self.preflight(batch_id)
+        self.assertEqual(batch["status"], "preflight_ready")
+        self.assertEqual(batch["receipt"]["requested_total"], 19)
+        for kind in ("compute", "export"):
+            queued = self.client.post(
+                f"/api/batches/{batch_id}/{kind}", headers=self.headers
+            )
+            self.assertEqual(queued.status_code, 202, queued.text)
+            run_once(self.database_url, self.storage_root)
+        batch = self.client.get(f"/api/batches/{batch_id}", headers=self.headers).json()
+        self.assertEqual(batch["summary"]["import_total"], 0)
+        self.assertEqual(batch["summary"]["manual_total"], 19)
+        pending = self.client.get(
+            f"/api/batches/{batch_id}/exceptions", headers=self.headers
+        ).json()
+        self.assertEqual(pending[0]["manual_quantity"], 19)
+        self.assertEqual(pending[0]["overreceipt_allocated_quantity"], 0)
+        result = self.client.get(
+            f"/api/batches/{batch_id}/download", headers=self.headers
+        )
+        self.assertEqual(result.status_code, 200)
+        book = load_workbook(BytesIO(result.content), data_only=True)
+        self.assertEqual(book.worksheets[0].max_row, 1)
+        book.close()
+
     def test_missing_source_fails_preparation_and_blocks_compute_and_download(self):
         batch_id = self.create_receipt_batch()
         with self.app.state.database.session() as session:
