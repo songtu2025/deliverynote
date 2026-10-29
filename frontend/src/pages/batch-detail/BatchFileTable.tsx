@@ -26,6 +26,7 @@ export default function BatchFileTable({
     <Card
       title={selfOperated ? "本批次业务文件" : "来源文件与处理顺序"}
       className="section-card file-order-card"
+      classNames={{ body: "batch-detail-panel-body" }}
       extra={
         <span className="order-hint">
           {selfOperated ? "序号越小，越先扣减待入库余额和超收额度" : "序号越小，越先扣减采购余额"}

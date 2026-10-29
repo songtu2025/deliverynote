@@ -74,6 +74,7 @@ export default function ReceiptReview({
     <Card
       title="累计实收核对"
       className="section-card"
+      classNames={{ body: "batch-detail-panel-body" }}
       extra={
         <Popconfirm
           title="重新获取历史？"

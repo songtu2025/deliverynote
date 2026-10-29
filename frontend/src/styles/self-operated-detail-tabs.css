@@ -7,10 +7,9 @@
   overflow: visible;
 }
 
-.self-operated-detail-tabs > .ant-tabs-nav {
+.self-operated-detail-tabs .self-operated-tab-nav {
   position: sticky;
   top: 0;
-  z-index: 10;
   margin-bottom: 16px;
   padding-inline: 16px;
   border: 1px solid var(--dn-border);
@@ -50,7 +49,7 @@
   padding-block: 8px;
 }
 
-.self-operated-detail-tabs .ant-card-body {
+.self-operated-detail-tabs .batch-detail-panel-body {
   padding: 16px;
 }
 
@@ -80,17 +79,12 @@
 }
 
 @media (max-width: 600px) {
-  .self-operated-detail-tabs > .ant-tabs-nav {
+  .self-operated-detail-tabs .self-operated-tab-nav {
     padding-inline: 8px;
   }
 
-  .self-operated-detail-tabs .ant-tabs-tab {
-    margin-left: 12px !important;
+  .self-operated-detail-tabs .self-operated-tab-item {
     font-size: 12px;
-  }
-
-  .self-operated-detail-tabs .ant-tabs-tab:first-child {
-    margin-left: 0 !important;
   }
 
   .self-operated-detail-tabs .detail-tab-count {
@@ -106,7 +100,7 @@
     font-size: 14px;
   }
 
-  .self-operated-detail-tabs .ant-card-body {
+  .self-operated-detail-tabs .batch-detail-panel-body {
     padding: 12px;
   }
 }

@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { ReactNode } from "react";
-import { Alert, Tabs } from "antd";
+import { Alert, Tabs, theme } from "antd";
 import type { TabsRef } from "antd/es/tabs";
 import type { Batch } from "../../types";
 import { batchPresentation } from "./batchPresentation";
@@ -26,6 +26,7 @@ export default function SelfOperatedDetailTabs({
   review: ReactNode;
 }) {
   const tabs = useRef<TabsRef>(null);
+  const { token } = theme.useToken();
   const { computed, needsReview } = batchPresentation(batch);
   const defaultKey = needsReview ? "review" : batch.receipt?.captured_at ? "receipts" : "files";
   const pendingLabel = computed ? (reviewStats ? `${reviewStats.unfinishedCount} 条未完成` : "读取中") : "计算后生成";
@@ -33,12 +34,14 @@ export default function SelfOperatedDetailTabs({
     <Tabs
       ref={tabs}
       className="self-operated-detail-tabs"
+      classNames={{ header: "self-operated-tab-nav", item: "self-operated-tab-item" }}
+      styles={{ header: { zIndex: token.zIndexBase + 1 } }}
       activeKey={activeKey ?? defaultKey}
       onChange={(key) => {
         onChange(key);
         requestAnimationFrame(() => tabs.current?.nativeElement?.scrollIntoView?.({ block: "start" }));
       }}
-      tabBarGutter={24}
+      tabBarGutter={12}
       items={[
         { key: "receipts", label: "累计实收核对", children: receipts },
         {

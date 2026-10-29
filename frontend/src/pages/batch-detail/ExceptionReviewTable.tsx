@@ -36,6 +36,7 @@ export default function ExceptionReviewTable({
         title={`待处理审校（共 ${reviewStats.totalCount} 条）`}
         extra={<span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
         className="section-card exception-review-card"
+        classNames={{ body: "batch-detail-panel-body" }}
         loading={exceptionsLoading}
       >
         <ExceptionReviewToolbar selfOperated={selfOperated} review={review} onReset={onReset} />

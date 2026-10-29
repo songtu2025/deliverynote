@@ -41,6 +41,7 @@ export default function BatchLockedVersions({
         </span>
       }
       className={`section-card compact-card locked-data-card ${lockedDataOpen ? "" : "is-collapsed"}`}
+      classNames={{ body: "batch-detail-panel-body" }}
       extra={
         <Space size="small">
           {canAdoptCurrentSupplier && (
