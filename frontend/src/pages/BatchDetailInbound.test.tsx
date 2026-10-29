@@ -76,9 +76,10 @@ describe("自营仓批次详情", () => {
     state.batch.status = "draft";
     state.batch.inbound_file = { uploaded: false, original_name: "" };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("status")).toHaveTextContent("待入库数据尚未就绪");
-    expect(screen.getByRole("button", { name: /执行预检/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /上传自营仓入库单/ })).toBeEnabled();
+    const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
+    expect(task.getByRole("status")).toHaveTextContent("待入库数据尚未就绪");
+    expect(task.getByRole("button", { name: /执行预检/ })).toBeDisabled();
+    expect(task.getByRole("button", { name: /上传自营仓入库单/ })).toBeEnabled();
   });
 
   it.each([true, false])("区分有效零值与缺失汇总：%s", async (hasSummary) => {
