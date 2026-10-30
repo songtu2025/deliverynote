@@ -44,7 +44,11 @@ def register_purchase_snapshot_routes(
             session, batch, storage, page=(offset, limit), snapshot_id=snapshot_id
         )
 
-    @app.post(path, response_model=None)
+    @app.post(
+        path,
+        response_model=None,
+        responses={202: {"description": "整批采购采集任务已排队或正在执行"}},
+    )
     def load_snapshot(
         batch_id: int,
         user: Annotated[User, Depends(dependencies.current_user)],

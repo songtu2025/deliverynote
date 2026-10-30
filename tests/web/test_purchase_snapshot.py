@@ -81,6 +81,10 @@ class PurchaseSnapshotTests(WebApiCase):
         self.assertEqual(
             self.client.get(self.path, headers=self.headers).json()["state"], "missing"
         )
+        contract = self.app.openapi()["paths"][
+            "/api/self-operated-batches/{batch_id}/purchase-snapshot"
+        ]["post"]
+        self.assertIn("202", contract["responses"])
         first = self.client.post(self.path, headers=self.headers).json()
         second = self.client.post(self.path, headers=self.headers).json()
         self.assertEqual(first["job"]["id"], second["job"]["id"])
