@@ -17,10 +17,6 @@
   background: var(--dn-surface);
 }
 
-.self-operated-detail-tabs .review-section-anchor {
-  scroll-margin-top: 72px;
-}
-
 .self-operated-detail-tabs .batch-detail-panel-body {
   padding: 16px;
 }

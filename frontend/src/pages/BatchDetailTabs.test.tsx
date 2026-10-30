@@ -31,6 +31,7 @@ describe("自营仓详情工作区", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "未完成（4）" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("region", { name: "审校概览" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "处理异常" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /^已处理/ }));
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=resolved"), expect.anything())
@@ -69,23 +70,5 @@ describe("自营仓详情工作区", () => {
     expect(within(screen.getByLabelText("入库数量摘要")).getByText("计算后生成")).toBeInTheDocument();
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByText("本批次没有待处理记录")).not.toBeInTheDocument();
-  });
-
-  it("处理异常直接选择未完成并聚焦表格", async () => {
-    const scroll = vi.fn();
-    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
-    try {
-      const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-      fireEvent.click(await screen.findByRole("tab", { name: /^已处理/ }));
-      fireEvent.click(screen.getByRole("tab", { name: "累计实收核对" }));
-      fireEvent.click(screen.getByRole("button", { name: "处理异常" }));
-      await waitFor(() =>
-        expect(screen.getByRole("tab", { name: /^未完成/ })).toHaveAttribute("aria-selected", "true")
-      );
-      await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".review-section-anchor")));
-      expect(scroll).toHaveBeenCalled();
-    } finally {
-      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
-    }
   });
 });

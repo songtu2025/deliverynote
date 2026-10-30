@@ -82,16 +82,8 @@ export default function BatchDetail({
   const selectDetailTab = (key: string) => setDetailTabs((current) => ({ ...current, [batchId]: key }));
 
   const focusReview = () => {
-    const focus = () => {
-      reviewSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      reviewSection.current?.focus({ preventScroll: true });
-    };
-    if (selfOperated) {
-      review.changeScope("unfinished");
-      setSplitTarget(null);
-      selectDetailTab("review");
-      requestAnimationFrame(focus);
-    } else focus();
+    reviewSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    reviewSection.current?.focus({ preventScroll: true });
   };
 
   const taskContent = (

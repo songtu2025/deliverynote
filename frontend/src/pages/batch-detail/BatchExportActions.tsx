@@ -22,7 +22,7 @@ export default function BatchExportActions({
   const { downloadResult, startExport } = tasks;
   return (
     <div className="batch-result-actions">
-      {needsReview && (
+      {needsReview && batch.workflow !== "self_operated_inbound" && (
         <Button aria-label="处理异常" type="primary" onClick={focusReview}>
           处理异常
         </Button>
