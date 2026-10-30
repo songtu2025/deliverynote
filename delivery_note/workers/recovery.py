@@ -10,6 +10,7 @@ from ..web.database import Database
 from ..web.models import Batch, Job, PurchaseSyncJob, SelfOperatedInboundSyncJob
 from .leases import WORKER_QUEUES
 from .sync_models import SYNC_METADATA, SyncJob, SyncJobModel
+from ..web.purchase_snapshot import PURCHASE_SNAPSHOT_KIND
 
 LOGGER = logging.getLogger("delivery_note.worker")
 
@@ -32,7 +33,7 @@ def _recover_batch_jobs(session: Session, cutoff: datetime, max_attempts: int) -
             job.error_message = (
                 f"任务运行超时，已达到最大自动尝试次数（{max_attempts}）"
             )
-            if batch is not None:
+            if batch is not None and job.kind != PURCHASE_SNAPSHOT_KIND:
                 batch.error_message = job.error_message
                 if job.kind in {"compute", "prepare"}:
                     batch.status = "failed"

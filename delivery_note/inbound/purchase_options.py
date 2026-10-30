@@ -10,22 +10,25 @@ from ..sync_mapping import normalize_sync_site, sync_text
 from .history import receipt_quantity
 
 
-def query_purchase_options(
-    client: GerpgoClient, supplier_code: str, sku: str
+def collect_purchase_options(
+    client: GerpgoClient, targets: set[tuple[str, str]]
 ) -> list[dict[str, Any]]:
-    orders = client.list_purchase_orders(supplier_code=supplier_code, sku=sku)
+    """按供应商采集一次，整批共用去重后的 PO 明细。"""
+    orders: dict[str, dict[str, Any]] = {}
+    for supplier in sorted({supplier for supplier, _ in targets}):
+        seen: set[str] = set()
+        for order in client.list_purchase_orders(supplier_code=supplier):
+            code = sync_text(order.get("code") or order.get("poCode"))
+            if not code or code in seen:
+                raise GerpgoError("采购单号缺失或重复，无法核对完整采购明细")
+            seen.add(code)
+            orders.setdefault(code, order)
     rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for order in orders:
-        code = sync_text(order.get("code") or order.get("poCode"))
-        if not code or code in seen:
-            raise GerpgoError("采购单号缺失或重复，无法核对完整采购明细")
-        seen.add(code)
+    for code, order in orders.items():
         detail = client.purchase_order_detail(code)
         for index, item in enumerate(purchase_order_items({**order, **detail})):
-            if key(item.get("supplierCode")) != key(supplier_code) or key(
-                item.get("product")
-            ) != key(sku):
+            identity = key(item.get("supplierCode")), key(item.get("product"))
+            if identity not in targets:
                 continue
             try:
                 balance = Decimal(str(item.get("balanceQuantity")))
@@ -39,6 +42,8 @@ def query_purchase_options(
             rows.append(
                 {
                     "id": f"{code}:{index}",
+                    "supplier_code": identity[0],
+                    "sku": identity[1],
                     "po_code": code,
                     "site": site or source_site,
                     "warehouse": sync_text(item.get("arrivalWarehouseName")),

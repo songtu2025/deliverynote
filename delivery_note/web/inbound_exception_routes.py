@@ -1,17 +1,15 @@
 """提供自营仓异常的采购依据与本次分配明细，不修改批次结果。"""
 
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
-from ..gerpgo import GerpgoClient, GerpgoError
-from ..inbound.purchase_options import query_purchase_options
 from ..processing.keys import _normalize_position_text as key
 from .dependencies import RequestDependencies
 from .models import Batch, BatchFile, ExceptionRecord, SelfOperatedBatch, User
+from .purchase_snapshot import snapshot_document
 
 
 def _load_source(
@@ -39,24 +37,21 @@ def register_inbound_exception_routes(
         _user: Annotated[User, Depends(dependencies.current_user)],
         session: Annotated[Session, Depends(dependencies.get_session)],
     ) -> dict[str, Any]:
-        exception, source, _, _ = _load_source(session, exception_id)
+        exception, source, batch, _ = _load_source(session, exception_id)
         if not source.supplier_code:
             raise HTTPException(
                 status_code=409, detail="来源文件缺少供应商编码，无法精确查询采购数据"
             )
-        supplier_code, sku = source.supplier_code, exception.sku
-        # 外部查询不占用数据库读取事务，也不写入当前批次的锁定数据。
-        session.rollback()
-        try:
-            rows = query_purchase_options(
-                GerpgoClient.from_config(storage), supplier_code, sku
-            )
-        except GerpgoError as error:
-            raise HTTPException(
-                status_code=502,
-                detail="未交采购明细查询失败，请重试；持续失败时请联系管理员检查积加接口",
-            ) from error
-        return {"items": rows, "queried_at": datetime.now(timezone.utc).isoformat()}
+        state, snapshot = snapshot_document(session, batch, storage)
+        if state != "ready":
+            raise HTTPException(status_code=409, detail="请先加载或刷新整批采购数据")
+        rows = [
+            row
+            for row in snapshot["items"]
+            if row["supplier_code"] == key(source.supplier_code)
+            and row["sku"] == key(exception.sku)
+        ]
+        return {"items": rows, "queried_at": snapshot["completed_at"]}
 
     @app.get("/api/exceptions/{exception_id}/inbound-allocation", response_model=None)
     def inbound_allocation(

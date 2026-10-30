@@ -106,7 +106,7 @@ def job_json(job: Job) -> dict[str, object]:
         "status": job.status,
         "attempts": job.attempts,
         "error_message": job.error_message,
-        "download_ready": bool(job.output_path),
+        "download_ready": job.kind == "export" and bool(job.output_path),
         "created_at": utc_isoformat(job.created_at),
         "claimed_at": utc_isoformat(job.claimed_at) if job.claimed_at else None,
         "heartbeat_at": utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None,

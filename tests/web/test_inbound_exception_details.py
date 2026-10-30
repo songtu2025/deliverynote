@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 from delivery_note.gerpgo import GerpgoError
@@ -6,7 +7,9 @@ from delivery_note.web.models import (
     BatchFile,
     ExceptionRecord,
     SelfOperatedBatch,
+    Job,
 )
+from delivery_note.web.purchase_snapshot import snapshot_sources
 from tests.support.web_api import WebApiCase
 
 
@@ -91,9 +94,7 @@ class InboundExceptionDetailsTests(WebApiCase):
         return f"/api/exceptions/{self.exception_id}/{suffix}"
 
     def test_allocation_is_scoped_to_the_source_sku_and_site_without_erp_calls(self):
-        with patch(
-            "delivery_note.web.inbound_exception_routes.GerpgoClient.from_config"
-        ) as factory:
+        with patch("delivery_note.gerpgo.GerpgoClient.from_config") as factory:
             response = self.client.get(
                 self.path("inbound-allocation"), headers=self.headers
             )
@@ -125,36 +126,72 @@ class InboundExceptionDetailsTests(WebApiCase):
                 session.get(ExceptionRecord, self.exception_id).status, "pending"
             )
 
-    def test_latest_purchase_query_uses_server_side_identity_and_operator_can_read(
+    def test_purchase_snapshot_uses_server_side_identity_and_operator_can_read(
         self,
     ):
         self.create_operator(self.headers)
         operator = self.login("operator", "operator-pass")
-        with patch(
-            "delivery_note.web.inbound_exception_routes.GerpgoClient.from_config"
-        ) as factory:
-            client = factory.return_value
-            client.list_purchase_orders.return_value = []
+        storage = self.app.state.storage_root
+        path = (
+            storage
+            / "batches"
+            / str(self.batch_id)
+            / "purchase-snapshots"
+            / "test.json"
+        )
+        path.parent.mkdir(parents=True)
+        with self.app.state.database.session() as session:
+            _, signature = snapshot_sources(session, session.get(Batch, self.batch_id))
+            row = {
+                "supplier_code": "GYS-1",
+                "sku": "SKU-A",
+                "po_code": "PO-1",
+                "remaining_quantity": 8,
+            }
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "source_signature": signature,
+                        "snapshot_id": "test",
+                        "completed_at": "2026-10-30T00:00:00Z",
+                        "items": [
+                            row,
+                            {**row, "sku": "SKU-B"},
+                            {**row, "supplier_code": "OTHER"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            session.add(
+                Job(
+                    batch_id=self.batch_id,
+                    kind="purchase_snapshot",
+                    status="succeeded",
+                    output_path=str(path),
+                )
+            )
+            session.commit()
+        with patch("delivery_note.gerpgo.GerpgoClient.from_config") as factory:
             response = self.client.get(
                 self.path("purchase-options") + "?sku=SKU-B&supplier_code=OTHER",
                 headers=operator,
             )
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["items"], [])
+        self.assertEqual(response.json()["items"], [row])
         self.assertTrue(response.json()["queried_at"])
-        client.list_purchase_orders.assert_called_once_with(
-            supplier_code="GYS-1", sku="SKU-A"
-        )
+        factory.assert_not_called()
 
-    def test_purchase_failure_is_masked_and_does_not_prevent_allocation_read(self):
+    def test_missing_snapshot_does_not_prevent_allocation_read(self):
         with patch(
-            "delivery_note.web.inbound_exception_routes.GerpgoClient.from_config",
+            "delivery_note.gerpgo.GerpgoClient.from_config",
             side_effect=GerpgoError("不应对外显示的上游内容"),
         ):
             response = self.client.get(
                 self.path("purchase-options"), headers=self.headers
             )
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 409)
         self.assertNotIn("不应对外", response.text)
         self.assertEqual(
             self.client.get(
@@ -166,9 +203,7 @@ class InboundExceptionDetailsTests(WebApiCase):
     def test_rejects_missing_wrong_workflow_and_uncomputed_records_before_querying(
         self,
     ):
-        with patch(
-            "delivery_note.web.inbound_exception_routes.GerpgoClient.from_config"
-        ) as factory:
+        with patch("delivery_note.gerpgo.GerpgoClient.from_config") as factory:
             missing = self.client.get(
                 "/api/exceptions/99999/purchase-options", headers=self.headers
             )
@@ -199,9 +234,7 @@ class InboundExceptionDetailsTests(WebApiCase):
             source.supplier_code = ""
             source.import_rows = []
             session.commit()
-        with patch(
-            "delivery_note.web.inbound_exception_routes.GerpgoClient.from_config"
-        ) as factory:
+        with patch("delivery_note.gerpgo.GerpgoClient.from_config") as factory:
             self.assertEqual(
                 self.client.get(
                     self.path("purchase-options"), headers=self.headers

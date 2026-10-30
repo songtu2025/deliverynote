@@ -44,6 +44,7 @@ from .exception_views import (
 from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
 from .inbound_exception_routes import register_inbound_exception_routes
+from .purchase_snapshot_routes import register_purchase_snapshot_routes
 from .input_version_read_routes import register_input_version_read_routes
 from .models import AuditLog
 from .sync.commands import SyncCommands
@@ -137,6 +138,8 @@ def create_app(
     register_purchase_routes(app, dependencies, sync_commands)
     register_inbound_routes(app, dependencies, sync_commands)
     register_inbound_exception_routes(app, dependencies, storage)
+    queue_job = build_job_queue(_audit)
+    register_purchase_snapshot_routes(app, dependencies, storage, queue_job)
     register_batch_read_routes(
         app=app,
         get_session=get_session,
@@ -200,7 +203,6 @@ def create_app(
         app, dependencies, BatchMaintenance(storage, _audit, dependencies)
     )
 
-    queue_job = build_job_queue(_audit)
     register_job_routes(app, dependencies, queue_job, _audit)
 
     register_exception_write_routes(

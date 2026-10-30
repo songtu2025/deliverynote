@@ -29,6 +29,8 @@ from .sync_inbound import _execute_self_operated_inbound_sync
 from .sync_purchase import _execute_purchase_sync
 from .sync_results import _fail_sync_job
 from .prepare_inbound import execute_prepare_inbound
+from .purchase_snapshot import execute_purchase_snapshot
+from ..web.purchase_snapshot import PURCHASE_SNAPSHOT_KIND, PURCHASE_SNAPSHOT_ERROR
 
 LOGGER = logging.getLogger("delivery_note.worker")
 
@@ -43,13 +45,15 @@ def _fail_job(
         job = session.scalar(select(Job).where(Job.id == job_id).with_for_update())
         if job is None or job.status != "running" or job.claim_token != claim_token:
             return
+        if job.kind == PURCHASE_SNAPSHOT_KIND:
+            message = PURCHASE_SNAPSHOT_ERROR
         job.status = "failed"
         job.error_message = message
         job.finished_at = datetime.utcnow()
         job.heartbeat_at = job.finished_at
         job.claim_token = None
         batch = session.get(Batch, job.batch_id)
-        if batch is not None:
+        if batch is not None and job.kind != PURCHASE_SNAPSHOT_KIND:
             batch.error_message = message
             if job.kind in {"compute", "prepare"}:
                 batch.status = "failed"
@@ -95,7 +99,14 @@ def _run_batch_job(
             elif kind == "prepare":
                 execute_prepare_inbound(
                     JobContext(database, job_id, claim_token, lease_keeper.stop),
-                    batch_id, Path(storage_root),
+                    batch_id,
+                    Path(storage_root),
+                )
+            elif kind == PURCHASE_SNAPSHOT_KIND:
+                execute_purchase_snapshot(
+                    JobContext(database, job_id, claim_token, lease_keeper.stop),
+                    batch_id,
+                    Path(storage_root),
                 )
             else:
                 raise RuntimeError(f"未知任务类型：{kind}")

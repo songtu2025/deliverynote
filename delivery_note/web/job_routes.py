@@ -14,6 +14,7 @@ from .models import AuditLog, Batch, Job, SelfOperatedBatch, User
 from .receipt_routes import queue_receipt_preflight, register_receipt_routes
 from .receipt_state import require_receipts
 from .serializers import job_json, utc_isoformat
+from .purchase_snapshot import PURCHASE_SNAPSHOT_KIND
 
 
 class AuditCallback(Protocol):
@@ -28,12 +29,31 @@ class AuditCallback(Protocol):
     ) -> None: ...
 
 
-def build_job_queue(audit: AuditCallback) -> Callable[[Batch, str, User, Session], Job]:
-    def queue_job(batch: Batch, kind: str, user: User, session: Session) -> Job:
+class JobQueue(Protocol):
+    def __call__(
+        self,
+        batch: Batch,
+        kind: str,
+        user: User,
+        session: Session,
+        *,
+        refresh: bool = False,
+    ) -> Job: ...
+
+
+def build_job_queue(audit: AuditCallback) -> JobQueue:
+    def queue_job(
+        batch: Batch, kind: str, user: User, session: Session, *, refresh: bool = False
+    ) -> Job:
         existing = session.scalar(
             select(Job).where(Job.batch_id == batch.id, Job.kind == kind)
         )
-        if existing and existing.status in {"queued", "running", "succeeded"}:
+        retained_snapshot = kind == PURCHASE_SNAPSHOT_KIND and not refresh
+        if existing and (
+            existing.status in {"queued", "running"}
+            or retained_snapshot
+            or (existing.status == "succeeded" and not refresh)
+        ):
             return existing
         if existing is None:
             existing = Job(batch_id=batch.id, kind=kind, status="queued")
@@ -41,7 +61,10 @@ def build_job_queue(audit: AuditCallback) -> Callable[[Batch, str, User, Session
         else:
             existing.status = "queued"
             existing.error_message = None
-            existing.output_path = None
+            if kind != PURCHASE_SNAPSHOT_KIND:
+                existing.output_path = None
+            else:
+                existing.attempts = 0
             existing.claim_token = None
             existing.claimed_at = None
             existing.heartbeat_at = None
