@@ -14,7 +14,7 @@ from delivery_note.web.uploads import _save_upload
 
 class UploadLimitTests(IsolatedAsyncioTestCase):
     async def test_exact_limit_is_saved_and_one_extra_byte_is_rejected(self) -> None:
-        limit = 50 * 1024 * 1024
+        limit = 100 * 1024 * 1024
         with TemporaryDirectory() as directory:
             destination = Path(directory) / "upload.xlsx"
             for extra in (0, 1):
@@ -28,7 +28,7 @@ class UploadLimitTests(IsolatedAsyncioTestCase):
                         self.assertEqual(caught.exception.status_code, 413)
                         self.assertEqual(
                             caught.exception.detail,
-                            "单个文件不能超过 50 MiB，请缩小文件后重试。",
+                            "单个文件不能超过 100 MiB，请缩小文件后重试。",
                         )
                     else:
                         await _save_upload(upload, destination, limit)
@@ -37,7 +37,7 @@ class UploadLimitTests(IsolatedAsyncioTestCase):
                     self.assertEqual(list(Path(directory).iterdir()), [destination])
 
     async def test_default_and_environment_override(self) -> None:
-        for configured, expected in ((None, 50 * 1024 * 1024), ("10485760", 10485760)):
+        for configured, expected in ((None, 100 * 1024 * 1024), ("10485760", 10485760)):
             with self.subTest(configured=configured), TemporaryDirectory() as directory:
                 root = Path(directory)
                 with patch.dict(os.environ):

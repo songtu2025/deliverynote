@@ -84,7 +84,7 @@ def initialize_application(settings: ApplicationSettings) -> ApplicationResource
     ).resolve()
     storage.mkdir(parents=True, exist_ok=True)
     configured_max_upload_bytes = _positive_setting(
-        settings.max_upload_bytes, "MAX_UPLOAD_BYTES", 50 * 1024 * 1024
+        settings.max_upload_bytes, "MAX_UPLOAD_BYTES", 100 * 1024 * 1024
     )
     configured_max_concurrent_upload_parses = _positive_setting(
         settings.max_concurrent_upload_parses, "MAX_CONCURRENT_UPLOAD_PARSES", 2
