@@ -33,6 +33,7 @@ export default function BatchDetail({
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const reviewSection = useRef<HTMLDivElement | null>(null);
   const [detailTabs, setDetailTabs] = useState<Record<number, string>>({});
+  const [materialsOpen, setMaterialsOpen] = useState(false);
   const data = useBatchDetailData(batchId, Boolean(canRefreshSupplierVersion), setSplitTarget);
   const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
   const activeJob = useBatchJob(batch, load);
@@ -86,6 +87,8 @@ export default function BatchDetail({
       reviewSection.current?.focus({ preventScroll: true });
     };
     if (selfOperated) {
+      review.changeScope("unfinished");
+      setSplitTarget(null);
       selectDetailTab("review");
       requestAnimationFrame(focus);
     } else focus();
@@ -103,6 +106,7 @@ export default function BatchDetail({
         focusReview={focusReview}
         reviewStats={availableReviewStats(data)}
         reviewError={Boolean(loadError)}
+        extra={selfOperated && <Button onClick={() => setMaterialsOpen(true)}>批次资料</Button>}
       />
 
       <BatchErrorNotice batch={batch} />
@@ -151,6 +155,10 @@ export default function BatchDetail({
           activeKey={detailTabs[batchId]}
           onChange={selectDetailTab}
           reviewStats={availableReviewStats(data)}
+          reviewState={review}
+          onReset={() => setSplitTarget(null)}
+          materialsOpen={materialsOpen}
+          onCloseMaterials={() => setMaterialsOpen(false)}
           files={fileContent}
           versions={versionContent}
           receipts={<ReceiptReview batch={batch} runAction={runAction} load={load} />}

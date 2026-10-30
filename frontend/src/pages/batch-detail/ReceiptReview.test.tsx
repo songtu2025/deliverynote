@@ -59,10 +59,10 @@ describe("累计实收核对", () => {
       </>
     );
     expect(await screen.findByText("狂飙-A.xlsx")).toBeInTheDocument();
-    const strip = screen.getByText("累计实收", { selector: ".summary-metric span" }).closest(".summary-strip")!;
-    expect(within(strip as HTMLElement).getByText("19")).toBeInTheDocument();
-    expect(within(strip as HTMLElement).getByText("3")).toBeInTheDocument();
-    expect(within(strip as HTMLElement).getByText("16")).toBeInTheDocument();
+    const summary = within(screen.getByLabelText("入库数量摘要"));
+    expect(summary.getByText("19")).toBeInTheDocument();
+    expect(summary.getByText("3")).toBeInTheDocument();
+    expect(summary.getByText("16")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
     const drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByText("交货单号：LN1")).toBeInTheDocument();

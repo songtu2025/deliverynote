@@ -29,12 +29,12 @@ export default function ExceptionReviewTable({
   onReset: () => void;
   sectionRef: Ref<HTMLDivElement>;
 }) {
-  const { reviewStats, exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage, reviewScope } = review;
+  const { reviewStats, exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
   return (
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
-        title={`待处理审校（共 ${reviewStats.totalCount} 条）`}
-        extra={<span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
+        title={selfOperated ? undefined : `待处理审校（共 ${reviewStats.totalCount} 条）`}
+        extra={!selfOperated && <span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}
         loading={exceptionsLoading}
@@ -42,6 +42,7 @@ export default function ExceptionReviewTable({
         <ExceptionReviewToolbar selfOperated={selfOperated} review={review} onReset={onReset} />
         <Table<DeliveryException>
           rowKey="id"
+          size={selfOperated ? "small" : undefined}
           dataSource={exceptions}
           pagination={
             exceptionTotal > REVIEW_PAGE_SIZE
@@ -57,17 +58,7 @@ export default function ExceptionReviewTable({
           }
           scroll={{ x: selfOperated ? 1175 : 1260 }}
           locale={{
-            emptyText: (
-              <Empty
-                description={
-                  reviewStats.totalCount
-                    ? reviewScope === "unfinished"
-                      ? "当前没有未完成记录"
-                      : "没有匹配的审校记录"
-                    : "本批次没有待处理记录"
-                }
-              />
-            )
+            emptyText: <Empty description={reviewEmptyText(review)} />
           }}
           columns={[
             {
@@ -151,4 +142,9 @@ export default function ExceptionReviewTable({
       </Card>
     </div>
   );
+}
+
+function reviewEmptyText({ reviewStats, reviewScope }: ExceptionReview) {
+  if (!reviewStats.totalCount) return "本批次没有待处理记录";
+  return reviewScope === "unfinished" ? "当前没有未完成记录" : "没有匹配的审校记录";
 }

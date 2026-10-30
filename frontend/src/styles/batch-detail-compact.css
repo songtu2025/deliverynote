@@ -133,15 +133,6 @@
   background: transparent;
 }
 
-.batch-detail--compact .summary-receipts {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.batch-detail--compact .summary-receipts .summary-equation {
-  grid-column: 1 / -1;
-  min-height: 44px;
-}
-
 .batch-detail--compact .summary-metric,
 .batch-detail--compact .summary-equation {
   min-width: 0;

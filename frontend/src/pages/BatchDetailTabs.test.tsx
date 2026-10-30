@@ -4,7 +4,7 @@ import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { jsonResponse } from "./admin/positionDraftTestSupport";
 
-describe("自营仓详情标签工作区", () => {
+describe("自营仓详情工作区", () => {
   const { state } = setupBatchDetailTest();
 
   beforeEach(() => {
@@ -27,53 +27,65 @@ describe("自营仓详情标签工作区", () => {
     );
   });
 
-  it("计算后默认展示审校，直接切换状态并保留筛选", async () => {
-    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    const reviewTab = await screen.findByRole("tab", { name: /待处理审校/ });
-    expect(reviewTab).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(await screen.findByRole("button", { name: /已处理 \d+ 条/ }));
-    fireEvent.click(screen.getByRole("tab", { name: /累计实收核对/ }));
-    expect(screen.getByRole("tab", { name: /累计实收核对/ })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(reviewTab);
-    expect(await screen.findByRole("button", { name: /已处理 \d+ 条/ })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("tab", { name: /业务文件/ }));
-    expect(await screen.findByRole("columnheader", { name: "来源文件" })).toBeInTheDocument();
+  it("状态一次点击可达，共用审校表格且保留搜索", async () => {
+    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    expect(await screen.findByRole("tab", { name: "未完成（4）" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("region", { name: "审校概览" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^已处理/ }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=resolved"), expect.anything())
+    );
+    fireEvent.change(screen.getByLabelText("搜索待处理记录"), { target: { value: "SKU" } });
+    fireEvent.click(screen.getByRole("tab", { name: "累计实收核对" }));
+    fireEvent.click(screen.getByRole("tab", { name: /^已处理/ }));
+    expect(screen.getByLabelText("搜索待处理记录")).toHaveValue("SKU");
+    expect(container.querySelectorAll(".exception-review-card")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("tab", { name: /^全部审校/ }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=all"), expect.anything())
+    );
   });
 
-  it("预检后默认核对，待处理明确显示计算后生成", async () => {
+  it("文件与锁定版本集中到资料抽屉，关闭后保留当前视图", async () => {
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /^已处理/ }));
+    fireEvent.click(screen.getByRole("button", { name: "批次资料" }));
+    const drawer = within(screen.getByRole("dialog", { name: "批次资料" }));
+    expect(drawer.getByRole("columnheader", { name: "来源文件" })).toBeInTheDocument();
+    expect(drawer.getByText("purchase-v1")).toBeInTheDocument();
+    fireEvent.click(drawer.getByRole("button", { name: "Close" }));
+    expect(screen.getByRole("tab", { name: /^已处理/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: "业务文件" })).not.toBeInTheDocument();
+  });
+
+  it("未计算时直接显示文件准备和核对，不显示虚假的零条审校", async () => {
     state.batch.status = "preflight_ready";
     state.batch.download_ready = false;
     state.batch.summary = undefined;
     state.exceptions = [];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("tab", { name: /累计实收核对/ })).toHaveAttribute("aria-selected", "true");
-    const task = screen.getByRole("region", { name: "当前批次任务" });
-    expect(within(task).getByText("计算后生成")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /待处理审校/ }));
-    expect(screen.getByRole("tabpanel")).toHaveTextContent("启动计算后生成待处理明细");
+    expect(await screen.findByRole("columnheader", { name: "来源文件" })).toBeInTheDocument();
+    expect(screen.getByText("累计实收核对")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("入库数量摘要")).getByText("计算后生成")).toBeInTheDocument();
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     expect(screen.queryByText("本批次没有待处理记录")).not.toBeInTheDocument();
   });
 
-  it("未预检默认文件，锁定版本可以直接打开", async () => {
-    state.batch.status = "draft";
-    state.batch.download_ready = false;
-    delete state.batch.receipt;
-    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("tab", { name: /业务文件/ })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("tab", { name: "锁定版本" }));
-    expect(screen.getByRole("tabpanel")).toHaveTextContent("purchase-v1");
-  });
-
-  it("后台刷新不切走用户选择，处理异常按钮打开审校面板", async () => {
-    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("tab", { name: /锁定版本/ }));
+  it("处理异常直接选择未完成并聚焦表格", async () => {
     const scroll = vi.fn();
-    Object.defineProperty(container.querySelector(".review-section-anchor"), "scrollIntoView", { value: scroll });
-    fireEvent.click(await screen.findByRole("button", { name: "处理异常" }));
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /待处理审校/ })).toHaveAttribute("aria-selected", "true")
-    );
-    await waitFor(() => expect(scroll).toHaveBeenCalled());
-    expect(document.activeElement).toHaveClass("review-section-anchor");
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    try {
+      const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole("tab", { name: /^已处理/ }));
+      fireEvent.click(screen.getByRole("tab", { name: "累计实收核对" }));
+      fireEvent.click(screen.getByRole("button", { name: "处理异常" }));
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { name: /^未完成/ })).toHaveAttribute("aria-selected", "true")
+      );
+      await waitFor(() => expect(document.activeElement).toBe(container.querySelector(".review-section-anchor")));
+      expect(scroll).toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
   });
 });

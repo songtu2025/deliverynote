@@ -34,14 +34,14 @@ describe("自营仓批次详情", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
-    expect(await task.findByText("1 条未完成 · 待处理 60 件")).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "未完成（1）" })).toBeInTheDocument();
     expect(task.getByText("本次申请")).toBeInTheDocument();
-    expect(task.getByText("160 = 100 + 60")).toBeInTheDocument();
+    expect(task.getByLabelText("入库数量摘要")).toHaveTextContent("累计实收 163 − 历史已入库 3 = 本次申请 160");
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "业务文件" }));
+    fireEvent.click(screen.getByRole("button", { name: "批次资料" }));
     expect(screen.getByRole("columnheader", { name: "本次申请" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "可入库" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /待处理审校/ }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "批次资料" })).getByRole("button", { name: "Close" }));
     expect(screen.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("备货定位筛选")).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "规模定位" })).not.toBeInTheDocument();
@@ -68,12 +68,11 @@ describe("自营仓批次详情", () => {
       delete state.batch.versions.self_operated_inbound;
     }
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("tab", { name: "业务文件" }));
+    fireEvent.click(await screen.findByRole("button", { name: "批次资料" }));
     expect(
       await screen.findByText(new RegExp(`待入库数据（${apiSource ? "API锁定" : "手动上传"}）`))
     ).toBeInTheDocument();
     if (apiSource) {
-      fireEvent.click(screen.getByRole("tab", { name: "锁定版本" }));
       expect(screen.getByText("待入库 API 数据")).toBeInTheDocument();
     }
   });
@@ -98,6 +97,8 @@ describe("自营仓批次详情", () => {
     state.exceptions = [];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
-    expect(task.getByText(hasSummary ? "0 = 0 + 0" : "尚未计算")).toBeInTheDocument();
+    const summary = task.getByLabelText("入库数量摘要");
+    expect(summary).toHaveTextContent(hasSummary ? "可入库 0 件" : "可入库 —");
+    expect(summary).toHaveTextContent(hasSummary ? "待处理 0 件" : "待处理 计算后生成");
   });
 });

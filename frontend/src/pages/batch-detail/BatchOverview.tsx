@@ -1,4 +1,5 @@
 import { Button, Space, Typography, Upload } from "antd";
+import type { ReactNode } from "react";
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
@@ -29,6 +30,7 @@ type OverviewProps = {
   focusReview: () => void;
   reviewStats?: ExceptionReview["reviewStats"];
   reviewError: boolean;
+  extra?: ReactNode;
 };
 
 export default function BatchOverview(props: OverviewProps) {
@@ -62,6 +64,7 @@ function BatchTaskBar(props: OverviewProps) {
   const { batch, activeJob, reviewStats } = props;
   const { computed } = batchPresentation(batch);
   const { title, description, tone, busy } = batchTaskPresentation(batch, activeJob, reviewStats);
+  const details = overviewDescription(props, description, tone);
   const StateIcon = busy
     ? LoadingOutlined
     : tone === "error"
@@ -75,14 +78,13 @@ function BatchTaskBar(props: OverviewProps) {
         <StateIcon className={busy ? "batch-task-spinner" : undefined} aria-hidden />
         <div>
           <strong>{title}</strong>
-          <span>
-            {computed && !activeJob && props.reviewError ? "审校统计暂不可用，请重试读取批次。" : description}
-          </span>
+          {details && <span>{details}</span>}
         </div>
       </div>
       <div className="batch-task-actions">
         <BatchPrimaryActions {...props} />
         {computed && <BatchExportActions {...props} />}
+        {props.extra}
       </div>
       {computed && (
         <p className="batch-task-result">
@@ -92,6 +94,13 @@ function BatchTaskBar(props: OverviewProps) {
       )}
     </section>
   );
+}
+
+function overviewDescription({ batch, activeJob, reviewError }: OverviewProps, description: string, tone: string) {
+  const { computed } = batchPresentation(batch);
+  if (computed && !activeJob && reviewError) return "审校统计暂不可用，请重试读取批次。";
+  if (computed && !activeJob && batch.workflow === "self_operated_inbound" && tone !== "error") return undefined;
+  return description;
 }
 
 function BatchPrimaryActions({ batch, action, fileActions, tasks }: OverviewProps) {

@@ -36,56 +36,58 @@ export default function ExceptionReviewToolbar({
   const stockingOptions = filterOptions(exceptionFilters.stocking);
   return (
     <>
-      <section className="review-overview" aria-label="审校概览">
-        <div className="review-overview-copy">
-          <strong>审校进度</strong>
-          <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
-        </div>
-        <div className="review-scope-options">
-          <button
-            type="button"
-            className="review-scope-card"
-            aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
-            aria-pressed={reviewScope === "unfinished"}
-            onClick={() => {
-              changeScope("unfinished");
-              onReset();
-            }}
-          >
-            <span>未完成</span>
-            <strong>{reviewStats.unfinishedCount} 条</strong>
-            <small>待处理 {reviewStats.unfinishedQuantity} 件</small>
-          </button>
-          <button
-            type="button"
-            className="review-scope-card"
-            aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
-            aria-pressed={reviewScope === "resolved"}
-            onClick={() => {
-              changeScope("resolved");
-              onReset();
-            }}
-          >
-            <span>已处理</span>
-            <strong>{reviewStats.resolvedCount} 条</strong>
-            <small>查看已完成记录</small>
-          </button>
-          <button
-            type="button"
-            className="review-scope-card"
-            aria-label={`全部 ${reviewStats.totalCount} 条`}
-            aria-pressed={reviewScope === "all"}
-            onClick={() => {
-              changeScope("all");
-              onReset();
-            }}
-          >
-            <span>全部</span>
-            <strong>{reviewStats.totalCount} 条</strong>
-            <small>查看完整审校队列</small>
-          </button>
-        </div>
-      </section>
+      {!selfOperated && (
+        <section className="review-overview" aria-label="审校概览">
+          <div className="review-overview-copy">
+            <strong>审校进度</strong>
+            <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
+          </div>
+          <div className="review-scope-options">
+            <button
+              type="button"
+              className="review-scope-card"
+              aria-label={`未完成 ${reviewStats.unfinishedCount} 条，待处理 ${reviewStats.unfinishedQuantity} 件`}
+              aria-pressed={reviewScope === "unfinished"}
+              onClick={() => {
+                changeScope("unfinished");
+                onReset();
+              }}
+            >
+              <span>未完成</span>
+              <strong>{reviewStats.unfinishedCount} 条</strong>
+              <small>待处理 {reviewStats.unfinishedQuantity} 件</small>
+            </button>
+            <button
+              type="button"
+              className="review-scope-card"
+              aria-label={`已处理 ${reviewStats.resolvedCount} 条`}
+              aria-pressed={reviewScope === "resolved"}
+              onClick={() => {
+                changeScope("resolved");
+                onReset();
+              }}
+            >
+              <span>已处理</span>
+              <strong>{reviewStats.resolvedCount} 条</strong>
+              <small>查看已完成记录</small>
+            </button>
+            <button
+              type="button"
+              className="review-scope-card"
+              aria-label={`全部 ${reviewStats.totalCount} 条`}
+              aria-pressed={reviewScope === "all"}
+              onClick={() => {
+                changeScope("all");
+                onReset();
+              }}
+            >
+              <span>全部</span>
+              <strong>{reviewStats.totalCount} 条</strong>
+              <small>查看完整审校队列</small>
+            </button>
+          </div>
+        </section>
+      )}
       <div className={`table-toolbar exception-toolbar${selfOperated ? " exception-toolbar--inbound" : ""}`}>
         <div className="exception-filter-field exception-search-field">
           <label htmlFor="exception-search">搜索</label>

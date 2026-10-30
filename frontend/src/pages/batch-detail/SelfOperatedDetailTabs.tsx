@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import type { ReactNode } from "react";
-import { Alert, Tabs, theme } from "antd";
+import { Drawer, Tabs, theme } from "antd";
 import type { TabsRef } from "antd/es/tabs";
 import type { Batch } from "../../types";
 import { batchPresentation } from "./batchPresentation";
@@ -11,6 +11,10 @@ export default function SelfOperatedDetailTabs({
   activeKey,
   onChange,
   reviewStats,
+  reviewState,
+  onReset,
+  materialsOpen,
+  onCloseMaterials,
   files,
   versions,
   receipts,
@@ -20,6 +24,10 @@ export default function SelfOperatedDetailTabs({
   activeKey?: string;
   onChange: (key: string) => void;
   reviewStats?: ExceptionReview["reviewStats"];
+  reviewState: ExceptionReview;
+  onReset: () => void;
+  materialsOpen: boolean;
+  onCloseMaterials: () => void;
   files: ReactNode;
   versions: ReactNode;
   receipts: ReactNode;
@@ -27,44 +35,50 @@ export default function SelfOperatedDetailTabs({
 }) {
   const tabs = useRef<TabsRef>(null);
   const { token } = theme.useToken();
-  const { computed, needsReview } = batchPresentation(batch);
-  const defaultKey = needsReview ? "review" : batch.receipt?.captured_at ? "receipts" : "files";
-  const pendingLabel = computed ? (reviewStats ? `${reviewStats.unfinishedCount} 条未完成` : "读取中") : "计算后生成";
+  const { computed } = batchPresentation(batch);
+  const selected = activeKey === "receipts" ? "receipts" : reviewState.reviewScope;
+  const scopes = [
+    { key: "unfinished", label: "未完成", count: reviewStats?.unfinishedCount },
+    { key: "resolved", label: "已处理", count: reviewStats?.resolvedCount },
+    { key: "all", label: "全部审校", count: reviewStats?.totalCount }
+  ] as const;
   return (
-    <Tabs
-      ref={tabs}
-      className="self-operated-detail-tabs"
-      classNames={{ header: "self-operated-tab-nav", item: "self-operated-tab-item" }}
-      styles={{ header: { zIndex: token.zIndexBase + 1 } }}
-      activeKey={activeKey ?? defaultKey}
-      onChange={(key) => {
-        onChange(key);
-        requestAnimationFrame(() => tabs.current?.nativeElement?.scrollIntoView?.({ block: "start" }));
-      }}
-      tabBarGutter={12}
-      items={[
-        { key: "receipts", label: "累计实收核对", children: receipts },
-        {
-          key: "review",
-          label: (
-            <span>
-              待处理审校 <small className="detail-tab-count">{pendingLabel}</small>
-            </span>
-          ),
-          children: computed ? (
-            review
-          ) : (
-            <Alert
-              type="info"
-              showIcon
-              title="启动计算后生成待处理明细"
-              description="预检只核对累计实收与历史；计算完成后，可在这里查看未匹配、超量等记录及其待处理数量。"
-            />
-          )
-        },
-        { key: "files", label: "业务文件", children: files },
-        { key: "versions", label: "锁定版本", children: versions }
-      ]}
-    />
+    <div className="self-operated-detail-tabs">
+      {computed ? (
+        <Tabs
+          ref={tabs}
+          classNames={{ header: "self-operated-tab-nav", item: "self-operated-tab-item" }}
+          styles={{ header: { zIndex: token.zIndexBase + 1 } }}
+          activeKey={selected}
+          onChange={(key) => {
+            if (key === "receipts") onChange(key);
+            else if (key === "unfinished" || key === "resolved" || key === "all") {
+              if (key !== reviewState.reviewScope) reviewState.changeScope(key);
+              onReset();
+              onChange("review");
+            }
+            requestAnimationFrame(() => tabs.current?.nativeElement?.scrollIntoView?.({ block: "start" }));
+          }}
+          tabBarGutter={12}
+          items={[
+            ...scopes.map(({ key, label, count }) => ({
+              key,
+              label: `${label}（${count ?? "读取中"}）`,
+              children: key === reviewState.reviewScope ? review : null
+            })),
+            { key: "receipts", label: "累计实收核对", children: receipts }
+          ]}
+        />
+      ) : (
+        <>
+          {files}
+          {batch.receipt?.captured_at ? receipts : null}
+        </>
+      )}
+      <Drawer title="批次资料" open={materialsOpen} onClose={onCloseMaterials} size="large">
+        {computed && files}
+        {versions}
+      </Drawer>
+    </div>
   );
 }
