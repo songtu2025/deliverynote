@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { getInboundAllocations, getPurchaseOptions } from "../../inboundExceptionApi";
+import { useContext, useEffect, useState } from "react";
+import { getInboundAllocations, purchaseIdentity } from "../../inboundExceptionApi";
+import { PurchaseSnapshotContext } from "./useBatchPurchaseSnapshot";
 
 function useDetailSection<T>(exceptionId: number, load: (id: number) => Promise<T>) {
   const [attempt, setAttempt] = useState(0);
@@ -34,9 +35,18 @@ function useDetailSection<T>(exceptionId: number, load: (id: number) => Promise<
   return { ...current, retry: () => setAttempt((value) => value + 1) };
 }
 
-export function useInboundExceptionDetails(exceptionId: number) {
+export function useInboundExceptionDetails(exceptionId: number, supplierCode: string, sku: string) {
+  const snapshot = useContext(PurchaseSnapshotContext);
+  if (!snapshot) throw new Error("采购明细需要批次快照上下文");
+  const purchases = {
+    data: snapshot.data
+      ? { queried_at: snapshot.data.completed_at, items: snapshot.index.get(purchaseIdentity(supplierCode, sku)) ?? [] }
+      : null,
+    loading: snapshot.loading,
+    error: snapshot.loading || snapshot.data ? null : (snapshot.error ?? "请在批次审校区域加载整批采购数据")
+  };
   return {
-    purchases: useDetailSection(exceptionId, getPurchaseOptions),
+    purchases,
     allocations: useDetailSection(exceptionId, getInboundAllocations)
   };
 }

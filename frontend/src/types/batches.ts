@@ -46,7 +46,7 @@ export interface Batch {
   file_count: number;
   files?: BatchFile[];
   versions?: Record<string, InputVersion>;
-  jobs?: Partial<Record<"compute" | "export" | "prepare", Job>>;
+  jobs?: Partial<Record<"compute" | "export" | "prepare" | "purchase_snapshot", Job>>;
   receipt?: ReceiptTotals | null;
   summary?: {
     delivery_total: number;
@@ -59,7 +59,7 @@ export interface Batch {
 export interface Job {
   id: number;
   batch_id: number;
-  kind: "compute" | "export" | "prepare";
+  kind: "compute" | "export" | "prepare" | "purchase_snapshot";
   status: string;
   attempts: number;
   error_message: string | null;

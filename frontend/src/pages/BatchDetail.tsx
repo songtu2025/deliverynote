@@ -19,6 +19,7 @@ import { useBatchJob } from "./batch-detail/useBatchJob";
 import { useBatchTasks } from "./batch-detail/useBatchTasks";
 import ReceiptReview from "./batch-detail/ReceiptReview";
 import SelfOperatedDetailTabs from "./batch-detail/SelfOperatedDetailTabs";
+import BatchPurchaseSnapshot, { BatchPurchaseSnapshotNotice } from "./batch-detail/BatchPurchaseSnapshot";
 
 export default function BatchDetail({
   batchId,
@@ -128,44 +129,49 @@ export default function BatchDetail({
     />
   );
   const reviewContent = computed && (
-    <ExceptionReviewTable
-      selfOperated={selfOperated}
-      review={review}
-      fileById={fileById}
-      hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
-      onOpen={openSplit}
-      onReset={() => setSplitTarget(null)}
-      sectionRef={reviewSection}
-    />
+    <>
+      <BatchPurchaseSnapshotNotice />
+      <ExceptionReviewTable
+        selfOperated={selfOperated}
+        review={review}
+        fileById={fileById}
+        hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
+        onOpen={openSplit}
+        onReset={() => setSplitTarget(null)}
+        sectionRef={reviewSection}
+      />
+    </>
   );
 
   return (
-    <BatchWorkbench notice={loadFailure} taskContent={taskContent}>
-      {selfOperated ? (
-        <SelfOperatedDetailTabs
-          batch={batch}
-          activeKey={detailTabs[batchId]}
-          onChange={selectDetailTab}
-          reviewStats={availableReviewStats(data)}
-          reviewState={review}
-          onReset={() => setSplitTarget(null)}
-          materialsOpen={materialsOpen}
-          onCloseMaterials={() => setMaterialsOpen(false)}
-          files={fileContent}
-          versions={versionContent}
-          receipts={<ReceiptReview batch={batch} runAction={runAction} load={load} />}
-          review={reviewContent}
-        />
-      ) : (
-        <>
-          {fileContent}
-          {versionContent}
-          {reviewContent}
-        </>
-      )}
+    <BatchPurchaseSnapshot batch={batch}>
+      <BatchWorkbench notice={loadFailure} taskContent={taskContent}>
+        {selfOperated ? (
+          <SelfOperatedDetailTabs
+            batch={batch}
+            activeKey={detailTabs[batchId]}
+            onChange={selectDetailTab}
+            reviewStats={availableReviewStats(data)}
+            reviewState={review}
+            onReset={() => setSplitTarget(null)}
+            materialsOpen={materialsOpen}
+            onCloseMaterials={() => setMaterialsOpen(false)}
+            files={fileContent}
+            versions={versionContent}
+            receipts={<ReceiptReview batch={batch} runAction={runAction} load={load} />}
+            review={reviewContent}
+          />
+        ) : (
+          <>
+            {fileContent}
+            {versionContent}
+            {reviewContent}
+          </>
+        )}
 
-      <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
-    </BatchWorkbench>
+        <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
+      </BatchWorkbench>
+    </BatchPurchaseSnapshot>
   );
 }
 

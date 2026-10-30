@@ -5,8 +5,14 @@ import type { DeliveryException } from "../../types";
 import type { InboundAllocation, PurchaseOption } from "../../inboundExceptionApi";
 import { useInboundExceptionDetails } from "./useInboundExceptionDetails";
 
-export default function SelfOperatedExceptionDetails({ exception }: { exception: DeliveryException }) {
-  const { purchases, allocations } = useInboundExceptionDetails(exception.id);
+export default function SelfOperatedExceptionDetails({
+  exception,
+  supplierCode
+}: {
+  exception: DeliveryException;
+  supplierCode: string;
+}) {
+  const { purchases, allocations } = useInboundExceptionDetails(exception.id, supplierCode, exception.sku);
   return (
     <Flex vertical gap="middle">
       <Descriptions
@@ -34,10 +40,10 @@ type Evidence = ReturnType<typeof useInboundExceptionDetails>;
 
 function PurchaseEvidence({ state: purchases }: { state: Evidence["purchases"] }) {
   return (
-    <EvidenceSection title="未交采购明细" retryLabel="重新查询采购" state={purchases}>
+    <EvidenceSection title="未交采购明细" state={purchases}>
       <Typography.Paragraph type="secondary">
-        同一供应商、同一 SKU 的各站点未交采购需求，不改变本批分配。
-        {purchases.data && ` 查询完成：${formatBeijingDateTime(purchases.data.queried_at)}`}
+        使用整批采购快照，展示同一供应商、同一 SKU 的各站点未交需求，不改变本批分配。
+        {purchases.data && ` 采购数据更新于：${formatBeijingDateTime(purchases.data.queried_at ?? "")}`}
       </Typography.Paragraph>
       <Table<PurchaseOption>
         size="small"
@@ -102,8 +108,8 @@ function EvidenceSection({
   children
 }: {
   title: string;
-  retryLabel: string;
-  state: { loading: boolean; error: string | null; retry: () => void };
+  retryLabel?: string;
+  state: { loading: boolean; error: string | null; retry?: () => void };
   children: ReactNode;
 }) {
   return (
@@ -112,9 +118,11 @@ function EvidenceSection({
         size="small"
         title={title}
         extra={
-          <Button size="small" disabled={state.loading} onClick={state.retry}>
-            {retryLabel}
-          </Button>
+          retryLabel && (
+            <Button size="small" disabled={state.loading} onClick={state.retry}>
+              {retryLabel}
+            </Button>
+          )
         }
       >
         {state.error ? <Alert type="error" showIcon title={state.error} /> : children}
