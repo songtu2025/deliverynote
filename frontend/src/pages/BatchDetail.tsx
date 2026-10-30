@@ -170,7 +170,9 @@ export default function BatchDetail({
 }
 
 function availableReviewStats(data: BatchDetailData) {
-  return data.review.exceptionsLoading || data.loadError ? undefined : data.review.reviewStats;
+  const available =
+    data.batch?.workflow === "self_operated_inbound" ? data.review.hasLoadedExceptions : !data.review.exceptionsLoading;
+  return available && !data.loadError ? data.review.reviewStats : undefined;
 }
 
 function BatchWorkbench({

@@ -37,11 +37,12 @@ export default function ExceptionReviewTable({
         extra={!selfOperated && <span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}
-        loading={exceptionsLoading}
+        loading={exceptionsLoading && !selfOperated}
       >
         <ExceptionReviewToolbar selfOperated={selfOperated} review={review} onReset={onReset} />
         <Table<DeliveryException>
           rowKey="id"
+          loading={exceptionsLoading}
           size={selfOperated ? "small" : undefined}
           dataSource={exceptions}
           pagination={
@@ -144,7 +145,8 @@ export default function ExceptionReviewTable({
   );
 }
 
-function reviewEmptyText({ reviewStats, reviewScope }: ExceptionReview) {
+function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: ExceptionReview) {
+  if (exceptionsLoading) return "正在读取审校记录";
   if (!reviewStats.totalCount) return "本批次没有待处理记录";
   return reviewScope === "unfinished" ? "当前没有未完成记录" : "没有匹配的审校记录";
 }

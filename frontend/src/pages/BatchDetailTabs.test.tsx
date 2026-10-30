@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
-import { jsonResponse } from "./admin/positionDraftTestSupport";
+import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
 describe("自营仓详情工作区", () => {
   const { state } = setupBatchDetailTest();
@@ -57,6 +57,39 @@ describe("自营仓详情工作区", () => {
     fireEvent.click(drawer.getByRole("button", { name: "Close" }));
     expect(screen.getByRole("tab", { name: /^已处理/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: "业务文件" })).not.toBeInTheDocument();
+  });
+
+  it("切换状态等待响应时保留表格、筛选和计数，不主动滚动页面", async () => {
+    state.exceptions.push({ ...state.exceptions[0], id: 35, sku: "SKU-已处理", status: "resolved" });
+    const pending = deferred<void>();
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).includes("review_scope=all")
+          ? pending.promise.then(() => originalFetch(input, init))
+          : originalFetch(input, init)
+      )
+    );
+    const scroll = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    try {
+      const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+      await screen.findByRole("tab", { name: "未完成（4）" });
+      fireEvent.click(screen.getByRole("tab", { name: /^全部审校/ }));
+      await waitFor(() =>
+        expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=all"), expect.anything())
+      );
+      expect(screen.getByLabelText("搜索待处理记录")).toBeVisible();
+      expect(screen.getByRole("columnheader", { name: "SKU" })).toBeVisible();
+      expect(screen.getByRole("tab", { name: "未完成（4）" })).toBeVisible();
+      expect(scroll).not.toHaveBeenCalled();
+      pending.resolve(undefined);
+      await waitFor(() => expect(container.querySelectorAll(".exception-review-card .ant-table-row")).toHaveLength(5));
+    } finally {
+      pending.resolve(undefined);
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
   });
 
   it("未计算时直接显示文件准备和核对，不显示虚假的零条审校", async () => {

@@ -26,6 +26,7 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
     stocking: []
   });
   const [exceptionsLoading, setExceptionsLoading] = useState(true);
+  const [loadedBatchId, setLoadedBatchId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
   const [filterValues, setFilterValues] = useState<FilterValues>({});
@@ -49,21 +50,25 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
     [batchId, reviewPage, reviewScope, debouncedQuery, filterValues]
   );
 
-  const applyExceptionPage = useCallback((result: ExceptionPage) => {
-    setExceptions(result.items);
-    setExceptionTotal(result.total);
-    setReviewStats({
-      unfinishedCount: result.stats.unfinished_count,
-      unfinishedQuantity: result.stats.unfinished_quantity,
-      resolvedCount: result.stats.resolved_count,
-      totalCount: result.stats.total_count
-    });
-    if (!pendingReviewDirection.current) return undefined;
-    const target =
-      pendingReviewDirection.current === "first" ? (result.items[0] ?? null) : (result.items.at(-1) ?? null);
-    pendingReviewDirection.current = null;
-    return target;
-  }, []);
+  const applyExceptionPage = useCallback(
+    (result: ExceptionPage) => {
+      setLoadedBatchId(batchId);
+      setExceptions(result.items);
+      setExceptionTotal(result.total);
+      setReviewStats({
+        unfinishedCount: result.stats.unfinished_count,
+        unfinishedQuantity: result.stats.unfinished_quantity,
+        resolvedCount: result.stats.resolved_count,
+        totalCount: result.stats.total_count
+      });
+      if (!pendingReviewDirection.current) return undefined;
+      const target =
+        pendingReviewDirection.current === "first" ? (result.items[0] ?? null) : (result.items.at(-1) ?? null);
+      pendingReviewDirection.current = null;
+      return target;
+    },
+    [batchId]
+  );
 
   const changeScope = (scope: ReviewScope) => {
     setReviewPage(1);
@@ -110,6 +115,7 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
     reviewStats,
     exceptionFilters,
     exceptionsLoading,
+    hasLoadedExceptions: loadedBatchId === batchId,
     setExceptionsLoading,
     query,
     reviewScope,

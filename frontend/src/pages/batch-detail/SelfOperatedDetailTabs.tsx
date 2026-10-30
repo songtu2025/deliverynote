@@ -1,7 +1,5 @@
-import { useRef } from "react";
 import type { ReactNode } from "react";
 import { Drawer, Tabs, theme } from "antd";
-import type { TabsRef } from "antd/es/tabs";
 import type { Batch } from "../../types";
 import { batchPresentation } from "./batchPresentation";
 import type { ExceptionReview } from "./useExceptionReview";
@@ -33,7 +31,6 @@ export default function SelfOperatedDetailTabs({
   receipts: ReactNode;
   review: ReactNode;
 }) {
-  const tabs = useRef<TabsRef>(null);
   const { token } = theme.useToken();
   const { computed } = batchPresentation(batch);
   const selected = activeKey === "receipts" ? "receipts" : reviewState.reviewScope;
@@ -46,7 +43,6 @@ export default function SelfOperatedDetailTabs({
     <div className="self-operated-detail-tabs">
       {computed ? (
         <Tabs
-          ref={tabs}
           classNames={{ header: "self-operated-tab-nav", item: "self-operated-tab-item" }}
           styles={{ header: { zIndex: token.zIndexBase + 1 } }}
           activeKey={selected}
@@ -57,7 +53,6 @@ export default function SelfOperatedDetailTabs({
               onReset();
               onChange("review");
             }
-            requestAnimationFrame(() => tabs.current?.nativeElement?.scrollIntoView?.({ block: "start" }));
           }}
           tabBarGutter={12}
           items={[
