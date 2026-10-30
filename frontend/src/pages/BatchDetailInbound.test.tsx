@@ -34,7 +34,7 @@ describe("自营仓批次详情", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
-    expect(await screen.findByRole("tab", { name: "未完成（1）" })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "未完成（1）" })).toBeInTheDocument();
     expect(task.getByText("本次申请")).toBeInTheDocument();
     expect(task.getByLabelText("入库数量摘要")).toHaveTextContent("累计实收 163 − 历史已入库 3 = 本次申请 160");
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();

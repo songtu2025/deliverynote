@@ -11,7 +11,8 @@
   position: sticky;
   top: 0;
   margin-bottom: 16px;
-  padding-inline: 16px;
+  padding: 8px 16px;
+  overflow-x: auto;
   border: 1px solid var(--dn-border);
   border-radius: 6px;
   background: var(--dn-surface);
@@ -19,6 +20,10 @@
 
 .self-operated-detail-tabs .batch-detail-panel-body {
   padding: 16px;
+}
+
+.self-operated-review-content:not([hidden]) {
+  display: flow-root;
 }
 
 .batch-detail--compact:has(.self-operated-detail-tabs) .batch-heading {
