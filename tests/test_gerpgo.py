@@ -147,6 +147,43 @@ class GerpgoClientTests(unittest.TestCase):
         self.assertEqual(detail["poCode"], "PO-1")
         self.assertEqual(calls[1][2]["invoicesStatusList"], [3, 6])
 
+    def test_purchase_lookup_filters_supplier_and_sku_on_every_page(self):
+        calls = []
+
+        def post_json(_url, _headers, payload):
+            calls.append(payload)
+            return {
+                "code": 200,
+                "data": {"total": 2, "rows": [{"code": f"PO-{len(calls)}"}]},
+            }
+
+        client = GerpgoClient(
+            "https://example.test",
+            "app",
+            "key",
+            post_json=post_json,
+            sleep=lambda _: None,
+            monotonic=lambda: 0,
+        )
+        client.access_token = "token"
+        orders = client.list_purchase_orders(supplier_code="GYS-1", sku="SKU-A")
+        self.assertEqual(len(orders), 2)
+        for payload in calls:
+            self.assertEqual(payload["supplierCodeList"], ["GYS-1"])
+            self.assertEqual(payload["skuList"], ["SKU-A"])
+            self.assertEqual(payload["invoicesStatusList"], [3, 6])
+
+    def test_incomplete_purchase_page_does_not_loop_or_report_empty_success(self):
+        client = GerpgoClient(
+            "https://example.test",
+            "app",
+            "key",
+            post_json=lambda *_: {"code": 200, "data": {"total": 1, "rows": []}},
+        )
+        client.access_token = "token"
+        with self.assertRaisesRegex(GerpgoError, "分页不完整"):
+            client.list_purchase_orders(supplier_code="GYS-1", sku="SKU-A")
+
     def test_rejects_unsuccessful_response(self):
         calls = []
         client = GerpgoClient(

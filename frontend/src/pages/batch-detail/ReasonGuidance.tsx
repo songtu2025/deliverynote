@@ -12,12 +12,10 @@ function GuidanceMetric({ label, value }: { label: string; value: number | null 
 
 export default function ReasonGuidance({
   exception,
-  hasOverreceiptRule,
-  selfOperated = false
+  hasOverreceiptRule
 }: {
   exception: DeliveryException;
   hasOverreceiptRule: boolean;
-  selfOperated?: boolean;
 }) {
   if (exception.reason_code === "purchase_not_found") {
     return (
@@ -61,11 +59,7 @@ export default function ReasonGuidance({
           showIcon
           type="warning"
           title="选择候选站点"
-          description={
-            selfOperated
-              ? "请在下方候选项中选择正确的完整站点。保存后系统会按所选站点重新计算整个批次。"
-              : "请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
-          }
+          description="请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
         />
       </div>
     );

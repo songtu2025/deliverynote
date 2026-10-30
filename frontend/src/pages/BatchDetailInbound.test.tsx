@@ -38,15 +38,12 @@ describe("自营仓批次详情", () => {
     expect(task.getByText("本次申请")).toBeInTheDocument();
     expect(task.getByLabelText("入库数量摘要")).toHaveTextContent("累计实收 163 − 历史已入库 3 = 本次申请 160");
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "批次资料" }));
-    expect(screen.getByRole("columnheader", { name: "本次申请" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "可入库" })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole("dialog", { name: "批次资料" })).getByRole("button", { name: "Close" }));
-    expect(screen.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("备货定位筛选")).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "规模定位" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "查看并处理" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "保存并重新计算" })).not.toBeInTheDocument();
+    const page = within(container);
+    expect(page.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
+    expect(page.queryByLabelText("备货定位筛选")).not.toBeInTheDocument();
+    expect(page.queryByRole("columnheader", { name: "规模定位" })).not.toBeInTheDocument();
+    expect(page.getByText("查看并处理").closest("button")).toBeEnabled();
+    expect(page.queryByText("保存并重新计算")).not.toBeInTheDocument();
   });
 
   it.each([
@@ -69,6 +66,9 @@ describe("自营仓批次详情", () => {
     }
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "批次资料" }));
+    const materials = within(screen.getByRole("dialog", { name: "批次资料" }));
+    expect(materials.getByRole("columnheader", { name: "本次申请" })).toBeInTheDocument();
+    expect(materials.getByRole("columnheader", { name: "可入库" })).toBeInTheDocument();
     expect(
       await screen.findByText(new RegExp(`待入库数据（${apiSource ? "API锁定" : "手动上传"}）`))
     ).toBeInTheDocument();

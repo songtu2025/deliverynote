@@ -230,6 +230,9 @@ class GerpgoClient:
     def list_purchase_orders(
         self,
         statuses: tuple[int, ...] = (3, 6),
+        *,
+        supplier_code: str = "",
+        sku: str = "",
     ) -> list[dict[str, Any]]:
         if not self.access_token:
             self.authenticate()
@@ -240,6 +243,8 @@ class GerpgoClient:
                 "/purchase/srm/procure/page",
                 {
                     "invoicesStatusList": list(statuses),
+                    **({"supplierCodeList": [supplier_code]} if supplier_code else {}),
+                    **({"skuList": [sku]} if sku else {}),
                     "pageInfo": {"page": page, "pagesize": 100},
                 },
                 group="purchase-list",
@@ -248,6 +253,8 @@ class GerpgoClient:
             data = response.get("data") or {}
             orders.extend(data.get("rows") or [])
             total = int(data.get("total") or 0)
+            if not data.get("rows") and len(orders) < total:
+                raise GerpgoError("采购列表分页不完整，请重新查询")
             if len(orders) >= total:
                 return orders
             page += 1

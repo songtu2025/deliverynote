@@ -25,7 +25,8 @@ class PurchaseMappingResult:
     filtered_count: int
 
 
-def _detail_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
+def purchase_order_items(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    """展开逐仓采购明细，并补齐上层供应商和仓库字段。"""
     items: list[dict[str, Any]] = []
     for warehouse in detail.get("warehouseProcureItemVos") or []:
         for source in warehouse.get("procureItemVos") or []:
@@ -64,7 +65,7 @@ def _map_purchase_order(
     rows: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
-    items = _detail_items(detail)
+    items = purchase_order_items(detail)
     filtered_count = 0
 
     for item in items:

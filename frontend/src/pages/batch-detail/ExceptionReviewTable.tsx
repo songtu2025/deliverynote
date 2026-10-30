@@ -130,7 +130,7 @@ export default function ExceptionReviewTable({
               title: "操作",
               width: 100,
               render: (_, record) =>
-                record.allowed_actions.length === 0 ? (
+                !selfOperated && record.allowed_actions.length === 0 ? (
                   <Typography.Text type="secondary">待处理</Typography.Text>
                 ) : (
                   <Button type="link" onClick={() => onOpen(record)}>

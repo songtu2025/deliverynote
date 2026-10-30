@@ -6,6 +6,7 @@ import { ExceptionStatusTag, PositionValue } from "./ExceptionEvidence";
 import ReasonGuidance from "./ReasonGuidance";
 import ExceptionReviewActions from "./ExceptionReviewActions";
 import SplitPartsForm from "./SplitPartsForm";
+import SelfOperatedExceptionDetails from "./SelfOperatedExceptionDetails";
 
 export default function ExceptionReviewDrawer({
   editor,
@@ -32,7 +33,7 @@ export default function ExceptionReviewDrawer({
           )}
         </div>
       }
-      size={520}
+      size={selfOperated ? "min(1280px, 100vw)" : 520}
       open={splitTarget !== null}
       onClose={() => setSplitTarget(null)}
       extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
@@ -42,11 +43,11 @@ export default function ExceptionReviewDrawer({
         <>
           <ExceptionSourceSummary selfOperated={selfOperated} splitTarget={splitTarget} fileById={fileById} />
 
-          <ReasonGuidance
-            exception={splitTarget}
-            hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
-            selfOperated={selfOperated}
-          />
+          {selfOperated ? (
+            <SelfOperatedExceptionDetails exception={splitTarget} />
+          ) : (
+            <ReasonGuidance exception={splitTarget} hasOverreceiptRule={Boolean(batch.overreceipt_rule)} />
+          )}
 
           {!selfOperated && <SplitPartsForm editor={editor} />}
         </>
@@ -67,6 +68,11 @@ function ExceptionSourceSummary({
   return (
     <Descriptions className="split-source" size="small" column={1}>
       <Descriptions.Item label="来源文件">{fileById[splitTarget.batch_file_id]?.original_name}</Descriptions.Item>
+      {selfOperated && (
+        <Descriptions.Item label="供应商">
+          {fileById[splitTarget.batch_file_id]?.supplier_name || "—"}
+        </Descriptions.Item>
+      )}
       <Descriptions.Item label="站点">{splitTarget.full_site || "—"}</Descriptions.Item>
       <Descriptions.Item label={selfOperated ? "入库仓" : "目的仓"}>{splitTarget.destination || "—"}</Descriptions.Item>
       {!selfOperated && (

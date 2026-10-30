@@ -43,6 +43,7 @@ from .exception_views import (
 )
 from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
+from .inbound_exception_routes import register_inbound_exception_routes
 from .input_version_read_routes import register_input_version_read_routes
 from .models import AuditLog
 from .sync.commands import SyncCommands
@@ -135,6 +136,7 @@ def create_app(
     sync_commands = SyncCommands(storage, _audit)
     register_purchase_routes(app, dependencies, sync_commands)
     register_inbound_routes(app, dependencies, sync_commands)
+    register_inbound_exception_routes(app, dependencies, storage)
     register_batch_read_routes(
         app=app,
         get_session=get_session,
