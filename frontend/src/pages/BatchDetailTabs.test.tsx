@@ -31,7 +31,7 @@ describe("自营仓详情工作区", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("radio", { name: "未完成（4）" })).toBeChecked();
     expect(screen.queryByRole("region", { name: "审校概览" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "处理异常" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
     const reviewCard = container.querySelector(".exception-review-card");
     fireEvent.click(screen.getByRole("radio", { name: /^已处理/ }));
     await waitFor(() =>
@@ -103,6 +103,6 @@ describe("自营仓详情工作区", () => {
     expect(screen.getByText("累计实收核对")).toBeInTheDocument();
     expect(within(screen.getByLabelText("入库数量摘要")).getByText("计算后生成")).toBeInTheDocument();
     expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
-    expect(screen.queryByText("本批次没有待处理记录")).not.toBeInTheDocument();
+    expect(screen.queryByText("没有待处理，可以直接生成结果")).not.toBeInTheDocument();
   });
 });

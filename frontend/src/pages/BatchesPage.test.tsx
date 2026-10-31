@@ -45,7 +45,7 @@ describe("BatchesPage", () => {
     expect(await screen.findByRole("region", { name: "积加采购数据同步" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /同步采购数据/ })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "统一批次流程" })).not.toBeInTheDocument();
-    expect(screen.getByText("查看待处理")).toBeInTheDocument();
+    expect(screen.getByText("审校待处理")).toBeInTheDocument();
     expect(screen.getByText("2 个文件 · 交货 160")).toBeInTheDocument();
     expect(screen.getByText("批次 #7")).toBeInTheDocument();
     expect(screen.getByText(/可导入 100/)).toHaveTextContent("可导入 100 · 待处理 60");
@@ -62,16 +62,24 @@ describe("BatchesPage", () => {
     await waitFor(() => expect(onOpen).toHaveBeenCalledWith(7));
   });
 
+  it.each(["delivery", "self_operated_inbound"] as const)("%s 列表中的失败状态使用实心标签", async (workflow) => {
+    Object.assign(state.batchRows[0], { workflow, status: "failed" });
+    render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />, { wrapper: AntApp });
+
+    const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
+    expect(within(row).getByText("失败").closest(".ant-tag")).toHaveClass("ant-tag-error", "ant-tag-solid");
+  });
+
   it.each([true, false])("keeps pending quantities visible when download readiness is %s", async (downloadReady) => {
     state.batchRows[0].download_ready = downloadReady;
     const onOpen = vi.fn();
     render(<BatchesPage onOpen={onOpen} />, { wrapper: AntApp });
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByText("查看待处理")).toBeInTheDocument();
+    expect(within(row).getByText("审校待处理")).toBeInTheDocument();
     expect(within(row).getByText(/可导入 100/)).toHaveTextContent("待处理 60");
     expect(within(row).queryByText("结果可下载") !== null).toBe(downloadReady);
-    expect(within(row).queryByText(/等待人工审校|未完成审校|审校待处理/)).not.toBeInTheDocument();
+    expect(within(row).queryByText(/等待人工审校|未完成审校|条待审校/)).not.toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "交货批次列表" })).getAllByRole("columnheader")).toHaveLength(6);
     fireEvent.click(within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" }));
     expect(onOpen).toHaveBeenCalledWith(7);
@@ -79,13 +87,13 @@ describe("BatchesPage", () => {
 
   it.each([
     ["succeeded", 0, true, "下载结果"],
-    ["succeeded", 0, false, "生成导出"],
-    ["draft", 60, true, "执行预检"],
-    ["preflight_ready", 60, true, "启动计算"],
-    ["queued", 60, true, "等待后台任务"],
-    ["running", 60, true, "等待后台任务"],
-    ["failed", 60, true, "查看原因并重试"],
-    ["expired", 60, true, "查看原因并重试"]
+    ["succeeded", 0, false, "生成结果"],
+    ["draft", 60, true, "预检"],
+    ["preflight_ready", 60, true, "开始计算"],
+    ["queued", 60, true, "计算中"],
+    ["running", 60, true, "计算中"],
+    ["failed", 60, true, "查看原因"],
+    ["expired", 60, true, "查看原因"]
   ] as const)(
     "preserves the action for %s with pending quantity %s and download readiness %s",
     async (status, pending, downloadReady, action) => {
@@ -97,8 +105,8 @@ describe("BatchesPage", () => {
       render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
       const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-      expect(within(row).getByText(action)).toBeInTheDocument();
-      expect(within(row).queryByText("查看待处理")).not.toBeInTheDocument();
+      expect(within(row).getByText(action, { selector: ".next-action" })).toBeInTheDocument();
+      expect(within(row).queryByText("审校待处理")).not.toBeInTheDocument();
       expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
     }
   );

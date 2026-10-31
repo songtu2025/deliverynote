@@ -190,7 +190,7 @@
 .batch-list-page--compact .batch-list-table .ant-tag.ant-tag-warning {
   color: #895d16;
 }
-.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-error {
+.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-error:not(.ant-tag-solid) {
   color: #b52c35;
 }
 .batch-list-page--compact .batch-list-table .ant-tag.ant-tag-cyan {

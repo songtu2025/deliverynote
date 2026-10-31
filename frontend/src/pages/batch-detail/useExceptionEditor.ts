@@ -89,7 +89,7 @@ export function useExceptionEditor({
       replaceException(updated);
       const refreshed = await load(true);
       const continued = continueReview(savedId, savedIndex, refreshed, advance);
-      message.success(continued ? "当前记录已保存，已打开下一条未完成记录" : "处理结果已保存，批次数量保持守恒");
+      message.success(continued ? "已保存，下一条" : "已保存");
     });
   };
 

@@ -12,7 +12,7 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
       const result = await preflightBatch(batchId);
       await load(true);
       if (result.workflow === "self_operated_inbound") message.info("已提交后台预检，正在获取历史并核对累计实收");
-      else message.success("所有基础资料和交货文件均已通过预检");
+      else message.success("预检通过");
     });
 
   const refreshSupplierVersion = () =>
@@ -27,14 +27,14 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
     runAction("compute", async () => {
       await startBatchJob(batchId, "compute");
       await load(true);
-      message.info("计算任务已提交，可以离开页面，返回后状态会自动恢复");
+      message.info("已开始计算");
     });
 
   const startExport = () =>
     runAction("export", async () => {
       await startBatchJob(batchId, "export");
       await load(true);
-      message.info("正在生成导出文件");
+      message.info("正在生成结果");
     });
 
   const downloadResult = (path: string, filename: string) => runAction("download", () => download(path, filename));

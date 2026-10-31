@@ -39,7 +39,7 @@ export async function submitBatchAction(action: "create" | "delete" | "clean") {
     fireEvent.click(screen.getByRole("button", { name: "删除已选（1）" }));
     fireEvent.click(await screen.findByRole("button", { name: "永久删除" }));
   } else {
-    fireEvent.click(await screen.findByRole("button", { name: /清理空批次/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /清理 \d+ 个空批次/ }));
     fireEvent.click(await screen.findByRole("button", { name: /^删\s*除$/ }));
   }
 }

@@ -40,7 +40,7 @@ export function useBatchFiles({
     await runAction("delete", async () => {
       await deleteBatchFile(batchId, file.id);
       await load(true);
-      message.success(`${file.original_name} 已删除，其余文件已自动重排`);
+      message.success(`${file.original_name} 已删除，其余文件已重新编号`);
     });
   };
 
@@ -53,7 +53,7 @@ export function useBatchFiles({
     await runAction("order", async () => {
       await reorderBatchFiles(batchId, ids);
       await load(true);
-      message.info("处理顺序已更新，需要重新预检");
+      message.info("顺序已调整，需要重新预检");
     });
   };
 

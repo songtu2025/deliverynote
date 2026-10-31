@@ -147,6 +147,6 @@ export default function ExceptionReviewTable({
 
 function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: ExceptionReview) {
   if (exceptionsLoading) return "正在读取审校记录";
-  if (!reviewStats.totalCount) return "本批次没有待处理记录";
-  return reviewScope === "unfinished" ? "当前没有未完成记录" : "没有匹配的审校记录";
+  if (!reviewStats.totalCount) return "没有待处理，可以直接生成结果";
+  return reviewScope === "unfinished" ? "审校已全部完成" : "没有匹配的审校记录";
 }

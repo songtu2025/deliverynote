@@ -21,8 +21,8 @@ describe("BatchDetailWorkbench", () => {
     await screen.findByText(state.batch.name);
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     const task = screen.getByRole("region", { name: "当前批次任务" });
-    expect(within(task).queryByRole("button", { name: /执行预检/ }) !== null).toBe(preflight);
-    expect(within(task).queryByRole("button", { name: /启动计算|重新计算/ }) !== null).toBe(compute);
+    expect(within(task).queryByRole("button", { name: /预检/ }) !== null).toBe(preflight);
+    expect(within(task).queryByRole("button", { name: /开始计算|重新计算/ }) !== null).toBe(compute);
     expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(preflight || compute);
     expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
     expect(within(task).queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
@@ -34,7 +34,7 @@ describe("BatchDetailWorkbench", () => {
     state.batch.files = [];
     state.batch.file_count = 0;
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: /执行预检/ })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /预检/ })).toBeDisabled();
     expect(container.querySelector('.batch-primary-actions input[type="file"]')).toHaveAttribute("multiple");
     expect(screen.getByText("请先上传一个或多个交货 Excel")).toBeInTheDocument();
   });
@@ -78,7 +78,7 @@ describe("BatchDetailWorkbench", () => {
           expect.objectContaining({ method: "PUT", body: JSON.stringify({ file_ids: [11, 10] }) })
         )
       );
-      await screen.findByText("处理顺序已更新，需要重新预检");
+      await screen.findByText("顺序已调整，需要重新预检");
     }
   );
 
@@ -108,25 +108,25 @@ describe("BatchDetailWorkbench", () => {
     expect(task.getByRole("button", { name: /下载合并结果/ })).toBeEnabled();
     expect(task.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
     if (pending) {
-      expect(await task.findByText("1 条未完成 · 待处理 60 件")).toBeInTheDocument();
-      expect(task.getByText("等待人工审校")).toBeInTheDocument();
+      expect(await task.findByText("1 条待审校，共 60 件")).toBeInTheDocument();
+      expect(task.getByText("1 条待审校，共 60 件")).toBeInTheDocument();
       const scroll = vi.fn();
       Object.defineProperty(container.querySelector(".review-section-anchor"), "scrollIntoView", { value: scroll });
-      fireEvent.click(task.getByRole("button", { name: "处理异常" }));
+      fireEvent.click(task.getByRole("button", { name: "开始审校" }));
       expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
       expect(document.activeElement).toHaveClass("review-section-anchor");
     } else {
-      expect(await task.findByText("审校已完成")).toBeInTheDocument();
-      expect(task.queryByRole("button", { name: "处理异常" })).not.toBeInTheDocument();
+      expect(await task.findByText("审校完成，可以生成结果")).toBeInTheDocument();
+      expect(task.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
     }
-    expect(task.getByText("当前结果文件已生成，可下载")).toBeInTheDocument();
+    expect(task.getByText("结果可下载")).toBeInTheDocument();
     expect(container.querySelector(".batch-task-spinner")).not.toBeInTheDocument();
   });
 
   it.each([
-    [false, false, false, "生成导出"],
+    [false, false, false, "生成结果"],
     [true, false, false, "生成合并结果"],
-    [false, false, true, "重新生成导出"]
+    [false, false, true, "重新生成结果"]
   ] as const)("describes the export generation action %s/%s/%s accurately", async (ready, merged, stale, label) => {
     state.batch.download_ready = ready;
     state.batch.merged_download_ready = merged;
@@ -144,11 +144,9 @@ describe("BatchDetailWorkbench", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const button = await screen.findByRole("button", { name: new RegExp(label) });
     expect(
-      screen.getByText(
-        stale ? "审校已更新，需要重新生成结果" : ready ? "单文件结果已生成，需要生成合并结果" : "需要生成结果"
-      )
+      screen.getByText(stale ? "审校有更新，需重新生成结果" : ready ? "需生成合并结果" : "尚未生成结果")
     ).toBeInTheDocument();
-    expect(screen.queryByText("当前结果文件已生成，可下载")).not.toBeInTheDocument();
+    expect(screen.queryByText("结果可下载")).not.toBeInTheDocument();
     fireEvent.click(button);
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith("/api/batches/7/export", expect.objectContaining({ method: "POST" }))
@@ -158,7 +156,7 @@ describe("BatchDetailWorkbench", () => {
   it("shows a running export and prevents another generation request", async () => {
     state.batch.jobs = { export: fixtureJob({ kind: "export" }) };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: /生成导出/ })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: /生成结果/ })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("正在生成结果");
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });

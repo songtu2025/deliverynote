@@ -11,7 +11,7 @@
   margin-bottom: 18px;
   border: 1px solid #e2e9e7;
   border-radius: 8px;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 
 .admin-panel-intro .ant-typography {

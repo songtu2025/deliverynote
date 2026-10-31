@@ -142,7 +142,7 @@
   gap: 5px;
   padding: 15px 16px;
   border-radius: 8px;
-  background: #f6f8f7;
+  background: var(--dn-canvas);
 }
 
 .overreceipt-metric.is-accent {
@@ -223,7 +223,7 @@
 }
 .overreceipt-history-table .ant-table-thead > tr > th {
   padding: 12px 10px;
-  background: #f6f8f7;
+  background: var(--dn-canvas);
 }
 .overreceipt-history-table .ant-table-tbody > tr > td {
   padding: 14px 10px;

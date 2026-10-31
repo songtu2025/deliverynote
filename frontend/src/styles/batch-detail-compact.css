@@ -49,7 +49,7 @@
 
 .batch-detail--compact .pending-value,
 .batch-detail--compact .summary-metric.pending strong {
-  color: #8a4b00;
+  color: var(--dn-warning);
 }
 
 .batch-detail--compact .batch-task-bar {
@@ -87,14 +87,16 @@
   font-variant-numeric: tabular-nums;
 }
 .batch-detail--compact .batch-task-review {
-  color: #8a4b00;
+  color: var(--dn-warning);
 }
-.batch-detail--compact .batch-task-ready,
+.batch-detail--compact .batch-task-ready {
+  color: var(--dn-success);
+}
 .batch-detail--compact .batch-task-running {
-  color: var(--dn-primary);
+  color: var(--dn-info);
 }
 .batch-detail--compact .batch-task-error {
-  color: #b42318;
+  color: var(--dn-danger);
 }
 .batch-detail--compact .batch-task-actions,
 .batch-detail--compact .batch-result-actions {

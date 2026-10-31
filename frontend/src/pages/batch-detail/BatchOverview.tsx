@@ -118,7 +118,7 @@ function BatchPrimaryActions({ batch, action, fileActions, tasks }: OverviewProp
           loading={action === "preflight"}
           onClick={() => void preflight()}
         >
-          执行预检
+          预检
         </Button>
       )}
       {canCompute && (
@@ -128,7 +128,7 @@ function BatchPrimaryActions({ batch, action, fileActions, tasks }: OverviewProp
           loading={action === "compute"}
           onClick={() => void compute()}
         >
-          {batch.status === "failed" ? "重新计算" : "启动计算"}
+          {batch.status === "failed" ? "重新计算" : "开始计算"}
         </Button>
       )}
     </Space>

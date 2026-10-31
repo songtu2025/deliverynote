@@ -157,7 +157,7 @@
 .position-row-drawer .position-row-drawer-header,
 .position-row-drawer .position-row-drawer-footer {
   border-color: #e2e9e7;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 
 .position-row-drawer .position-row-drawer-body {

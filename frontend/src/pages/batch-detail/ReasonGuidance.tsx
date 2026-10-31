@@ -24,7 +24,7 @@ export default function ReasonGuidance({
           showIcon
           type="warning"
           title="核对锁定采购版本"
-          description="请核对本批次锁定采购版本中的供应商、SKU、站点和目的仓，并确认对应采购需求仍有可交货未交量。"
+          description="锁定的采购数据里没有这个 SKU 的未交量，请核对供应商、站点和目的仓。"
         />
       </div>
     );
@@ -55,12 +55,7 @@ export default function ReasonGuidance({
   if (exception.reason_code === "ambiguous_product_site") {
     return (
       <div className="review-guidance">
-        <Alert
-          showIcon
-          type="warning"
-          title="选择候选站点"
-          description="请在下方候选项中选择正确的完整站点，再将需要导入的处理明细选择为“可正式导入”。"
-        />
+        <Alert showIcon type="warning" title="选择候选站点" description="选择正确的站点后即可导入。" />
       </div>
     );
   }
@@ -91,7 +86,7 @@ function OverreceiptGuidance({ exception }: { exception: DeliveryException }) {
         title={hasExactBreakdown ? "本批次共享超收额度已用尽" : "历史批次暂无额度明细"}
         description={
           hasExactBreakdown
-            ? "超收额度按供应商 + SKU + 站点在本批次内共享，前序文件可能已使用部分额度；超过剩余额度的数量继续保留为待处理。"
+            ? "超收额度已被前面的文件用完，超出部分保留待处理。"
             : "该记录生成时尚未保存正常采购与超收额度的分配构成，页面不会用规则上限倒推。"
         }
       />

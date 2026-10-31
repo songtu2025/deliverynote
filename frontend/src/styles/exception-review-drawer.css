@@ -19,7 +19,7 @@
   margin-bottom: 10px;
   border: 1px solid #dfe6e3;
   border-radius: 8px;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
   overflow: hidden;
 }
 .review-guidance-metrics-three {
@@ -51,7 +51,7 @@
   padding: 10px 12px;
   border: 1px solid #dfe6e3;
   border-radius: 8px;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 .candidate-site-options .ant-radio-wrapper {
   margin-inline-end: 0;
@@ -67,7 +67,7 @@
   margin-bottom: 18px;
   border-radius: 8px;
   border: 1px solid #e5ebe9;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 
 .split-conservation > div {

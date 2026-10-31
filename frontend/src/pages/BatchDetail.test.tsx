@@ -69,11 +69,11 @@ describe("BatchDetail", () => {
       })
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    const button = await screen.findByRole("button", { name: /执行预检/ });
+    const button = await screen.findByRole("button", { name: /预检/ });
     fireEvent.click(button);
     await screen.findByText(`预检失败 ${status}`);
     expect(button).not.toHaveClass("ant-btn-loading");
-    expect(screen.queryByText("所有基础资料和交货文件均已通过预检")).not.toBeInTheDocument();
+    expect(screen.queryByText("预检通过")).not.toBeInTheDocument();
   });
 
   it.each(["operation", "refresh", "download", "poll", "poll-refresh"])(
@@ -114,9 +114,8 @@ describe("BatchDetail", () => {
         );
         renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
         await screen.findByText(state.batch.name);
-        if (phase === "operation" || phase === "refresh")
-          fireEvent.click(screen.getByRole("button", { name: /执行预检/ }));
-        if (phase === "download") fireEvent.click(screen.getAllByRole("button", { name: /下载处理结果/ })[0]);
+        if (phase === "operation" || phase === "refresh") fireEvent.click(screen.getByRole("button", { name: /预检/ }));
+        if (phase === "download") fireEvent.click(screen.getAllByRole("button", { name: /下载结果/ })[0]);
         await waitFor(() => expect(expired).toHaveBeenCalledOnce());
         await waitFor(() => expect(document.querySelector(".ant-btn-loading")).not.toBeInTheDocument());
         expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();

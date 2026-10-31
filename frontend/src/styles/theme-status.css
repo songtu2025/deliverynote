@@ -43,7 +43,7 @@
 }
 .overreceipt-scope-switcher button:hover {
   border-color: var(--dn-primary-border);
-  background: #f3f9f7;
+  background: var(--dn-primary-soft);
 }
 .overreceipt-metric,
 .overreceipt-impact-preview,
@@ -68,10 +68,10 @@
 }
 .input-data-layout .input-data-kind-button:not(.ant-btn-primary):hover {
   border-color: var(--dn-primary-border);
-  background: #f3f9f7;
+  background: var(--dn-primary-soft);
 }
 .input-data-layout .input-data-kind-button.is-selected {
-  color: #144036;
+  color: var(--dn-primary);
   border-color: var(--dn-primary-border);
   background: var(--dn-primary-soft);
   box-shadow: inset 0 -3px 0 var(--dn-primary);
@@ -89,7 +89,7 @@
   color: var(--dn-primary);
 }
 .input-data-active-version-row > td {
-  background: #f3f9f7 !important;
+  background: var(--dn-primary-soft) !important;
 }
 .audit-entity,
 .position-reference-value {
@@ -118,7 +118,6 @@
 .ant-tag {
   border-radius: 4px;
 }
-.ant-tag.ant-tag-processing,
 .ant-tag.purchase-sync-scope-tag {
   color: #426f63 !important;
   background: #f7fbf9 !important;

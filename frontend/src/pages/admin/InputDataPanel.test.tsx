@@ -57,7 +57,7 @@ describe("InputDataPanel 资料类型与工作区", () => {
     const drawer = screen.getByRole("dialog", { name: "更新商品信息" });
     expect(drawer.querySelector(".input-data-maintenance-header")).toHaveStyle({
       borderColor: "#e2e9e7",
-      background: "#f7f9f8"
+      background: "var(--dn-surface-muted)"
     });
     expect(drawer.querySelector(".input-data-maintenance-body")).toHaveStyle({ padding: "22px 24px" });
     expect(screen.getByLabelText("新版本名称")).toBeInTheDocument();

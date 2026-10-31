@@ -10,7 +10,7 @@
   place-items: center;
   border: 1px dashed #cad6d2;
   border-radius: 8px;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 
 .audit-log-toolbar {
@@ -22,7 +22,7 @@
   margin-bottom: 16px;
   border: 1px solid #e2e9e7;
   border-radius: 8px;
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 
 .audit-filter-field {

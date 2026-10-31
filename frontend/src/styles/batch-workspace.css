@@ -36,7 +36,7 @@
   border-radius: 10px;
 }
 .batch-list-table .ant-table-thead > tr > th {
-  background: #f7f9f8;
+  background: var(--dn-surface-muted);
 }
 .batch-list-table .ant-table-cell {
   vertical-align: middle;

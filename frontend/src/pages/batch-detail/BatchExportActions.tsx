@@ -23,8 +23,8 @@ export default function BatchExportActions({
   return (
     <div className="batch-result-actions">
       {needsReview && batch.workflow !== "self_operated_inbound" && (
-        <Button aria-label="处理异常" type="primary" onClick={focusReview}>
-          处理异常
+        <Button aria-label="开始审校" type="primary" onClick={focusReview}>
+          开始审校
         </Button>
       )}
       <div className="export-action-buttons">
@@ -87,7 +87,7 @@ function ResultDownloadButtons({
           )
         }
       >
-        下载处理结果
+        下载结果
       </Button>
     )
   );
@@ -113,7 +113,7 @@ function ExportGenerationButton({
       loading={action === "export" || activeJob?.kind === "export"}
       onClick={() => void startExport()}
     >
-      {exportJob?.status === "stale" ? "重新生成导出" : needsMergedGeneration ? "生成合并结果" : "生成导出"}
+      {exportJob?.status === "stale" ? "重新生成结果" : needsMergedGeneration ? "生成合并结果" : "生成结果"}
     </Button>
   );
 }

@@ -34,7 +34,9 @@ describe("BatchDetailGuidance", () => {
     fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: "查看并处理" }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("核对锁定采购版本")).toBeInTheDocument();
-    expect(within(drawer).getByText(/供应商、SKU、站点和目的仓/)).toBeInTheDocument();
+    expect(
+      within(drawer).getByText("锁定的采购数据里没有这个 SKU 的未交量，请核对供应商、站点和目的仓。")
+    ).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
 
     const ambiguousRow = screen.getByText("SKU-C").closest("tr");

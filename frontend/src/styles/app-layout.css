@@ -6,7 +6,6 @@
   min-width: 0;
 }
 .app-layout .ant-layout-sider {
-  background: var(--dn-surface);
   border-right: 1px solid var(--dn-border);
 }
 .app-layout .ant-layout-sider-children {

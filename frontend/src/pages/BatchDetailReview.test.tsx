@@ -13,10 +13,10 @@ describe("BatchDetailReview", () => {
     await screen.findByText("160 = 100 + 60");
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
     const task = within(screen.getByRole("region", { name: "批次任务状态" }));
-    expect(await task.findByText("等待人工审校")).toBeInTheDocument();
+    expect(await task.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
     expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
-    expect(task.getByText("4 条未完成 · 待处理 107 件")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "处理异常" })).toBeInTheDocument();
+    expect(task.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始审校" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe("BatchDetailReview", () => {
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
     fireEvent.click(await screen.findByText("中尾", { selector: ".ant-select-item-option-content" }));
-    await screen.findByText("当前没有未完成记录");
+    await screen.findByText("审校已全部完成");
   }, 30_000);
 
   it("keeps review navigation working across server pages", async () => {
@@ -153,7 +153,7 @@ describe("BatchDetailReview", () => {
     expect(within(drawer).getByText("第 1 / 4 条")).toBeInTheDocument();
     expect(within(drawer).getByRole("radio", { name: "继续保留待处理" })).toBeChecked();
     fireEvent.click(within(drawer).getByRole("radio", { name: "可正式导入" }));
-    const saveAndNext = within(drawer).getByRole("button", { name: "保存并下一条" });
+    const saveAndNext = within(drawer).getByRole("button", { name: "保存，下一条" });
     await waitFor(() => expect(saveAndNext).toBeEnabled());
     fireEvent.click(saveAndNext);
 

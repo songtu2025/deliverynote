@@ -40,7 +40,6 @@ export default function ExceptionReviewToolbar({
         <section className="review-overview" aria-label="审校概览">
           <div className="review-overview-copy">
             <strong>审校进度</strong>
-            <span>默认优先显示未完成记录，保存后可连续处理下一条。</span>
           </div>
           <div className="review-scope-options">
             <button

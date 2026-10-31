@@ -52,7 +52,7 @@ export default function BatchListTable({
           <table {...props} aria-label={workflow === "self_operated_inbound" ? "自营仓入库批次列表" : "交货批次列表"} />
         )
       }}
-      locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "暂无批次"} /> }}
+      locale={{ emptyText: <Empty description={query || statusFilter ? "没有匹配的批次" : "还没有批次"} /> }}
       pagination={
         batchTotal > 12
           ? {
@@ -126,7 +126,7 @@ export default function BatchListTable({
               <div className="batch-table-value">
                 <span className="batch-cell-label">下一步</span>
                 <span className="next-action">{action}</span>
-                {delivery && batch.download_ready && action === "查看待处理" && (
+                {delivery && batch.download_ready && action === "审校待处理" && (
                   <span className="batch-result-availability">结果可下载</span>
                 )}
               </div>

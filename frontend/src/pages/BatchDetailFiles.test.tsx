@@ -55,7 +55,7 @@ describe("BatchDetailFiles", () => {
     );
 
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: /下载处理结果/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /下载结果/ }));
 
     await screen.findByText("下载失败");
   });
@@ -81,7 +81,7 @@ describe("BatchDetailFiles", () => {
 
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("2 份质检交货单 · 请确认处理顺序后执行预检。")).toBeInTheDocument();
+    expect(await screen.findByText("2 份质检交货单已上传，确认顺序后预检")).toBeInTheDocument();
     expect(screen.getByText("序号越小，越先扣减待入库余额和超收额度")).toBeInTheDocument();
     const uploadInput = container.querySelector<HTMLInputElement>('.batch-primary-actions input[type="file"]');
     expect(uploadInput).toHaveAttribute("multiple");
@@ -97,6 +97,6 @@ describe("BatchDetailFiles", () => {
         })
       );
     });
-    expect(await screen.findByText("处理顺序已更新，需要重新预检")).toBeInTheDocument();
+    expect(await screen.findByText("顺序已调整，需要重新预检")).toBeInTheDocument();
   });
 });

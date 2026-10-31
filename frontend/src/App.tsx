@@ -9,25 +9,30 @@ export default function App() {
         algorithm: theme.defaultAlgorithm,
         token: {
           colorPrimary: "#055247",
-          colorInfo: "#055247",
-          colorText: "#202a27",
-          colorTextSecondary: "#707b76",
-          colorBgLayout: "#f6f8f7",
-          colorBorder: "#e3e8e5",
+          colorInfo: "#2d5c94",
+          colorSuccess: "#1f6b52",
+          colorWarning: "#b4381f",
+          colorError: "#a3162b",
+          colorText: "#182230",
+          colorTextSecondary: "#667085",
+          colorBgLayout: "#f1f4f8",
+          colorBorder: "#848ea0",
+          colorBorderSecondary: "#e3e8ef",
           borderRadius: 6,
           controlHeight: 36,
           fontFamily: '"PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif'
         },
         components: {
           Button: { primaryShadow: "none", defaultShadow: "none" },
+          Layout: { siderBg: "#f8fafc" },
           Menu: {
             itemHeight: 44,
             itemMarginInline: 12,
             itemMarginBlock: 6,
-            itemColor: "#707b76",
+            itemColor: "#475467",
             itemSelectedColor: "#055247",
-            itemSelectedBg: "#edf4f0",
-            itemHoverBg: "#f6f8f7",
+            itemSelectedBg: "#e6f1ee",
+            itemHoverBg: "#f1f4f8",
             activeBarBorderWidth: 0
           }
         }

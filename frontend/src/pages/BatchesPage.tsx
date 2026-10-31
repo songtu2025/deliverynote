@@ -93,7 +93,7 @@ export default function BatchesPage({
               onConfirm={() => void cleanEmptyBatches()}
             >
               <Button danger icon={<DeleteOutlined />} loading={cleaningEmpty}>
-                清理空批次（{emptyDraftCount}）
+                清理 {emptyDraftCount} 个空批次
               </Button>
             </Popconfirm>
           )}

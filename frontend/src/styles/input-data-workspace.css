@@ -149,7 +149,7 @@
   max-width: 260px;
 }
 .input-data-active-version-row > td {
-  background: #f3f9f7 !important;
+  background: var(--dn-primary-soft) !important;
 }
 
 .input-data-layout .ant-table-wrapper,

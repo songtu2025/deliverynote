@@ -47,9 +47,9 @@ describe("自营仓批次详情", () => {
   });
 
   it.each([
-    ["compute", "queued", "计算任务排队中"],
+    ["compute", "queued", "计算排队中"],
     ["compute", "running", "正在计算"],
-    ["export", "queued", "导出任务排队中"],
+    ["export", "queued", "结果排队中"],
     ["export", "running", "正在生成结果"]
   ] as const)("恢复真实任务状态 %s/%s", async (kind, status, title) => {
     state.batch.jobs = { [kind]: fixtureJob({ kind, status }) };
@@ -83,7 +83,7 @@ describe("自营仓批次详情", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(task.getByRole("status")).toHaveTextContent("待入库数据尚未就绪");
-    expect(task.getByRole("button", { name: /执行预检/ })).toBeDisabled();
+    expect(task.getByRole("button", { name: /预检/ })).toBeDisabled();
     expect(task.getByRole("button", { name: /上传自营仓入库单/ })).toBeEnabled();
   });
 

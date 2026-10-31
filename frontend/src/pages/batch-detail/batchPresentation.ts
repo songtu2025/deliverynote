@@ -46,9 +46,9 @@ function failureTaskPresentation(batch: Batch) {
       busy: false
     };
   if (batch.status === "failed")
-    return { title: "任务执行失败", description: "查看下方错误信息，修正后重试。", tone: "error", busy: false };
+    return { title: "计算失败", description: "原因见下方，修正后重新预检", tone: "error", busy: false };
   if (batch.jobs?.export?.status === "failed")
-    return { title: "结果生成失败", description: "可重新生成导出；已有审校记录仍然保留。", tone: "error", busy: false };
+    return { title: "结果生成失败", description: "审校记录已保留，可以重新生成", tone: "error", busy: false };
   return null;
 }
 
@@ -56,21 +56,19 @@ function preparedTaskPresentation(batch: Batch) {
   const selfOperated = batch.workflow === "self_operated_inbound";
   const copy = selfOperated
     ? {
-        emptyTitle: "等待上传质检交货单",
+        emptyTitle: "还没有质检交货单",
         upload: "上传一份或多份质检交货单，按顺序处理。",
-        unit: "份质检交货单",
-        compute: "按当前质检单顺序连续扣减待入库余额和超收额度。"
+        unit: "份质检交货单"
       }
     : {
-        emptyTitle: "等待上传交货文件",
+        emptyTitle: "还没有交货文件",
         upload: "上传一个或多个交货 Excel，按顺序处理。",
-        unit: "个来源文件",
-        compute: "按当前文件顺序连续扣减采购余额。"
+        unit: "个文件"
       };
   if (batch.status === "preflight_ready")
     return {
       title: "预检通过，可以计算",
-      description: copy.compute,
+      description: "",
       tone: "ready",
       busy: false
     };
@@ -78,8 +76,8 @@ function preparedTaskPresentation(batch: Batch) {
     return { title: "待入库数据尚未就绪", description: "请补齐待入库数据后执行预检。", tone: "waiting", busy: false };
   const count = batch.files?.length ?? 0;
   return {
-    title: count ? "文件已准备，等待预检" : copy.emptyTitle,
-    description: count ? `${count} ${copy.unit} · 请确认处理顺序后执行预检。` : copy.upload,
+    title: count ? `${count} ${copy.unit}已上传，确认顺序后预检` : copy.emptyTitle,
+    description: count ? "" : copy.upload,
     tone: "waiting",
     busy: false
   };
@@ -96,8 +94,8 @@ function jobTaskPresentation(job: Pick<Job, "kind" | "status">) {
     };
   const compute = job.kind === "compute";
   return {
-    title: queued ? (compute ? "计算任务排队中" : "导出任务排队中") : compute ? "正在计算" : "正在生成结果",
-    description: "可以离开页面，返回后会恢复实际任务状态。",
+    title: queued ? (compute ? "计算排队中" : "结果排队中") : compute ? "正在计算" : "正在生成结果",
+    description: "可以先离开此页",
     tone: queued ? "waiting" : "running",
     busy: !queued
   };
@@ -112,8 +110,11 @@ function reviewTaskPresentation(needsReview: boolean, stats?: ReviewStats) {
       busy: false
     };
   return {
-    title: stats.unfinishedCount > 0 ? "等待人工审校" : "审校已完成",
-    description: `${stats.unfinishedCount} 条未完成 · 待处理 ${stats.unfinishedQuantity} 件`,
+    title:
+      stats.unfinishedCount > 0
+        ? `${stats.unfinishedCount} 条待审校，共 ${stats.unfinishedQuantity} 件`
+        : "审校完成，可以生成结果",
+    description: "",
     tone: stats.unfinishedCount > 0 || needsReview ? "review" : "ready",
     busy: false
   };
@@ -121,10 +122,10 @@ function reviewTaskPresentation(needsReview: boolean, stats?: ReviewStats) {
 
 export function batchResultPresentation(batch: Batch, activeJob?: Job) {
   const { needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
-  if (activeJob?.kind === "export") return activeJob.status === "queued" ? "结果文件等待生成" : "结果文件正在生成";
-  if (batch.jobs?.export?.status === "stale") return "审校已更新，需要重新生成结果";
-  if (resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles)) return "当前结果文件已生成，可下载";
-  return needsMergedGeneration ? "单文件结果已生成，需要生成合并结果" : "需要生成结果";
+  if (activeJob?.kind === "export") return activeJob.status === "queued" ? "结果排队中" : "正在生成结果";
+  if (batch.jobs?.export?.status === "stale") return "审校有更新，需重新生成结果";
+  if (resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles)) return "结果可下载";
+  return needsMergedGeneration ? "需生成合并结果" : "尚未生成结果";
 }
 
 function resultDownloadAvailable(batch: Batch, needsMergedGeneration: boolean, hasMultipleFiles: boolean) {
