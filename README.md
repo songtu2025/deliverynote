@@ -295,51 +295,79 @@ python -m delivery_note.cli \
 
 ## 开发与验证
 
-推荐使用 Python 3.11 和 Node.js 22。
+推荐使用 Python 3.11 和 Node.js 22。以下命令均从项目根目录开始执行，先准备环境，再执行只读检查。
 
-后端与核心逻辑：
+首次环境准备会安装依赖，与检查命令分开执行。
+
+Windows PowerShell：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements-dev.txt
+npm --prefix frontend ci
+```
+
+Linux / CI 本地复现：
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
+npm --prefix frontend ci
+```
+
+后端与核心逻辑检查（激活虚拟环境后，Windows / Linux 命令相同）：
+
+```bash
 python -m ruff check delivery_note tests scripts
 python -m scripts.check_code_health
 python -m ruff format --check scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
 python -m mypy --strict scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
+python -m mypy
 python -m vulture delivery_note scripts --min-confidence 100
 python -m unittest discover -s tests -v
 python -m pip check
 ```
 
-Windows PowerShell 使用 `.venv\Scripts\Activate.ps1` 激活虚拟环境。
+`python -m mypy` 的范围由 `mypy.ini` 维护，已覆盖 Web、Worker、处理、入库、Excel、检查模块及配置列出的测试；各模块严格程度以配置为准，不表示全项目均为 strict。`scripts.check_code_health` 对新增 Python 模块执行类型与复杂度检查。格式检查除上述检查工具外，还须覆盖本次新增或修改的 Python 文件；CI 对既有业务模块及专项测试的具体格式范围见 [.github/workflows/ci.yml](.github/workflows/ci.yml)，不得将其描述为全仓已完成格式治理。
 
-前端：
+前端检查（进入前端目录后，Windows / Linux 命令相同）：
 
 ```bash
 cd frontend
-npm ci
 npm run format:check
 npm run typecheck
 npm run test:quality
 npm run lint:tools
 npm run lint
+npm run lint:all
 npm run check:duplicates
 npm run check:unused
 npm run check:imports
 npm run test
 npm run build
+npm ls antd @ant-design/icons react react-dom
+npm audit --registry=https://registry.npmjs.org
 ```
 
-上述命令适用于 Windows PowerShell 和 Linux/CI。`npm ci` 负责安装依赖，其余检查命令不会安装依赖；格式检查不会改写文件，独立类型检查不会生成文件。
+上述检查不会安装依赖；格式检查不会改写文件，独立类型检查不会生成文件。依赖审计需要访问 npm Registry；相关检查条件不足时如实报告，不能写成通过。
 
-`format:check` 检查相对 `HEAD` 的前端已暂存、未暂存及未跟踪文件；提交后复查某个范围使用 `npm run format:check -- --base <起始提交>`。CI 使用 PR 的目标分支提交或本次推送前的提交作为起点，检查范围内所有提交的最终变更。锁文件和非前端文件不参与格式检查。
+`format:check` 检查相对 `HEAD` 的前端已暂存、未暂存及未跟踪文件；提交后复查某个范围使用 `npm run format:check -- --base <起始提交>`。CI 使用 PR 的目标分支提交或本次推送前的提交作为起点，检查范围内所有提交的最终变更。锁文件和非前端文件不参与格式检查。`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题返回非零状态，当前不批量格式化历史源码。
 
-`npm run format:check:all` 提供历史文件的全量只读扫描，格式问题会返回非零状态。当前采用增量门禁，不批量格式化历史源码。TypeScript 锁定 6.0.3，与 typescript-eslint 8.71.0 的官方支持范围一致。`lint:tools` 检查工程 JavaScript 脚本，`lint` 检查相对 HEAD 的新增和修改 TS/TSX 文件；提交范围使用 `npm run lint -- --base <起始提交>`，全量只读报告使用 `npm run lint:all`。React Hooks 调用和依赖检查覆盖受检业务文件，复杂度门禁先覆盖专项治理的批次详情新模块；其余存量函数继续人工审查。Python 类型与格式门禁目前覆盖新增的检查工具，不代表存量业务代码已经完成治理。
+TypeScript 锁定 6.0.3，与 typescript-eslint 8.71.0 的支持范围一致。`lint:tools` 检查工程 JavaScript 脚本；`lint` 检查相对 HEAD 的新增和修改 TS/TSX 文件，提交范围使用 `npm run lint -- --base <起始提交>`；CI 同时运行 `lint:all` 扫描全部业务源码。React Hooks 检查覆盖受检文件，复杂度、嵌套、参数和语句数门禁只覆盖 `frontend/eslint.config.js` 指定的页面及模块，不代表所有前端函数均自动覆盖。认知复杂度和未覆盖的函数指标仍须人工审查并如实报告。
 
-本轮代码治理参考 SEEKWAY V2.0.0 草案，来源为 `songtu2025/seekway-codex-standards` 主分支提交 `0b1e78cea7b20d103b2f0713b83e0aacf9607d4b`（2026-10-03 核验），未复制规范文档或变更现有技术栈。`python -m scripts.check_code_health` 检查相对 HEAD 的已暂存、未暂存和未跟踪代码；CI 使用 `--base <起始提交>` 检查提交范围。新增文件及原本不超过 300 行的文件不得超过 300 个物理行，存量超长文件继续报告提醒。新增 Python 文件执行 Ruff 复杂度检查；存量函数仍需按职责人工审查。
+历史治理记录：2026-10-03 曾参考 SEEKWAY V2.0.0 草案，来源为 `songtu2025/seekway-codex-standards` 主分支提交 `0b1e78cea7b20d103b2f0713b83e0aacf9607d4b`，当时未复制规范文件。当前接入基线见下方“Codex 规范接入”。`python -m scripts.check_code_health` 检查相对 HEAD 的已暂存、未暂存和未跟踪代码；CI 使用 `--base <起始提交>` 检查提交范围。新增文件及原本不超过 300 行的代码文件不得超过 300 个物理行，存量超长文件只作提醒。现有 Python 文件的未自动覆盖指标继续人工审查，不为套用规范进行无关拆分。
 
-重复代码扫描使用实际源码目录 `frontend/src` 和 `delivery_note`，不设历史重复清零门禁；扫描结果须在阶段验收中审查。本轮初始扫描为 100 处重复片段、3.49% 重复行。Knip 和 Vulture 检查死代码，前端通过 Oxc 解析器与模块解析器检查静态导入循环，后端通过 Python AST 检查包内静态导入循环；动态导入和运行时插件关系仍需人工核对。
+重复代码扫描复用 `npm run check:duplicates`，实际扫描 `frontend/src`、`delivery_note` 和 `scripts`；不设历史重复清零门禁，结果须在阶段验收中审查。V2.0.0 草案治理的初始记录为 100 处重复片段、3.49% 重复行，不代表当前扫描结果。Knip 和 Vulture 检查死代码，前端通过 Oxc 解析器与模块解析器检查静态导入循环，后端通过 Python AST 检查包内静态导入循环；动态导入和运行时插件关系仍需人工核对。
+
+每个实施任务执行重复与死代码扫描；仅规则或说明变更可从根目录运行以下命令，并按验证规范检查路径、规则冲突及原有改动保留情况，不必运行无关业务测试或构建：
+
+```bash
+npm --prefix frontend run check:duplicates
+npm --prefix frontend run check:unused
+python -m vulture delivery_note scripts --min-confidence 100
+```
 
 部署配置：
 
@@ -348,7 +376,7 @@ docker compose config
 git diff --check
 ```
 
-CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、后端测试、前端增量格式检查、独立类型检查、质量门禁测试、前端测试与构建、依赖检查和 Compose 配置校验。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
+CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、配置范围内的 Mypy 与格式检查、后端测试、前端增量格式检查、类型检查、增量及全量 ESLint、质量门禁测试、重复/死代码/导入循环检查、前端测试与构建、依赖审计和 Compose 配置校验，并包含隔离 Docker 发布及备份恢复业务演练。实际覆盖以工作流为准；GitHub 分支是否要求这些检查通过后才能合并，需要另外核验，不能仅根据 CI 配置推断。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
 
 也可以显式运行统一迁移命令：
 
@@ -366,8 +394,47 @@ python -m delivery_note.migrations --database-url postgresql+psycopg://user:pass
 - 不删除或重建生产数据卷；
 - 数据库和后台任务时间使用 UTC，Web 统一显示北京时间。
 
+## Codex 规范接入
+
+- 基线版本：[SEEKWAY V2.1.0](https://github.com/songtu2025/seekway-codex-standards/tree/v2.1.0)，为 DeliveryNote 适配，不等同于产品版本。
+- 获取来源：[v2.1.0 标签 ZIP](https://github.com/songtu2025/seekway-codex-standards/archive/refs/tags/v2.1.0.zip)，在项目外下载、解压并核对来源文件。
+- 来源提交：`ff27d5a34bf8e34c9dc71b10d26ff40b6ec006fb`；下载时核验远程标签所指向的提交及 10 个接入来源文件。
+- 接入日期：2026-10-29。
+- 版本控制状态（接入时）：项目使用 Git；本次规范改动尚未提交、未推送，原有前端文件内容保留。临时备份位于项目外，只供本次恢复。
+- 接入范围：根规则与本说明、六份开发专项规范、四份界面规范；业务代码、测试、依赖、CI 和部署配置沿用现状。
+- 文件与索引检查：2026-10-29 已通过 12 份文件及 39 处本地链接和锚点核验；根规则 74 行，原有业务、安全规则及受保护文件内容保留。独立新聊天实际加载验证仍待执行。
+
+### 项目差异
+
+| 范围 | DeliveryNote 约定 |
+| --- | --- |
+| 业务与兼容 | 保留根规则及本说明中的交货、自营仓、数量守恒、版本锁定、导出兼容和数据安全要求 |
+| 目录与测试 | 后端沿用 `delivery_note`、`scripts`、`tests` 和 unittest；不套用 `backend/app` 或切换 pytest |
+| 数据库迁移 | 复用 `python -m delivery_note.migrations` 与受控 Compose 迁移流程，不引入 Alembic，不授予代理生产迁移权限 |
+| 前端与主题 | 沿用 React 19、Ant Design 6、图标库及现有 Token、`--dn-*` 变量和布局；不复制第二套主题或替换登录页 |
+| 检查与治理 | 复用已有命令，区分实际自动覆盖和人工审查；存量问题按相关任务渐进处理，不降低本次新增和修改的质量要求 |
+| 流程与报告 | 简单任务轻量执行，非简单任务先确认方案；设计探索按需开展；简短报告实际结果与遗留问题，仅用户要求时创建文档 |
+| 外部工具与模板 | 保留已有工具和技能；本次不复制设计采样工具、登录模板或规范源仓库发布流程，不擅自安装工具或改个人配置 |
+
+详细差异已落实到对应专项条款，不能仅依靠本表覆盖冲突规则。检查和记录基线不代表所有存量代码已经符合规范；组件中文环境、历史样式覆盖、可访问性及多视口表现需在相关任务中验证。
+
+### 加载验证与后续升级
+
+完成文件检查后，在 DeliveryNote 项目根目录新建聊天并发送：
+
+> 请列出本任务实际加载的 AGENTS.md 路径，概括关键业务约束，并分别说明修改前端、后端、数据库和界面时需要读取哪些专项规范。不要修改文件。
+
+静态索引检查通过后仍需记录这次新聊天的实际结果，不能提前写成已验证。加载机制见 [OpenAI 官方说明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。后续升级固定已发布版本，按上游差异合并适用条款，同时保留本项目业务规则与技术约定；规范文件随项目维护，不与相邻仓库自动同步。
+
 ## 相关文档
 
 | 文档 | 用途 |
 | --- | --- |
-| [代理工作规则](AGENTS.md) | 自动化开发代理在本仓库中的强制规则 |
+| [代理工作规则](AGENTS.md) | 自动化开发代理在本仓库中的强制规则与读取索引 |
+| [开发流程](docs/codex/workflow.md) | 任务分级、规则作用域、方案确认与升级方式 |
+| [代码质量](docs/codex/code-quality.md) | 复用、规模、复杂度及清理要求 |
+| [后端规范](docs/codex/backend.md) | Python、API、数据库与迁移 |
+| [前端规范](docs/codex/frontend.md) | React、TypeScript、组件与主题 |
+| [验证规范](docs/codex/verification.md) | 按实际影响选择检查并报告结果 |
+| [界面设计](docs/codex/interface-design.md) | 按需探索与设计验证 |
+| [界面通用规范](docs/web-ui-standard.md) | 项目配置及布局、表单、数据专项入口 |
