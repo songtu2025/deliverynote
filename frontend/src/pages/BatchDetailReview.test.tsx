@@ -21,7 +21,7 @@ describe("BatchDetailReview", () => {
     expect(task.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
     expect(task.getByRole("button", { name: "开始审校" })).toBeInTheDocument();
     const reviewTable = within(container.querySelector(".exception-review-card") as HTMLElement);
-    expect(reviewTable.getByRole("columnheader", { name: "规模定位", hidden: true })).toBeInTheDocument();
+    expect(reviewTable.getByRole("columnheader", { name: "定位", hidden: true })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
@@ -34,7 +34,9 @@ describe("BatchDetailReview", () => {
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
     expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
-    fireEvent.click(reviewTable.getAllByRole("button", { name: "查看并处理", hidden: true })[0]);
+    const reviewButton = reviewTable.getByRole("button", { name: "审校 SKU-A", hidden: true });
+    expect(reviewButton).toHaveTextContent("审校");
+    fireEvent.click(reviewButton);
 
     await screen.findByText("审校处理 · SKU-A");
     const drawer = screen.getByRole("dialog");
@@ -64,9 +66,15 @@ describe("BatchDetailReview", () => {
     fireEvent.click(await screen.findByText("AMAZON:SEEKWAY:US", { selector: ".ant-select-item-option-content" }));
     await waitFor(() => expect(screen.queryByText("SKU-B")).not.toBeInTheDocument());
 
+    fireEvent.click(screen.getByRole("button", { name: "更多筛选" }));
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "规模定位筛选" }));
     fireEvent.click(await screen.findByText("短尾", { selector: ".ant-select-item-option-content" }));
     expect(await screen.findByText("SKU-A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "更多筛选 1" })).toBeInTheDocument();
+    const requests = vi.mocked(fetch).mock.calls.map(([input]) => String(input));
+    expect(requests).toContain(
+      "/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished&site=AMAZON%3ASEEKWAY%3AUS&scale_position=%E7%9F%AD%E5%B0%BE"
+    );
 
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "备货定位筛选" }));
     fireEvent.click(await screen.findByText("备货", { selector: ".ant-select-item-option-content" }));
@@ -82,10 +90,10 @@ describe("BatchDetailReview", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    expect(await screen.findByRole("button", { name: "全部 12 条" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "全部 12" })).toBeInTheDocument();
     fireEvent.click(screen.getByTitle("2"));
     expect(await screen.findByText("SKU-11")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理", hidden: true })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^审校 SKU-/, hidden: true })[0]);
     const drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("第 11 / 12 条")).toBeInTheDocument();
 
@@ -108,7 +116,7 @@ describe("BatchDetailReview", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    await screen.findByRole("button", { name: "全部 12 条" });
+    await screen.findByRole("button", { name: "全部 12" });
     fireEvent.click(screen.getByTitle("2"));
     await screen.findByText("SKU-11");
     fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), {
@@ -150,16 +158,14 @@ describe("BatchDetailReview", () => {
     await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const overview = await screen.findByRole("region", { name: "审校概览" });
-    expect(within(overview).getByRole("button", { name: "未完成 4 条，待处理 107 件" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    );
-    expect(within(overview).getByRole("button", { name: "已处理 0 条" })).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "全部 4 条" })).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "待审校 4" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(overview).getByRole("button", { name: "已处理 0" })).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "全部 4" })).toBeInTheDocument();
+    expect(screen.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
 
     const excessRow = (await screen.findByText("SKU-A")).closest("tr");
     expect(excessRow).not.toBeNull();
-    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理", hidden: true }));
+    fireEvent.click(within(excessRow!).getByRole("button", { name: /^审校 SKU-/, hidden: true }));
 
     let drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("第 1 / 4 条")).toBeInTheDocument();
@@ -175,8 +181,18 @@ describe("BatchDetailReview", () => {
     drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByText("审校处理 · SKU-B")).toBeInTheDocument();
     expect(within(drawer).getByText("第 1 / 3 条")).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "未完成 3 条，待处理 47 件" })).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "已处理 1 条" })).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "待审校 3" })).toBeInTheDocument();
+    expect(within(overview).getByRole("button", { name: "已处理 1" })).toBeInTheDocument();
+    expect(screen.getByText("3 条待审校，共 47 件")).toBeInTheDocument();
+    fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+    fireEvent.click(within(overview).getByRole("button", { name: "已处理 1" }));
+    const modify = await screen.findByRole("button", { name: "修改 SKU-A", hidden: true });
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toContain(
+      "/api/batches/7/exceptions?offset=0&limit=10&review_scope=resolved"
+    );
+    expect(modify).toHaveTextContent("修改");
+    fireEvent.click(modify);
+    expect(await within(screen.getByRole("dialog")).findByText("审校处理 · SKU-A")).toBeInTheDocument();
   }, 30_000);
 
   it("keeps only the necessary footer actions for a single review item", async () => {
@@ -192,7 +208,7 @@ describe("BatchDetailReview", () => {
 
     const row = (await screen.findByText("SKU-A")).closest("tr");
     expect(row).not.toBeNull();
-    const button = within(row!).getByRole("button", { name: "查看并处理", hidden: true });
+    const button = within(row!).getByRole("button", { name: /^审校 SKU-/, hidden: true });
     fireEvent.click(button);
 
     const drawer = await screen.findByRole("dialog");

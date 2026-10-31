@@ -216,7 +216,4 @@
     color: #53605d;
     font-size: 12px;
   }
-  .exception-toolbar {
-    grid-template-columns: 1fr;
-  }
 }

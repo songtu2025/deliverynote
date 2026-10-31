@@ -8,9 +8,10 @@ const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
   resolved: { label: "已处理", color: "success" }
 };
 
-export function ExceptionStatusTag({ status }: { status: string }) {
+export function ExceptionStatusTag({ status, selfOperated = false }: { status: string; selfOperated?: boolean }) {
   const item = EXCEPTION_STATUS[status] ?? { label: status, color: "default" };
-  return <Tag color={item.color}>{item.label}</Tag>;
+  const label = status === "pending" && !selfOperated ? "待审校" : item.label;
+  return <Tag color={item.color}>{label}</Tag>;
 }
 
 export function ExceptionReason({ reason }: { reason: string }) {

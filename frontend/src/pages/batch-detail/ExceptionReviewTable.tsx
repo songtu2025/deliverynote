@@ -1,15 +1,11 @@
 import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
-import { Button, Card, Empty, Table, Tooltip, Typography } from "antd";
+import { Button, Card, Empty, Table, Tag, Typography } from "antd";
+import type { TableColumnsType } from "antd";
 import type { Ref } from "react";
 import type { BatchFile, DeliveryException } from "../../types";
 import type { ExceptionReview } from "./useExceptionReview";
-import {
-  ExceptionReason,
-  ExceptionEvidence,
-  ExceptionStatusTag,
-  formatPositionValue,
-  PositionValue
-} from "./ExceptionEvidence";
+import { ExceptionReason, ExceptionEvidence, ExceptionStatusTag, formatPositionValue } from "./ExceptionEvidence";
+import { candidateSites } from "./reviewDraft";
 import ExceptionReviewToolbar from "./ExceptionReviewToolbar";
 
 export default function ExceptionReviewTable({
@@ -34,10 +30,8 @@ export default function ExceptionReviewTable({
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
         variant={selfOperated ? undefined : "borderless"}
-        extra={!selfOperated && <span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}
-        loading={exceptionsLoading && !selfOperated}
       >
         <ExceptionReviewToolbar selfOperated={selfOperated} review={review} onReset={onReset} />
         <Table<DeliveryException>
@@ -57,87 +51,14 @@ export default function ExceptionReviewTable({
                 }
               : false
           }
-          scroll={{ x: selfOperated ? 1175 : 1260 }}
+          scroll={{ x: selfOperated ? 1175 : 980 }}
+          onHeaderRow={() => ({ className: "exception-review-header" })}
           locale={{
             emptyText: <Empty description={reviewEmptyText(review)} />
           }}
           columns={[
-            {
-              title: "来源文件",
-              dataIndex: "batch_file_id",
-              width: 130,
-              ellipsis: true,
-              render: (fileId: number) => fileById[fileId]?.original_name ?? `文件 #${fileId}`
-            },
-            {
-              title: "SKU",
-              dataIndex: "sku",
-              width: 130,
-              render: (value: string) => (
-                <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
-              )
-            },
-            {
-              title: "站点",
-              dataIndex: "full_site",
-              width: 190,
-              render: (value: string) => (
-                <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
-              )
-            },
-            { title: selfOperated ? "入库仓" : "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
-            ...(!selfOperated
-              ? [
-                  {
-                    title: "规模定位",
-                    dataIndex: "scale_position",
-                    width: 85,
-                    ellipsis: true,
-                    render: (value: string | number, record: DeliveryException) => (
-                      <Tooltip title={`备货定位：${formatPositionValue(record.stocking_position)}`}>
-                        <span>
-                          <PositionValue value={value} />
-                        </span>
-                      </Tooltip>
-                    )
-                  }
-                ]
-              : []),
-            {
-              title: "待处理量",
-              dataIndex: "manual_quantity",
-              width: 75,
-              render: (value: number) => <strong className="pending-value">{value}</strong>
-            },
-            {
-              title: "异常原因",
-              dataIndex: "reason",
-              width: 130,
-              render: (reason: string) => <ExceptionReason reason={reason} />
-            },
-            {
-              title: "审校依据",
-              width: 250,
-              render: (_, record) => <ExceptionEvidence exception={record} hasOverreceiptRule={hasOverreceiptRule} />
-            },
-            {
-              title: "状态",
-              dataIndex: "status",
-              width: 70,
-              render: (value: string) => <ExceptionStatusTag status={value} />
-            },
-            {
-              title: "操作",
-              width: 100,
-              render: (_, record) =>
-                !selfOperated && record.allowed_actions.length === 0 ? (
-                  <Typography.Text type="secondary">待处理</Typography.Text>
-                ) : (
-                  <Button type="link" onClick={() => onOpen(record)}>
-                    查看并处理
-                  </Button>
-                )
-            }
+            ...reviewIdentityColumns(selfOperated, fileById),
+            ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen)
           ]}
         />
       </Card>
@@ -149,4 +70,127 @@ function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: Except
   if (exceptionsLoading) return "正在读取审校记录";
   if (!reviewStats.totalCount) return "没有待处理，可以直接生成结果";
   return reviewScope === "unfinished" ? "审校已全部完成" : "没有匹配的审校记录";
+}
+
+function reviewIdentityColumns(
+  selfOperated: boolean,
+  fileById: Record<number, BatchFile>
+): TableColumnsType<DeliveryException> {
+  return [
+    {
+      title: selfOperated ? "来源文件" : "文件",
+      dataIndex: "batch_file_id",
+      width: selfOperated ? 130 : 56,
+      ellipsis: true,
+      render: (fileId: number) => {
+        const file = fileById[fileId];
+        const name = file?.original_name ?? `文件 #${fileId}`;
+        return selfOperated ? (
+          name
+        ) : (
+          <span title={name}>{file?.file_order != null ? String(file.file_order).padStart(2, "0") : name}</span>
+        );
+      }
+    },
+    {
+      title: selfOperated ? "SKU" : "SKU / 站点",
+      dataIndex: "sku",
+      width: selfOperated ? 130 : 160,
+      render: (value: string, record: DeliveryException) => (
+        <>
+          <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
+          {!selfOperated && (
+            <span
+              className="exception-identifier-value exception-site-value exception-site-secondary"
+              title={record.full_site}
+            >
+              {record.full_site.includes("、")
+                ? `${candidateSites(record.full_site).length} 个候选站点`
+                : record.full_site || "—"}
+            </span>
+          )}
+        </>
+      )
+    },
+    ...(selfOperated
+      ? [
+          {
+            title: "站点",
+            dataIndex: "full_site",
+            width: 190,
+            render: (value: string) => (
+              <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
+            )
+          }
+        ]
+      : []),
+    { title: selfOperated ? "入库仓" : "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
+    ...(!selfOperated
+      ? [
+          {
+            title: "定位",
+            dataIndex: "scale_position",
+            width: 100,
+            render: (value: string | number, record: DeliveryException) => (
+              <div className="exception-position-cell">
+                <span>{formatPositionValue(value)}</span>
+                <span>{formatPositionValue(record.stocking_position)}</span>
+              </div>
+            )
+          }
+        ]
+      : [])
+  ];
+}
+
+function reviewDetailColumns(
+  selfOperated: boolean,
+  hasOverreceiptRule: boolean,
+  onOpen: (record: DeliveryException) => void
+): TableColumnsType<DeliveryException> {
+  return [
+    {
+      title: selfOperated ? "待处理量" : "待处理",
+      dataIndex: "manual_quantity",
+      width: 75,
+      align: selfOperated ? undefined : "right",
+      render: (value: number) => <strong className="pending-value">{value}</strong>
+    },
+    {
+      title: selfOperated ? "异常原因" : "原因",
+      dataIndex: "reason",
+      width: selfOperated ? 130 : 120,
+      render: (reason: string) =>
+        selfOperated ? <ExceptionReason reason={reason} /> : <Tag className="exception-reason-tag">{reason}</Tag>
+    },
+    {
+      title: "审校依据",
+      width: selfOperated ? 250 : 180,
+      render: (_, record) => <ExceptionEvidence exception={record} hasOverreceiptRule={hasOverreceiptRule} />
+    },
+    {
+      title: "状态",
+      dataIndex: "status",
+      width: selfOperated ? 70 : 80,
+      render: (value: string) => <ExceptionStatusTag status={value} selfOperated={selfOperated} />
+    },
+    {
+      title: "操作",
+      width: selfOperated ? 100 : 80,
+      render: (_, record) =>
+        !selfOperated && record.allowed_actions.length === 0 ? (
+          <Typography.Text type="secondary">待处理</Typography.Text>
+        ) : (
+          <Button
+            type={selfOperated ? "link" : record.status === "resolved" ? "text" : "primary"}
+            size={selfOperated ? undefined : "small"}
+            autoInsertSpace={selfOperated}
+            aria-label={selfOperated ? undefined : `${record.status === "resolved" ? "修改" : "审校"} ${record.sku}`}
+            onClick={() => onOpen(record)}
+          >
+            {selfOperated ? "查看并处理" : record.status === "resolved" ? "修改" : "审校"}
+          </Button>
+        )
+    }
+  ];
 }

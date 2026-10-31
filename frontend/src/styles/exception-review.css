@@ -2,111 +2,83 @@
   scroll-margin-top: 18px;
   outline: none;
 }
-.exception-review-card .ant-card-head {
-  min-height: 50px;
-}
-.review-overview {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(620px, 2.2fr);
-  align-items: stretch;
-  gap: 12px;
-  padding: 12px;
-  margin-bottom: 14px;
-  border: 1px solid #dfe8e5;
-  border-radius: 10px;
-  background: #f7faf9;
-}
-.review-overview-copy {
+.review-scope-switch {
   display: flex;
-  min-width: 0;
-  padding: 4px 6px;
-  flex-direction: column;
-  justify-content: center;
-  gap: 5px;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: 6px;
+  background: var(--dn-canvas);
 }
-.review-overview-copy strong {
-  color: #263b36;
-  font-size: 15px;
-}
-.review-overview-copy span {
-  color: #66736f;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.review-scope-options {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(150px, 1fr));
-  gap: 8px;
-}
-.review-scope-card {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 3px 10px;
-  padding: 10px 12px;
-  border: 1px solid #dfe6e3;
-  border-radius: 8px;
-  background: #fff;
-  color: #52615d;
-  text-align: left;
+.review-scope-switch button {
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dn-muted);
+  white-space: nowrap;
   cursor: pointer;
-  transition:
-    border-color 0.16s ease,
-    background-color 0.16s ease,
-    box-shadow 0.16s ease;
 }
-.review-scope-card:hover {
-  border-color: #8bb7aa;
+.review-scope-switch button:hover {
+  color: var(--dn-primary);
 }
-.review-scope-card:focus-visible {
-  outline: 2px solid #176b5b;
-  outline-offset: 2px;
+.review-scope-switch button[aria-pressed="true"] {
+  background: var(--dn-surface);
+  color: var(--dn-ink);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--dn-ink) 15%, transparent);
 }
-.review-scope-card[aria-pressed="true"] {
-  border-color: #72aa9b;
-  background: #f0f8f5;
-  box-shadow: 0 0 0 1px rgb(23 107 91 / 8%);
-}
-.review-scope-card span {
-  font-size: 12px;
-  font-weight: 650;
-}
-.review-scope-card strong {
-  color: #176b5b;
-  font-size: 17px;
+.review-scope-switch strong {
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-.review-scope-card small {
-  grid-column: 1 / -1;
-  color: #71807c;
-  font-size: 11px;
-}
 .exception-toolbar {
-  display: grid;
-  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(120px, 1fr)) minmax(160px, 1.15fr);
-  align-items: end;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   padding-bottom: 2px;
 }
 .exception-filter-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex: 1 1 120px;
   min-width: 0;
+  max-width: 100%;
 }
-.exception-filter-field label {
-  color: #53605d;
-  font-size: 12px;
-  font-weight: 650;
+.exception-search-field {
+  flex: 1 1 240px;
 }
-.exception-filter-field .ant-select,
-.exception-filter-field .ant-input-affix-wrapper {
+.exception-filter-field > * {
   width: 100%;
 }
-.toolbar-count {
-  margin-left: auto;
-  color: #66736f;
-  font-size: 13px;
+.exception-more-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(240px, calc(100vw - 64px));
+}
+.exception-review-header {
+  white-space: nowrap;
+}
+.exception-site-value.exception-site-secondary,
+.exception-position-cell {
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+.exception-position-cell {
+  display: flex;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+.exception-reason-tag {
+  max-width: 100%;
+  margin: 0;
+  border: 1px solid var(--dn-warning);
+  border-radius: 4px;
+  background: var(--dn-warning-soft);
+  color: var(--dn-warning);
+  white-space: normal;
 }
 .position-reference-value {
   color: #2f5149;
@@ -189,13 +161,4 @@
   background: var(--dn-surface-muted);
   color: #334a44;
   overflow-wrap: anywhere;
-}
-
-.exception-toolbar--inbound {
-  grid-template-columns: minmax(200px, 2fr) repeat(2, minmax(140px, 1fr));
-}
-@media (max-width: 900px) {
-  .exception-toolbar--inbound .exception-search-field {
-    grid-column: 1 / -1;
-  }
 }

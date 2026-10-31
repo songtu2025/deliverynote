@@ -36,7 +36,7 @@ export default function ExceptionReviewDrawer({
       size={selfOperated ? "min(1280px, 100vw)" : 520}
       open={splitTarget !== null}
       onClose={() => setSplitTarget(null)}
-      extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} /> : null}
+      extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} selfOperated={selfOperated} /> : null}
       footer={<ExceptionReviewActions editor={editor} action={action} />}
     >
       {splitTarget && (

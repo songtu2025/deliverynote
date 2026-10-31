@@ -193,12 +193,13 @@ describe("BatchDetail", () => {
     expect(await screen.findByText("交货 160 = 可导入 100 + 待处理 60")).toBeInTheDocument();
     await waitFor(() => expect(exceptionRequests).toBe(2));
     await waitFor(() => {
-      expect(container.querySelector(".exception-review-card.ant-card-loading")).toBeInTheDocument();
+      expect(container.querySelector(".exception-review-card .ant-spin-spinning")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "搜索待处理记录" })).toBeInTheDocument();
     });
 
     finishRefresh(jsonResponse(exceptionPage("/api/batches/7/exceptions?offset=0&limit=10&review_scope=unfinished")));
     await waitFor(() => {
-      expect(container.querySelector(".exception-review-card.ant-card-loading")).not.toBeInTheDocument();
+      expect(container.querySelector(".exception-review-card .ant-spin-spinning")).not.toBeInTheDocument();
     });
   });
 });
