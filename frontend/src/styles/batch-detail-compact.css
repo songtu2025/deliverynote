@@ -1,12 +1,12 @@
 .batch-detail--compact {
-  --detail-muted: #53605d;
+  --detail-muted: var(--dn-muted);
   min-width: 0;
   color: var(--dn-ink);
 }
 
 .batch-detail--compact .batch-task-surface {
   margin-bottom: 16px;
-  padding: 16px 20px 0;
+  padding: 20px;
   border: 1px solid var(--dn-border);
   border-radius: 8px;
   background: var(--dn-surface);
@@ -47,28 +47,39 @@
   font-size: 12px;
 }
 
-.batch-detail--compact .pending-value,
-.batch-detail--compact .summary-metric.pending strong {
+.batch-detail--compact .pending-value {
   color: var(--dn-warning);
 }
 
 .batch-detail--compact .batch-task-bar {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto;
+  min-width: 0;
+  margin-bottom: 16px;
+}
+.batch-task-say {
+  display: flex;
   align-items: center;
-  gap: 8px 24px;
-  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  background: var(--dn-surface-muted);
 }
 .batch-detail--compact .batch-task-copy {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  align-items: center;
+  flex: 1 1 240px;
+  gap: 12px;
   min-width: 0;
-  transition: color 180ms ease-out;
 }
-.batch-detail--compact .batch-task-copy > .anticon {
-  margin-top: 3px;
-  font-size: 18px;
+.batch-task-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--dn-surface);
+  font-size: 20px;
 }
 .batch-detail--compact .batch-task-copy strong,
 .batch-detail--compact .batch-task-copy span:not(.anticon) {
@@ -76,7 +87,8 @@
   overflow-wrap: anywhere;
 }
 .batch-detail--compact .batch-task-copy strong {
-  font-size: 16px;
+  font-size: 17px;
+  font-weight: 700;
   line-height: 24px;
 }
 .batch-detail--compact .batch-task-copy span:not(.anticon),
@@ -88,15 +100,23 @@
 }
 .batch-detail--compact .batch-task-review {
   color: var(--dn-warning);
+  background: var(--dn-warning-soft);
 }
 .batch-detail--compact .batch-task-ready {
   color: var(--dn-success);
+  background: var(--dn-primary-soft);
 }
 .batch-detail--compact .batch-task-running {
   color: var(--dn-info);
+  background: var(--dn-info-soft);
 }
 .batch-detail--compact .batch-task-error {
   color: var(--dn-danger);
+  background: var(--dn-danger-soft);
+}
+.batch-task-error .batch-task-icon {
+  color: var(--dn-surface);
+  background: var(--dn-danger);
 }
 .batch-detail--compact .batch-task-actions,
 .batch-detail--compact .batch-result-actions {
@@ -111,54 +131,15 @@
   display: none;
 }
 .batch-detail--compact .batch-task-result {
-  grid-column: 1 / -1;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin: 0;
+  margin: 8px 0 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  .batch-detail--compact .batch-task-copy {
-    transition: none;
-  }
   .batch-detail--compact .batch-task-spinner {
     animation: none;
   }
-}
-
-.batch-detail--compact .summary-strip {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(240px, 1.4fr);
-  margin: 0 -20px;
-  border: 0;
-  border-top: 1px solid var(--dn-border);
-  border-radius: 0;
-  background: transparent;
-}
-
-.batch-detail--compact .summary-metric,
-.batch-detail--compact .summary-equation {
-  min-width: 0;
-  min-height: 68px;
-  padding: 10px 20px;
-  border-top: 0;
-}
-
-.batch-detail--compact .summary-metric span,
-.batch-detail--compact .summary-equation span {
-  margin-bottom: 4px;
-  color: var(--detail-muted);
-  font-size: 12px;
-}
-
-.batch-detail--compact .summary-metric strong,
-.batch-detail--compact .summary-equation strong {
-  overflow-wrap: anywhere;
-  font-size: 24px;
-  line-height: 1.25;
-}
-
-.batch-detail--compact .summary-pending strong {
-  color: var(--detail-muted) !important;
 }
 
 .batch-detail--compact .file-order-card,
@@ -217,29 +198,9 @@
   .batch-detail--compact .batch-heading {
     align-items: stretch;
   }
-  .batch-detail--compact .batch-task-bar {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .batch-detail--compact .batch-task-actions,
   .batch-detail--compact .batch-result-actions {
     justify-content: flex-start;
-  }
-  .batch-detail--compact .summary-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .batch-detail--compact .summary-equation {
-    grid-column: 1 / -1;
-    min-height: 52px;
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 8px 16px;
-    border-left: 0;
-    border-top: 1px solid var(--dn-border);
-  }
-  .batch-detail--compact .summary-equation span {
-    margin: 0;
   }
   .batch-detail--compact .locked-data-card .ant-card-head-wrapper {
     flex-wrap: wrap;
@@ -254,24 +215,6 @@
   }
   .batch-detail--compact .batch-title-row h2 {
     font-size: 22px;
-  }
-  .batch-detail--compact .summary-strip {
-    margin-inline: -12px;
-  }
-  .batch-detail--compact .summary-metric,
-  .batch-detail--compact .summary-equation {
-    padding-inline: 12px;
-  }
-  .batch-detail--compact .summary-metric {
-    border-top: 0;
-    border-left: 1px solid var(--dn-border);
-  }
-  .batch-detail--compact .summary-metric:first-child {
-    border-left: 0;
-  }
-  .batch-detail--compact .summary-metric strong,
-  .batch-detail--compact .summary-equation strong {
-    font-size: 20px;
   }
   .batch-detail--compact .file-order-card .ant-card-head {
     padding-inline: 16px;

@@ -26,7 +26,7 @@ describe("BatchDetailWorkbench", () => {
     expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(preflight || compute);
     expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
     expect(within(task).queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
-    if (status !== "succeeded") expect(within(task).getByText("尚未计算")).toBeInTheDocument();
+    if (status !== "succeeded") expect(within(task).queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
   });
 
   it("keeps empty-file preflight disabled and upload multiple", async () => {
@@ -52,13 +52,16 @@ describe("BatchDetailWorkbench", () => {
 
   it("keeps locked versions expanded and supports the existing toggle", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    const toggle = await screen.findByRole("button", { name: "收起锁定版本" });
+    const tab = await screen.findByText("锁定资料", { selector: '[role="tab"]' });
+    fireEvent.click(tab);
+    const panel = within(screen.getByText("批次锁定版本").closest(".locked-data-card") as HTMLElement);
+    const toggle = panel.getByRole("button", { name: "收起锁定版本" });
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("purchase-v1")).toBeInTheDocument();
     fireEvent.click(toggle);
-    expect(screen.getByRole("button", { name: "查看锁定版本" })).toHaveAttribute("aria-expanded", "false");
+    expect(panel.getByRole("button", { name: "查看锁定版本" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("purchase-v1")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
+    fireEvent.click(panel.getByRole("button", { name: "查看锁定版本" }));
     expect(screen.getByText("purchase-v1")).toBeInTheDocument();
   });
 
@@ -85,7 +88,7 @@ describe("BatchDetailWorkbench", () => {
   it("does not delete a source file when confirmation is cancelled", async () => {
     state.batch.status = "draft";
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "删除 KuangBiao-A交货单.xlsx" }));
+    fireEvent.click(await screen.findByLabelText("删除 KuangBiao-A交货单.xlsx"));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
     expect(screen.getByText("KuangBiao-A交货单.xlsx")).toBeInTheDocument();

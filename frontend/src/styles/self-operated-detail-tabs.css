@@ -68,13 +68,8 @@
   }
 
   .batch-detail--compact:has(.self-operated-detail-tabs) .batch-task-bar {
-    grid-template-columns: minmax(0, 1fr);
     align-self: center;
     margin-bottom: 0;
-  }
-
-  .batch-detail--compact:has(.self-operated-detail-tabs) .batch-task-copy {
-    justify-content: flex-end;
   }
 
   .batch-detail--compact:has(.self-operated-detail-tabs) .batch-task-result {

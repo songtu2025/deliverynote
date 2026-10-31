@@ -29,11 +29,11 @@ export default function ExceptionReviewTable({
   onReset: () => void;
   sectionRef: Ref<HTMLDivElement>;
 }) {
-  const { reviewStats, exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
+  const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
   return (
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
-        title={selfOperated ? undefined : `待处理审校（共 ${reviewStats.totalCount} 条）`}
+        variant={selfOperated ? undefined : "borderless"}
         extra={!selfOperated && <span className="toolbar-count">当前显示 {exceptionTotal} 条</span>}
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}

@@ -28,7 +28,13 @@ describe("BatchDetailFiles", () => {
 
     const mergedButton = await screen.findByRole("button", { name: /下载合并结果/ });
     const zipButton = screen.getByRole("button", { name: /下载分文件 ZIP/ });
-    expect(screen.getAllByRole("button", { name: "下载单文件结果" })).toHaveLength(2);
+    fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
+    expect(
+      within(container.querySelector(".file-order-card") as HTMLElement).getAllByRole("button", {
+        name: "下载单文件结果",
+        hidden: true
+      })
+    ).toHaveLength(2);
     expect(container.querySelector(".export-card")).not.toBeInTheDocument();
 
     fireEvent.click(mergedButton);

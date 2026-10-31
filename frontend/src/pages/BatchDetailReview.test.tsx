@@ -9,25 +9,32 @@ describe("BatchDetailReview", () => {
 
   it("shows quantity conservation and prevents an invalid split", async () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    await screen.findByText("160 = 100 + 60");
+    await screen.findByText("交货 160 = 可导入 100 + 待处理 60");
+    fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
     expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
     const task = within(screen.getByRole("region", { name: "批次任务状态" }));
     expect(await task.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
     expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
     expect(task.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始审校" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "规模定位" })).toBeInTheDocument();
+    expect(task.getByRole("button", { name: "开始审校" })).toBeInTheDocument();
+    const reviewTable = within(container.querySelector(".exception-review-card") as HTMLElement);
+    expect(reviewTable.getByRole("columnheader", { name: "规模定位", hidden: true })).toBeInTheDocument();
     expect(screen.getAllByText("短尾").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
     expect(screen.getByText("短尾 +50 / 中尾 +20 / 长尾 +10")).toBeInTheDocument();
     expect(container.querySelector(".exception-review-card .ant-table-content")).toHaveStyle({ overflowX: "auto" });
-    fireEvent.click(screen.getByRole("button", { name: "收起锁定版本" }));
+    const lockedData = within(screen.getByText("批次锁定版本").closest(".locked-data-card") as HTMLElement);
+    fireEvent.click(lockedData.getByRole("button", { name: "收起锁定版本" }));
     expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "查看锁定版本" }));
+    fireEvent.click(lockedData.getByRole("button", { name: "查看锁定版本" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
     expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
+    fireEvent.click(reviewTable.getAllByRole("button", { name: "查看并处理", hidden: true })[0]);
 
     await screen.findByText("审校处理 · SKU-A");
     const drawer = screen.getByRole("dialog");
@@ -36,9 +43,9 @@ describe("BatchDetailReview", () => {
     expect(within(drawer).getByText("备货定位")).toBeInTheDocument();
     expect(within(drawer).getByText("备货")).toBeInTheDocument();
     expect(within(drawer).queryByText("已下单可售天数")).not.toBeInTheDocument();
-    const saveButton = screen.getByRole("button", { name: "保存" });
+    const saveButton = within(drawer).getByRole("button", { name: "保存" });
     expect(saveButton).toBeEnabled();
-    const quantity = screen.getByRole("spinbutton", { name: "数量" });
+    const quantity = within(drawer).getByRole("spinbutton", { name: "数量" });
     fireEvent.change(quantity, { target: { value: "59" } });
     await waitFor(() => expect(saveButton).toBeDisabled());
     expect(screen.getByText("1", { selector: ".split-conservation strong" })).toBeInTheDocument();
@@ -46,6 +53,7 @@ describe("BatchDetailReview", () => {
 
   it("filters pending rows by site, scale position, and stocking position", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     await screen.findByText("SKU-A");
     expect(screen.getByText("SKU-B")).toBeInTheDocument();
@@ -72,11 +80,12 @@ describe("BatchDetailReview", () => {
   it("keeps review navigation working across server pages", async () => {
     state.exceptions = pagedExceptions();
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     expect(await screen.findByRole("button", { name: "全部 12 条" })).toBeInTheDocument();
     fireEvent.click(screen.getByTitle("2"));
     expect(await screen.findByText("SKU-11")).toBeInTheDocument();
-    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "查看并处理", hidden: true })[0]);
     const drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("第 11 / 12 条")).toBeInTheDocument();
 
@@ -97,6 +106,7 @@ describe("BatchDetailReview", () => {
   it("returns to the first review page when searching from a later page", async () => {
     state.exceptions = pagedExceptions();
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     await screen.findByRole("button", { name: "全部 12 条" });
     fireEvent.click(screen.getByTitle("2"));
@@ -123,6 +133,7 @@ describe("BatchDetailReview", () => {
       full_site: "AMAZON:SEEKWAY:US"
     };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const sku = await screen.findByText("SKU-EXCESS-LONG");
     const row = sku.closest("tr");
@@ -136,6 +147,7 @@ describe("BatchDetailReview", () => {
 
   it("summarizes unfinished work and saves directly into the next exception", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const overview = await screen.findByRole("region", { name: "审校概览" });
     expect(within(overview).getByRole("button", { name: "未完成 4 条，待处理 107 件" })).toHaveAttribute(
@@ -147,7 +159,7 @@ describe("BatchDetailReview", () => {
 
     const excessRow = (await screen.findByText("SKU-A")).closest("tr");
     expect(excessRow).not.toBeNull();
-    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理" }));
+    fireEvent.click(within(excessRow!).getByRole("button", { name: "查看并处理", hidden: true }));
 
     let drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("第 1 / 4 条")).toBeInTheDocument();
@@ -176,10 +188,12 @@ describe("BatchDetailReview", () => {
       conserved: true
     };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const row = (await screen.findByText("SKU-A")).closest("tr");
     expect(row).not.toBeNull();
-    fireEvent.click(within(row!).getByRole("button", { name: "查看并处理" }));
+    const button = within(row!).getByRole("button", { name: "查看并处理", hidden: true });
+    fireEvent.click(button);
 
     const drawer = await screen.findByRole("dialog");
     expect(within(drawer).queryByRole("button", { name: "上一条" })).not.toBeInTheDocument();

@@ -58,9 +58,6 @@
   .batch-list-toolbar {
     gap: 9px;
   }
-  .summary-strip {
-    grid-template-columns: 1fr;
-  }
   .batch-list-page > .section-card {
     margin-bottom: 14px;
     padding-block: 9px;
@@ -134,14 +131,6 @@
   }
   .batch-list-table .ant-pagination {
     margin-top: 12px;
-  }
-  .summary-metric,
-  .summary-equation {
-    border-left: none;
-    border-top: 1px solid #e5ebe9;
-  }
-  .summary-metric:first-child {
-    border-top: none;
   }
   .split-fields-row {
     grid-template-columns: 1fr;

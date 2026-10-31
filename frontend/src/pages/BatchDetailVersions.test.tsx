@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { message } from "antd";
 import { expect, it, vi } from "vitest";
 import { describe } from "vitest";
@@ -12,7 +12,9 @@ describe("BatchDetailVersions", () => {
     state.batch.status = "draft";
     const staticSuccess = vi.spyOn(message, "success");
     renderDetail(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "采用当前供应商资料" }));
+    fireEvent.click(await screen.findByText("锁定资料", { selector: '[role="tab"]' }));
+    const lockedData = within(screen.getByText("批次锁定版本").closest(".locked-data-card") as HTMLElement);
+    fireEvent.click(await lockedData.findByRole("button", { name: "采用当前供应商资料" }));
     await screen.findByText("批次已采用当前供应商资料");
     expect(staticSuccess).not.toHaveBeenCalled();
   });
@@ -21,7 +23,9 @@ describe("BatchDetailVersions", () => {
     state.batch.status = "draft";
     renderDetail(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
 
-    const refreshButton = await screen.findByRole("button", {
+    fireEvent.click(await screen.findByText("锁定资料", { selector: '[role="tab"]' }));
+    const lockedData = within(screen.getByText("批次锁定版本").closest(".locked-data-card") as HTMLElement);
+    const refreshButton = await lockedData.findByRole("button", {
       name: "采用当前供应商资料"
     });
     fireEvent.click(refreshButton);
@@ -37,21 +41,23 @@ describe("BatchDetailVersions", () => {
       ).toBe(true)
     );
     await screen.findByText("supplier-v2");
-    expect(screen.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
+    expect(lockedData.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
   });
 
   it("does not show supplier refresh outside an admin draft", async () => {
     state.batch.status = "draft";
     const { rerender } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
+    fireEvent.click(await screen.findByText("锁定资料", { selector: '[role="tab"]' }));
+    const lockedData = within(screen.getByText("批次锁定版本").closest(".locked-data-card") as HTMLElement);
     await screen.findByText("批次锁定版本");
-    expect(screen.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
+    expect(lockedData.queryByRole("button", { name: "采用当前供应商资料" })).not.toBeInTheDocument();
 
     state.batch.status = "failed";
     rerender(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
     await waitFor(() =>
       expect(
-        screen.queryByRole("button", {
+        lockedData.queryByRole("button", {
           name: "采用当前供应商资料"
         })
       ).not.toBeInTheDocument()

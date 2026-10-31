@@ -1,4 +1,3 @@
-.summary-metric.import,
 .overreceipt-effect-notice,
 .input-data-context {
   background: var(--dn-surface-muted);
@@ -16,15 +15,6 @@
 .overreceipt-allowance-value {
   color: var(--dn-primary);
 }
-.summary-metric,
-.summary-equation {
-  border-left-color: var(--dn-border);
-}
-.summary-metric.import strong,
-.summary-equation strong {
-  color: var(--dn-primary);
-}
-.summary-metric.pending strong,
 .pending-value,
 .audit-action-warning {
   color: var(--dn-warning);

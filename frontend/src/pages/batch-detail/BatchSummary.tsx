@@ -20,23 +20,35 @@ export default function BatchSummary({ batch }: { batch: Batch }) {
   const { totals, computed } = batchPresentation(batch);
   const known = computed && Boolean(batch.summary);
   if (batch.workflow === "self_operated_inbound") return <InboundSummary batch={batch} />;
+  if (!known) return null;
+  const segments = [
+    { label: "可导入", value: totals.import_total, tone: "import" },
+    { label: "待处理", value: totals.manual_total, tone: "pending" }
+  ];
   return (
-    <div className={`summary-strip ${known ? "" : "summary-pending"}`}>
-      {summaryMetrics(batch, "—").map((metric) => (
-        <div className={`summary-metric ${metric.tone}`} key={metric.label}>
-          <span>{metric.label}</span>
-          <strong>{metric.value}</strong>
+    <div className="batch-quantity-summary">
+      <div
+        className="batch-quantity-bar"
+        role="img"
+        aria-label={segments.map(({ label, value }) => `${label} ${value}`).join("，")}
+      >
+        {segments.map(({ label, value, tone }) => (
+          <span key={label} className={`batch-quantity-segment quantity-${tone}`} style={{ flexGrow: value }} />
+        ))}
+      </div>
+      <div className="batch-quantity-details">
+        <div className="batch-quantity-legend">
+          {segments.map(({ label, value, tone }) => (
+            <span key={label}>
+              <i className={`batch-quantity-swatch quantity-${tone}`} aria-hidden />
+              {label} <strong>{value}</strong>
+            </span>
+          ))}
         </div>
-      ))}
-      <div className="summary-equation">
-        <span>数量守恒</span>
-        {known ? (
-          <strong className={totals.conserved ? "conservation-ok" : "conservation-bad"}>
-            {totals.delivery_total} = {totals.import_total} + {totals.manual_total}
-          </strong>
-        ) : (
-          <strong>尚未计算</strong>
-        )}
+        <strong className={totals.conserved ? "conservation-ok" : "conservation-bad"}>
+          {!totals.conserved && "数量不守恒："}交货 {totals.delivery_total} {totals.conserved ? "=" : "≠"} 可导入{" "}
+          {totals.import_total} + 待处理 {totals.manual_total}
+        </strong>
       </div>
     </div>
   );

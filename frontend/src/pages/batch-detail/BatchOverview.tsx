@@ -1,7 +1,6 @@
 import { Button, Space, Typography, Upload } from "antd";
 import type { ReactNode } from "react";
 import {
-  ArrowLeftOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloudUploadOutlined,
@@ -26,31 +25,31 @@ type OverviewProps = {
   action: string | null;
   fileActions: BatchFiles;
   tasks: ReturnType<typeof useBatchTasks>;
-  onBack: () => void;
   focusReview: () => void;
   reviewStats?: ExceptionReview["reviewStats"];
   reviewError: boolean;
   extra?: ReactNode;
 };
 
+const TASK_ICONS: Record<string, typeof CheckCircleOutlined> = {
+  error: ExclamationCircleOutlined,
+  ready: CheckCircleOutlined
+};
+
 export default function BatchOverview(props: OverviewProps) {
-  const { batch, onBack } = props;
-  const selfOperated = batch.workflow === "self_operated_inbound";
+  const { batch } = props;
   return (
     <>
       <div className="batch-heading">
         <div>
-          <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} className="back-link">
-            返回批次列表
-          </Button>
           <div className="batch-title-row">
             <Typography.Title level={2} title={batch.name}>
               {batch.name}
             </Typography.Title>
-            {selfOperated && <StatusTag status={batch.status} />}
+            <StatusTag status={batch.status} />
           </div>
           <Typography.Text type="secondary">
-            批次 #{batch.id} · 更新于 {formatBeijingDateTime(batch.updated_at)}
+            {batch.files?.length ?? 0} 个来源文件，更新于 {formatBeijingDateTime(batch.updated_at)}
           </Typography.Text>
         </div>
       </div>
@@ -64,27 +63,26 @@ function BatchTaskBar(props: OverviewProps) {
   const { batch, activeJob, reviewStats } = props;
   const { computed } = batchPresentation(batch);
   const { title, description, tone, busy } = batchTaskPresentation(batch, activeJob, reviewStats);
+  const pending = busy || [batch.status, activeJob?.status].includes("queued");
   const details = overviewDescription(props, description, tone);
-  const StateIcon = busy
-    ? LoadingOutlined
-    : tone === "error"
-      ? ExclamationCircleOutlined
-      : tone === "ready"
-        ? CheckCircleOutlined
-        : ClockCircleOutlined;
+  const StateIcon = pending ? LoadingOutlined : (TASK_ICONS[tone] ?? ClockCircleOutlined);
   return (
     <section className="batch-task-bar" aria-label="批次任务状态">
-      <div className={`batch-task-copy batch-task-${tone}`} role="status" aria-live="polite" aria-atomic="true">
-        <StateIcon className={busy ? "batch-task-spinner" : undefined} aria-hidden />
-        <div>
-          <strong>{title}</strong>
-          {details && <span>{details}</span>}
+      <div className={`batch-task-say batch-task-${pending ? "running" : tone}`}>
+        <div className="batch-task-copy" role="status" aria-live="polite" aria-atomic="true">
+          <div className="batch-task-icon" aria-hidden>
+            <StateIcon className={pending ? "batch-task-spinner" : undefined} />
+          </div>
+          <div>
+            <strong>{title}</strong>
+            {details && <span>{details}</span>}
+          </div>
         </div>
-      </div>
-      <div className="batch-task-actions">
-        <BatchPrimaryActions {...props} />
-        {computed && <BatchExportActions {...props} />}
-        {props.extra}
+        <div className="batch-task-actions">
+          <BatchPrimaryActions {...props} />
+          {computed && <BatchExportActions {...props} />}
+          {props.extra}
+        </div>
       </div>
       {computed && (
         <p className="batch-task-result">

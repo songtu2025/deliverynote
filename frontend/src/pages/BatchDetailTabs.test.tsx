@@ -4,6 +4,67 @@ import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
+describe("交货批次详情标签页", () => {
+  const { state } = setupBatchDetailTest();
+
+  it("计算后默认显示待处理，数量条按汇总显示两段", async () => {
+    state.exceptions = [state.exceptions[0]];
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    expect(await screen.findByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true");
+    const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
+    expect(bar.children).toHaveLength(2);
+    expect(screen.getByText("交货 160 = 可导入 100 + 待处理 60")).toHaveClass("conservation-ok");
+    expect(screen.getByText(/2 个来源文件，更新于/)).toBeInTheDocument();
+  });
+
+  it("未计算时默认来源文件且不显示数量条和待处理标签", async () => {
+    state.batch.status = "draft";
+    state.batch.summary = undefined;
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    expect(await screen.findByRole("tab", { name: "来源文件 2" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: /^待处理/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
+    expect(screen.getByText("purchase-v1")).toBeVisible();
+  });
+
+  it("开始审校先切换标签再滚动聚焦，返回标签保留选择", async () => {
+    state.exceptions = [state.exceptions[0]];
+    const scroll = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
+    try {
+      renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+      fireEvent.click(await screen.findByRole("tab", { name: "来源文件 2" }));
+      fireEvent.click(screen.getByRole("button", { name: "开始审校" }));
+      await waitFor(() =>
+        expect(screen.getByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true")
+      );
+      expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+      expect(document.activeElement).toHaveClass("review-section-anchor");
+      fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
+      expect(screen.getByRole("tab", { name: "来源文件 2" })).toHaveAttribute("aria-selected", "true");
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+    }
+  });
+
+  it("读取审校统计失败时仅显示两段待处理数量", async () => {
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).includes("/exceptions?")
+          ? Promise.resolve(new Response("读取失败", { status: 500 }))
+          : originalFetch(input, init)
+      )
+    );
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByText("读取批次失败");
+    expect(screen.getByRole("img", { name: "可导入 100，待处理 60" }).children).toHaveLength(2);
+    expect(screen.queryByText("保留待处理")).not.toBeInTheDocument();
+  });
+});
+
 describe("自营仓详情工作区", () => {
   const { state } = setupBatchDetailTest();
 

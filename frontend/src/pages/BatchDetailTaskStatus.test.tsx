@@ -9,9 +9,9 @@ describe("交货批次任务状态条", () => {
   const { state } = setupBatchDetailTest();
 
   it.each([
-    ["compute", "queued", "计算排队中", false],
+    ["compute", "queued", "计算排队中", true],
     ["compute", "running", "正在计算", true],
-    ["export", "queued", "结果排队中", false],
+    ["export", "queued", "结果排队中", true],
     ["export", "running", "正在生成结果", true]
   ] as const)("刷新后恢复 %s/%s 的真实状态", async (kind, status, title, spinning) => {
     state.batch.jobs = { [kind]: fixtureJob({ kind, status }) };
@@ -72,6 +72,10 @@ describe("交货批次任务状态条", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
     expect(await task.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
+    expect(bar.children).toHaveLength(2);
+    expect(bar.children[1]).toHaveStyle({ flexGrow: "60" });
+    expect(screen.queryByText(/保留待处理/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), { target: { value: "SKU-B" } });
     await waitFor(() => expect(screen.queryByText("SKU-A")).not.toBeInTheDocument());
     expect(task.getByText("4 条待审校，共 107 件")).toBeInTheDocument();

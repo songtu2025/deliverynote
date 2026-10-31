@@ -24,7 +24,8 @@ export default function BatchFileTable({
   const selfOperated = batch.workflow === "self_operated_inbound";
   return (
     <Card
-      title={selfOperated ? "本批次业务文件" : "来源文件与处理顺序"}
+      title={selfOperated ? "本批次业务文件" : undefined}
+      variant={selfOperated ? undefined : "borderless"}
       className="section-card file-order-card"
       classNames={{ body: "batch-detail-panel-body" }}
       extra={

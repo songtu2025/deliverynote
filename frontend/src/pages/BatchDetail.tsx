@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Alert, Button, Card } from "antd";
-import { ArrowLeftOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ReloadOutlined } from "@ant-design/icons";
+import BatchBreadcrumb from "./batch-detail/BatchBreadcrumb";
+import DeliveryDetailTabs from "./batch-detail/DeliveryDetailTabs";
 import BatchOverview from "./batch-detail/BatchOverview";
 import BatchSummary from "./batch-detail/BatchSummary";
 import BatchLockedVersions from "./batch-detail/BatchLockedVersions";
@@ -34,6 +36,7 @@ export default function BatchDetail({
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
   const reviewSection = useRef<HTMLDivElement | null>(null);
   const [detailTabs, setDetailTabs] = useState<Record<number, string>>({});
+  const [reviewFocusRequested, setReviewFocusRequested] = useState(false);
   const [materialsOpen, setMaterialsOpen] = useState(false);
   const data = useBatchDetailData(batchId, Boolean(canRefreshSupplierVersion), setSplitTarget);
   const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
@@ -54,6 +57,13 @@ export default function BatchDetail({
 
   const editor = useExceptionEditor({ splitTarget, setSplitTarget, review, runAction, load });
 
+  useEffect(() => {
+    if (!reviewFocusRequested || !reviewSection.current) return;
+    reviewSection.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    reviewSection.current.focus({ preventScroll: true });
+    setReviewFocusRequested(false);
+  }, [reviewFocusRequested, detailTabs]);
+
   const loadFailure = loadError && (
     <Alert
       type="error"
@@ -71,9 +81,7 @@ export default function BatchDetail({
   if (!batch) {
     return (
       <div className="page-shell">
-        <Button type="link" icon={<ArrowLeftOutlined />} onClick={onBack} className="back-link">
-          返回批次列表
-        </Button>
+        <BatchBreadcrumb batchId={batchId} onBack={onBack} />
         {loadFailure || <Card loading={loading} />}
       </div>
     );
@@ -83,8 +91,8 @@ export default function BatchDetail({
   const selectDetailTab = (key: string) => setDetailTabs((current) => ({ ...current, [batchId]: key }));
 
   const focusReview = () => {
-    reviewSection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    reviewSection.current?.focus({ preventScroll: true });
+    selectDetailTab("review");
+    setReviewFocusRequested(true);
   };
 
   const taskContent = (
@@ -95,7 +103,6 @@ export default function BatchDetail({
         action={action}
         fileActions={fileActions}
         tasks={tasks}
-        onBack={onBack}
         focusReview={focusReview}
         reviewStats={availableReviewStats(data)}
         reviewError={Boolean(loadError)}
@@ -145,7 +152,11 @@ export default function BatchDetail({
 
   return (
     <BatchPurchaseSnapshot batch={batch}>
-      <BatchWorkbench notice={loadFailure} taskContent={taskContent}>
+      <BatchWorkbench
+        notice={loadFailure}
+        breadcrumb={<BatchBreadcrumb batchId={batchId} selfOperated={selfOperated} onBack={onBack} />}
+        taskContent={taskContent}
+      >
         {selfOperated ? (
           <SelfOperatedDetailTabs
             batch={batch}
@@ -162,11 +173,16 @@ export default function BatchDetail({
             review={reviewContent}
           />
         ) : (
-          <>
-            {fileContent}
-            {versionContent}
-            {reviewContent}
-          </>
+          <DeliveryDetailTabs
+            computed={computed}
+            activeKey={detailTabs[batchId]}
+            onChange={selectDetailTab}
+            reviewStats={availableReviewStats(data)}
+            fileCount={files.length}
+            files={fileContent}
+            versions={versionContent}
+            review={reviewContent}
+          />
         )}
 
         <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
@@ -183,16 +199,19 @@ function availableReviewStats(data: BatchDetailData) {
 
 function BatchWorkbench({
   notice,
+  breadcrumb,
   taskContent,
   children
 }: {
   notice: ReactNode;
+  breadcrumb: ReactNode;
   taskContent: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="page-shell batch-workbench batch-detail--compact">
       {notice}
+      {breadcrumb}
       <section className="batch-task-surface" aria-label="当前批次任务">
         {taskContent}
       </section>

@@ -10,7 +10,6 @@
   border-color: var(--dn-primary-border) !important;
 }
 .ant-card,
-.summary-strip,
 .input-data-workspace,
 .input-data-status-header,
 .input-data-kind-switcher {
