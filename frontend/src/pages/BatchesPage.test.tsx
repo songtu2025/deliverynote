@@ -37,18 +37,23 @@ describe("BatchesPage", () => {
 
     const status = await screen.findByRole("region", { name: "运行状态" });
     expect(within(status).getByText("基础资料")).toBeInTheDocument();
-    expect(within(status).getByText("5 / 5 已就绪")).toBeInTheDocument();
+    expect(within(status).getByText("5/5")).toBeInTheDocument();
+    expect(within(status).getByText("采购数据")).toBeInTheDocument();
+    expect(within(status).getByText("purchase-v1")).toBeInTheDocument();
+    expect(within(status).getByText("超收规则")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /新建批次/ })).toBeEnabled();
     expect(screen.getByLabelText("搜索")).toHaveAttribute("placeholder", "搜索批次名称");
     expect(screen.getByLabelText("状态")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "交货批次列表" })).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "积加采购数据同步" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /同步采购数据/ })).toBeInTheDocument();
+    expect(within(status).getByRole("button", { name: /同步采购数据/ })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "统一批次流程" })).not.toBeInTheDocument();
-    expect(screen.getByText("审校待处理")).toBeInTheDocument();
-    expect(screen.getByText("2 个文件 · 交货 160")).toBeInTheDocument();
+    expect(screen.getByText("去审校 60")).toBeInTheDocument();
+    expect(screen.getByText("2 个文件")).toBeInTheDocument();
     expect(screen.getByText("批次 #7")).toBeInTheDocument();
-    expect(screen.getByText(/可导入 100/)).toHaveTextContent("可导入 100 · 待处理 60");
+    expect(screen.getByText(/可导入 100/)).toHaveTextContent("可导入 100 / 待处理 60");
+    expect(screen.getByRole("img", { name: "可导入 100，待处理 60" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "2026-07-21 交货批次" })).toHaveAttribute("title", "2026-07-21 交货批次");
     expect(screen.getAllByText("短尾超收 V1").length).toBeGreaterThan(0);
     expect(container.querySelector(".ant-pagination")).not.toBeInTheDocument();
@@ -76,11 +81,12 @@ describe("BatchesPage", () => {
     render(<BatchesPage onOpen={onOpen} />, { wrapper: AntApp });
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByText("审校待处理")).toBeInTheDocument();
+    expect(within(row).getByText("去审校 60")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" })).toHaveClass("ant-btn-primary");
     expect(within(row).getByText(/可导入 100/)).toHaveTextContent("待处理 60");
     expect(within(row).queryByText("结果可下载") !== null).toBe(downloadReady);
     expect(within(row).queryByText(/等待人工审校|未完成审校|条待审校/)).not.toBeInTheDocument();
-    expect(within(screen.getByRole("table", { name: "交货批次列表" })).getAllByRole("columnheader")).toHaveLength(6);
+    expect(within(screen.getByRole("table", { name: "交货批次列表" })).getAllByRole("columnheader")).toHaveLength(5);
     fireEvent.click(within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" }));
     expect(onOpen).toHaveBeenCalledWith(7);
   });
@@ -105,8 +111,26 @@ describe("BatchesPage", () => {
       render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
       const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-      expect(within(row).getByText(action, { selector: ".next-action" })).toBeInTheDocument();
-      expect(within(row).queryByText("审校待处理")).not.toBeInTheDocument();
+      if (action === "计算中") {
+        expect(within(row).getByText("计算中", { selector: ".batch-computing" })).toBeInTheDocument();
+        expect(within(row).queryByRole("button", { name: "打开 2026-07-21 交货批次" })).not.toBeInTheDocument();
+      } else {
+        const button = within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" });
+        expect(button).toHaveAttribute("title", action);
+        const labels: Record<string, string> = {
+          下载结果: "去下载",
+          生成结果: "去生成",
+          预检: "去预检",
+          开始计算: "去计算",
+          查看原因: "查看原因"
+        };
+        expect(button).toHaveTextContent(labels[action]);
+        expect(button.classList.contains("ant-btn-dangerous")).toBe(action === "查看原因");
+        expect(button.classList.contains("ant-btn-primary")).toBe(
+          ["开始计算", "生成结果", "下载结果"].includes(action)
+        );
+      }
+      expect(within(row).queryByText("去审校 60")).not.toBeInTheDocument();
       expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
     }
   );
@@ -120,7 +144,7 @@ describe("BatchesPage", () => {
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByText(downloadReady ? "下载结果" : "审校待处理")).toBeInTheDocument();
+    expect(within(row).getByText(downloadReady ? "去下载" : "去审校 60")).toBeInTheDocument();
     expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
   });
 
@@ -128,10 +152,36 @@ describe("BatchesPage", () => {
     Object.assign(state.batchRows[0], { workflow: "self_operated_inbound", receipt: undefined, download_ready: true });
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByText("重新取数并核对")).toBeInTheDocument();
+    expect(within(row).getByTitle("重新取数并核对")).toBeInTheDocument();
     expect(within(row).getByText("尚未计算")).toBeInTheDocument();
     expect(within(row).queryByText(/可入库 100/)).not.toBeInTheDocument();
   });
+
+  it.each(["delivery", "self_operated_inbound"] as const)(
+    "maps %s upload actions to opening the batch",
+    async (workflow) => {
+      Object.assign(state.batchRows[0], { workflow, status: "draft", file_count: 0 });
+      const onOpen = vi.fn();
+      render(<BatchesPage workflow={workflow} onOpen={onOpen} />, { wrapper: AntApp });
+      const button = await screen.findByRole("button", { name: "打开 2026-07-21 交货批次" });
+      expect(button).toHaveTextContent("去上传");
+      expect(button).toHaveAttribute("title", workflow === "delivery" ? "上传交货文件" : "上传质检交货单");
+      expect(button).not.toHaveClass("ant-btn-primary");
+      fireEvent.click(button);
+      expect(onOpen).toHaveBeenCalledWith(7);
+    }
+  );
+
+  it.each([undefined, { delivery_total: 0, import_total: 0, manual_total: 0, conserved: true }])(
+    "omits the quantity bar for missing or zero results: %s",
+    async (summary) => {
+      state.batchRows[0].summary = summary;
+      render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
+      const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
+      expect(within(row).queryByRole("img", { name: /可导入/ })).not.toBeInTheDocument();
+      if (summary) expect(within(row).getByText(/可导入 0/)).toHaveTextContent("可导入 0 / 待处理 0");
+    }
+  );
 
   it("loads batch pages and applies search on the server", async () => {
     setFourteenBatches(state);

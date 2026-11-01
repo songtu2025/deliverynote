@@ -22,10 +22,11 @@ describe("自营仓紧凑列表", () => {
     expect(table.closest(".batch-list-page")).toHaveClass("batch-list-page--compact");
     expect(within(row).getByText(/批次 #7/)).toHaveTextContent("待入库数据已就绪");
     expect(within(row).getByTitle("锁定待入库版本 V1")).toBeInTheDocument();
-    expect(within(row).getByText(/2 份质检单/)).toHaveTextContent("本次申请 160");
+    expect(within(row).getByText("2 份质检单")).toBeInTheDocument();
     expect(within(row).getByText(/可入库 100/)).toHaveTextContent("待处理 60");
+    expect(within(row).getByRole("img", { name: "可入库 100，待处理 60" })).toBeInTheDocument();
     expect(within(row).queryByText(/可导入|交货 160/)).not.toBeInTheDocument();
-    expect(within(row).getByText("审校待处理")).toBeInTheDocument();
+    expect(within(row).getByText("去审校 60")).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: /删除批次/ })).not.toBeInTheDocument();
   });
 
@@ -40,7 +41,7 @@ describe("自营仓紧凑列表", () => {
 
     expect(within(row).getByText(/批次 #7/)).toHaveTextContent("待入库数据未就绪");
     if (computed) {
-      expect(within(row).getByText(/本次申请 0/)).toBeInTheDocument();
+      expect(within(row).queryByRole("img", { name: /可入库/ })).not.toBeInTheDocument();
       expect(within(row).getByText(/可入库 0/)).toHaveTextContent("待处理 0");
       expect(within(row).queryByText("尚未计算")).not.toBeInTheDocument();
     } else {
@@ -62,7 +63,7 @@ describe("自营仓紧凑列表", () => {
     );
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: FocusTestApp });
 
-    expect(await screen.findByText("3 / 4 待补齐")).toBeInTheDocument();
+    expect(await screen.findByText("3/4")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /新建批次/ })).toBeDisabled();
   });
 });

@@ -53,6 +53,16 @@ export default function BatchesPage({
   const activeOverreceiptRule = overreceiptRules.find((rule) => rule.active);
   const activeSelfOperatedRule = selfOperatedRules.find((rule) => rule.active);
   const ready = missingKinds.length === 0;
+  const readiness = (
+    <BatchReadiness
+      workflow={workflow}
+      activeVersions={activeVersions}
+      versionKinds={versionKinds}
+      missingKinds={missingKinds}
+      activeSelfOperatedRule={activeSelfOperatedRule}
+      activeOverreceiptRule={activeOverreceiptRule}
+    />
+  );
   const pageClassName = "page-shell batch-list-page batch-list-page--compact";
   if (loading && !initialized) {
     return (
@@ -109,25 +119,19 @@ export default function BatchesPage({
         </Space>
       </div>
 
-      {workflow === "delivery" && (
-        <PurchaseSyncPanel
-          versions={versions}
-          canActivate={canActivatePurchaseSync}
-          refreshVersions={refreshVersions}
-          compact
-        />
-      )}
-
-      {workflow === "self_operated_inbound" && <InboundSyncPanel syncStatus={syncStatus} sync={inboundSync} />}
-
-      <BatchReadiness
-        workflow={workflow}
-        activeVersions={activeVersions}
-        versionKinds={versionKinds}
-        missingKinds={missingKinds}
-        activeSelfOperatedRule={activeSelfOperatedRule}
-        activeOverreceiptRule={activeOverreceiptRule}
-      />
+      <section className="batch-materials" aria-label="运行状态">
+        {workflow === "delivery" ? (
+          <PurchaseSyncPanel
+            versions={versions}
+            canActivate={canActivatePurchaseSync}
+            refreshVersions={refreshVersions}
+            compact
+            readiness={readiness}
+          />
+        ) : (
+          <InboundSyncPanel syncStatus={syncStatus} sync={inboundSync} readiness={readiness} />
+        )}
+      </section>
       <BatchListToolbar
         workflow={workflow}
         active={active}

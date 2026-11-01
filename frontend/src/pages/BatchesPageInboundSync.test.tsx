@@ -12,8 +12,11 @@ describe("BatchesPageInboundSync", () => {
 
     await screen.findByRole("heading", { name: "自营仓入库" });
     const status = await screen.findByRole("region", { name: "运行状态" });
-    expect(within(status).getByText("4 / 4 已就绪")).toBeInTheDocument();
+    expect(within(status).getByText("4/4")).toBeInTheDocument();
     expect(within(status).getByText("待入库数据")).toBeInTheDocument();
+    expect(within(status).getByText("基础资料")).toBeInTheDocument();
+    expect(within(status).getByText("超收规则")).toBeInTheDocument();
+    expect(within(status).getByRole("button", { name: /同步待入库数据/ })).toBeInTheDocument();
     expect(screen.getByText("待入库 + 部分入库")).toBeInTheDocument();
     expect(screen.getByText("数据已启用")).toBeInTheDocument();
     expect(screen.getByText("含 2 条“共享”站点数据，请展开复核")).toBeInTheDocument();

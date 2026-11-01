@@ -1,6 +1,6 @@
 import SyncDifference from "./batches/SyncDifference";
-import { useState } from "react";
-import { Alert, Button, Popconfirm, Space, Skeleton, Tag, Typography } from "antd";
+import { type ReactNode, useState } from "react";
+import { Alert, Button, Popconfirm, Space, Skeleton, Typography } from "antd";
 import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../dateTime";
 import { getPurchaseSyncPreview, getPurchaseSyncIssues } from "../syncApi";
@@ -15,13 +15,15 @@ interface PurchaseSyncPanelProps {
   canActivate: boolean;
   refreshVersions: () => Promise<InputVersion[]>;
   compact?: boolean;
+  readiness?: ReactNode;
 }
 
 export default function PurchaseSyncPanel({
   versions,
   canActivate,
   refreshVersions,
-  compact = false
+  compact = false,
+  readiness
 }: PurchaseSyncPanelProps) {
   const {
     syncStatus,
@@ -52,6 +54,7 @@ export default function PurchaseSyncPanel({
         aria-busy="true"
         aria-label="正在读取积加采购数据同步状态"
       >
+        {readiness}
         <Skeleton active title={{ width: 180 }} paragraph={{ rows: compact ? 1 : 2 }} />
       </section>
     );
@@ -60,14 +63,15 @@ export default function PurchaseSyncPanel({
   return (
     <>
       <section
-        className={`purchase-sync-card${compact ? " purchase-sync-card--compact" : ""}${compact && syncJob?.status === "succeeded" && !detailsOpen ? " purchase-sync-card--summary" : ""}`}
+        className={`purchase-sync-card${compact ? " purchase-sync-card--compact" : ""}`}
         aria-label="积加采购数据同步"
       >
         <div className="purchase-sync-heading">
+          {readiness}
           <div>
             <Space size={8} wrap>
-              <Typography.Title level={5}>积加采购数据</Typography.Title>
-              <Tag className="purchase-sync-scope-tag">待交货 + 交货中</Tag>
+              {!readiness && <Typography.Title level={5}>积加采购数据</Typography.Title>}
+              <span className="purchase-sync-scope-tag">待交货 + 交货中</span>
             </Space>
             {!compact && <Typography.Text type="secondary">同步未交清采购单；启用后用于新批次。</Typography.Text>}
           </div>
@@ -143,7 +147,7 @@ export default function PurchaseSyncPanel({
                 <Typography.Text type="secondary">
                   {detailsOpen
                     ? `接口明细 ${syncJob.raw_detail_count} 行，保留 ${syncJob.eligible_detail_count} 行，过滤已交清 ${syncJob.filtered_detail_count} 行`
-                    : `保留 ${syncJob.eligible_detail_count} 行 · ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
+                    : `保留 ${syncJob.eligible_detail_count} 行 / ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
                 </Typography.Text>
                 {compact && !detailsOpen && syncJob.warning_count > 0 && (
                   <Typography.Text className="purchase-sync-warning-summary">

@@ -83,10 +83,6 @@
   width: 100%;
 }
 
-.batch-list-toolbar-heading strong {
-  color: var(--dn-ink);
-  font-size: 16px;
-}
 .batch-list-toolbar.is-selecting {
   border-color: var(--dn-primary-border);
   background: var(--dn-primary-soft);
@@ -153,13 +149,8 @@
     grid-template-areas:
       "heading"
       "status"
-      "sync"
       "toolbar"
       "table";
-  }
-
-  .batch-status-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -185,18 +176,6 @@
   }
   .batch-list-page > .page-heading > .ant-space .ant-btn-primary {
     flex: 1;
-  }
-  .batch-status-strip {
-    grid-template-columns: 1fr;
-  }
-  .batch-status-item {
-    min-height: 62px;
-    padding-block: 10px;
-    border-top: 1px solid var(--dn-border);
-    border-left: 0;
-  }
-  .batch-status-item:first-child {
-    border-top: 0;
   }
   .batch-list-toolbar {
     grid-template-columns: 1fr;

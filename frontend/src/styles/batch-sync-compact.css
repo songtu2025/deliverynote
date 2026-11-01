@@ -1,9 +1,3 @@
-.batch-list-page > .purchase-sync-card {
-  grid-area: sync;
-  min-width: 0;
-  margin: 0;
-}
-
 .purchase-sync-card--compact {
   gap: 12px;
   padding: 20px;

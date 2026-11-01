@@ -29,7 +29,7 @@ describe("BatchesPageCreation", () => {
     render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: AntApp });
 
     await screen.findByRole("heading", { name: "自营仓入库" });
-    await screen.findByText("4 / 4 已就绪");
+    await screen.findByText("4/4");
     fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));
     const dialog = await screen.findByRole("dialog", { name: "新建自营仓入库批次" });
     expect(within(dialog).getByRole("textbox", { name: /批次名称/ })).toHaveValue("2026-10-08 自营仓入库批次 14:26:35");
@@ -69,7 +69,7 @@ describe("BatchesPageCreation", () => {
   it("requires a delivery file before creating a delivery batch", async () => {
     render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 
-    await screen.findByText("5 / 5 已就绪");
+    await screen.findByText("5/5");
     fireEvent.click(screen.getByRole("button", { name: /新建批次/ }));
     const dialog = await screen.findByRole("dialog", { name: "新建交货批次" });
 

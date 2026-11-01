@@ -1,6 +1,6 @@
 import SyncDifference from "./SyncDifference";
-import { useState } from "react";
-import { Alert, Button, Popconfirm, Space, Tag, Typography } from "antd";
+import { type ReactNode, useState } from "react";
+import { Alert, Button, Popconfirm, Space, Typography } from "antd";
 import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../../dateTime";
 import { getInboundSyncPreview, getInboundSyncIssues } from "../../syncApi";
@@ -12,10 +12,12 @@ import { inboundIssueColumns, inboundPreviewColumns } from "./inboundSyncColumns
 
 export default function InboundSyncPanel({
   syncStatus,
-  sync
+  sync,
+  readiness
 }: {
   syncStatus: SelfOperatedInboundSyncStatus | null;
   sync: ReturnType<typeof useInboundSync>;
+  readiness?: ReactNode;
 }) {
   const {
     syncStarting,
@@ -40,14 +42,15 @@ export default function InboundSyncPanel({
   return (
     <>
       <section
-        className={`purchase-sync-card purchase-sync-card--compact self-operated-sync-card${syncJob?.status === "succeeded" && !syncDetailsOpen ? " purchase-sync-card--summary" : ""}`}
+        className="purchase-sync-card purchase-sync-card--compact self-operated-sync-card"
         aria-label="积加待入库数据同步"
       >
         <div className="purchase-sync-heading">
+          {readiness}
           <div>
             <Space size={8} wrap>
-              <Typography.Title level={5}>积加待入库数据</Typography.Title>
-              <Tag className="purchase-sync-scope-tag">待入库 + 部分入库</Tag>
+              {!readiness && <Typography.Title level={5}>积加待入库数据</Typography.Title>}
+              <span className="purchase-sync-scope-tag">待入库 + 部分入库</span>
             </Space>
           </div>
           <Button
@@ -110,7 +113,7 @@ export default function InboundSyncPanel({
                 <Typography.Text type="secondary">
                   {syncDetailsOpen
                     ? `接口明细 ${syncJob.raw_detail_count} 行，保留 ${syncJob.eligible_detail_count} 行，过滤已全部入库 ${syncJob.filtered_detail_count} 行`
-                    : `保留 ${syncJob.eligible_detail_count} 行 · ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
+                    : `保留 ${syncJob.eligible_detail_count} 行 / ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
                 </Typography.Text>
                 {!syncDetailsOpen && syncJob.warning_count > 0 && (
                   <Typography.Text className="purchase-sync-warning-summary">

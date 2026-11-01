@@ -82,7 +82,7 @@
   }
   .batch-list-table .ant-table-tbody > tr.ant-table-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 12px;
     margin-bottom: 10px;
     padding: 14px;
@@ -120,14 +120,6 @@
     display: block;
     color: #75817d;
     font-size: 11px;
-  }
-  .batch-open-action {
-    width: 100%;
-    padding-inline: 0;
-  }
-  .batch-open-action > span {
-    width: 100%;
-    justify-content: space-between;
   }
   .batch-list-table .ant-pagination {
     margin-top: 12px;

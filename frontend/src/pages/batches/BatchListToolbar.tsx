@@ -36,7 +36,6 @@ export default function BatchListToolbar({
       aria-label={workflow === "self_operated_inbound" ? "入库批次筛选" : "交货批次筛选"}
     >
       <div className="batch-list-toolbar-heading">
-        <strong>{workflow === "self_operated_inbound" ? "入库批次" : "交货批次"}</strong>
         <Typography.Text className="batch-result-count" type="secondary">
           {batchTotal} 个批次
         </Typography.Text>
@@ -85,7 +84,6 @@ export default function BatchListToolbar({
         )}
       </div>
       <div className="table-filter-field">
-        <label htmlFor={`${workflow}-batch-search`}>搜索</label>
         <Input
           id={`${workflow}-batch-search`}
           aria-label="搜索"
@@ -100,7 +98,6 @@ export default function BatchListToolbar({
         />
       </div>
       <div className="table-filter-field">
-        <label htmlFor={`${workflow}-batch-status-filter`}>状态</label>
         <Select
           id={`${workflow}-batch-status-filter`}
           aria-label="状态"

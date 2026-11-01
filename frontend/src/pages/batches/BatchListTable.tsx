@@ -1,5 +1,5 @@
-import { Button, Empty, Popconfirm, Space, Table } from "antd";
-import { RightOutlined } from "@ant-design/icons";
+import { Button, Empty, Popconfirm, Table } from "antd";
+import { DeleteOutlined, LoadingOutlined } from "@ant-design/icons";
 import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import StatusTag from "../../BatchStatusTag";
@@ -8,6 +8,17 @@ import { canDeleteBatch, nextAction } from "./batchWorkspace";
 import type { BatchWorkflow } from "./batchWorkspace";
 import type { useBatchList } from "./useBatchList";
 import type { useBatchDeletion } from "./useBatchDeletion";
+const actionLabels: Record<string, string> = {
+  开始计算: "去计算",
+  生成结果: "去生成",
+  下载结果: "去下载",
+  预检: "去预检",
+  上传交货文件: "去上传",
+  上传质检交货单: "去上传",
+  重新取数并核对: "去核对",
+  查看原因: "查看原因"
+};
+const primaryActions = ["审校待处理", "开始计算", "生成结果", "下载结果"];
 export default function BatchListTable({
   workflow,
   onOpen,
@@ -76,7 +87,7 @@ export default function BatchListTable({
               </Button>
               <span className="batch-id" title={delivery ? undefined : batch.inbound_file?.original_name}>
                 批次 #{batch.id}
-                {!delivery && ` · 待入库数据${batch.inbound_file?.uploaded ? "已就绪" : "未就绪"}`}
+                {!delivery && ` / 待入库数据${batch.inbound_file?.uploaded ? "已就绪" : "未就绪"}`}
               </span>
             </div>
           )
@@ -93,22 +104,35 @@ export default function BatchListTable({
           )
         },
         {
-          title: "文件 / 数量",
+          title: "数量",
           width: 186,
           render: (_, batch) => {
             const summary = delivery || receiptReady(batch) ? batch.summary : undefined;
             return (
               <div className="batch-table-value">
-                <span className="batch-cell-label">文件 / 数量</span>
+                <span className="batch-cell-label">数量</span>
                 <span className="batch-volume">
                   {!delivery ? `${batch.file_count} 份质检单` : `${batch.file_count} 个文件`}
-                  {summary && (!delivery || summary.delivery_total > 0)
-                    ? ` · ${delivery ? "交货" : "本次申请"} ${summary.delivery_total}`
-                    : ""}
                 </span>
+                {summary && summary.delivery_total > 0 && (
+                  <div
+                    className="batch-quantity-bar batch-list-quantity-bar"
+                    role="img"
+                    aria-label={`${delivery ? "可导入" : "可入库"} ${summary.import_total}，待处理 ${summary.manual_total}`}
+                  >
+                    <span
+                      className="batch-quantity-segment quantity-import"
+                      style={{ flexGrow: summary.import_total }}
+                    />
+                    <span
+                      className="batch-quantity-segment quantity-pending"
+                      style={{ flexGrow: summary.manual_total }}
+                    />
+                  </div>
+                )}
                 {summary ? (
                   <span className="batch-allocation">
-                    {delivery ? "可导入" : "可入库"} {summary.import_total} · <span>待处理 {summary.manual_total}</span>
+                    {delivery ? "可导入" : "可入库"} {summary.import_total} / 待处理 <span>{summary.manual_total}</span>
                   </span>
                 ) : !delivery ? (
                   <span className="batch-allocation">尚未计算</span>
@@ -119,13 +143,28 @@ export default function BatchListTable({
         },
         {
           title: "下一步",
-          width: 120,
+          width: 140,
           render: (_, batch) => {
             const action = nextAction(batch, workflow);
             return (
               <div className="batch-table-value">
                 <span className="batch-cell-label">下一步</span>
-                <span className="next-action">{action}</span>
+                {action === "计算中" ? (
+                  <span className="batch-computing">
+                    <LoadingOutlined /> 计算中
+                  </span>
+                ) : (
+                  <Button
+                    size="small"
+                    type={primaryActions.includes(action) ? "primary" : "default"}
+                    danger={action === "查看原因"}
+                    aria-label={"打开 " + batch.name}
+                    title={action}
+                    onClick={() => onOpen(batch.id)}
+                  >
+                    {action === "审校待处理" ? `去审校 ${batch.summary?.manual_total}` : actionLabels[action]}
+                  </Button>
+                )}
                 {delivery && batch.download_ready && action === "审校待处理" && (
                   <span className="batch-result-availability">结果可下载</span>
                 )}
@@ -144,47 +183,37 @@ export default function BatchListTable({
             </div>
           )
         },
-        {
-          title: "操作",
-          width: canDeleteBatches ? 124 : 100,
-          render: (_, batch) => (
-            <Space className="batch-row-actions" size={0}>
-              <Button
-                className="batch-open-action"
-                type="link"
-                aria-label={"打开 " + batch.name}
-                onClick={() => onOpen(batch.id)}
-              >
-                <Space size={4}>
-                  打开
-                  <RightOutlined />
-                </Space>
-              </Button>
-              {canDeleteBatches && (
-                <Popconfirm
-                  title={`永久删除“${batch.name}”？`}
-                  description="将删除批次记录、上传文件和结果文件，无法恢复。"
-                  okText="永久删除"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  disabled={!canDeleteBatch(batch)}
-                  onConfirm={() => void deleteSelectedBatches([batch.id])}
-                >
-                  <Button
-                    danger
-                    type="link"
-                    aria-label={`删除批次 ${batch.name}`}
-                    disabled={!canDeleteBatch(batch)}
-                    loading={deletingBatchIds.includes(batch.id)}
-                    title={canDeleteBatch(batch) ? "删除批次" : "运行中的批次不能删除"}
-                  >
-                    删除
-                  </Button>
-                </Popconfirm>
-              )}
-            </Space>
-          )
-        }
+        ...(canDeleteBatches
+          ? [
+              {
+                title: "操作",
+                width: 64,
+                render: (_: unknown, batch: Batch) => (
+                  <div className="batch-row-actions">
+                    <Popconfirm
+                      title={`永久删除“${batch.name}”？`}
+                      description="将删除批次记录、上传文件和结果文件，无法恢复。"
+                      okText="永久删除"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true }}
+                      disabled={!canDeleteBatch(batch)}
+                      onConfirm={() => void deleteSelectedBatches([batch.id])}
+                    >
+                      <Button
+                        className="batch-delete-action"
+                        type="text"
+                        icon={<DeleteOutlined />}
+                        aria-label={`删除批次 ${batch.name}`}
+                        disabled={!canDeleteBatch(batch)}
+                        loading={deletingBatchIds.includes(batch.id)}
+                        title={canDeleteBatch(batch) ? "删除批次" : "运行中的批次不能删除"}
+                      />
+                    </Popconfirm>
+                  </div>
+                )
+              }
+            ]
+          : [])
       ]}
     />
   );

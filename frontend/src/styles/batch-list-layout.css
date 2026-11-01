@@ -1,76 +1,72 @@
-/* 批次首页只保留运行状态、批次列表和当前待办，降低首屏文字密度。 */
+/* 批次资料与同步操作共用一行，额外同步内容在下方展开。 */
 .batch-list-page {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  grid-template-areas:
-    "heading heading"
-    "status status"
-    "toolbar sync"
-    "table sync";
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "heading" "status" "toolbar" "table";
   align-items: start;
-  gap: 20px 24px;
+  gap: 12px;
 }
-
 .batch-list-page > .page-heading {
   grid-area: heading;
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
-
-.batch-status-strip {
+.batch-materials {
   grid-area: status;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow: hidden;
-  padding-block: 4px;
-  border-block: 1px solid var(--dn-border);
-}
-
-.batch-status-item {
-  position: relative;
-  display: flex;
   min-width: 0;
-  min-height: 84px;
+}
+.batch-materials .purchase-sync-card {
+  display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 5px;
-  padding: 12px 24px;
-  border-left: 1px solid var(--dn-border);
+  gap: 12px;
+  padding: 6px 16px;
+  border: 1px solid var(--dn-border);
+  border-radius: 6px;
+  background: var(--dn-surface);
+  box-shadow: none;
+  margin: 0;
 }
-
-.batch-status-item:first-child {
-  border-left: 0;
+.batch-materials .purchase-sync-card .purchase-sync-heading {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-height: 30px;
+  padding-bottom: 0;
+  border-bottom: 0;
 }
-
-.batch-status-item::before {
-  position: absolute;
-  top: 39px;
-  left: 12px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #7a8c87;
-  content: "";
+.batch-materials .purchase-sync-card .purchase-sync-heading > .ant-btn {
+  width: auto;
+  margin-top: 0;
 }
-
-.batch-status-item.is-ready::before {
-  background: var(--dn-success);
+.batch-readiness {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  min-width: 0;
 }
-.batch-status-item.is-warning::before {
-  background: var(--dn-warning);
+.batch-material-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  color: var(--dn-ink);
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
-.batch-status-item > span {
+.batch-material-item > span:first-child,
+.batch-materials .purchase-sync-scope-tag {
   color: var(--dn-muted);
   font-size: 12px;
 }
-.batch-status-item > strong {
-  color: var(--dn-ink);
-  font-size: 16px;
-  font-weight: 600;
+.batch-material-item.is-warning,
+.batch-material-item.is-warning > span:first-child {
+  color: var(--dn-warning);
 }
-.batch-status-item > small {
-  overflow: hidden;
-  color: var(--dn-muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@media (max-width: 700px) {
+  .batch-readiness {
+    flex-basis: 100%;
+  }
 }
