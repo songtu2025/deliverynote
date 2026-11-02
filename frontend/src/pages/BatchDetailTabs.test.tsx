@@ -39,8 +39,8 @@ describe("交货批次详情标签页", () => {
       await waitFor(() =>
         expect(screen.getByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true")
       );
+      await waitFor(() => expect(document.activeElement).toHaveClass("review-section-anchor"));
       expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
-      expect(document.activeElement).toHaveClass("review-section-anchor");
       fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
       expect(screen.getByRole("tab", { name: "来源文件 2" })).toHaveAttribute("aria-selected", "true");
     } finally {

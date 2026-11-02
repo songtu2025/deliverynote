@@ -71,10 +71,9 @@ describe("PositionMaintenance publishing", () => {
 
     const dialog = await dialogByTitle("发布新的MSKU定位版本");
     const body = dialog.querySelector<HTMLElement>(".ant-modal-body");
-    expect(body).toHaveStyle({
-      maxHeight: "calc(100vh - 300px)",
-      overflowY: "auto"
-    });
+    expect(body).toHaveStyle({ overflowY: "auto" });
+    // 计算样式会把 calc 换算成像素，这里核对组件写入的原始高度表达式。
+    expect(body?.style.maxHeight).toBe("calc(100vh - 300px)");
     const footer = dialog.querySelector<HTMLElement>(".ant-modal-footer");
     expect(footer).toContainElement(within(dialog).getByRole("button", { name: "继续修改草稿" }));
     expect(footer).toContainElement(within(dialog).getByRole("button", { name: "确认发布" }));

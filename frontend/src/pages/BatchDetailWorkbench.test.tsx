@@ -116,8 +116,8 @@ describe("BatchDetailWorkbench", () => {
       const scroll = vi.fn();
       Object.defineProperty(container.querySelector(".review-section-anchor"), "scrollIntoView", { value: scroll });
       fireEvent.click(task.getByRole("button", { name: "开始审校" }));
+      await waitFor(() => expect(document.activeElement).toHaveClass("review-section-anchor"));
       expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
-      expect(document.activeElement).toHaveClass("review-section-anchor");
     } else {
       expect(await task.findByText("审校完成，可以生成结果")).toBeInTheDocument();
       expect(task.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();

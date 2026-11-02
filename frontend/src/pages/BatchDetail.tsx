@@ -59,9 +59,14 @@ export default function BatchDetail({
 
   useEffect(() => {
     if (!reviewFocusRequested || !reviewSection.current) return;
-    reviewSection.current.scrollIntoView({ behavior: "smooth", block: "start" });
-    reviewSection.current.focus({ preventScroll: true });
-    setReviewFocusRequested(false);
+    const section = reviewSection.current;
+    // 标签页在本次提交后才移除隐藏样式，隐藏元素无法获得焦点，延后到下一任务执行。
+    const timer = window.setTimeout(() => {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+      section.focus({ preventScroll: true });
+      setReviewFocusRequested(false);
+    });
+    return () => window.clearTimeout(timer);
   }, [reviewFocusRequested, detailTabs]);
 
   const loadFailure = loadError && (
