@@ -1,0 +1,109 @@
+name: 隔离 Docker 演练
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
+  BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
+
+jobs:
+  images:
+    name: 构建演练镜像
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 构建演练镜像
+        run: |
+          docker build -t "$RELEASE_WEB_IMAGE" frontend
+          docker build -t "$BACKUP_API_IMAGE" .
+      - name: 导出演练镜像
+        run: docker save "$RELEASE_WEB_IMAGE" "$BACKUP_API_IMAGE" | gzip -1 > "$RUNNER_TEMP/drill-images.tar.gz"
+      - name: 上传演练镜像
+        uses: actions/upload-artifact@v4
+        with:
+          name: drill-images
+          path: ${{ runner.temp }}/drill-images.tar.gz
+          compression-level: 0
+          retention-days: 1
+
+  drill:
+    name: ${{ matrix.name }}
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Docker 代理切换与失败回退
+            flag: RELEASE_DOCKER_TESTS
+            modules: tests.test_release_docker
+            python: python3
+          - name: PostgreSQL 与文件卷备份恢复
+            flag: BACKUP_DOCKER_TESTS
+            modules: tests.test_backup_docker
+            python: python3
+          - name: 真实交货业务
+            flag: RECOVERY_BUSINESS_DOCKER_TESTS
+            modules: tests.test_recovery_business_docker tests.test_recovery_validation_docker
+            python: python
+          - name: 真实自营仓业务
+            flag: RECOVERY_INBOUND_DOCKER_TESTS
+            modules: tests.test_recovery_inbound_docker
+            python: python
+          - name: 真实 ERP HTTP 同步与 API 来源恢复
+            flag: RECOVERY_API_DOCKER_TESTS
+            modules: tests.test_recovery_api_docker
+            python: python
+          - name: 真实采购 HTTP 同步与恢复
+            flag: RECOVERY_PURCHASE_DOCKER_TESTS
+            modules: tests.test_recovery_purchase_docker
+            python: python
+          - name: 真实 Worker 退出与备份排空
+            flag: WORKER_DOCKER_TESTS
+            modules: tests.test_worker_shutdown_docker
+            python: python
+          - name: 真实 Worker 中断与租约恢复
+            flag: WORKER_DOCKER_TESTS
+            modules: tests.test_worker_interruption_docker tests.test_export_publication_docker
+            python: python
+          - name: 真实 Worker 并发、旧租约与重试上限
+            flag: WORKER_DOCKER_TESTS
+            modules: tests.test_worker_ownership_docker tests.test_worker_retry_docker tests.test_worker_claim_docker
+            python: python
+          - name: 后端选择性发布、任务排空与失败回退
+            flag: BACKEND_RELEASE_DOCKER_TESTS
+            modules: tests.test_backend_release_docker
+            python: python
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 下载演练镜像
+        uses: actions/download-artifact@v4
+        with:
+          name: drill-images
+          path: ${{ runner.temp }}
+      - name: 加载演练镜像
+        run: gunzip -c "$RUNNER_TEMP/drill-images.tar.gz" | docker load
+      # 前两项沿用原工作流的系统 python3，只依赖标准库。
+      - name: 配置 Python
+        if: matrix.python == 'python'
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock
+      - name: 安装业务演练依赖
+        if: matrix.python == 'python'
+        run: python -m pip install -r requirements.lock
+      - name: 执行隔离演练
+        run: env "${{ matrix.flag }}=1" ${{ matrix.python }} -m unittest ${{ matrix.modules }} -v
