@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     name: 后端与 Python 质量检查
@@ -156,7 +160,7 @@ jobs:
         run: python -m pip check
 
   frontend:
-    name: 前端增量格式、类型检查与测试构建
+    name: 前端增量格式、类型检查与构建
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -197,10 +201,33 @@ jobs:
         run: npm run check:unused
       - name: 前端导入循环检查
         run: npm run check:imports
-      - name: 前端测试
-        run: npm run test
       - name: 生产构建
         run: npm run build
+
+  frontend-tests:
+    name: 前端测试 ${{ matrix.shard }}/3
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: 安装依赖
+        run: npm ci
+      - name: 前端测试
+        run: npm run test -- --shard=${{ matrix.shard }}/3
 
   configuration:
     name: 提交与 Compose 配置检查
@@ -221,73 +248,7 @@ jobs:
           ADMIN_PASSWORD: ci-admin-password
           POSTGRES_PASSWORD: ci-postgres-password
         run: docker compose config --quiet
-      - name: 隔离 Docker 代理切换与失败回退演练
-        env:
-          RELEASE_DOCKER_TESTS: "1"
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: |
-          docker build -t "$RELEASE_WEB_IMAGE" frontend
-          python3 -m unittest tests.test_release_docker -v
-      - name: 隔离 PostgreSQL 与文件卷备份恢复演练
-        env:
-          BACKUP_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: |
-          docker build -t "$BACKUP_API_IMAGE" .
-          python3 -m unittest tests.test_backup_docker -v
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements.lock
-      - name: 安装业务演练依赖
-        run: python -m pip install -r requirements.lock
-      - name: 隔离真实交货业务演练
-        env:
-          RECOVERY_BUSINESS_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_recovery_business_docker tests.test_recovery_validation_docker -v
-      - name: 隔离真实自营仓业务演练
-        env:
-          RECOVERY_INBOUND_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_recovery_inbound_docker -v
-      - name: 隔离真实 ERP HTTP 同步与 API 来源恢复演练
-        env:
-          RECOVERY_API_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_recovery_api_docker -v
-      - name: 隔离真实采购 HTTP 同步与恢复演练
-        env:
-          RECOVERY_PURCHASE_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_recovery_purchase_docker -v
-      - name: 隔离真实 Worker 退出与备份排空演练
-        env:
-          WORKER_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_worker_shutdown_docker -v
-      - name: 隔离真实 Worker 中断与租约恢复演练
-        env:
-          WORKER_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_worker_interruption_docker tests.test_export_publication_docker -v
-      - name: 隔离真实 Worker 并发、旧租约与重试上限演练
-        env:
-          WORKER_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_worker_ownership_docker tests.test_worker_retry_docker tests.test_worker_claim_docker -v
-      - name: 隔离后端选择性发布、任务排空与失败回退演练
-        env:
-          BACKEND_RELEASE_DOCKER_TESTS: "1"
-          BACKUP_API_IMAGE: deliverynote-backup-test:${{ github.sha }}
-          RELEASE_WEB_IMAGE: deliverynote-release-test:${{ github.sha }}
-        run: python -m unittest tests.test_backend_release_docker -v
+
+  drills:
+    name: 隔离演练
+    uses: ./.github/workflows/drills.yml
