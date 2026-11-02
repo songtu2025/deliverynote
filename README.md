@@ -384,7 +384,7 @@ CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、配置范围内
 python -m delivery_note.migrations --database-url postgresql+psycopg://user:password@host/database
 ```
 
-当前迁移数量较少，因此没有引入 Alembic；统一入口先创建缺失的新表，再按固定顺序执行 `overreceipt_rules`、`self_operated_optional_versions` 和 `purchase_sync_optional_versions` 三个幂等升级。新增结构变更必须加入该有序入口，不能只挂在 API 启动代码中。
+当前迁移数量较少，因此没有引入 Alembic；统一入口先创建缺失的新表，再按 `delivery_note/migrations/runner.py` 中的 `MIGRATIONS` 顺序执行所有幂等升级。新增结构变更必须加入该有序入口，不能只挂在 API 启动代码中。
 
 ## 数据与安全
 

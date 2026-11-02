@@ -7,6 +7,9 @@ import os
 from collections.abc import Callable
 
 from ..web.database import Database
+from .batch_file_document_note_text import (
+    migrate as migrate_batch_file_document_note_text,
+)
 from .exception_reason_codes import migrate as migrate_exception_reason_codes
 from .inbound_receipts import migrate as migrate_inbound_receipts
 from .overreceipt_rules import migrate as migrate_overreceipt_rules
@@ -26,6 +29,7 @@ MIGRATIONS: tuple[Callable[[str], None], ...] = (
     migrate_position_draft_row_index,
     migrate_exception_reason_codes,
     migrate_inbound_receipts,
+    migrate_batch_file_document_note_text,
 )
 
 

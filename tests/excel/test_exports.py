@@ -84,6 +84,8 @@ class ExcelOutputTests(unittest.TestCase):
                 ],
                 columns=IMPORT_COLUMNS,
             )
+            document_note = "、".join(f"LN260817{index:04d}" for index in range(30))
+            rows["单据备注"] = document_note
             write_import_workbook(template_path, output_path, rows)
             result = load_workbook(output_path)
             output_sheet = cast(Worksheet, result.active)
@@ -94,6 +96,8 @@ class ExcelOutputTests(unittest.TestCase):
         self.assertEqual(output_sheet["A4"].value, "仓B")
         self.assertEqual(output_sheet["D3"].value, 10)
         self.assertEqual(output_sheet["D4"].value, 20)
+        self.assertEqual(output_sheet["F3"].value, document_note)
+        self.assertEqual(output_sheet["F4"].value, document_note)
         self.assertEqual(
             cast(_StyledCell, output_sheet["A3"])._style,
             cast(_StyledCell, output_sheet["A4"])._style,

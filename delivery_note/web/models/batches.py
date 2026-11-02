@@ -104,7 +104,7 @@ class BatchFile(Base):
     file_order: Mapped[int] = mapped_column(Integer)
     supplier_name: Mapped[str] = mapped_column(String(200), default="")
     supplier_code: Mapped[str] = mapped_column(String(100), default="")
-    document_note: Mapped[str] = mapped_column(String(255), default="")
+    document_note: Mapped[str] = mapped_column(Text, default="")
     delivery_total: Mapped[int] = mapped_column(Integer, default=0)
     import_total: Mapped[int] = mapped_column(Integer, default=0)
     manual_total: Mapped[int] = mapped_column(Integer, default=0)

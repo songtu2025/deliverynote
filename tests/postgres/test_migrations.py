@@ -1,4 +1,4 @@
-from sqlalchemy import inspect, text
+from sqlalchemy import Text, inspect, text
 
 from delivery_note.migrations.runner import migrate_schema
 from delivery_note.web.database import Database
@@ -80,6 +80,7 @@ class MigrationTests(PostgreSQLCase):
                     original_name="legacy.xlsx",
                     storage_path="/legacy.xlsx",
                     file_order=1,
+                    document_note="历史单据备注、LN2608179025",
                 )
                 session.add(source)
                 session.flush()
@@ -96,8 +97,15 @@ class MigrationTests(PostgreSQLCase):
                 batch_id = batch.id
                 sync_job_id = sync_job.id
                 exception_id = exception.id
+                source_id = source.id
 
             with database.engine.begin() as connection:
+                connection.execute(
+                    text(
+                        "ALTER TABLE batch_files ALTER COLUMN document_note "
+                        "TYPE VARCHAR(255)"
+                    )
+                )
                 for table, column in (
                     ("batch_files", "receipt_context"),
                     ("batch_files", "receipt_sites"),
@@ -136,10 +144,17 @@ class MigrationTests(PostgreSQLCase):
             database.dispose()
 
         migrate_schema(self.database_url)
+        migrate_schema(self.database_url)
 
         database = Database(self.database_url)
         try:
             inspector = inspect(database.engine)
+            note_column = next(
+                column
+                for column in inspector.get_columns("batch_files")
+                if column["name"] == "document_note"
+            )
+            self.assertIsInstance(note_column["type"], Text)
             tables = set(inspector.get_table_names())
             batch_columns = {
                 column["name"]: column
@@ -161,6 +176,16 @@ class MigrationTests(PostgreSQLCase):
                 self.assertEqual(sync_job.status, "succeeded")
                 self.assertEqual(exception.reason, "产品信息站点不唯一")
                 self.assertEqual(exception.reason_code, "ambiguous_product_site")
+                source = session.get(BatchFile, source_id)
+                self.assertEqual(source.document_note, "历史单据备注、LN2608179025")
+                long_note = "、".join(f"交货单号-{index:06d}" for index in range(100))
+                self.assertGreater(len(long_note), 1000)
+                source.document_note = long_note
+                session.commit()
+            with database.session() as session:
+                self.assertEqual(
+                    session.get(BatchFile, source_id).document_note, long_note
+                )
         finally:
             database.dispose()
 

@@ -15,6 +15,78 @@ from delivery_note.worker import (
 
 
 class WorkerIntegrationTests(WorkerCase):
+    def test_prepare_and_compute_preserve_thirty_delivery_numbers(self):
+        numbers = [f"LN260817{index:04d}" for index in range(30)]
+        expected_note = "、".join(numbers)
+        self.assertGreater(len(expected_note), 255)
+        delivery = self.create_self_operated_delivery(
+            self.root / "260817-狂飙-多单号质检交货单.xlsx", 1, numbers[0]
+        )
+        workbook = load_workbook(delivery)
+        for number in numbers[1:]:
+            workbook["明细"].append(["SKU-A", 1, "US站", number])
+        workbook.save(delivery)
+        workbook.close()
+        inbound = self.create_self_operated_inbound(self.root / "待入库.xlsx")
+        workbook = load_workbook(inbound)
+        sheet = workbook.worksheets[0]
+        headers = [cell.value for cell in sheet[1]]
+        number_column = headers.index("关联交货单/调拨单") + 1
+        original_rows = list(sheet.iter_rows(min_row=2, values_only=True))
+        sheet.delete_rows(2, sheet.max_row - 1)
+        for index, number in enumerate(numbers):
+            for original in original_rows:
+                values = list(original)
+                values[number_column - 1] = number
+                values[headers.index("积加明细ID")] += f"-{index}"
+                sheet.append(values)
+        workbook.save(inbound)
+        workbook.close()
+        created = self.client.post(
+            "/api/self-operated-batches",
+            headers=self.headers,
+            json={"name": "完整单据备注"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        batch_id = created.json()["id"]
+        with delivery.open("rb") as upload:
+            uploaded = self.client.post(
+                f"/api/batches/{batch_id}/files",
+                headers=self.headers,
+                files={"file": (delivery.name, upload)},
+            )
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+        with inbound.open("rb") as upload:
+            response = self.client.post(
+                f"/api/self-operated-batches/{batch_id}/inbound-file",
+                headers=self.headers,
+                files={"file": (inbound.name, upload)},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        preflight = self.client.post(
+            f"/api/batches/{batch_id}/preflight", headers=self.headers
+        )
+        self.assertEqual(preflight.status_code, 200, preflight.text)
+        prepare_id = preflight.json()["jobs"]["prepare"]["id"]
+        self.assertEqual(run_once(self.database_url, self.storage_root), prepare_id)
+        with self.app.state.database.session() as session:
+            source = session.get(BatchFile, uploaded.json()["id"])
+            self.assertEqual(source.document_note, expected_note)
+            self.assertEqual(session.get(Batch, batch_id).status, "preflight_ready")
+        compute = self.client.post(
+            f"/api/batches/{batch_id}/compute", headers=self.headers
+        )
+        self.assertEqual(compute.status_code, 202, compute.text)
+        self.assertEqual(
+            run_once(self.database_url, self.storage_root), compute.json()["id"]
+        )
+        with self.app.state.database.session() as session:
+            self.assertEqual(session.get(Batch, batch_id).status, "succeeded")
+            self.assertEqual(
+                session.get(BatchFile, uploaded.json()["id"]).document_note,
+                expected_note,
+            )
+
     def test_self_operated_site_choice_recomputes_and_exports_inbound_workbook(self):
         self._prepare_site_choice_inputs()
 
