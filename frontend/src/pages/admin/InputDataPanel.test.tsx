@@ -55,10 +55,10 @@ describe("InputDataPanel 资料类型与工作区", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "更新资料" }));
     const drawer = screen.getByRole("dialog", { name: "更新商品信息" });
-    expect(drawer.querySelector(".input-data-maintenance-header")).toHaveStyle({
-      borderColor: "#e2e9e7",
-      background: "var(--dn-surface-muted)"
-    });
+    const header = drawer.querySelector<HTMLElement>(".input-data-maintenance-header");
+    expect(header).toHaveStyle({ borderColor: "#e2e9e7" });
+    // 计算样式会解析 CSS 变量，这里核对组件写入的原始变量引用。
+    expect(header?.style.background).toBe("var(--dn-surface-muted)");
     expect(drawer.querySelector(".input-data-maintenance-body")).toHaveStyle({ padding: "22px 24px" });
     expect(screen.getByLabelText("新版本名称")).toBeInTheDocument();
   });
