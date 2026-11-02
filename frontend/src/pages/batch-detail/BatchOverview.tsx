@@ -104,22 +104,30 @@ function overviewDescription({ batch, activeJob, reviewError }: OverviewProps, d
 function BatchPrimaryActions({ batch, action, fileActions, tasks }: OverviewProps) {
   const files = batch.files ?? [];
   const selfOperated = batch.workflow === "self_operated_inbound";
-  const { preflight, compute } = tasks;
+  const { preflight, preflightAndCompute, compute } = tasks;
   const { canPreflight, canCompute } = batchPresentation(batch);
+  const preflightAction = selfOperated
+    ? {
+        type: "default" as const,
+        icon: <SafetyCertificateOutlined />,
+        loading: action === "preflight",
+        onClick: () => void preflight(),
+        children: "预检"
+      }
+    : {
+        type: "primary" as const,
+        icon: <PlayCircleOutlined />,
+        loading: action === "preflight-compute",
+        onClick: () => void preflightAndCompute(),
+        children: "预检并计算"
+      };
   return (
     <Space wrap className="batch-primary-actions">
       <BatchFileUploads batch={batch} action={action} fileActions={fileActions} />
       {canPreflight && (
-        <Button
-          icon={<SafetyCertificateOutlined />}
-          disabled={!files.length || (selfOperated && !batch.inbound_file?.uploaded)}
-          loading={action === "preflight"}
-          onClick={() => void preflight()}
-        >
-          预检
-        </Button>
+        <Button {...preflightAction} disabled={!files.length || (selfOperated && !batch.inbound_file?.uploaded)} />
       )}
-      {canCompute && (
+      {(selfOperated ? canCompute : batch.status === "preflight_ready") && (
         <Button
           type="primary"
           icon={<PlayCircleOutlined />}

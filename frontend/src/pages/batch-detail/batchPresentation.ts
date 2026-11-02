@@ -46,7 +46,13 @@ function failureTaskPresentation(batch: Batch) {
       busy: false
     };
   if (batch.status === "failed")
-    return { title: "计算失败", description: "原因见下方，修正后重新预检", tone: "error", busy: false };
+    return {
+      title: "计算失败",
+      description:
+        batch.workflow === "self_operated_inbound" ? "原因见下方，修正后重新预检" : "原因见下方，修正后重新预检并计算",
+      tone: "error",
+      busy: false
+    };
   if (batch.jobs?.export?.status === "failed")
     return { title: "结果生成失败", description: "审校记录已保留，可以重新生成", tone: "error", busy: false };
   return null;
@@ -58,12 +64,14 @@ function preparedTaskPresentation(batch: Batch) {
     ? {
         emptyTitle: "还没有质检交货单",
         upload: "上传一份或多份质检交货单，按顺序处理。",
-        unit: "份质检交货单"
+        unit: "份质检交货单",
+        action: "预检"
       }
     : {
         emptyTitle: "还没有交货文件",
         upload: "上传一个或多个交货 Excel，按顺序处理。",
-        unit: "个文件"
+        unit: "个文件",
+        action: "预检并计算"
       };
   if (batch.status === "preflight_ready")
     return {
@@ -76,7 +84,7 @@ function preparedTaskPresentation(batch: Batch) {
     return { title: "待入库数据尚未就绪", description: "请补齐待入库数据后执行预检。", tone: "waiting", busy: false };
   const count = batch.files?.length ?? 0;
   return {
-    title: count ? `${count} ${copy.unit}已上传，确认顺序后预检` : copy.emptyTitle,
+    title: count ? `${count} ${copy.unit}已上传，确认顺序后${copy.action}` : copy.emptyTitle,
     description: count ? "" : copy.upload,
     tone: "waiting",
     busy: false

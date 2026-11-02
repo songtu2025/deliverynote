@@ -13,7 +13,7 @@ describe("BatchDetailWorkbench", () => {
     ["preflight_ready", false, true],
     ["queued", false, false],
     ["running", false, false],
-    ["failed", true, true],
+    ["failed", true, false],
     ["succeeded", false, false]
   ] as const)("preserves actions in %s", async (status, preflight, compute) => {
     state.batch.status = status;
@@ -21,7 +21,7 @@ describe("BatchDetailWorkbench", () => {
     await screen.findByText(state.batch.name);
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     const task = screen.getByRole("region", { name: "当前批次任务" });
-    expect(within(task).queryByRole("button", { name: /预检/ }) !== null).toBe(preflight);
+    expect(within(task).queryByRole("button", { name: /预检并计算/ }) !== null).toBe(preflight);
     expect(within(task).queryByRole("button", { name: /开始计算|重新计算/ }) !== null).toBe(compute);
     expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(preflight || compute);
     expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();

@@ -74,6 +74,8 @@ describe("BatchDetail", () => {
     await screen.findByText(`预检失败 ${status}`);
     expect(button).not.toHaveClass("ant-btn-loading");
     expect(screen.queryByText("预检通过")).not.toBeInTheDocument();
+    expect(screen.queryByText("预检通过，已开始计算")).not.toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/compute"))).toBe(false);
   });
 
   it.each(["operation", "refresh", "download", "poll", "poll-refresh"])(

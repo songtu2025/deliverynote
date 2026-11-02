@@ -15,6 +15,24 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
       else message.success("预检通过");
     });
 
+  const preflightAndCompute = () =>
+    runAction("preflight-compute", async () => {
+      const result = await preflightBatch(batchId);
+      if (result.status !== "preflight_ready") {
+        await load(true);
+        return;
+      }
+      try {
+        await startBatchJob(batchId, "compute");
+      } catch (error) {
+        // 刷新失败时仍向用户提示原始的计算启动错误。
+        await load(true).catch(() => undefined);
+        throw error;
+      }
+      await load(true);
+      message.info("预检通过，已开始计算");
+    });
+
   const refreshSupplierVersion = () =>
     runAction("refresh-supplier-version", async () => {
       const updated = await adoptSupplierVersion(batchId);
@@ -39,5 +57,5 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
 
   const downloadResult = (path: string, filename: string) => runAction("download", () => download(path, filename));
 
-  return { preflight, refreshSupplierVersion, compute, startExport, downloadResult };
+  return { preflight, preflightAndCompute, refreshSupplierVersion, compute, startExport, downloadResult };
 }
