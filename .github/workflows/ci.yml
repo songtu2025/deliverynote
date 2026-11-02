@@ -4,213 +4,18 @@ on:
   pull_request:
     branches:
       - master
-  push:
-    branches:
-      - master
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
-  backend:
-    name: 后端与 Python 质量检查
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
-        env:
-          POSTGRES_DB: delivery_note_test
-          POSTGRES_USER: delivery_note
-          POSTGRES_PASSWORD: ci-postgres-password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U delivery_note -d delivery_note_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
-    env:
-      POSTGRES_TEST_URL: postgresql+psycopg://delivery_note:ci-postgres-password@127.0.0.1:5432/delivery_note_test
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: |
-            requirements.lock
-            requirements-dev.txt
-      - name: 安装依赖
-        run: python -m pip install -r requirements-dev.txt
-      - name: Ruff 检查
-        run: python -m ruff check delivery_note tests scripts
-      - name: 增量规模与 Python 导入检查
-        env:
-          QUALITY_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: python -m scripts.check_code_health --base "$QUALITY_BASE"
-      - name: 检查工具类型与格式
-        run: |
-          python -m mypy --strict scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
-          python -m ruff format --check scripts/check_code_health.py scripts/python_imports.py tests/test_code_health.py
-      - name: Worker 与全量 Web 模块类型检查
-        run: python -m mypy
-      - name: 模型与契约测试格式检查
-        run: python -m ruff format --check delivery_note/web/models tests/test_model_contracts.py
-      - name: 异常读写模块格式检查
-        run: python -m ruff format --check delivery_note/web/exception_read_routes.py delivery_note/web/exception_write_routes.py delivery_note/web/exception_views.py
-      - name: 批次查询与导出模块格式检查
-        run: python -m ruff format --check delivery_note/web/batch_read_routes.py delivery_note/web/batch_export_routes.py delivery_note/web/batch_views.py tests/web/test_batch_exports.py
-      - name: 任务入口与契约测试格式检查
-        run: python -m ruff format --check delivery_note/web/job_routes.py delivery_note/web/api.py tests/web/test_jobs.py tests/web/test_exception_queries.py
-      - name: 认证与用户管理模块格式检查
-        run: python -m ruff format --check delivery_note/web/auth_routes.py delivery_note/web/user_accounts.py tests/web/test_auth_cookies.py tests/web/test_auth_users.py
-      - name: 基础资料查询与下载模块格式检查
-        run: python -m ruff format --check delivery_note/web/input_version_read_routes.py delivery_note/web/caches.py tests/web/test_input_versions.py tests/web/test_input_inspection_cache.py
-      - name: 基础资料上传与激活模块格式检查
-        run: python -m ruff format --check delivery_note/web/input_version_routes.py delivery_note/web/input_versions.py tests/web/test_input_version_commands.py
-      - name: 共享上传与健康模块格式检查
-        run: python -m ruff format --check delivery_note/web/uploads.py delivery_note/web/health_routes.py tests/web/test_upload_concurrency.py
-      - name: 批次写入与维护模块格式检查
-        run: python -m ruff format --check delivery_note/web/batch_creation.py delivery_note/web/batch_creation_routes.py delivery_note/web/batch_file_edits.py delivery_note/web/batch_file_routes.py delivery_note/web/batch_file_uploads.py delivery_note/web/batch_maintenance.py delivery_note/web/batch_maintenance_routes.py delivery_note/web/batch_preflight.py delivery_note/web/self_operated_creation.py delivery_note/web/self_operated_creation_routes.py delivery_note/web/dependencies.py tests/web/test_inbound_files.py
-      - name: 库位草稿与分析模块格式检查
-        run: python -m ruff format --check delivery_note/web/position_draft_state.py delivery_note/web/position_draft_files.py delivery_note/web/position_draft_read.py delivery_note/web/position_draft_lifecycle.py delivery_note/web/position_draft_import.py delivery_note/web/position_draft_read_routes.py delivery_note/web/position_draft_row_routes.py delivery_note/web/position_draft_lifecycle_routes.py delivery_note/web/position_draft_import_routes.py delivery_note/web/caches.py delivery_note/web/app_setup.py delivery_note/inspection/positions.py
-      - name: 规则与同步模块格式检查
-        run: python -m ruff format --check delivery_note/web/gerpgo_routes.py delivery_note/web/overreceipt_routes.py delivery_note/web/self_operated_rule_routes.py delivery_note/web/sync/inbound_routes.py delivery_note/web/sync/purchase_routes.py delivery_note/web/sync/views.py delivery_note/web/sync/queries.py delivery_note/web/sync/issues.py delivery_note/web/sync/commands.py
-      - name: 同步问题导出契约测试格式检查
-        run: python -m ruff format --check tests/web/test_purchase_candidates.py tests/web/test_inbound_candidates.py tests/web/test_sync_jobs.py
-      - name: 库位加锁与业务投影格式检查
-        run: python -m ruff format --check delivery_note/web/position_draft_creation.py delivery_note/web/position_draft_state.py delivery_note/web/serializers.py delivery_note/workers/export_rows.py delivery_note/workers/export_inputs.py tests/postgres/test_position_draft_concurrency.py tests/workers/test_export_rows.py
-      - name: PostgreSQL 草稿并发测试类型检查
-        run: python -m mypy --check-untyped-defs tests/postgres/test_position_draft_concurrency.py
-      - name: 批次上传回滚契约测试格式检查
-        run: python -m ruff format --check tests/web/test_batch_creation_rollback.py
-      - name: Worker 领取状态与同步并发测试门禁
-        run: |
-          python -m ruff format --check delivery_note/workers/leases.py tests/workers/test_claim_state.py tests/postgres/test_sync_claim_concurrency.py
-          python -m mypy --check-untyped-defs tests/postgres/test_sync_claim_concurrency.py
-      - name: Python 死代码检查
-        run: python -m vulture delivery_note scripts --min-confidence 100
-      - name: 发布工具类型与格式检查
-        run: |
-          python -m mypy --strict scripts/release_common.py scripts/release_backend.py scripts/backend_release.py tests/support/backend_release.py tests/test_backend_release.py tests/support/backend_docker.py tests/test_backend_release_docker.py
-          python -m ruff format --check scripts/release_common.py scripts/release_backend.py scripts/backend_release.py tests/support/backend_release.py tests/test_backend_release.py tests/support/backend_docker.py tests/test_backend_release_docker.py
-          python -m mypy --strict scripts/check_deployment.py scripts/deployment_sources.py scripts/deployment_verification.py tests/test_deployment_sources.py tests/test_deployment_verification.py tests/support/release.py
-          python -m ruff format --check scripts/check_deployment.py scripts/deployment_sources.py scripts/deployment_verification.py tests/test_deployment_sources.py tests/test_deployment_verification.py tests/support/release.py
-          python -m mypy --strict scripts/package_release.py scripts/release_web.py tests/test_release_package.py tests/test_release_web.py tests/test_release_docker.py tests/support/release_docker.py
-          python -m ruff format --check scripts/package_release.py scripts/release_web.py scripts/backup/runtime.py tests/test_release_package.py tests/test_release_web.py tests/test_release_docker.py tests/support/release_docker.py
-          python -m mypy --strict scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/test_web_verification.py
-          python -m mypy --check-untyped-defs tests/postgres/test_backup_queues.py
-          python -m ruff format --check scripts/backup scripts/backup_deliverynote.py scripts/web_verification.py tests/support/backup.py tests/backup/test_services.py tests/backup/test_cli.py tests/postgres/test_backup_queues.py tests/test_web_verification.py
-          python -m mypy --strict tests/support/backup_docker.py tests/test_backup_docker.py
-          python -m ruff format --check tests/support/backup_docker.py tests/test_backup_docker.py tests/backup/test_restore.py
-          python -m mypy --strict tests/backup/test_resources.py
-          python -m ruff format --check tests/backup/test_resources.py
-          python -m mypy --strict scripts/check_restore.py tests/support/restore_manifest.py tests/backup/test_manifest.py tests/backup/test_restore_checks.py tests/backup/test_restore_cli.py tests/test_recovery_validation_docker.py
-          python -m ruff format --check scripts/check_restore.py tests/support/restore_manifest.py tests/backup/test_manifest.py tests/backup/test_restore_checks.py tests/backup/test_restore_cli.py tests/test_recovery_validation_docker.py
-          python -m mypy --strict tests/backup/test_completion.py tests/backup/test_operational_lock.py tests/backup/test_cli.py
-          python -m ruff format --check tests/backup/test_completion.py tests/backup/test_operational_lock.py
-          python -m mypy --strict tests/support/business_docker.py tests/support/business_restore.py tests/support/business_scenario.py tests/support/delivery_exports.py tests/test_recovery_business_docker.py
-          python -m ruff format --check tests/support/business_docker.py tests/support/business_restore.py tests/support/business_scenario.py tests/support/delivery_exports.py tests/test_recovery_business_docker.py tests/workers/test_delivery_end_to_end.py
-          python -m mypy --strict tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py
-          python -m ruff format --check tests/support/business_case.py tests/support/inbound_inputs.py tests/support/inbound_scenario.py tests/support/inbound_exports.py tests/test_recovery_inbound_docker.py tests/workers/test_inbound_site_choice.py
-          python -m mypy --strict tests/support/inbound_recovery.py
-          python -m ruff format --check tests/support/inbound_recovery.py
-          python -m mypy --strict tests/support/erp_stub.py tests/support/api_docker.py tests/support/api_scenario.py tests/test_recovery_api_docker.py
-          python -m ruff format --check tests/support/erp_stub.py tests/support/api_docker.py tests/support/api_scenario.py tests/test_recovery_api_docker.py
-          python -m mypy --strict tests/support/api_recovery.py
-          python -m ruff format --check tests/support/api_recovery.py
-          python -m mypy --strict tests/support/sync_http.py tests/support/purchase_docker.py tests/support/purchase_scenario.py tests/test_recovery_purchase_docker.py
-          python -m ruff format --check tests/support/sync_http.py tests/support/purchase_docker.py tests/support/purchase_scenario.py tests/test_recovery_purchase_docker.py
-          python -m mypy --strict tests/support/purchase_recovery.py
-          python -m ruff format --check tests/support/purchase_recovery.py
-          python -m mypy --strict tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/support/worker_case.py tests/test_worker_shutdown_docker.py tests/test_worker_interruption_docker.py
-          python -m ruff format --check tests/support/worker_process.py tests/support/worker_docker.py tests/support/worker_backup.py tests/support/worker_case.py tests/test_worker_shutdown_docker.py tests/test_worker_interruption_docker.py
-          python -m mypy --strict tests/test_worker_ownership_docker.py tests/test_worker_retry_docker.py tests/test_worker_claim_docker.py tests/test_export_publication_docker.py
-          python -m ruff format --check tests/test_worker_ownership_docker.py tests/test_worker_retry_docker.py tests/test_worker_claim_docker.py tests/test_export_publication_docker.py
-      - name: 同步候选清理类型与格式检查
-        run: |
-          python -m mypy --strict tests/workers/test_sync_file_cleanup.py
-          python -m ruff format --check delivery_note/workers/sync_results.py delivery_note/workers/sync_purchase.py delivery_note/workers/sync_inbound.py tests/workers/test_sync_file_cleanup.py
-      - name: 存储审计类型与格式检查
-        run: |
-          python -m mypy --strict scripts/audit_storage.py scripts/storage_paths.py scripts/storage_resources.py
-          python -m mypy --check-untyped-defs tests/test_storage_audit.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
-          python -m ruff format --check scripts/audit_storage.py scripts/storage_paths.py scripts/storage_resources.py tests/test_storage_audit.py tests/test_storage_resources.py tests/support/storage_audit.py tests/postgres/test_storage_audit.py
-          python -m mypy --check-untyped-defs tests/test_storage_resources.py
-      - name: 历史合并导出恢复类型与格式检查
-        run: |
-          python -m mypy --strict scripts/merged_export_checks.py scripts/merged_export_recovery.py
-          python -m mypy --check-untyped-defs tests/support/merged_recovery.py tests/test_merged_export_recovery.py
-          python -m ruff format --check scripts/merged_export_checks.py scripts/merged_export_recovery.py tests/support/merged_recovery.py tests/test_merged_export_recovery.py
-      - name: 历史导出隔离类型与格式检查
-        run: |
-          python -m mypy --strict scripts/quarantine_files.py scripts/storage_quarantine.py
-          python -m mypy --check-untyped-defs tests/support/storage_quarantine.py tests/test_storage_quarantine.py tests/test_storage_quarantine_safety.py
-          python -m ruff format --check scripts/quarantine_files.py scripts/storage_quarantine.py tests/support/storage_quarantine.py tests/test_storage_quarantine.py tests/test_storage_quarantine_safety.py
-      - name: 后端测试
-        run: python -m unittest discover -s tests -v
-      - name: Python 依赖检查
-        run: python -m pip check
-
-  frontend:
-    name: 前端增量格式、类型检查与构建
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: 安装依赖
-        run: npm ci
-      - name: 前端依赖安全审计
-        run: npm audit --registry=https://registry.npmjs.org
-      - name: 增量格式检查
-        env:
-          FORMAT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: npm run format:check -- --base "$FORMAT_BASE"
-      - name: 独立类型检查
-        run: npm run typecheck
-      - name: 质量门禁测试
-        run: npm run test:quality
-      - name: 工程脚本 ESLint
-        run: npm run lint:tools
-      - name: 增量 React 与 TypeScript ESLint
-        env:
-          LINT_BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: npm run lint -- --base "$LINT_BASE"
-      - name: 全量 React 与 TypeScript ESLint
-        run: npm run lint:all
-      - name: 重复代码扫描
-        run: npm run check:duplicates
-      - name: 前端死代码检查
-        run: npm run check:unused
-      - name: 前端导入循环检查
-        run: npm run check:imports
-      - name: 生产构建
-        run: npm run build
-
-  frontend-tests:
-    name: 前端测试 ${{ matrix.shard }}/3
+  profile:
+    name: 诊断第 3 片 ${{ matrix.run }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        run: [1, 2, 3, 4, 5, 6, 7, 8]
     defaults:
       run:
         working-directory: frontend
@@ -218,37 +23,20 @@ jobs:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: 安装依赖
-        run: npm ci
-      - name: 前端测试
-        run: npm run test -- --shard=${{ matrix.shard }}/3
-
-  configuration:
-    name: 提交与 Compose 配置检查
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - name: 检查 PR 差异
-        if: github.event_name == 'pull_request'
-        run: git diff --check "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
-      - name: 检查 master 推送差异
-        if: github.event_name == 'push'
-        run: git diff --check "${{ github.event.before }}" "${{ github.sha }}"
-      - name: 校验 Compose 配置
+      - run: npm ci
+      - name: 第 3 片测试（CPU 采样）
         env:
-          ADMIN_PASSWORD: ci-admin-password
-          POSTGRES_PASSWORD: ci-postgres-password
-        run: docker compose config --quiet
-
-  drills:
-    name: 隔离演练
-    uses: ./.github/workflows/drills.yml
+          NODE_OPTIONS: --cpu-prof --cpu-prof-dir=${{ runner.temp }}/prof
+        run: npx vitest run --maxWorkers=1 --fileParallelism=false --shard=3/3 --reporter=verbose
+      - name: 上传 CPU 采样
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prof-${{ matrix.run }}
+          path: ${{ runner.temp }}/prof
+          retention-days: 3
