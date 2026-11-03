@@ -2,10 +2,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import case, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from ..excel_io import read_supplier_workbook
@@ -89,17 +91,22 @@ class ExceptionTransferService:
 
     def _reserve_quantity(self, session: Session, item: TransferItem) -> None:
         remaining = ExceptionRecord.manual_quantity - transferred_quantity_expression()
-        changed = session.execute(
-            update(ExceptionRecord)
-            .where(
-                ExceptionRecord.id == item.exception_id,
-                ExceptionRecord.status == "pending",
-                remaining >= item.quantity,
-            )
-            .values(
-                status=case((remaining == item.quantity, "resolved"), else_="pending")
-            )
-            .execution_options(synchronize_session=False)
+        changed = cast(
+            CursorResult[Any],
+            session.execute(
+                update(ExceptionRecord)
+                .where(
+                    ExceptionRecord.id == item.exception_id,
+                    ExceptionRecord.status == "pending",
+                    remaining >= item.quantity,
+                )
+                .values(
+                    status=case(
+                        (remaining == item.quantity, "resolved"), else_="pending"
+                    )
+                )
+                .execution_options(synchronize_session=False)
+            ),
         )
         if changed.rowcount != 1:
             raise HTTPException(
