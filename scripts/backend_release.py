@@ -28,7 +28,11 @@ from scripts.release_common import (
     verify_release_inputs,
     verify_unchanged,
 )
-from scripts.receipt_release import migrate_receipts, verify_receipt_migration
+from scripts.schema_release import (
+    reviewed_changes,
+    run_schema_migrations,
+    verify_reviewed_schema,
+)
 
 
 @dataclass(frozen=True)
@@ -37,7 +41,7 @@ class BackendReleaseConfig(ReleaseConfig):
     job_drain_timeout_seconds: int = 1800
     job_poll_seconds: int = 5
     stop_timeout_seconds: int = 60
-    receipt_migration: bool = False
+    schema_changes: tuple[str, ...] = ()
     web_image: str | None = None
 
 
@@ -51,12 +55,12 @@ def selected_services(config: BackendReleaseConfig) -> tuple[str, ...]:
         raise BackupError("必须选择不重复的 API 或 Worker 服务")
     if selected & config.retained.keys():
         raise BackupError("更新服务不能同时声明为保留版本")
-    if config.receipt_migration and (
-        selected != BACKEND_SERVICES or not config.web_image
-    ):
-        raise BackupError("累计实收迁移必须同时更新全部后端及 Web")
-    if config.web_image and not config.receipt_migration:
-        raise BackupError("联合 Web 发布仅用于显式累计实收迁移")
+    changes = reviewed_changes(config.schema_changes)
+    requires_full_release = any(change.requires_full_release for change in changes)
+    if requires_full_release and (selected != BACKEND_SERVICES or not config.web_image):
+        raise BackupError("声明的结构变更必须同时更新全部后端及 Web")
+    if config.web_image and not requires_full_release:
+        raise BackupError("联合 Web 发布仅用于要求全量发布的已审核结构变更")
     if (
         min(
             config.job_drain_timeout_seconds,
@@ -86,8 +90,10 @@ def preflight(
         previous.retained.get(name, config.revision) for name in BACKEND_SERVICES
     }
     for revision in revisions:
-        if config.receipt_migration:
-            verify_receipt_migration(config.root, revision, config.revision, runner)
+        if config.schema_changes:
+            verify_reviewed_schema(
+                config.root, revision, config.revision, config.schema_changes, runner
+            )
         else:
             verify_schema_unchanged(config.root, revision, config.revision, runner)
     if config.web_image:
@@ -220,9 +226,9 @@ def publish_backend(
             if active_job_count(config, runner) != 0:
                 raise BackupError("Worker 停止后仍存在活动任务")
             rollback_images = retain_images(config, before, services, runner)
-            if config.receipt_migration:
+            if config.schema_changes:
                 migration_attempted = True
-                migrate_receipts(config, runner)
+                run_schema_migrations(config, runner)
             changed_images = True
             updated_images = {name: candidate["Id"] for name in services}
             if config.web_image:
@@ -259,7 +265,7 @@ def publish_backend(
             if migration_attempted:
                 runner.run(compose(config, "stop", "web", "api"))
                 raise BackupError(
-                    f"累计实收发布失败，已回退镜像；入口保持维护，需核查后恢复：{failure}"
+                    f"结构变更发布失败，已回退镜像；入口保持维护，需核查后恢复：{failure}"
                 ) from failure
             raise BackupError(f"发布失败，已恢复原镜像并验收：{failure}") from failure
         return {
