@@ -41,7 +41,7 @@ function failureTaskPresentation(batch: Batch) {
   if (batch.receipt?.issue_count)
     return {
       title: "累计实收待核对",
-      description: "请查看下方累计实收核对明细，修正问题后重新预检。",
+      description: "在积加补好入库单后点「重新取数」；交货单数量有误时替换文件后重新预检。",
       tone: "error",
       busy: false
     };

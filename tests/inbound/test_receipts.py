@@ -40,10 +40,12 @@ class ReceiptTests(InboundAllocationCase):
         self.assertIn("小于", contexts["a"]["rows"][0]["issue"])
         self.assertEqual(requests, [])
 
-    def test_closed_order_does_not_reopen_difference(self):
+    def test_closed_order_keeps_difference_for_pending(self):
         contexts, requests = self.prepare(19, 18, "COMPLETED")
-        self.assertIn("已完结", contexts["a"]["rows"][0]["issue"])
-        self.assertEqual(requests, [])
+        row = contexts["a"]["rows"][0]
+        self.assertEqual((row["issue"], row["requested"]), ("", 1))
+        self.assertEqual(row["notice"], "入库单已完结，新增数量进入待处理")
+        self.assertEqual(len(requests), 1)
 
     def test_missing_history_is_unknown(self):
         contexts, requests = self.prepare(history=None)
@@ -82,6 +84,7 @@ class ReceiptTests(InboundAllocationCase):
         self.assertEqual((result.import_total, result.pending_total), (16, 4))
         pending = result.items[0].result.pending_rows.iloc[0]
         self.assertEqual(pending["SKU"], "SKU-B")
+        self.assertEqual(pending["待处理原因"], "未找到自营仓入库单")
         self.assertEqual(pending["规则内超收数量"], 0)
 
     def test_missing_delivery_number_still_blocks_the_batch(self):

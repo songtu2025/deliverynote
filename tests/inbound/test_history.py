@@ -1,8 +1,12 @@
 from copy import deepcopy
 import unittest
 
+import pandas as pd
+
 from delivery_note.gerpgo import GerpgoClient
 from delivery_note.inbound.history import history_frame, receipt_quantity
+from delivery_note.inbound.receipts import _history_for_row
+from delivery_note.inbound.allocation import completed_history_summary
 
 
 def inbound_order():
@@ -45,6 +49,32 @@ def inbound_order():
 
 
 class HistoryTests(unittest.TestCase):
+    def test_completed_history_breakdown_is_calculated_per_item(self):
+        order = inbound_order()
+        first = history_frame([order])
+        second = first.copy()
+        first.loc[0, ["原始应收货", "已入库"]] = [60, 65]
+        second.loc[0, ["原始应收货", "已入库"]] = [45, 40]
+        summary = completed_history_summary(pd.concat([first, second]), 73)
+        self.assertEqual(
+            (summary.purchase, summary.overreceipt, summary.remaining), (100, 5, 73)
+        )
+
+    def test_receipt_history_still_blocks_invalid_history(self):
+        for changes, message in (
+            ({"入库状态": "CANCELLED"}, "取消或未知"),
+            ({"入库状态": "UNKNOWN"}, "取消或未知"),
+            ({"已退货": 1}, "存在退货"),
+            ({"历史核对问题": "历史合计不一致"}, "历史合计不一致"),
+        ):
+            with self.subTest(changes=changes):
+                frame = history_frame([inbound_order()])
+                for name, value in changes.items():
+                    frame.loc[0, name] = value
+                row = {"cumulative": 19}
+                _history_for_row(row, frame)
+                self.assertIn(message, row["issue"])
+
     def test_parent_null_does_not_replace_child_history(self):
         frame = history_frame([inbound_order()])
         self.assertEqual(frame.iloc[0]["已入库"], 3)

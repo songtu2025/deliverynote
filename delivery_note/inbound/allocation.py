@@ -7,7 +7,21 @@ from ..exception_reasons import ExceptionReason
 from ..processing.allocation import AllocationSummary
 from ..processing.keys import make_overreceipt_key
 from ..processing.models import OverreceiptAllowance, OverreceiptKey
+from .history import receipt_quantity
 from .models import ALLOCATION_COLUMNS, PENDING_COLUMNS, SelfOperatedInboundResult
+
+
+def completed_history_summary(
+    candidates: pd.DataFrame, requested: int
+) -> AllocationSummary:
+    """已完结单据的历史分解仅供审校，新增量全部保留为待处理。"""
+    summary = AllocationSummary(remaining=requested)
+    for _, item in candidates.iterrows():
+        expected = receipt_quantity(item["原始应收货"])
+        history = receipt_quantity(item["已入库"])
+        summary.purchase += min(expected, history)
+        summary.overreceipt += max(history - expected, 0)
+    return summary
 
 
 @dataclass

@@ -22,9 +22,12 @@ def _known_quantity(value):
         return None
 
 
-def allocation_frame(inbound: pd.DataFrame) -> pd.DataFrame:
-    """历史覆盖全部状态，分配仍只开放既有业务仓型和单据类型。"""
-    frame = inbound[inbound["入库状态"].isin(OPEN_STATUSES)].copy()
+def allocation_frame(
+    inbound: pd.DataFrame, *, completed_only: bool = False
+) -> pd.DataFrame:
+    """沿用业务仓型和单据类型，默认选开放单据，也可仅取已完结历史。"""
+    statuses = {"COMPLETED"} if completed_only else OPEN_STATUSES
+    frame = inbound[inbound["入库状态"].isin(statuses)].copy()
     if "仓库类型" in frame and "单据类型" in frame:
         frame = frame[
             (frame["仓库类型"].eq("0") & frame["单据类型"].eq("purchase"))
@@ -58,7 +61,11 @@ def _history_for_row(row: dict, matches: pd.DataFrame) -> None:
                 f"，差额 {abs(requested)}"
             )
         if requested and allocation_frame(matches).empty:
-            raise ValueError("仅有已完结单据或非本流程仓库，存在新增数量时需核对")
+            row["notice"] = (
+                "入库单已完结，新增数量进入待处理"
+                if not allocation_frame(matches, completed_only=True).empty
+                else "非本流程仓库，新增数量进入待处理"
+            )
         row["requested"] = requested
     except ValueError as error:
         row["issue"] = str(error)
