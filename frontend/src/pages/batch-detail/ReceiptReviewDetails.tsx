@@ -1,4 +1,4 @@
-import { Alert, Drawer, Select, Space, Table } from "antd";
+import { Alert, Drawer, Select, Table, Typography } from "antd";
 
 export interface ReceiptRow {
   file_id: number;
@@ -41,38 +41,18 @@ export default function ReceiptReviewDetails({
   return (
     <Drawer title="累计数量与历史依据" open={Boolean(target)} onClose={() => onClose()} size={520}>
       {target && (
-        <Space orientation="vertical" style={{ width: "100%" }}>
-          <div>
-            {target.filename} · {target.supplier}
-          </div>
-          <strong>
-            {target.sku} / {target.original_site}
-          </strong>
-          <div>{target.full_site}</div>
-          <div>
-            累计实收 {target.cumulative} − 历史已入库 {target.history ?? "待核对"} = 本次申请{" "}
-            {target.requested ?? "待核对"}
-          </div>
-          <div>交货单号：{target.delivery_numbers.join("、")}</div>
-          <div>入库单：{referenceText(target.order_numbers, target.notice)}</div>
-          <div>采购单：{referenceText(target.purchase_numbers, target.notice)}</div>
-          <div>积加商品明细 ID：{referenceText(target.item_ids, target.notice)}</div>
-          <Table
-            rowKey="item_id"
-            size="small"
-            dataSource={target.entries}
-            pagination={false}
-            scroll={{ x: 650 }}
-            columns={[
-              { title: "入库单", dataIndex: "order_no" },
-              { title: "采购单", dataIndex: "purchase_no" },
-              { title: "状态", dataIndex: "status" },
-              { title: "已入库", dataIndex: "history", render: (value) => value ?? "待核对" },
-              { title: "分批入库单", dataIndex: "shelf_numbers" }
-            ]}
-          />
+        <div className="receipt-review-details">
+          <header className="receipt-review-heading">
+            <h3>
+              {target.sku} · {target.original_site}
+            </h3>
+            <div className="receipt-review-secondary">
+              {target.filename} · {target.supplier}
+            </div>
+            <div className="receipt-review-secondary">{target.full_site}</div>
+          </header>
+          <ReceiptQuantities target={target} />
           {target.issue && <Alert type="warning" title={target.issue} />}
-          {target.notice && <Alert type="info" title={target.notice} />}
           {target.issue && target.candidates.length > 1 && (
             <Select
               aria-label="选择该文件的完整站点"
@@ -83,10 +63,118 @@ export default function ReceiptReviewDetails({
               onChange={(value) => void onChooseSite(target, value)}
             />
           )}
-        </Space>
+          {target.notice && <Alert type="info" title={target.notice} />}
+          <section aria-label="历史入库明细">
+            <h4 className="receipt-review-section-title">历史入库明细</h4>
+            {target.entries?.length ? (
+              <ReceiptHistory entries={target.entries} />
+            ) : (
+              <div className="receipt-review-references">
+                <div>入库单：{referenceText(target.order_numbers, target.notice)}</div>
+                <div>采购单：{referenceText(target.purchase_numbers, target.notice)}</div>
+                <div>积加商品明细 ID：{referenceText(target.item_ids, target.notice)}</div>
+              </div>
+            )}
+          </section>
+          {target.delivery_numbers.length > 0 && (
+            <section aria-label="交货单号">
+              <h4 className="receipt-review-section-title">交货单号（{target.delivery_numbers.length}）</h4>
+              <Typography.Paragraph
+                className="receipt-review-delivery-numbers"
+                ellipsis={{ rows: 2, expandable: true, symbol: "展开全部" }}
+                copyable={{ text: target.delivery_numbers.join("、") }}
+              >
+                {target.delivery_numbers.join("、")}
+              </Typography.Paragraph>
+            </section>
+          )}
+        </div>
       )}
     </Drawer>
   );
+}
+
+function ReceiptQuantities({ target }: { target: ReceiptRow }) {
+  return (
+    <dl className="receipt-review-quantities" aria-label="入库数量算式">
+      {[
+        { label: "累计实收", value: target.cumulative },
+        { label: "历史已入库", value: target.history },
+        { label: "本次申请", value: target.requested }
+      ].map(({ label, value }) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{quantityText(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+const historyStatusLabels: Record<string, string> = {
+  COMPLETED: "已完结",
+  PART_INBOUND: "部分入库",
+  WAIT_INBOUND: "待入库"
+};
+
+function ReceiptHistory({ entries }: { entries: NonNullable<ReceiptRow["entries"]> }) {
+  const total = entries.reduce<number | null>(
+    (sum, entry) => (sum === null || entry.history === null ? null : sum + entry.history),
+    0
+  );
+  return (
+    <Table
+      className="receipt-review-history"
+      rowKey="item_id"
+      size="small"
+      tableLayout="fixed"
+      dataSource={entries}
+      pagination={false}
+      columns={[
+        {
+          title: "入库单",
+          dataIndex: "order_no",
+          width: "36%",
+          render: (value: string, entry) => (
+            <div>
+              <div>{value}</div>
+              <div className="receipt-review-secondary">
+                ID {entry.item_id}
+                {entry.shelf_numbers && ` · 分批 ${entry.shelf_numbers}`}
+              </div>
+            </div>
+          )
+        },
+        { title: "采购单", dataIndex: "purchase_no", width: "26%" },
+        {
+          title: "状态",
+          dataIndex: "status",
+          width: "20%",
+          render: (value: string) => historyStatusLabels[value] ?? value
+        },
+        {
+          title: "已入库",
+          dataIndex: "history",
+          align: "right",
+          render: (value: number | null) => quantityText(value)
+        }
+      ]}
+      summary={() => (
+        <Table.Summary.Row>
+          <Table.Summary.Cell index={0} colSpan={3}>
+            合计
+          </Table.Summary.Cell>
+          <Table.Summary.Cell index={3} align="right">
+            {quantityText(total)}
+          </Table.Summary.Cell>
+        </Table.Summary.Row>
+      )}
+    />
+  );
+}
+
+function quantityText(value: number | null) {
+  return value === null ? <span className="receipt-review-unconfirmed">待核对</span> : value;
 }
 
 function referenceText(values: string[], notice?: string) {

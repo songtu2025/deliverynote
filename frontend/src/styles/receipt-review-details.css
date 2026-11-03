@@ -1,0 +1,78 @@
+.receipt-review-details {
+  display: grid;
+  gap: 12px;
+  color: var(--dn-ink);
+  overflow-wrap: anywhere;
+}
+
+.receipt-review-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.receipt-review-heading h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.receipt-review-secondary {
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+
+.receipt-review-quantities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 12px 0;
+  border-block: 1px solid var(--dn-border);
+  background: var(--dn-surface-muted);
+}
+
+.receipt-review-quantities > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-inline: 12px;
+}
+
+.receipt-review-quantities > div + div {
+  border-left: 1px solid var(--dn-border);
+}
+
+.receipt-review-quantities dt {
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+
+.receipt-review-quantities dd {
+  order: -1;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.receipt-review-unconfirmed {
+  color: var(--dn-warning);
+}
+
+.receipt-review-section-title {
+  margin: 4px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.receipt-review-history {
+  font-variant-numeric: tabular-nums;
+}
+
+.receipt-review-references {
+  display: grid;
+  gap: 4px;
+}
+
+.receipt-review-delivery-numbers {
+  margin-bottom: 0;
+}
