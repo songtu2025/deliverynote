@@ -30,6 +30,7 @@ MODEL_TABLES = {
     "SelfOperatedSiteResolution": "self_operated_site_resolutions",
     "BatchFile": "batch_files",
     "ExceptionRecord": "exceptions",
+    "ExceptionTransfer": "exception_transfers",
     "SplitRecord": "splits",
     "OverreceiptRuleVersion": "overreceipt_rule_versions",
     "SelfOperatedOverreceiptRuleVersion": "self_operated_overreceipt_rule_versions",
@@ -51,6 +52,7 @@ class ModelContractTests(unittest.TestCase):
                 "SelfOperatedSiteResolution",
                 "BatchFile",
                 "ExceptionRecord",
+                "ExceptionTransfer",
                 "SplitRecord",
             ),
             "rules": (

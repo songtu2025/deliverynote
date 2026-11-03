@@ -26,11 +26,13 @@ import BatchPurchaseSnapshot, { BatchPurchaseSnapshotNotice } from "./batch-deta
 export default function BatchDetail({
   batchId,
   onBack,
-  canRefreshSupplierVersion
+  canRefreshSupplierVersion,
+  onOpenDeliveryBatch
 }: {
   batchId: number;
   onBack: () => void;
   canRefreshSupplierVersion?: boolean;
+  onOpenDeliveryBatch?: (id: number) => void;
 }) {
   const { action, runAction } = useBatchAction();
   const [splitTarget, setSplitTarget] = useState<DeliveryException | null>(null);
@@ -144,6 +146,9 @@ export default function BatchDetail({
     <>
       <BatchPurchaseSnapshotNotice />
       <ExceptionReviewTable
+        key={batchId}
+        transferBatch={batch}
+        onOpenDeliveryBatch={onOpenDeliveryBatch}
         selfOperated={selfOperated}
         review={review}
         fileById={fileById}

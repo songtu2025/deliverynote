@@ -7,6 +7,7 @@ import ReasonGuidance from "./ReasonGuidance";
 import ExceptionReviewActions from "./ExceptionReviewActions";
 import SplitPartsForm from "./SplitPartsForm";
 import SelfOperatedExceptionDetails from "./SelfOperatedExceptionDetails";
+import ExceptionTransfers from "./ExceptionTransfers";
 
 export default function ExceptionReviewDrawer({
   editor,
@@ -42,6 +43,7 @@ export default function ExceptionReviewDrawer({
       {splitTarget && (
         <>
           <ExceptionSourceSummary selfOperated={selfOperated} splitTarget={splitTarget} fileById={fileById} />
+          {selfOperated && <ExceptionTransfers record={splitTarget} />}
 
           {selfOperated ? (
             <SelfOperatedExceptionDetails

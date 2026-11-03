@@ -2,7 +2,10 @@ import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
 import { Button, Card, Empty, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import type { Ref } from "react";
-import type { BatchFile, DeliveryException } from "../../types";
+import type { Batch, BatchFile, DeliveryException } from "../../types";
+import { remainingTransferQuantity } from "../../exceptionTransferApi";
+import { useExceptionTransfer } from "./useExceptionTransfer";
+import ExceptionTransfers from "./ExceptionTransfers";
 import type { ExceptionReview } from "./useExceptionReview";
 import { ExceptionReason, ExceptionEvidence, ExceptionStatusTag, formatPositionValue } from "./ExceptionEvidence";
 import { candidateSites } from "./reviewDraft";
@@ -15,7 +18,9 @@ export default function ExceptionReviewTable({
   hasOverreceiptRule,
   onOpen,
   onReset,
-  sectionRef
+  sectionRef,
+  transferBatch,
+  onOpenDeliveryBatch
 }: {
   selfOperated: boolean;
   review: ExceptionReview;
@@ -24,8 +29,11 @@ export default function ExceptionReviewTable({
   onOpen: (record: DeliveryException) => void;
   onReset: () => void;
   sectionRef: Ref<HTMLDivElement>;
+  transferBatch?: Batch;
+  onOpenDeliveryBatch?: (id: number) => void;
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
+  const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch);
   return (
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
@@ -33,9 +41,18 @@ export default function ExceptionReviewTable({
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}
       >
-        <ExceptionReviewToolbar selfOperated={selfOperated} review={review} onReset={onReset} />
+        <ExceptionReviewToolbar
+          selfOperated={selfOperated}
+          review={review}
+          onReset={() => {
+            transfer.reset();
+            onReset();
+          }}
+        />
+        {review.reviewStats.unfinishedCount > 0 && transfer.action}
         <Table<DeliveryException>
           rowKey="id"
+          rowSelection={transfer.rowSelection}
           loading={exceptionsLoading}
           size={selfOperated ? "small" : undefined}
           dataSource={exceptions}
@@ -61,6 +78,7 @@ export default function ExceptionReviewTable({
             ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen)
           ]}
         />
+        {transfer.modal}
       </Card>
     </div>
   );
@@ -154,7 +172,9 @@ function reviewDetailColumns(
       dataIndex: "manual_quantity",
       width: 75,
       align: selfOperated ? undefined : "right",
-      render: (value: number) => <strong className="pending-value">{value}</strong>
+      render: (value: number, record) => (
+        <strong className="pending-value">{selfOperated ? remainingTransferQuantity(record) : value}</strong>
+      )
     },
     {
       title: selfOperated ? "异常原因" : "原因",
@@ -166,7 +186,12 @@ function reviewDetailColumns(
     {
       title: "审校依据",
       width: selfOperated ? 250 : 180,
-      render: (_, record) => <ExceptionEvidence exception={record} hasOverreceiptRule={hasOverreceiptRule} />
+      render: (_, record) => (
+        <>
+          <ExceptionEvidence exception={record} hasOverreceiptRule={hasOverreceiptRule} />
+          {selfOperated && <ExceptionTransfers record={record} />}
+        </>
+      )
     },
     {
       title: "状态",

@@ -107,6 +107,8 @@ export interface DeliveryException {
   overreceipt_allocated_quantity: number | null;
   overreceipt_remaining_quantity: number | null;
   manual_quantity: number;
+  transferred_quantity?: number;
+  transfers?: { target_batch_id: number; quantity: number; full_site: string }[];
   reason: string;
   reason_code: ExceptionReasonCode;
   allowed_actions: "split"[];

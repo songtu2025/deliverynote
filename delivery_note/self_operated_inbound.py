@@ -5,7 +5,6 @@ import pandas as pd
 from .exception_reasons import ExceptionReason
 from .inbound.allocation import InboundAllocator, completed_history_summary
 from .inbound.candidates import (
-    _apply_site_overrides,
     _resolve_inbound_candidate_sites,
     prepare_inbound_candidates,
     select_inbound_candidates,
@@ -19,6 +18,7 @@ from .inbound.models import (
 from .inbound.receipts import allocation_frame
 from .processing.allocation import AllocationSummary
 from .processing.delivery_sites import resolve_delivery_sites
+from .processing.site_overrides import _apply_site_overrides
 from .processing.models import OverreceiptAllowance, OverreceiptKey
 
 

@@ -6,8 +6,8 @@ import pandas as pd
 
 from ..processing.delivery_sites import resolve_delivery_sites
 from ..processing.keys import _normalize_position_text as key
+from ..processing.site_overrides import _apply_site_overrides
 from .candidates import (
-    _apply_site_overrides,
     _resolve_inbound_candidate_sites,
     prepare_inbound_candidates,
 )

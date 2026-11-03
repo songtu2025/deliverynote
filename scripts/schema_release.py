@@ -12,6 +12,7 @@ from scripts.release_common import ReleaseConfig
 
 
 MODEL_FILE = "delivery_note/web/models/batches.py"
+MODEL_EXPORTS_FILE = "delivery_note/web/models/__init__.py"
 RUNNER_FILE = "delivery_note/migrations/runner.py"
 
 
@@ -25,6 +26,7 @@ class SchemaChange:
     requires_full_release: bool
     model_file: str = MODEL_FILE
     model_imports: frozenset[tuple[str, str]] = frozenset()
+    models: frozenset[str] = frozenset()
 
     @property
     def files(self) -> frozenset[str]:
@@ -33,11 +35,20 @@ class SchemaChange:
                 self.model_file,
                 RUNNER_FILE,
                 f"delivery_note/migrations/{self.migration}.py",
+                *({MODEL_EXPORTS_FILE} if self.models else set()),
             }
         )
 
 
 REVIEWED_SCHEMA_CHANGES = {
+    "exception-transfers": SchemaChange(
+        migration="exception_transfers",
+        migration_function="migrate_exception_transfers",
+        fields=frozenset({"ExceptionRecord.transfers"}),
+        requires_full_release=False,
+        model_imports=frozenset({("sqlalchemy.orm", "relationship")}),
+        models=frozenset({"ExceptionTransfer"}),
+    ),
     "inbound-receipts": SchemaChange(
         migration="inbound_receipts",
         migration_function="migrate_inbound_receipts",
@@ -77,7 +88,11 @@ def reviewed_changes(names: tuple[str, ...]) -> tuple[SchemaChange, ...]:
 
 def _normalize_model(tree: ast.Module, changes: tuple[SchemaChange, ...]) -> None:
     fields = {field for change in changes for field in change.fields}
+    models = {model for change in changes for model in change.models}
     imports = {entry for change in changes for entry in change.model_imports}
+    model_modules = {
+        Path(change.model_file).stem for change in changes if change.models
+    }
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
             node.body = [
@@ -95,10 +110,34 @@ def _normalize_model(tree: ast.Module, changes: tuple[SchemaChange, ...]) -> Non
                 for alias in node.names
                 if (node.module, alias.name) not in imports or alias.asname is not None
             ]
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 1
+            and node.module in model_modules
+        ):
+            node.names = [
+                alias
+                for alias in node.names
+                if alias.name not in models or alias.asname is not None
+            ]
+        if (
+            isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "__all__"
+                for target in node.targets
+            )
+            and isinstance(node.value, ast.List)
+        ):
+            node.value.elts = [
+                entry
+                for entry in node.value.elts
+                if not (isinstance(entry, ast.Constant) and entry.value in models)
+            ]
     tree.body = [
         node
         for node in tree.body
         if not (isinstance(node, ast.ImportFrom) and not node.names)
+        and not (isinstance(node, ast.ClassDef) and node.name in models)
     ]
 
 
@@ -145,7 +184,13 @@ def _normalized_source(
         _normalize_runner(tree, changes)
     else:
         _normalize_model(
-            tree, tuple(change for change in changes if change.model_file == name)
+            tree,
+            tuple(
+                change
+                for change in changes
+                if change.model_file == name
+                or (name == MODEL_EXPORTS_FILE and change.models)
+            ),
         )
     return ast.dump(tree)
 
@@ -172,7 +217,10 @@ def verify_reviewed_schema(
             + "；缺少变更文件："
             + ", ".join(sorted(expected - changed))
         )
-    for name in sorted({RUNNER_FILE, *(change.model_file for change in changes)}):
+    checked = {RUNNER_FILE, *(change.model_file for change in changes)}
+    if any(change.models for change in changes):
+        checked.add(MODEL_EXPORTS_FILE)
+    for name in sorted(checked):
         if _normalized_source(
             root, revision, name, changes, runner
         ) != _normalized_source(root, target, name, changes, runner):

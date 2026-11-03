@@ -5,6 +5,7 @@ import unittest
 from sqlalchemy import inspect, text
 
 from delivery_note.migrations.overreceipt_rules import migrate
+from delivery_note.migrations.exception_transfers import migrate as migrate_transfers
 from delivery_note.migrations.runner import migrate_schema
 from delivery_note.web.database import Database
 from delivery_note.web.models import (
@@ -22,6 +23,29 @@ POSITION_DRAFT_PAGE_INDEX = "ix_position_draft_rows_draft_id_deleted_row_order"
 
 
 class SchemaMigrationRunnerTests(unittest.TestCase):
+    def test_transfer_table_upgrade_is_idempotent_and_keeps_existing_tables(self):
+        with TemporaryDirectory() as directory:
+            url = f"sqlite+pysqlite:///{Path(directory) / 'transfers.db'}"
+            database = Database(url)
+            try:
+                database.create_schema()
+                with database.engine.begin() as connection:
+                    connection.execute(text("DROP TABLE exception_transfers"))
+                migrate_transfers(url)
+                migrate_transfers(url)
+                inspector = inspect(database.engine)
+                self.assertIn("exceptions", inspector.get_table_names())
+                self.assertIn("exception_transfers", inspector.get_table_names())
+                indexes = inspector.get_indexes("exception_transfers")
+                self.assertTrue(
+                    any(item["column_names"] == ["exception_id"] for item in indexes)
+                )
+                self.assertEqual(
+                    len(inspector.get_foreign_keys("exception_transfers")), 4
+                )
+            finally:
+                database.dispose()
+
     def test_fresh_schema_is_complete_and_runner_is_idempotent(self):
         with TemporaryDirectory() as directory:
             database_url = f"sqlite+pysqlite:///{Path(directory) / 'migration.db'}"

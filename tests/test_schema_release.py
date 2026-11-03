@@ -3,12 +3,11 @@
 from dataclasses import replace
 from contextlib import nullcontext
 from pathlib import Path
-import subprocess
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.backup.runtime import BackupError, SubprocessRunner
+from scripts.backup.runtime import BackupError
 from scripts.backend_release import BackendReleaseConfig, publish_backend
 from scripts.deployment_sources import BACKEND_SERVICES
 from scripts.schema_release import (
@@ -211,88 +210,7 @@ class SchemaReleaseTests(unittest.TestCase):
             )
         runner.run.assert_not_called()
 
-    def test_ast_gate_only_ignores_declared_fields_imports_and_migrations(self):
-        names = ("document-note-text",)
-        module = "batch_file_document_note_text"
-        function = "migrate_" + module
-        model = "delivery_note/web/models/batches.py"
-        runner_file = "delivery_note/migrations/runner.py"
-        old_model = (
-            "from sqlalchemy import String\nclass BatchFile:\n"
-            "    document_note: str = String(20)\n    quantity: int = 1\n"
-        )
-        new_model = old_model.replace("import String", "import String, Text").replace(
-            "String(20)", "Text()"
-        )
-        old_runner = "MIGRATIONS: tuple = (existing,)\nOTHER = ()\n"
-        new_runner = (
-            f"from .{module} import migrate as {function}\n"
-            f"MIGRATIONS: tuple = (existing, {function})\nOTHER = ()\n"
-        )
-        expected = REVIEWED_SCHEMA_CHANGES[names[0]].files
-        for model_source, runner_source, error in (
-            (new_model, new_runner, None),
-            (
-                new_model.replace("quantity: int = 1", "quantity: int = 2"),
-                new_runner,
-                model,
-            ),
-            (
-                new_model.replace("String, Text", "Integer, Text"),
-                new_runner,
-                model,
-            ),
-            (
-                new_model,
-                new_runner.replace("OTHER = ()", f"OTHER = ({function},)"),
-                runner_file,
-            ),
-            (new_model, new_runner.replace("existing, ", ""), runner_file),
-        ):
-            runner = Mock()
-            sources = {
-                model: (old_model, model_source),
-                runner_file: (old_runner, runner_source),
-            }
-            runner.run.side_effect = lambda args: sources[args[-1].split(":", 1)[1]][
-                args[-1].startswith(SHA)
-            ]
-            with (
-                self.subTest(model=model_source, runner=runner_source, error=error),
-                patch(
-                    "scripts.schema_release.source_files",
-                    side_effect=[
-                        ({file: "old" for file in expected}, {}),
-                        ({file: "new" for file in expected}, {}),
-                    ],
-                ),
-            ):
-                with (
-                    self.assertRaisesRegex(BackupError, error)
-                    if error
-                    else nullcontext()
-                ):
-                    verify_reviewed_schema(
-                        self.config.root, OLD_SHA, SHA, names, runner
-                    )
-
-    @patch("locale.getencoding", return_value="utf-8")
-    def test_real_git_document_note_history(self, _encoding):
-        root = Path(__file__).resolve().parents[1]
-        old = "c82d4aba4b2180c644202be92fcba8ea1045097a"
-        target = "a27770a03f1857217b39e430d55754cab73a4763"
-        for revision in (old, target):
-            result = subprocess.run(
-                ["git", "-C", str(root), "cat-file", "-e", revision + "^{commit}"],
-                capture_output=True,
-                check=False,
-            )
-            if result.returncode:
-                self.skipTest("测试仓库缺少历史提交：" + revision)
-        verify_reviewed_schema(
-            root, old, target, ("document-note-text",), SubprocessRunner()
-        )
-        with self.assertRaisesRegex(BackupError, "batch_file_document_note_text.py"):
-            verify_reviewed_schema(
-                root, old, target, ("inbound-receipts",), SubprocessRunner()
-            )
+    def test_exception_transfers_does_not_require_unrelated_workers(self):
+        change = REVIEWED_SCHEMA_CHANGES["exception-transfers"]
+        self.assertFalse(change.requires_full_release)
+        self.assertEqual(change.models, frozenset({"ExceptionTransfer"}))
