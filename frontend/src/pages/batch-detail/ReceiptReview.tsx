@@ -110,7 +110,7 @@ export default function ReceiptReview({
               pageSize: 20,
               total,
               showSizeChanger: false,
-              placement: ["topEnd", "bottomEnd"],
+              placement: ["bottomEnd"],
               onChange: setPage
             }}
             columns={[

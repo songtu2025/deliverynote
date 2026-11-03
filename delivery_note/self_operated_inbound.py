@@ -2,7 +2,8 @@ from typing import Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
 
-from .inbound.allocation import InboundAllocator
+from .exception_reasons import ExceptionReason
+from .inbound.allocation import InboundAllocator, completed_history_summary
 from .inbound.candidates import (
     _apply_site_overrides,
     _resolve_inbound_candidate_sites,
@@ -66,11 +67,27 @@ def process_self_operated_inbound(
             }
         )
     )
+    available = allocation_frame(inbound) if "入库状态" in inbound else inbound
+    completed = (
+        allocation_frame(inbound, completed_only=True)
+        if "入库状态" in inbound
+        else inbound.iloc[:0]
+    )
     for _, row in groups.iterrows():
         if int(row["交货量"]) == 0:
             continue
-        available = allocation_frame(inbound) if "入库状态" in inbound else inbound
         candidates, reason = select_inbound_candidates(available, row, supplier_name)
+        if candidates.empty:
+            history, _ = select_inbound_candidates(completed, row, supplier_name)
+            if not history.empty:
+                quantity = int(row["交货量"])
+                allocator.add_pending(
+                    row,
+                    completed_history_summary(history, quantity),
+                    ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED,
+                    over_limit=quantity,
+                )
+                continue
         allocator.allocate(row, candidates, reason)
     return allocator.result(int(resolved["交货量"].sum()))
 

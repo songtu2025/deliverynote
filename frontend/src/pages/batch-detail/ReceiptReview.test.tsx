@@ -7,7 +7,7 @@ import BatchSummary from "./BatchSummary";
 import { createDetailBatch } from "./detailFixtures";
 import { renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
-import { batchPresentation } from "./batchPresentation";
+import { batchPresentation, batchTaskPresentation } from "./batchPresentation";
 
 const fixtureRow: ReceiptRow = {
   file_id: 71,
@@ -71,12 +71,17 @@ describe("累计实收核对", () => {
     expect(within(drawer).getByText("LN1")).toBeInTheDocument();
     expect(within(drawer).getByText("入库单：WV1")).toBeInTheDocument();
     fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getAllByTitle("2")[0]);
+    expect(screen.getAllByTitle("2")).toHaveLength(1);
+    fireEvent.click(screen.getByTitle("2"));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("page=2"), expect.anything()));
   });
 
   it("未知本次量显示待核对，站点选择带文件编号并触发重新核对", async () => {
     const props = fixture();
+    props.batch.receipt.issue_count = 1;
+    expect(batchTaskPresentation(props.batch).description).toBe(
+      "在积加补好入库单后点「重新取数」；交货单数量有误时替换文件后重新预检。"
+    );
     const row = {
       ...fixtureRow,
       history: null,

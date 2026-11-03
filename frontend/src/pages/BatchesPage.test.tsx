@@ -157,6 +157,21 @@ describe("BatchesPage", () => {
     expect(within(row).queryByText(/可入库 100/)).not.toBeInTheDocument();
   });
 
+  it("自营仓草稿有历史核对问题时显示去核对并打开批次", async () => {
+    Object.assign(state.batchRows[0], {
+      workflow: "self_operated_inbound",
+      status: "draft",
+      receipt: { cumulative_total: 19, history_total: 20, requested_total: null, issue_count: 1 }
+    });
+    const onOpen = vi.fn();
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: AntApp });
+    const button = await screen.findByRole("button", { name: "打开 2026-07-21 交货批次" });
+    expect(button).toHaveAttribute("title", "重新取数并核对");
+    expect(button).toHaveTextContent("去核对");
+    fireEvent.click(button);
+    expect(onOpen).toHaveBeenCalledWith(7);
+  });
+
   it.each(["delivery", "self_operated_inbound"] as const)(
     "maps %s upload actions to opening the batch",
     async (workflow) => {

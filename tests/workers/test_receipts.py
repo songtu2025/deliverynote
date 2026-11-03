@@ -14,6 +14,68 @@ from tests.support.worker import WorkerCase
 
 
 class ReceiptWorkerTests(WorkerCase):
+    def test_completed_history_can_compute_without_exporting_history(self):
+        batch_id = self.create_receipt_batch(cumulative=183, managed=True)
+        order = inbound_order()
+        order.update(
+            supplierName="KuangBiao",
+            releatedCode="LN2608179025",
+            orderStatus="COMPLETED",
+        )
+        order["orderItemResultList"][0].update(arriveNum=105, onShelfNum=110)
+        order["onShelfOrderList"][0]["onShelfItemList"][0]["shelfedNum"] = 110
+        with patch(
+            "delivery_note.workers.prepare_inbound.GerpgoClient.from_config"
+        ) as factory:
+            factory.return_value.list_self_operated_inbound_orders.return_value = [
+                order
+            ]
+            batch = self.preflight(batch_id)
+        self.assertEqual(batch["status"], "preflight_ready")
+        self.assertEqual(batch["receipt"]["requested_total"], 73)
+        self.assertEqual(batch["receipt"]["issue_count"], 0)
+        for kind in ("compute", "export"):
+            response = self.client.post(
+                f"/api/batches/{batch_id}/{kind}", headers=self.headers
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            run_once(self.database_url, self.storage_root)
+        batch = self.client.get(f"/api/batches/{batch_id}", headers=self.headers).json()
+        self.assertEqual(batch["status"], "succeeded")
+        self.assertEqual(
+            batch["summary"],
+            {
+                "delivery_total": 73,
+                "import_total": 0,
+                "manual_total": 73,
+                "conserved": True,
+            },
+        )
+        pending = self.client.get(
+            f"/api/batches/{batch_id}/exceptions", headers=self.headers
+        ).json()[0]
+        self.assertEqual(pending["reason_code"], "overreceipt_limit_exceeded")
+        self.assertEqual(
+            tuple(
+                pending[name]
+                for name in (
+                    "purchase_allocated_quantity",
+                    "overreceipt_allocated_quantity",
+                    "overreceipt_remaining_quantity",
+                    "manual_quantity",
+                    "allocated_quantity",
+                )
+            ),
+            (105, 5, 0, 73, 110),
+        )
+        response = self.client.get(
+            f"/api/batches/{batch_id}/download", headers=self.headers
+        )
+        self.assertEqual(response.status_code, 200)
+        book = load_workbook(BytesIO(response.content), data_only=True)
+        self.assertEqual(book.worksheets[0].max_row, 1)
+        book.close()
+
     def test_unmatched_receipt_can_compute_and_export_without_importing_it(self):
         batch_id = self.create_receipt_batch(managed=True)
         order = inbound_order()
