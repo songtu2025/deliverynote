@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Card, Popconfirm, Space, Switch, Table } from "antd";
+import { Alert, App, Button, Card, Popconfirm, Space, Switch, Table, Typography } from "antd";
 import { api } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { Batch } from "../../types";
@@ -26,8 +26,14 @@ export default function ReceiptReview({
   const [target, setTarget] = useState<ReceiptRow | null>(null);
   const busy = receiptBusy(batch);
   const captured = batch.receipt?.captured_at;
+  const issueCount = batch.receipt?.issue_count ?? 0;
 
   useEffect(() => {
+    if (issuesOnly && issueCount === 0) {
+      setIssuesOnly(false);
+      setPage(1);
+      return;
+    }
     let cancelled = false;
     if (!captured || busy) return;
     const query = new URLSearchParams({ page: String(page), page_size: "20", issues_only: String(issuesOnly) });
@@ -49,7 +55,7 @@ export default function ReceiptReview({
     return () => {
       cancelled = true;
     };
-  }, [batch.id, batch.updated_at, captured, busy, page, issuesOnly]);
+  }, [batch.id, batch.updated_at, captured, busy, page, issuesOnly, issueCount]);
 
   const refresh = () =>
     runAction("refresh-history", async () => {
@@ -89,17 +95,19 @@ export default function ReceiptReview({
       {error && <Alert type="error" title={error} />}
       {captured && (
         <>
-          <Space className="inline-alert">
-            <Switch
-              checked={issuesOnly}
-              onChange={(value) => {
-                setIssuesOnly(value);
-                setPage(1);
-              }}
-              aria-label="仅显示待核对"
-            />
-            <span>仅显示待核对 · {batch.receipt?.issue_count ?? 0} 项</span>
-          </Space>
+          {issueCount > 0 && (
+            <Space className="inline-alert">
+              <Switch
+                checked={issuesOnly}
+                onChange={(value) => {
+                  setIssuesOnly(value);
+                  setPage(1);
+                }}
+                aria-label="仅显示待核对"
+              />
+              <span>仅显示待核对 · {issueCount} 项</span>
+            </Space>
+          )}
           <Table<ReceiptRow>
             rowKey={(row) => `${row.file_id}:${row.sku}:${row.original_site}`}
             loading={loading || busy}
@@ -124,7 +132,11 @@ export default function ReceiptReview({
                 title: "核对结果",
                 dataIndex: "issue",
                 width: 240,
-                render: (value, row) => value || row.notice || "已核对"
+                render: (value, row) => (
+                  <Typography.Text type={value ? "danger" : row.notice ? "warning" : "secondary"}>
+                    {value || row.notice || "已核对"}
+                  </Typography.Text>
+                )
               },
               {
                 title: "操作",
