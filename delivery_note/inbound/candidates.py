@@ -1,4 +1,4 @@
-from typing import Mapping, Sequence
+from typing import Sequence
 
 import pandas as pd
 
@@ -106,43 +106,4 @@ def _resolve_inbound_candidate_sites(
         else:
             result.at[index, "完整站点"] = ""
             result.at[index, "异常原因"] = ExceptionReason.INBOUND_ORDER_NOT_FOUND
-    return result
-
-
-def _apply_site_overrides(
-    resolved: pd.DataFrame,
-    site_overrides: Mapping[tuple[str, str], str] | None,
-) -> pd.DataFrame:
-    """应用操作员对仍有歧义的完整站点选择。"""
-    if not site_overrides:
-        return resolved
-
-    normalized_overrides = {
-        (_normalize_position_text(sku), _normalize_position_text(site)): _text(
-            full_site
-        )
-        for (sku, site), full_site in site_overrides.items()
-    }
-    result = resolved.copy()
-    ambiguous = result["异常原因"].eq(ExceptionReason.AMBIGUOUS_PRODUCT_SITE)
-    for index, row in result[ambiguous].iterrows():
-        selected = normalized_overrides.get(
-            (
-                _normalize_position_text(row["SKU"]),
-                _normalize_position_text(row["原始站点"]),
-            )
-        )
-        if not selected:
-            continue
-        candidates = {
-            _normalize_position_text(site)
-            for site in str(row["完整站点"]).split("、")
-            if site.strip()
-        }
-        if _normalize_position_text(selected) not in candidates:
-            raise ValueError(
-                f"人工选择站点不在候选范围：{row['SKU']} / {row['原始站点']}"
-            )
-        result.at[index, "完整站点"] = selected
-        result.at[index, "异常原因"] = ""
     return result

@@ -11,7 +11,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, utcnow
 
@@ -142,6 +142,20 @@ class ExceptionRecord(Base):
     reason: Mapped[str] = mapped_column(String(255))
     reason_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    transfers: Mapped[list["ExceptionTransfer"]] = relationship()
+
+
+class ExceptionTransfer(Base):
+    __tablename__ = "exception_transfers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exception_id: Mapped[int] = mapped_column(ForeignKey("exceptions.id"), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    full_site: Mapped[str] = mapped_column(Text)
+    target_batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"))
+    target_file_id: Mapped[int] = mapped_column(ForeignKey("batch_files.id"))
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

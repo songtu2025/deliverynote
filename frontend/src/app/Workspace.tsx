@@ -66,6 +66,7 @@ function WorkspacePages({
           batchId={batchId}
           canRefreshSupplierVersion={user.role === "admin"}
           onBack={() => navigate({ page, batchId: null })}
+          onOpenDeliveryBatch={(id) => navigate({ page: "batches", batchId: id })}
         />
       )}
       {visitedPages.has("batches") && (

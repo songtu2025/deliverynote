@@ -1,9 +1,10 @@
-from typing import MutableMapping
+from typing import Mapping, MutableMapping
 
 import pandas as pd
 
 from .processing.allocation import DeliveryAllocator
 from .processing.delivery_sites import resolve_delivery_sites
+from .processing.site_overrides import _apply_site_overrides
 
 
 from .processing.models import (
@@ -30,6 +31,7 @@ def process_data(
     | None = None,
     *,
     _purchase_ledger: PurchaseBalanceLedger | None = None,
+    site_overrides: Mapping[tuple[str, str], str] | None = None,
 ) -> BatchResult:
     """完成产品映射、采购需求汇总和交货数量分配。"""
     supplier_code = supplier_code or supplier_name
@@ -44,6 +46,7 @@ def process_data(
     )
 
     delivery = resolve_delivery_sites(delivery_lines, product_info)
+    delivery = _apply_site_overrides(delivery, site_overrides, allow_site_change=True)
 
     purchase_ledger = _purchase_ledger
     if purchase_ledger is None:

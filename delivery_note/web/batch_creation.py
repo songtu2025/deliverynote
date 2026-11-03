@@ -86,6 +86,47 @@ class DeliveryBatchCreator:
     audit: Callable[..., None]
     parse_workbook: UploadParser
 
+    def stage_files(
+        self,
+        session: Session,
+        name: str,
+        user_id: int,
+        *,
+        versions: dict[str, InputVersion],
+        files: list[tuple[str, Path]],
+        created_paths: list[Path],
+    ) -> Batch:
+        batch = _new_delivery_batch(session, name, user_id, versions)
+        input_root = self.storage / "batches" / str(batch.id) / "inputs"
+        input_root.mkdir(parents=True, exist_ok=True)
+        for file_order, (original_name, temporary_path) in enumerate(files, start=1):
+            destination = input_root / f"{uuid4().hex}_{original_name}"
+            os.replace(temporary_path, destination)
+            created_paths.append(destination)
+            session.add(
+                BatchFile(
+                    batch_id=batch.id,
+                    original_name=original_name,
+                    storage_path=str(destination),
+                    file_order=file_order,
+                )
+            )
+        rule = _active_overreceipt_rule(session)
+        _bind_overreceipt_rule(session, batch.id, rule)
+        self.audit(
+            session,
+            user_id,
+            "create_batch_with_files",
+            "batch",
+            batch.id,
+            {
+                "file_count": len(files),
+                "overreceipt_rule_version_id": rule.id if rule else None,
+            },
+        )
+        session.flush()
+        return batch
+
     def create(
         self, session: Session, payload: BatchPayload, user_id: int
     ) -> dict[str, object]:
@@ -139,7 +180,6 @@ class DeliveryBatchCreator:
             for index, original_name in enumerate(original_names, start=1)
         ]
         created_paths: list[Path] = []
-        active_overreceipt_rule = _active_overreceipt_rule(session)
         try:
             for file, temporary_path in zip(files, temporary_paths):
                 await _save_upload(
@@ -152,39 +192,13 @@ class DeliveryBatchCreator:
                     temporary_path,
                 )
 
-            batch = _new_delivery_batch(session, batch_name, user_id, active_versions)
-            input_root = self.storage / "batches" / str(batch.id) / "inputs"
-            await run_in_threadpool(input_root.mkdir, parents=True, exist_ok=True)
-            for file_order, (original_name, temporary_path) in enumerate(
-                zip(original_names, temporary_paths),
-                start=1,
-            ):
-                destination = input_root / f"{uuid4().hex}_{original_name}"
-                await run_in_threadpool(os.replace, temporary_path, destination)
-                created_paths.append(destination)
-                session.add(
-                    BatchFile(
-                        batch_id=batch.id,
-                        original_name=original_name,
-                        storage_path=str(destination),
-                        file_order=file_order,
-                    )
-                )
-            _bind_overreceipt_rule(session, batch.id, active_overreceipt_rule)
-            self.audit(
+            batch = self.stage_files(
                 session,
+                batch_name,
                 user_id,
-                "create_batch_with_files",
-                "batch",
-                batch.id,
-                {
-                    "file_count": len(original_names),
-                    "overreceipt_rule_version_id": (
-                        active_overreceipt_rule.id
-                        if active_overreceipt_rule is not None
-                        else None
-                    ),
-                },
+                versions=active_versions,
+                files=list(zip(original_names, temporary_paths)),
+                created_paths=created_paths,
             )
             session.commit()
         except Exception as error:

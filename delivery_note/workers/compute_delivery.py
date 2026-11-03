@@ -131,6 +131,11 @@ def _execute_compute(
                 supplier_name=supplier.name,
                 supplier_code=supplier.code,
                 source_name=source["original_name"],
+                site_overrides={
+                    (sku, site): full_site
+                    for key, full_site in source["receipt_sites"].items()
+                    for sku, site in [key.split("\t", 1)]
+                },
             )
         )
 

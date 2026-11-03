@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .models import Batch, BatchFile, Job, SelfOperatedBatch
+from .exception_transfer_state import require_no_transfer_links
 
 
 def receipt_signature(
@@ -32,6 +33,7 @@ def invalidate_receipts(
     profile = session.get(SelfOperatedBatch, batch.id)
     if profile is None:
         return
+    require_no_transfer_links(session, [batch.id])
     if refresh:
         profile.receipt_snapshot = None
     elif profile.receipt_snapshot:

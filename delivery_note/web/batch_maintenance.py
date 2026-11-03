@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from .batch_views import batch_json
 from .receipt_state import invalidate_receipts
 from .dependencies import RequestDependencies
+from .exception_transfer_state import require_no_transfer_links
 from .models import (
     Batch,
     BatchFile,
@@ -77,6 +78,7 @@ class BatchMaintenance:
                 detail=f"以下批次存在排队或运行中的任务，不能删除：{active_text}",
             )
 
+        require_no_transfer_links(session, batch_ids)
         sources = session.scalars(
             select(BatchFile).where(BatchFile.batch_id.in_(batch_ids))
         ).all()

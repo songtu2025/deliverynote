@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 import pandas as pd
 
@@ -12,11 +12,11 @@ from .config import (
     SupplierIdentity,
     build_ordered_document_note,
 )
-from .processing.models import (IMPORT_COLUMNS, BatchResult, OverreceiptPolicy)
-from .processing.pending import (build_manual_import_rows)
-from .processing.overreceipt import (build_overreceipt_allowances)
-from .pipeline import (process_data)
-from .processing.purchase_balances import (build_purchase_balance_ledger)
+from .processing.models import IMPORT_COLUMNS, BatchResult, OverreceiptPolicy
+from .processing.pending import build_manual_import_rows
+from .processing.overreceipt import build_overreceipt_allowances
+from .pipeline import process_data
+from .processing.purchase_balances import build_purchase_balance_ledger
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class DeliveryRequest:
     supplier_name: str
     supplier_code: str
     source_name: str = ""
+    site_overrides: Mapping[tuple[str, str], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,7 @@ def process_delivery_batch(
             delivery.supplier_code,
             overreceipt_allowances=overreceipt_allowances,
             _purchase_ledger=purchase_ledger,
+            site_overrides=delivery.site_overrides,
         )
         if document_note:
             import_rows = result.import_rows.copy()

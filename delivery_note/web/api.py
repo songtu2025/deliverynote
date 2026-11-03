@@ -44,6 +44,8 @@ from .exception_views import (
 from .exception_read_routes import register_exception_read_routes
 from .exception_write_routes import register_exception_write_routes
 from .inbound_exception_routes import register_inbound_exception_routes
+from .exception_transfer_routes import register_exception_transfer_routes
+from .exception_transfers import ExceptionTransferService
 from .purchase_snapshot_routes import register_purchase_snapshot_routes
 from .input_version_read_routes import register_input_version_read_routes
 from .models import AuditLog
@@ -188,10 +190,16 @@ def create_app(
         dependencies,
         SelfOperatedBatchCreator(app, storage, _audit, parse_uploaded_workbook),
     )
+    delivery_creator = DeliveryBatchCreator(
+        app, storage, _audit, parse_uploaded_workbook
+    )
+    register_exception_transfer_routes(
+        app, dependencies, ExceptionTransferService(dependencies, delivery_creator)
+    )
     register_batch_creation_routes(
         app,
         dependencies,
-        DeliveryBatchCreator(app, storage, _audit, parse_uploaded_workbook),
+        delivery_creator,
     )
     register_batch_file_routes(
         app,

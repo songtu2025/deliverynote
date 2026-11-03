@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .batch_read_routes import MAX_LIST_PAGE_SIZE
 from .caches import PositionFrameCache
@@ -108,6 +108,8 @@ def register_exception_read_routes(
             .order_by(BatchFile.file_order, ExceptionRecord.id)
         )
         filtered_positions: PositionValuesByException | None = None
+        if self_operated:
+            query = query.options(selectinload(ExceptionRecord.transfers))
         exceptions: Sequence[ExceptionRecord]
         if search.strip() or scale_position or stocking_position:
             filtered_positions = {}

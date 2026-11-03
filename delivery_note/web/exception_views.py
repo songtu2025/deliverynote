@@ -13,6 +13,7 @@ from ..exception_reasons import exception_reason_code
 from ..processing.models import IMPORT_COLUMNS, POSITION_VALUE_COLUMNS
 from ..processing.pending import enrich_pending_import_rows
 from .caches import PositionFrameCache
+from .exception_transfer_state import transferred_quantity_expression
 from .models import Batch, BatchFile, ExceptionRecord, InputVersion, SplitRecord
 
 
@@ -50,7 +51,8 @@ def _exception_review_stats(session: Session, batch_id: int) -> dict[str, int | 
                         case(
                             (
                                 ExceptionRecord.status != "resolved",
-                                ExceptionRecord.manual_quantity,
+                                ExceptionRecord.manual_quantity
+                                - transferred_quantity_expression(),
                             ),
                             else_=0,
                         ),
@@ -164,7 +166,17 @@ def _exception_json(
     position_values = position_values or {}
     reason_code = exception.reason_code or exception_reason_code(exception.reason)
     allowed_actions = [] if self_operated else ["split"]
+    transfers = exception.transfers if self_operated else []
     return {
+        "transferred_quantity": sum(transfer.quantity for transfer in transfers),
+        "transfers": [
+            {
+                "target_batch_id": transfer.target_batch_id,
+                "quantity": transfer.quantity,
+                "full_site": transfer.full_site,
+            }
+            for transfer in transfers
+        ],
         "id": exception.id,
         "batch_file_id": exception.batch_file_id,
         "sku": exception.sku,
