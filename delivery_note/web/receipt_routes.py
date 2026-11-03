@@ -71,6 +71,7 @@ def register_receipt_routes(
             for row in source.receipt_context["rows"]
             if not issues_only or row["issue"]
         ]
+        rows.sort(key=lambda row: 0 if row["issue"] else 1 if row.get("notice") else 2)
         offset = (page - 1) * page_size
         return {"items": rows[offset : offset + page_size], "total": len(rows)}
 
