@@ -1,4 +1,4 @@
-"""选择性发布无数据库迁移的后端版本，失败时恢复原镜像。"""
+"""选择性发布后端版本，支持显式声明已审核结构变更，失败时恢复原镜像。"""
 
 import argparse
 import json
@@ -9,6 +9,7 @@ from scripts.backup.runtime import BackupError, SubprocessRunner
 from scripts.backend_release import BackendReleaseConfig, publish_backend
 from scripts.deployment_sources import BACKEND_SERVICES
 from scripts.release_common import add_release_arguments, release_config, verify_ci
+from scripts.schema_release import REVIEWED_SCHEMA_CHANGES
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -24,7 +25,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--job-poll-seconds", type=int, default=5)
     parser.add_argument("--stop-timeout-seconds", type=int, default=60)
     parser.add_argument(
-        "--receipt-migration", action="store_true", help="显式执行已审核的累计实收迁移"
+        "--schema-change",
+        action="append",
+        choices=sorted(REVIEWED_SCHEMA_CHANGES),
+        default=[],
+        help="声明已审核的结构变更，可重复指定不同名称",
     )
     parser.add_argument("--web-image", help="与后端一同切换的 Web 候选镜像")
     arguments = parser.parse_args(argv)
@@ -36,7 +41,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             job_drain_timeout_seconds=arguments.job_drain_timeout_seconds,
             job_poll_seconds=arguments.job_poll_seconds,
             stop_timeout_seconds=arguments.stop_timeout_seconds,
-            receipt_migration=arguments.receipt_migration,
+            schema_changes=tuple(arguments.schema_change),
             web_image=arguments.web_image,
         )
         verify_ci(config.revision, arguments.ci_run)

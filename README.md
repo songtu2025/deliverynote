@@ -386,6 +386,8 @@ python -m delivery_note.migrations --database-url postgresql+psycopg://user:pass
 
 当前迁移数量较少，因此没有引入 Alembic；统一入口先创建缺失的新表，再按 `delivery_note/migrations/runner.py` 中的 `MIGRATIONS` 顺序执行所有幂等升级。新增结构变更必须加入该有序入口，不能只挂在 API 启动代码中。
 
+后端选择性发布 `python -m scripts.release_backend` 默认拒绝任何模型或迁移变化；已审核的结构变更登记在 `scripts/schema_release.py`，发布时用 `--schema-change NAME` 显式声明（可重复）。`document-note-text` 允许只发部分后端，`inbound-receipts` 要求全部后端及 `--web-image`。生产执行仍需逐次授权。
+
 ## 数据与安全
 
 - 不提交 `.env`、密码、Token、业务 Excel、数据库、日志或导出结果；
