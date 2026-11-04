@@ -11,6 +11,7 @@ describe("交货批次详情标签页", () => {
     state.exceptions = [state.exceptions[0]];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "可导入 100" })).toBeInTheDocument();
     const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
     expect(bar.children).toHaveLength(2);
     expect(screen.getByText("交货 160 = 可导入 100 + 待处理 60")).toHaveClass("conservation-ok");
@@ -23,6 +24,7 @@ describe("交货批次详情标签页", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "来源文件 2" })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByRole("tab", { name: /^待处理/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^可导入/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
     expect(screen.getByText("purchase-v1")).toBeVisible();
@@ -46,6 +48,68 @@ describe("交货批次详情标签页", () => {
     } finally {
       Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
     }
+  });
+
+  it("全部可扣时仍可从标签页查看明细", async () => {
+    state.batch.summary = { delivery_total: 1, import_total: 1, manual_total: 0, conserved: true };
+    state.exceptions = [];
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).includes("/import-rows?")
+          ? Promise.resolve(
+              jsonResponse({
+                items: [
+                  {
+                    file_id: 10,
+                    file_name: "合成文件.xlsx",
+                    row_index: 0,
+                    sku: "SKU-可导入",
+                    site: "US",
+                    warehouse: "本地仓",
+                    supplier_code: "GYS-001",
+                    quantity: 1,
+                    document_note: "",
+                    delivery_note: ""
+                  }
+                ],
+                total: 1
+              })
+            )
+          : originalFetch(input, init)
+      )
+    );
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "可导入 1" }));
+    expect(await screen.findByText("SKU-可导入")).toBeVisible();
+  });
+
+  it("转交来源显示汇总、跳转及对应文件标注", async () => {
+    state.batch.transfer_sources = [
+      { batch_id: 187, batch_name: "来源一", record_count: 1, quantity: 1, file_ids: [10] },
+      { batch_id: 188, batch_name: "来源二", record_count: 2, quantity: 3, file_ids: [10] }
+    ];
+    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: "可导入 100" });
+    const heading = container.querySelector(".batch-heading")!;
+    expect(heading).toHaveTextContent("转自 自营仓 #187 · 1 条 1 件、自营仓 #188 · 2 条 3 件");
+    expect(within(heading as HTMLElement).getByRole("link", { name: "#187" })).toHaveAttribute(
+      "href",
+      "/self-operated/187"
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
+    const firstFile = screen.getByText("KuangBiao-A交货单.xlsx").closest("tr")!;
+    expect(firstFile).toHaveTextContent("转自 #187、转自 #188");
+    expect(within(firstFile).getByRole("link", { name: "#188" })).toHaveAttribute("href", "/self-operated/188");
+    expect(screen.getByText("KuangBiao-B交货单.xlsx").closest("tr")).not.toHaveTextContent("转自");
+  });
+
+  it("没有转交来源时不显示来源文字", async () => {
+    state.batch.transfer_sources = [];
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    await screen.findByRole("tab", { name: "可导入 100" });
+    expect(screen.queryByText(/转自/)).not.toBeInTheDocument();
   });
 
   it("读取审校统计失败时仅显示两段待处理数量", async () => {

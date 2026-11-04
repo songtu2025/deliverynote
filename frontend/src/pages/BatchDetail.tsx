@@ -184,6 +184,7 @@ export default function BatchDetail({
           />
         ) : (
           <DeliveryDetailTabs
+            batch={batch}
             computed={computed}
             activeKey={detailTabs[batchId]}
             onChange={selectDetailTab}

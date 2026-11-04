@@ -3,6 +3,7 @@ import { Alert, Button, Card, Empty, Popconfirm, Space, Table, Tooltip } from "a
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
 import type { Batch, BatchFile } from "../../types";
 import type { BatchFiles } from "./useBatchFiles";
+import BatchTransferSources from "./BatchTransferSources";
 
 export default function BatchFileTable({
   batch,
@@ -58,13 +59,14 @@ export default function BatchFileTable({
             <Empty description={selfOperated ? "请先上传一份或多份质检交货单" : "请先上传一个或多个交货 Excel"} />
           )
         }}
-        columns={batchFileColumns({ files, selfOperated, canEditFiles, computed, actions, downloadResult })}
+        columns={batchFileColumns({ batch, files, selfOperated, canEditFiles, computed, actions, downloadResult })}
       />
     </Card>
   );
 }
 
 function batchFileColumns({
+  batch,
   files,
   selfOperated,
   canEditFiles,
@@ -72,6 +74,7 @@ function batchFileColumns({
   actions,
   downloadResult
 }: {
+  batch: Batch;
   files: BatchFile[];
   selfOperated: boolean;
   canEditFiles: boolean;
@@ -88,7 +91,17 @@ function batchFileColumns({
       width: 80,
       render: (value: number) => <span className="file-order">{String(value).padStart(2, "0")}</span>
     },
-    { title: "来源文件", dataIndex: "original_name", ellipsis: true },
+    {
+      title: "来源文件",
+      dataIndex: "original_name",
+      ellipsis: true,
+      render: (value: string, file: BatchFile) => (
+        <>
+          {value}
+          <BatchTransferSources batch={batch} fileId={file.id} />
+        </>
+      )
+    },
     {
       title: "供应商",
       dataIndex: "supplier_name",
