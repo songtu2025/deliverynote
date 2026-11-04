@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button, Flex, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { Batch, DeliveryException } from "../../types";
@@ -6,12 +6,17 @@ import { getTransferOptions, remainingTransferQuantity } from "../../exceptionTr
 import type { TransferOptions } from "../../exceptionTransferApi";
 import { workspacePath } from "../../app/workspaceRoutes";
 import ExceptionTransferModal from "./ExceptionTransferModal";
+import { PurchaseSnapshotContext } from "./useBatchPurchaseSnapshot";
 
-export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: number) => void) {
-  const [selected, setSelected] = useState<DeliveryException[]>([]);
-  const [open, setOpen] = useState(false);
+function useTransferOptions() {
   const optionsCache = useRef(new Map<number, TransferOptions>());
   const pendingOptions = useRef(new Map<number, Promise<TransferOptions>>());
+  const { completed_at: completedAt, snapshot_id: snapshotId } = useContext(PurchaseSnapshotContext)?.data ?? {};
+  const clearOptions = useCallback(() => {
+    optionsCache.current.clear();
+    pendingOptions.current.clear();
+  }, []);
+  useEffect(clearOptions, [completedAt, snapshotId, clearOptions]);
   const loadOptions = useCallback((id: number) => {
     const cached = optionsCache.current.get(id);
     if (cached) return Promise.resolve(cached);
@@ -19,13 +24,23 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
     if (pending) return pending;
     const request = getTransferOptions(id)
       .then((result) => {
-        optionsCache.current.set(id, result);
+        // 刷新前的请求完成后，不得回填旧数据。
+        if (pendingOptions.current.get(id) === request) optionsCache.current.set(id, result);
         return result;
       })
-      .finally(() => pendingOptions.current.delete(id));
+      .finally(() => {
+        if (pendingOptions.current.get(id) === request) pendingOptions.current.delete(id);
+      });
     pendingOptions.current.set(id, request);
     return request;
   }, []);
+  return { optionsCache, loadOptions, clearOptions };
+}
+
+export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: number) => void) {
+  const [selected, setSelected] = useState<DeliveryException[]>([]);
+  const [open, setOpen] = useState(false);
+  const { optionsCache, loadOptions, clearOptions } = useTransferOptions();
   if (!batch || batch.workflow !== "self_operated_inbound" || batch.status !== "succeeded") {
     return { rowSelection: undefined, reset: () => setSelected([]), action: null, modal: null };
   }
@@ -39,7 +54,7 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
     })
   };
   const success = (id: number) => {
-    optionsCache.current.clear();
+    clearOptions();
     setOpen(false);
     setSelected([]);
     if (onOpen) onOpen(id);

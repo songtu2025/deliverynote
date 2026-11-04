@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Form, InputNumber, Modal, Select, Table, Typography } from "antd";
+import { Alert, App, Button, Flex, Form, InputNumber, Modal, Select, Table, Typography } from "antd";
 import type { DeliveryException } from "../../types";
 import { remainingTransferQuantity, transferExceptions } from "../../exceptionTransferApi";
 import type { TransferItem, TransferOptions } from "../../exceptionTransferApi";
 import { preflightBatch, startBatchJob } from "../../batchDetailApi";
-import TransferPurchaseDetails, { transferSiteOptions } from "./TransferPurchaseDetails";
+import TransferPurchaseDetails, { estimateTransfers, transferSiteOptions } from "./TransferPurchaseDetails";
 import { formatBeijingDateTime } from "../../dateTime";
 
 export default function ExceptionTransferModal({
@@ -31,6 +31,7 @@ export default function ExceptionTransferModal({
   const [attempt, setAttempt] = useState(0);
   const items = Form.useWatch("items", form) as TransferItem[] | undefined;
   const queriedAt = sites.find((site) => site?.queried_at)?.queried_at;
+  const estimate = estimateTransfers(records, items, sites);
   useEffect(() => {
     let active = true;
     setLoading(records.some((record) => !optionsCache.has(record.id)));
@@ -99,6 +100,18 @@ export default function ExceptionTransferModal({
       keyboard={!submitting}
       onCancel={onClose}
       onOk={() => void submit()}
+      footer={(_, { OkBtn, CancelBtn }) => (
+        <Flex justify="space-between" align="center" gap="small" wrap>
+          <Typography.Text style={{ fontVariantNumeric: "tabular-nums" }}>
+            合计转交 {estimate.total} 件 = 预计可扣 {estimate.available ? estimate.deductible : "—"} + 预计待处理{" "}
+            {estimate.available ? estimate.pending : "—"}
+          </Typography.Text>
+          <Flex gap="small">
+            <CancelBtn />
+            <OkBtn />
+          </Flex>
+        </Flex>
+      )}
     >
       {error && (
         <Alert
@@ -132,34 +145,22 @@ export default function ExceptionTransferModal({
           pagination={false}
           loading={loading}
           dataSource={records}
-          scroll={{ x: 1000, y: 440 }}
+          scroll={{ x: 1060, y: "min(440px, calc(100vh - 280px))" }}
           onRow={() => ({ style: { verticalAlign: "middle" } })}
-          expandable={{
-            defaultExpandAllRows: true,
-            expandedRowRender: (record, index) => {
-              const site = items?.[index]?.full_site ?? record.full_site;
-              const quantity = records.reduce(
-                (total, row, rowIndex) =>
-                  row.sku === record.sku && (items?.[rowIndex]?.full_site ?? row.full_site) === site
-                    ? total + (Number(items?.[rowIndex]?.quantity ?? remainingTransferQuantity(row)) || 0)
-                    : total,
-                0
-              );
-              return <TransferPurchaseDetails data={sites[index]} site={site} quantity={quantity} />;
-            }
-          }}
           columns={[
-            { title: "SKU", dataIndex: "sku", width: 130 },
-            { title: "原站点", dataIndex: "full_site", width: 190 },
+            { title: "SKU", dataIndex: "sku", width: 150 },
+            { title: "原站点", dataIndex: "full_site", width: 140 },
             {
-              title: "剩余可转量",
-              width: 100,
+              title: "可转",
+              width: 60,
               align: "right",
-              render: (_, record) => remainingTransferQuantity(record)
+              render: (_, record) => (
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>{remainingTransferQuantity(record)}</span>
+              )
             },
             {
               title: "转交数量",
-              width: 130,
+              width: 110,
               align: "right",
               render: (_, record, index) => (
                 <Form.Item
@@ -178,8 +179,9 @@ export default function ExceptionTransferModal({
                   ]}
                 >
                   <InputNumber
+                    style={{ width: "100%" }}
                     aria-label={record.sku + " 转交数量"}
-                    styles={{ input: { textAlign: "right" } }}
+                    styles={{ input: { textAlign: "right", fontVariantNumeric: "tabular-nums" } }}
                     min={1}
                     max={remainingTransferQuantity(record)}
                     step={1}
@@ -193,7 +195,7 @@ export default function ExceptionTransferModal({
             },
             {
               title: "目标站点",
-              width: 350,
+              width: 200,
               render: (_, record, index) => (
                 <Form.Item
                   style={{ marginBottom: 0 }}
@@ -215,6 +217,28 @@ export default function ExceptionTransferModal({
                   />
                 </Form.Item>
               )
+            },
+            {
+              title: "采购去向",
+              width: 240,
+              render: (_, record, index) => (
+                <TransferPurchaseDetails data={sites[index]} site={items?.[index]?.full_site ?? record.full_site} />
+              )
+            },
+            {
+              title: "预计",
+              width: 160,
+              render: (_, __, index) => {
+                const row = estimate.rows[index];
+                if (!row) return <Typography.Text type="secondary">—</Typography.Text>;
+                return (
+                  <Typography.Text type={row.pending ? "warning" : "success"}>
+                    {row.pending
+                      ? `${row.deductible ? `可扣 ${row.deductible}，` : ""}${row.pending} 件进待处理`
+                      : "全部可扣"}
+                  </Typography.Text>
+                );
+              }
             }
           ]}
         />

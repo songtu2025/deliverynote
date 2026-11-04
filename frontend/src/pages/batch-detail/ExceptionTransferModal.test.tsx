@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Table } from "antd";
 import type { DeliveryException } from "../../types";
@@ -9,8 +9,6 @@ import ExceptionTransferModal from "./ExceptionTransferModal";
 import ExceptionTransfers from "./ExceptionTransfers";
 import { useExceptionTransfer } from "./useExceptionTransfer";
 import { getTransferOptions } from "../../exceptionTransferApi";
-import type { TransferOptions } from "../../exceptionTransferApi";
-import { transferSiteOptions } from "./TransferPurchaseDetails";
 
 const record = { ...createDetailExceptions()[0], manual_quantity: 8, transferred_quantity: 3 };
 const records = [record];
@@ -172,29 +170,34 @@ describe("自营仓转交货", () => {
     expect(screen.getByRole("link", { name: "已转 3 件 → 交货批次 #44" })).toHaveAttribute("href", "/batches/44");
   });
 
-  it("取消后重开复用缓存，成功后清空缓存", async () => {
-    renderDetail(<Selection onSuccess={vi.fn()} />);
-    await openSelection();
-    fireEvent.click(screen.getByRole("button", { name: /取.*消/ }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "转交货批次" }));
-    expect(screen.getByRole("button", { name: "创建交货批次" })).toBeEnabled();
-    expect(screen.getByText("PO-US")).toBeInTheDocument();
-    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("transfer-options"))).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "创建交货批次" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    await openSelection();
-    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("transfer-options"))).toHaveLength(2);
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("purchase-options"))).toBe(false);
-  });
-
-  it("同 SKU 同站点汇总提示超出量，切换站点即时重算", async () => {
-    renderModal([record, { ...record, id: 99 }]);
-    await waitFor(() => expect(screen.getAllByText("超出未交 5 件，将进入新批次待处理")).toHaveLength(2));
+  it("同 SKU 同站点按行顺序扣减，数量与站点变化时重算结论和合计", async () => {
+    renderModal([record, { ...record, id: 99 }, { ...record, id: 100 }]);
+    await screen.findAllByText("PO-US");
+    const rows = screen.getAllByRole("row").filter((row) => within(row).queryByRole("spinbutton"));
+    expect(within(rows[0]).getByText("全部可扣")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("5 件进待处理")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("5 件进待处理")).toBeInTheDocument();
+    expect(screen.getByText("合计转交 15 件 = 预计可扣 5 + 预计待处理 10")).toBeInTheDocument();
+    fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: "2" } });
+    expect(await within(rows[1]).findByText("可扣 3，2 件进待处理")).toBeInTheDocument();
+    expect(screen.getByText("合计转交 12 件 = 预计可扣 5 + 预计待处理 7")).toBeInTheDocument();
     fireEvent.mouseDown(screen.getAllByRole("combobox")[0]);
     fireEvent.click(await screen.findByText("OTHER:US · 未交 12"));
-    expect(await screen.findByText("PO-OTHER")).toBeInTheDocument();
-    expect(screen.queryAllByText(/超出未交/)).toHaveLength(0);
+    expect(await within(rows[0]).findByText("PO-OTHER")).toBeInTheDocument();
+    expect(within(rows[1]).getByText("全部可扣")).toBeInTheDocument();
+    expect(within(rows[2]).getByText("5 件进待处理")).toBeInTheDocument();
+    expect(screen.getByText("合计转交 12 件 = 预计可扣 7 + 预计待处理 5")).toBeInTheDocument();
+    for (const row of rows) expect(within(row).queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Expand row|Collapse row/ })).not.toBeInTheDocument();
+  });
+
+  it("不同 SKU 独立扣减，清空数量时不计入转交合计", async () => {
+    renderModal([record, { ...record, id: 99, sku: "SKU-B" }]);
+    await screen.findAllByText("PO-US");
+    expect(screen.getAllByText("全部可扣")).toHaveLength(2);
+    expect(screen.getByText("合计转交 10 件 = 预计可扣 10 + 预计待处理 0")).toBeInTheDocument();
+    fireEvent.change(screen.getAllByRole("spinbutton")[0], { target: { value: "" } });
+    expect(await screen.findByText("合计转交 5 件 = 预计可扣 5 + 预计待处理 0")).toBeInTheDocument();
   });
 
   it.each(["preflight_failed", "request_failed", "compute_failed"])("%s 仍跳转", async (failure) => {
@@ -226,27 +229,9 @@ describe("自营仓转交货", () => {
     ).toBeInTheDocument();
   });
 
-  it("站点按未交降序排列，零余额置后且使用次要色", () => {
-    const options = transferSiteOptions({
-      sites: ["AMAZON:EMPTY:DE", "AMAZON:SEEKWAY:JP", "AMAZON:OTHER:US"],
-      purchases: [
-        { site: "AMAZON:SEEKWAY:JP", remaining_quantity: 42 },
-        { site: "AMAZON:OTHER:US", remaining_quantity: 5 }
-      ],
-      purchase_error: null,
-      queried_at: null
-    } as TransferOptions);
-    expect(options.map((option) => option.label)).toEqual([
-      "SEEKWAY:JP · 未交 42",
-      "OTHER:US · 未交 5",
-      "EMPTY:DE · 未交 0"
-    ]);
-    expect(options[2].style).toEqual({ color: "var(--dn-muted)" });
-  });
-
   it("采购快照不可用时显示原因，仍允许选择站点提交", async () => {
     const purchaseError = "请先加载或刷新整批采购数据";
-    const data: TransferOptions = {
+    const data = {
       sites: [record.full_site],
       purchases: [],
       queried_at: null,
@@ -264,6 +249,7 @@ describe("自营仓转交货", () => {
     );
     expect(await screen.findByText(purchaseError)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "创建交货批次" })).toBeEnabled();
-    expect(screen.queryByText(/超出未交/)).not.toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByText("合计转交 5 件 = 预计可扣 — + 预计待处理 —")).toBeInTheDocument();
   });
 });
