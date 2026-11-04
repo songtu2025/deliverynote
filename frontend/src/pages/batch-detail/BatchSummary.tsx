@@ -127,7 +127,9 @@ function Conservation({ batch }: { batch: Batch }) {
 
 function QuantityMetric({ label, value, tone }: QuantityMetric) {
   return (
-    <div className={`batch-quantity-metric ${value == null ? "quantity-unknown" : `metric-${tone ?? "total"}`}`}>
+    <div
+      className={`batch-quantity-metric ${value == null ? "quantity-unknown" : `metric-${value === 0 ? "total" : (tone ?? "total")}`}`}
+    >
       <span>{label}</span> <strong>{value == null ? "—" : value.toLocaleString("zh-CN")}</strong>
     </div>
   );
