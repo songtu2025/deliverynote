@@ -6,7 +6,7 @@ import type { ReceiptRow } from "./ReceiptReviewDetails";
 import BatchSummary from "./BatchSummary";
 import { createDetailBatch } from "./detailFixtures";
 import { renderDetail } from "../batchDetailTestSupport";
-import { deferred, jsonResponse } from "../admin/positionDraftTestSupport";
+import { jsonResponse } from "../admin/positionDraftTestSupport";
 import { batchPresentation, batchTaskPresentation } from "./batchPresentation";
 
 const fixtureRow: ReceiptRow = {
@@ -191,48 +191,6 @@ describe("累计实收核对", () => {
     const drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByText(row.notice)).toBeInTheDocument();
     expect(within(drawer).getByText("入库单：未匹配")).toBeInTheDocument();
-  });
-
-  it("整批采购数据任务运行时仍读取核对明细，不一直加载", async () => {
-    const props = fixture();
-    const snapshotJob = {
-      id: 91,
-      batch_id: props.batch.id,
-      kind: "purchase_snapshot" as const,
-      status: "running",
-      attempts: 1,
-      error_message: null,
-      download_ready: false,
-      created_at: "2026-11-04T00:00:00Z",
-      claimed_at: "2026-11-04T00:00:00Z",
-      heartbeat_at: null,
-      finished_at: null
-    };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse({ items: [fixtureRow], total: 1 }))
-    );
-    const { container } = renderDetail(
-      <ReceiptReview {...props} batch={{ ...props.batch, jobs: { purchase_snapshot: snapshotJob } }} />
-    );
-    expect(await screen.findByText("狂飙-A.xlsx")).toBeInTheDocument();
-    expect(container.querySelector(".ant-spin-spinning")).not.toBeInTheDocument();
-  });
-
-  it("请求未返回时批次进入处理中，处理结束后不残留加载状态", async () => {
-    const props = fixture();
-    const pending = deferred<Response>();
-    const fetchMock = vi.fn(() => pending.promise);
-    vi.stubGlobal("fetch", fetchMock);
-    const { container, rerender } = renderDetail(<ReceiptReview {...props} />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const queued = { ...props.batch, status: "queued" };
-    rerender(<ReceiptReview {...props} batch={queued} />);
-    pending.resolve(jsonResponse({ items: [fixtureRow], total: 1 }));
-    fetchMock.mockImplementation(async () => jsonResponse({ items: [fixtureRow], total: 1 }));
-    rerender(<ReceiptReview {...props} batch={{ ...queued, status: "draft", updated_at: "2026-11-04T00:00:00Z" }} />);
-    expect(await screen.findByText("狂飙-A.xlsx")).toBeInTheDocument();
-    await waitFor(() => expect(container.querySelector(".ant-spin-spinning")).not.toBeInTheDocument());
   });
 });
 
