@@ -11,7 +11,7 @@ describe("交货批次详情标签页", () => {
     state.exceptions = [state.exceptions[0]];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "可导入 100" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "可导入 2" })).toBeInTheDocument();
     const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
     expect(bar.children).toHaveLength(2);
     expect(screen.getByText("交货 160 = 可导入 100 + 待处理 60")).toHaveClass("conservation-ok");
@@ -91,7 +91,7 @@ describe("交货批次详情标签页", () => {
       { batch_id: 188, batch_name: "来源二", record_count: 2, quantity: 3, file_ids: [10] }
     ];
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: "可导入 100" });
+    await screen.findByRole("tab", { name: "可导入 2" });
     const heading = container.querySelector(".batch-heading")!;
     expect(heading).toHaveTextContent("转自 自营仓 #187 · 1 条 1 件、自营仓 #188 · 2 条 3 件");
     expect(within(heading as HTMLElement).getByRole("link", { name: "#187" })).toHaveAttribute(
@@ -108,7 +108,7 @@ describe("交货批次详情标签页", () => {
   it("没有转交来源时不显示来源文字", async () => {
     state.batch.transfer_sources = [];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: "可导入 100" });
+    await screen.findByRole("tab", { name: "可导入 2" });
     expect(screen.queryByText(/转自/)).not.toBeInTheDocument();
   });
 
