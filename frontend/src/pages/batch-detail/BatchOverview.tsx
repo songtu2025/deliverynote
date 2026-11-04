@@ -18,6 +18,7 @@ import type { useBatchTasks } from "./useBatchTasks";
 import { batchPresentation, batchResultPresentation, batchTaskPresentation } from "./batchPresentation";
 import BatchExportActions from "./BatchExportActions";
 import type { ExceptionReview } from "./useExceptionReview";
+import BatchTransferSources from "./BatchTransferSources";
 
 type OverviewProps = {
   batch: Batch;
@@ -51,6 +52,7 @@ export default function BatchOverview(props: OverviewProps) {
           <Typography.Text type="secondary">
             {batch.files?.length ?? 0} 个来源文件，更新于 {formatBeijingDateTime(batch.updated_at)}
           </Typography.Text>
+          <BatchTransferSources batch={batch} />
         </div>
       </div>
 

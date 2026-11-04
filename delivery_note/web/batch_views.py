@@ -19,6 +19,7 @@ from .batch_queries import (
     exception_totals_by_source,
 )
 from .models import Batch, BatchFile
+from .batch_transfer_sources import batch_transfer_sources
 from .serializers import (
     job_json,
     overreceipt_rule_json,
@@ -169,6 +170,11 @@ def _batch_details(
     session: Session,
 ) -> dict[str, object]:
     return {
+        **(
+            {"transfer_sources": batch_transfer_sources(session, batch.id)}
+            if metadata.self_operated is None
+            else {}
+        ),
         "files": [
             file_json(
                 source,

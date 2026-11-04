@@ -1,7 +1,11 @@
 import { api } from "./api";
-import type { Batch, BatchFile, DeliveryException, Job, SplitPart } from "./types";
+import type { Batch, BatchFile, DeliveryException, DeliveryImportRow, Job, SplitPart } from "./types";
 
 export const REVIEW_PAGE_SIZE = 10;
+
+export function getBatchImportRows(batchId: number, params: URLSearchParams) {
+  return api<{ items: DeliveryImportRow[]; total: number }>(`/api/batches/${batchId}/import-rows?${params}`);
+}
 
 export type ExceptionPage = {
   items: DeliveryException[];

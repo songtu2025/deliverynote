@@ -5,11 +5,48 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from delivery_note.processing.models import IMPORT_COLUMNS
+
 from .dependencies import BatchLookup
 from .models import Batch, BatchFile, SelfOperatedBatch, User
 
 
 MAX_LIST_PAGE_SIZE = 200
+
+
+def _import_rows_page(
+    session: Session, batch_id: int, offset: int, limit: int, search: str
+) -> dict[str, object]:
+    fields = (
+        "warehouse",
+        "supplier_code",
+        "sku",
+        "quantity",
+        "site",
+        "document_note",
+        "delivery_note",
+    )
+    keyword = search.strip().casefold()
+    items: list[dict[str, object]] = []
+    total = 0
+    query = (
+        select(BatchFile.id, BatchFile.original_name, BatchFile.import_rows)
+        .where(BatchFile.batch_id == batch_id)
+        .order_by(BatchFile.file_order)
+    )
+    for file_id, file_name, rows in session.execute(query):
+        for row_index, row in enumerate(rows or []):
+            item = dict(zip(fields, (row.get(column, "") for column in IMPORT_COLUMNS)))
+            item.update(file_id=file_id, file_name=file_name, row_index=row_index)
+            if keyword and not any(
+                keyword in str(item[field]).casefold()
+                for field in ("sku", "site", "warehouse", "file_name")
+            ):
+                continue
+            if offset <= total < offset + limit:
+                items.append(item)
+            total += 1
+    return {"items": items, "total": total}
 
 
 def register_batch_read_routes(
@@ -92,3 +129,19 @@ def register_batch_read_routes(
         session: Annotated[Session, Depends(get_session)],
     ) -> dict[str, object]:
         return batch_json(get_batch_or_404(batch_id, session), session)
+
+    @app.get("/api/batches/{batch_id}/import-rows", response_model=None)
+    def list_import_rows(
+        batch_id: int,
+        _user: Annotated[User, Depends(current_user)],
+        session: Annotated[Session, Depends(get_session)],
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=MAX_LIST_PAGE_SIZE)] = 10,
+        search: str = "",
+    ) -> dict[str, object]:
+        batch = get_batch_or_404(batch_id, session)
+        if session.get(SelfOperatedBatch, batch.id) is not None or not (
+            batch.status == "succeeded" or batch.zip_path
+        ):
+            return {"items": [], "total": 0}
+        return _import_rows_page(session, batch.id, offset, limit, search)

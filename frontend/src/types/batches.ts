@@ -45,6 +45,13 @@ export interface Batch {
   updated_at: string;
   file_count: number;
   files?: BatchFile[];
+  transfer_sources?: {
+    batch_id: number;
+    batch_name: string;
+    record_count: number;
+    quantity: number;
+    file_ids: number[];
+  }[];
   versions?: Record<string, InputVersion>;
   jobs?: Partial<Record<"compute" | "export" | "prepare" | "purchase_snapshot", Job>>;
   receipt?: ReceiptTotals | null;
@@ -54,6 +61,19 @@ export interface Batch {
     manual_total: number;
     conserved: boolean;
   };
+}
+
+export interface DeliveryImportRow {
+  file_id: number;
+  file_name: string;
+  row_index: number;
+  warehouse: string;
+  supplier_code: string;
+  sku: string;
+  quantity: number;
+  site: string;
+  document_note: string;
+  delivery_note: string;
 }
 
 export interface Job {
