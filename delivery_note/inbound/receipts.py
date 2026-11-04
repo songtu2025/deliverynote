@@ -4,6 +4,7 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
+from ..exception_reasons import ExceptionReason
 from ..processing.delivery_sites import resolve_delivery_sites
 from ..processing.keys import _normalize_position_text as key
 from ..processing.site_overrides import _apply_site_overrides
@@ -114,7 +115,15 @@ def _file_receipt(delivery, products, inbound, choices) -> dict:
     for row in grouped.values():
         if context.get("issue"):
             row["issue"] = context["issue"]
-        if not row["issue"]:
+        elif row["issue"] in {
+            ExceptionReason.PRODUCT_NOT_FOUND,
+            ExceptionReason.AMBIGUOUS_PRODUCT_SITE,
+        }:
+            row["reason"] = row["issue"]
+            row["notice"] = f"{row['reason']}：历史未确认，全部进入待处理"
+            row["requested"] = row["cumulative"]
+            row["issue"] = ""
+        elif not row["issue"]:
             matches = scoped[
                 scoped["_sku_key"].eq(key(row["sku"]))
                 & scoped["_site_key"].eq(key(row["full_site"]))
@@ -179,7 +188,7 @@ def prepare_receipts(
     inbound: pd.DataFrame,
     file_choices: Mapping[Any, Mapping[tuple[str, str], str]],
 ) -> tuple[dict[Any, dict], list[SelfOperatedInboundRequest]]:
-    """未知数量保留为空；任一核对问题都会阻断整批分配。"""
+    """站点未确认行全额进入待处理，只有阻塞问题中止整批分配。"""
     inbound = validate_history_frame(inbound)
     contexts = {
         item.source_id: _file_receipt(
@@ -193,11 +202,10 @@ def prepare_receipts(
         context = contexts[item.source_id]
         rows = context["rows"]
         context["cumulative_total"] = sum(row["cumulative"] for row in rows)
-        context["history_total"] = (
-            None
-            if any(row["history"] is None for row in rows)
-            else sum(row["history"] for row in rows)
+        context["history_total"] = sum(
+            row["history"] for row in rows if row["history"] is not None
         )
+        context["unconfirmed_count"] = sum(row["history"] is None for row in rows)
         context["requested_total"] = (
             None
             if any(row["issue"] for row in rows)

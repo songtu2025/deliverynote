@@ -39,6 +39,7 @@ class RequestDependencies:
         *,
         for_update: bool = False,
         detail: str = "当前批次状态不可修改文件",
+        allow_succeeded: bool = False,
     ) -> Batch:
         """复用查询与锁，在各文件入口保持一致的可编辑状态。"""
         batch = self.get_batch_or_404(batch_id, session, for_update=for_update)
@@ -51,7 +52,10 @@ class RequestDependencies:
             raise HTTPException(
                 status_code=409, detail="后台任务进行中，请完成后再修改输入"
             )
-        if batch.status not in {"draft", "preflight_ready", "failed"}:
+        allowed = {"draft", "preflight_ready", "failed"}
+        if allow_succeeded:
+            allowed.add("succeeded")
+        if batch.status not in allowed:
             raise HTTPException(status_code=409, detail=detail)
         return batch
 

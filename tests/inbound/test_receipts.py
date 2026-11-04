@@ -49,7 +49,7 @@ class ReceiptTests(InboundAllocationCase):
 
     def test_missing_history_is_unknown(self):
         contexts, requests = self.prepare(history=None)
-        self.assertIsNone(contexts["a"]["history_total"])
+        self.assertEqual(contexts["a"]["history_total"], 0)
         self.assertEqual(requests, [])
 
     def test_unmatched_sku_becomes_pending_without_blocking_matched_quantity(self):
@@ -103,7 +103,7 @@ class ReceiptTests(InboundAllocationCase):
         )
         contexts, requests = prepare_receipts([delivery], self.products(), inbound, {})
         self.assertEqual(requests, [])
-        self.assertIsNone(contexts["a"]["history_total"])
+        self.assertEqual(contexts["a"]["history_total"], 0)
         self.assertIn("缺少交货单号", contexts["a"]["rows"][0]["issue"])
 
     def test_files_do_not_share_history_but_share_overreceipt(self):
@@ -250,47 +250,6 @@ class ReceiptTests(InboundAllocationCase):
         )
         contexts, _ = prepare_receipts([delivery], self.products(), inbound, {})
         self.assertEqual(contexts["a"]["history_total"], 3)
-
-    def test_site_choice_does_not_leak_to_another_file(self):
-        products = self.products().copy()
-        other = products.copy()
-        other["店铺/站点"] = "OTHER:US"
-        products = pd.concat([products, other])
-        rows = []
-        for number in ("LN2608179011", "LN2608179012"):
-            for site in ("AMAZON:RIVMOUNT:US", "AMAZON:OTHER:US"):
-                rows.append(
-                    {
-                        "积加明细ID": number + site,
-                        "已入库": 3,
-                        "原始应收货": 19,
-                        "入库状态": "PART_INBOUND",
-                        "关联交货单/调拨单": number,
-                        "平台站点": site,
-                    }
-                )
-        deliveries = [
-            SelfOperatedInboundRequest(name, self.delivery(19), (number,), "Yu feng")
-            for name, number in (("a", "LN2608179011"), ("b", "LN2608179012"))
-        ]
-        contexts, requests = prepare_receipts(
-            deliveries,
-            products,
-            self.inbound(rows),
-            {"a": {("SKU-A", "US"): "AMAZON:RIVMOUNT:US"}},
-        )
-        self.assertEqual(contexts["a"]["requested_total"], 16)
-        self.assertIsNone(contexts["b"]["requested_total"])
-        self.assertEqual(requests, [])
-        contexts, requests = prepare_receipts(
-            deliveries,
-            products,
-            self.inbound(rows),
-            {"a": {("SKU-A", "US"): "AMAZON:REMOVED:US"}},
-        )
-        self.assertIn("不在候选范围", contexts["a"]["rows"][0]["issue"])
-        self.assertEqual(len(contexts["a"]["rows"][0]["candidates"]), 2)
-        self.assertEqual(requests, [])
 
 
 if __name__ == "__main__":

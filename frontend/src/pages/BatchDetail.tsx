@@ -154,6 +154,7 @@ export default function BatchDetail({
       <ExceptionReviewTable
         key={batchId}
         transferBatch={batch}
+        onVersions={() => selectDetailTab("versions")}
         onSaved={() => load(true)}
         onOpenDeliveryBatch={onOpenDeliveryBatch}
         transferActionTarget={transferActionTarget}

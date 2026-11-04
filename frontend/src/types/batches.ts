@@ -6,6 +6,7 @@ interface ReceiptTotals {
   history_total?: number | null;
   requested_total?: number | null;
   issue_count?: number;
+  unconfirmed_count?: number;
   captured_at?: string;
   source?: "api" | "upload";
 }

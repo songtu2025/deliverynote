@@ -4,6 +4,21 @@ import BatchSummary from "./BatchSummary";
 import { createDetailBatch } from "./detailFixtures";
 
 describe("BatchSummary", () => {
+  it("历史仅汇总已确认部分，并标注未确认行但不计入待核对", () => {
+    render(
+      <BatchSummary
+        batch={{
+          ...createDetailBatch(),
+          status: "preflight_ready",
+          workflow: "self_operated_inbound",
+          summary: undefined,
+          receipt: { cumulative_total: 23, history_total: 3, requested_total: 20, issue_count: 0, unconfirmed_count: 1 }
+        }}
+      />
+    );
+    expect(screen.getByText("历史已入库").parentElement).toHaveTextContent("历史已入库 3 · 1 行未确认");
+    expect(screen.getByRole("img", { name: "尚未计算" })).toBeInTheDocument();
+  });
   it("始终按批次汇总显示可导入和待处理两段及图例", () => {
     const { container } = render(<BatchSummary batch={createDetailBatch()} />);
     const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });

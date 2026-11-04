@@ -5,6 +5,11 @@ import { remainingTransferQuantity, transferDisabledReason } from "../../excepti
 import { inboundRowActions } from "./inboundRowActions";
 import ManualAllowanceForm, { allowanceDisabledReason } from "./ManualAllowanceForm";
 import OfflineHandlingForm, { offlineDisabledReason } from "./OfflineHandlingForm";
+import ReceiptRowActions from "./ReceiptRowActions";
+import { useReceiptSite } from "./useReceiptSite";
+import { useBatchAction } from "./useBatchAction";
+import { receiptSiteDisabledReason } from "../../receipt";
+import { candidateSites } from "./reviewDraft";
 
 export default function InboundExceptionActions({
   batch,
@@ -12,6 +17,7 @@ export default function InboundExceptionActions({
   supplierCode,
   onOpen,
   onTransfer,
+  onVersions,
   onSaved
 }: {
   batch: Batch;
@@ -19,11 +25,15 @@ export default function InboundExceptionActions({
   supplierCode: string;
   onOpen: (record: DeliveryException) => void;
   onTransfer: (record: DeliveryException) => void;
+  onVersions?: () => void;
   onSaved: () => Promise<unknown>;
 }) {
   const [form, setForm] = useState<"allowance" | "offline" | null>(null);
+  const { action, runAction } = useBatchAction();
+  const chooseSite = useReceiptSite(batch.id, runAction, onSaved, () => setForm(null), batch.status === "succeeded");
   const remaining = remainingTransferQuantity(record);
-  const actions = inboundRowActions(record.reason, true, { remaining });
+  const candidates = candidateSites(record.full_site);
+  const actions = inboundRowActions(record.reason, true, { remaining, candidates });
   const saved = async () => {
     await onSaved();
     setForm(null);
@@ -37,6 +47,17 @@ export default function InboundExceptionActions({
   return (
     <>
       <Space wrap size="small">
+        {(actions.includes("site") || actions.includes("versions")) && (
+          <ReceiptRowActions
+            row={{ ...record, file_id: record.batch_file_id, issue: record.reason, candidates }}
+            computed
+            remaining={remaining}
+            disabledReason={action ? "正在保存站点选择" : receiptSiteDisabledReason(batch)}
+            refreshing={false}
+            onChooseSite={chooseSite}
+            onVersions={onVersions}
+          />
+        )}
         {actions.map((action) => {
           if (action !== "allowance" && action !== "offline" && action !== "transfer") return null;
           return (

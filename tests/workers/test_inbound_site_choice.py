@@ -1,5 +1,6 @@
 from tests.support.worker import WorkerCase
 from io import BytesIO
+from unittest.mock import patch
 
 from openpyxl import load_workbook
 from tests.support.inbound_inputs import create_ambiguous_product
@@ -126,12 +127,24 @@ class WorkerIntegrationTests(WorkerCase):
             f"/api/batches/{batch_id}/receipts", headers=self.headers
         ).json()["items"]
         self.assertEqual(len(rows), 1)
-        self.assertIn("站点不唯一", rows[0]["issue"])
-        self.assertIsNone(rows[0]["requested"])
-        blocked = self.client.post(
+        self.assertEqual(rows[0]["issue"], "")
+        self.assertIn("站点不唯一", rows[0]["notice"])
+        self.assertEqual(rows[0]["requested"], 18)
+        computed = self.client.post(
             f"/api/batches/{batch_id}/compute", headers=self.headers
         )
-        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(computed.status_code, 202)
+        run_once(self.database_url, self.storage_root)
+        before = self.client.get(
+            f"/api/batches/{batch_id}", headers=self.headers
+        ).json()
+        self.assertEqual(before["status"], "succeeded", before)
+        self.assertEqual(before["receipt"]["unconfirmed_count"], 1)
+        self.assertEqual(before["summary"]["manual_total"], 18)
+        pending = self.client.get(
+            f"/api/batches/{batch_id}/exceptions", headers=self.headers
+        ).json()[0]
+        self.assertEqual(pending["reason"], "产品信息站点不唯一")
         endpoint = f"/api/batches/{batch_id}/files/{rows[0]['file_id']}/receipt-site"
         payload = {
             "sku": "SKU-A",
@@ -141,9 +154,27 @@ class WorkerIntegrationTests(WorkerCase):
         rejected = self.client.put(endpoint, headers=self.headers, json=payload)
         self.assertEqual(rejected.status_code, 400)
         payload["full_site"] = "AMAZON:RIVMOUNT:US"
-        selected = self.client.put(endpoint, headers=self.headers, json=payload)
-        self.assertEqual(selected.status_code, 200, selected.text)
-        run_once(self.database_url, self.storage_root)
+        with (
+            patch("delivery_note.workers.prepare_inbound._capture_snapshot") as capture,
+            patch(
+                "delivery_note.workers.prepare_inbound.GerpgoClient.from_config"
+            ) as factory,
+        ):
+            selected = self.client.put(endpoint, headers=self.headers, json=payload)
+            self.assertEqual(selected.status_code, 200, selected.text)
+            self.assertEqual(selected.json()["status"], "queued")
+            self.assertFalse(selected.json()["download_ready"])
+            run_once(self.database_url, self.storage_root)
+        capture.assert_not_called()
+        factory.assert_not_called()
+        prepared = self.client.get(
+            f"/api/batches/{batch_id}", headers=self.headers
+        ).json()
+        self.assertEqual(prepared["status"], "preflight_ready", prepared)
+        self.assertEqual(
+            prepared["receipt"]["captured_at"], before["receipt"]["captured_at"]
+        )
+        self.assertEqual(prepared["receipt"]["unconfirmed_count"], 0)
         with self.app.state.database.session() as session:
             source = session.get(BatchFile, rows[0]["file_id"])
             self.assertEqual(source.receipt_sites, {"SKU-A\tUS": "AMAZON:RIVMOUNT:US"})

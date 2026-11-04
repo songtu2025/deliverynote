@@ -110,6 +110,7 @@ def execute_prepare_inbound(context, batch_id: int, storage: Path) -> None:
                     "history_total",
                     "requested_total",
                     "issue_count",
+                    "unconfirmed_count",
                 )
             },
         }

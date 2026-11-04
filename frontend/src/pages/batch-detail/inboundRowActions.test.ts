@@ -17,5 +17,10 @@ describe("自营仓原因与行内操作", () => {
       expect(inboundRowActions(reason, true, { remaining: 0 })).toEqual([]);
     }
     expect(inboundRowActions("其他", true, { remaining: 2 })).toEqual(["offline", "transfer"]);
+    expect(inboundRowActions("产品信息未匹配", true, { remaining: 2 })).toEqual(["versions", "offline"]);
+    expect(inboundRowActions("产品信息站点不唯一", true, { remaining: 2, candidates: ["Store:US"] })).toEqual([
+      "site",
+      "offline"
+    ]);
   });
 });

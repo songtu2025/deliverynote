@@ -1,6 +1,16 @@
 from typing import Any
 
-from delivery_note.web.models import BatchFile
+from sqlalchemy import select
+
+from delivery_note.web.models import (
+    Batch,
+    BatchFile,
+    ExceptionRecord,
+    Job,
+    SelfOperatedBatch,
+)
+from delivery_note.web.receipt_state import receipt_signature
+from tests.support.exception_transfers import ExceptionTransferCase
 from tests.support.web_api import WebApiCase
 
 
@@ -90,3 +100,121 @@ class ReceiptRowsTests(WebApiCase):
         page = self.receipt_rows(issues_only="true", page=2, page_size=3)
         self.assertEqual(page["total"], 4)
         self.assertEqual(page["items"], data["items"][3:])
+
+
+class ReceiptSiteRouteTests(ExceptionTransferCase):
+    def setUp(self):
+        super().setUp()
+        with self.app.state.database.session() as session:
+            record = session.get(ExceptionRecord, self.exception_id)
+            self.file_id = record.batch_file_id
+            source = session.get(BatchFile, self.file_id)
+            source.receipt_context = {
+                "delivery_numbers": ["LN-SYNTHETIC"],
+                "rows": [
+                    {
+                        "sku": "SKU-A",
+                        "original_site": "US",
+                        "candidates": ["AMAZON:SEEKWAY:US"],
+                    }
+                ],
+            }
+            profile = session.get(SelfOperatedBatch, self.batch_id)
+            batch = session.get(Batch, self.batch_id)
+            self.snapshot = {
+                "path": "frozen.json",
+                "signature": receipt_signature(batch, profile, [source]),
+                "captured_at": "2026-11-04",
+            }
+            profile.receipt_snapshot = {**self.snapshot, "summary": {"issue_count": 0}}
+            self.handling = {
+                "allowances": [{"quantity": 3}],
+                "offline": [{"quantity": 2}],
+            }
+            profile.manual_handling = self.handling
+            session.commit()
+        self.endpoint = (
+            f"/api/batches/{self.batch_id}/files/{self.file_id}/receipt-site"
+        )
+        self.choice = {
+            "sku": "SKU-A",
+            "original_site": "US",
+            "full_site": "AMAZON:SEEKWAY:US",
+        }
+
+    def test_computed_site_choice_preserves_snapshot_and_manual_inputs(self):
+        response = self.client.put(
+            self.endpoint, headers=self.headers, json=self.choice
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "queued")
+        with self.app.state.database.session() as session:
+            profile = session.get(SelfOperatedBatch, self.batch_id)
+            source = session.get(BatchFile, self.file_id)
+            batch = session.get(Batch, self.batch_id)
+            self.assertEqual(profile.receipt_snapshot, self.snapshot)
+            self.assertEqual(profile.manual_handling, self.handling)
+            self.assertEqual(
+                receipt_signature(batch, profile, [source]), self.snapshot["signature"]
+            )
+            self.assertEqual(source.receipt_sites, {"SKU-A\tUS": "AMAZON:SEEKWAY:US"})
+            self.assertIsNone(source.receipt_context)
+            job = session.scalar(
+                select(Job).where(Job.batch_id == self.batch_id, Job.kind == "prepare")
+            )
+            self.assertEqual(job.status, "queued")
+
+    def test_site_choice_rejects_transfer_links_without_changing_input(self):
+        self.assertEqual(self.transfer(1).status_code, 201)
+        response = self.client.put(
+            self.endpoint, headers=self.headers, json=self.choice
+        )
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("转交", response.json()["detail"])
+        with self.app.state.database.session() as session:
+            self.assertFalse(session.get(BatchFile, self.file_id).receipt_sites)
+
+    def test_site_choice_keeps_precompute_states_supported(self):
+        for status in ("draft", "preflight_ready", "failed"):
+            with self.subTest(status=status):
+                with self.app.state.database.session() as session:
+                    for job in session.scalars(
+                        select(Job).where(Job.batch_id == self.batch_id)
+                    ):
+                        session.delete(job)
+                    session.get(Batch, self.batch_id).status = status
+                    session.get(BatchFile, self.file_id).receipt_context = {
+                        "rows": [
+                            {**self.choice, "candidates": [self.choice["full_site"]]}
+                        ]
+                    }
+                    session.commit()
+                response = self.client.put(
+                    self.endpoint, headers=self.headers, json=self.choice
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["status"], "queued")
+
+    def test_site_choice_rejects_active_jobs_and_keeps_previous_result(self):
+        for status in ("queued", "running"):
+            with self.subTest(status=status):
+                with self.app.state.database.session() as session:
+                    job = session.scalar(
+                        select(Job).where(Job.batch_id == self.batch_id)
+                    )
+                    if job is None:
+                        job = Job(batch_id=self.batch_id, kind="export", status=status)
+                        session.add(job)
+                    job.status = status
+                    session.commit()
+                response = self.client.put(
+                    self.endpoint, headers=self.headers, json=self.choice
+                )
+                self.assertEqual(response.status_code, 409, response.text)
+                with self.app.state.database.session() as session:
+                    source = session.get(BatchFile, self.file_id)
+                    self.assertFalse(source.receipt_sites)
+                    self.assertIsNotNone(source.receipt_context)
+                    self.assertEqual(
+                        session.get(Batch, self.batch_id).status, "succeeded"
+                    )

@@ -11,6 +11,7 @@ export interface ReceiptRow {
   history: number | null;
   requested: number | null;
   issue: string;
+  reason?: string;
   notice?: string;
   candidates: string[];
   delivery_numbers: string[];
@@ -53,9 +54,10 @@ export default function ReceiptReviewDetails({
           </header>
           <ReceiptQuantities target={target} />
           {target.issue && <Alert type="warning" title={target.issue} />}
-          {target.issue && target.candidates.length > 1 && (
-            <Select
+          {(target.reason || target.issue) && target.candidates.length > 1 && (
+            <Select<string>
               aria-label="选择该文件的完整站点"
+              value={null}
               style={{ width: "100%" }}
               placeholder="选择完整站点后重新核对"
               disabled={busy}
@@ -63,7 +65,7 @@ export default function ReceiptReviewDetails({
               onChange={(value) => void onChooseSite(target, value)}
             />
           )}
-          {target.notice && <Alert type="info" title={target.notice} />}
+          {target.notice && <Alert type="warning" title={target.notice} />}
           <section aria-label="历史入库明细">
             <h4 className="receipt-review-section-title">历史入库明细</h4>
             {target.entries?.length ? (
