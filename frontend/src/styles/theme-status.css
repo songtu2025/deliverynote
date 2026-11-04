@@ -85,17 +85,9 @@
   color: #2f5f55;
 }
 
-.ant-alert-success {
-  border-color: #cfe8dd;
-  background: #f3fbf7;
-}
 .ant-alert-warning {
   border-color: #f1dfb6;
   background: #fffaf0;
-}
-.ant-alert-error {
-  border-color: #f2d1d4;
-  background: #fff6f7;
 }
 .ant-alert-error .ant-alert-message,
 .audit-action-error {
@@ -111,11 +103,6 @@
   color: #426f63 !important;
   background: #f7fbf9 !important;
   border-color: #c8ddd7 !important;
-}
-.ant-tag.ant-tag-success {
-  color: var(--dn-success) !important;
-  background: #f3faf6 !important;
-  border-color: #cfe3d8 !important;
 }
 .ant-tag-blue {
   color: var(--dn-primary);
