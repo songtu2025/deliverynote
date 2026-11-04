@@ -47,7 +47,7 @@ class BatchTotals:
 
 
 def _totals_by_batch(
-    sources: Iterable[BatchFile | Row[int, int, int, int]],
+    sources: Iterable[BatchFile | Row[tuple[int, int, int, int]]],
     exception_totals: dict[int, tuple[int, int]],
 ) -> dict[int, BatchTotals]:
     """共用 ORM 文件和列表标量记录，统一计入已解决的拆分数量。"""

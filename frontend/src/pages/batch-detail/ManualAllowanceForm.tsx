@@ -77,7 +77,7 @@ export default function ManualAllowanceForm({
   );
 }
 
-function allowanceDisabledReason(batch: Batch) {
+export function allowanceDisabledReason(batch: Batch) {
   if (batch.manual_allowance_disabled_reason !== undefined) return batch.manual_allowance_disabled_reason;
   return batch.status !== "succeeded" ? "批次尚未计算成功或当前状态不可重算" : null;
 }

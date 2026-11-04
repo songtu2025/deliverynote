@@ -154,6 +154,7 @@ export default function BatchDetail({
       <ExceptionReviewTable
         key={batchId}
         transferBatch={batch}
+        onSaved={() => load(true)}
         onOpenDeliveryBatch={onOpenDeliveryBatch}
         transferActionTarget={transferActionTarget}
         selfOperated={selfOperated}
@@ -186,7 +187,17 @@ export default function BatchDetail({
             files={fileContent}
             versions={versionContent}
             receipts={<ReceiptReview key={receiptKey} batch={batch} runAction={runAction} load={load} />}
-            receiptTodos={<ReceiptReview key={receiptKey} batch={batch} runAction={runAction} load={load} issuesOnly />}
+            receiptTodos={
+              <ReceiptReview
+                key={receiptKey}
+                batch={batch}
+                runAction={runAction}
+                load={load}
+                issuesOnly
+                onRefresh={tasks.refreshHistory}
+                onVersions={() => selectDetailTab("versions")}
+              />
+            }
             review={reviewContent}
           />
         ) : (

@@ -1,6 +1,8 @@
+import { receiptReviewColumns } from "./receiptReviewColumns";
+import { receiptInputBusy, receiptSiteDisabledReason } from "../../receipt";
+import { useReceiptSite } from "./useReceiptSite";
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Card, Space, Switch, Table, Typography } from "antd";
-import DetailHelp from "./DetailHelp";
+import { Alert, Card, Space, Switch, Table } from "antd";
 import { api } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { Batch } from "../../types";
@@ -12,14 +14,17 @@ export default function ReceiptReview({
   batch,
   runAction,
   load,
+  onRefresh,
+  onVersions,
   issuesOnly: initialIssuesOnly = false
 }: {
   batch: Batch;
   runAction: BatchAction;
   load: (silent?: boolean) => Promise<unknown>;
   issuesOnly?: boolean;
+  onRefresh?: () => Promise<void>;
+  onVersions?: () => void;
 }) {
-  const { message } = App.useApp();
   const [page, setPage] = useState(1);
   const [issuesOnly, setIssuesOnly] = useState(initialIssuesOnly);
   const [target, setTarget] = useState<ReceiptRow | null>(null);
@@ -35,16 +40,9 @@ export default function ReceiptReview({
     }
   }, [issuesOnly, issueCount]);
 
-  const chooseSite = (row: ReceiptRow, site: string) =>
-    runAction("receipt-site", async () => {
-      await api(`/api/batches/${batch.id}/files/${row.file_id}/receipt-site`, {
-        method: "PUT",
-        body: JSON.stringify({ sku: row.sku, original_site: row.original_site, full_site: site })
-      });
-      setTarget(null);
-      await load(true);
-      message.info("已保存该文件的站点选择，正在重新核对");
-    });
+  const chooseSite = useReceiptSite(batch.id, runAction, load, () => setTarget(null));
+  const siteDisabledReason = receiptSiteDisabledReason(batch);
+  const refreshing = receiptInputBusy(batch);
 
   return (
     <Card
@@ -83,49 +81,24 @@ export default function ReceiptReview({
               placement: ["bottomEnd"],
               onChange: setPage
             }}
-            columns={[
-              { title: "文件", dataIndex: "filename", ellipsis: true, width: 200 },
-              { title: "SKU", dataIndex: "sku", width: 170 },
-              { title: "完整站点", dataIndex: "full_site", width: 200, ellipsis: true },
-              {
-                title: (
-                  <span>
-                    累计实收
-                    <DetailHelp
-                      label="累计实收口径"
-                      title="表格「实收数量」按单份 Excel 内的累计实收解释，不跨文件累计。重复计算复用此快照；已完结单据只核算历史。"
-                    />
-                  </span>
-                ),
-                dataIndex: "cumulative",
-                width: 115
-              },
-              { title: "历史已入库", dataIndex: "history", width: 100, render: (value) => value ?? "待核对" },
-              { title: "本次申请", dataIndex: "requested", width: 100, render: (value) => value ?? "待核对" },
-              {
-                title: "核对结果",
-                dataIndex: "issue",
-                width: 240,
-                render: (value, row) => (
-                  <Typography.Text type={value ? "danger" : row.notice ? "warning" : "secondary"}>
-                    {value || row.notice || "已核对"}
-                  </Typography.Text>
-                )
-              },
-              {
-                title: "操作",
-                width: 100,
-                render: (_, row) => (
-                  <Button size="small" onClick={() => setTarget(row)}>
-                    查看明细
-                  </Button>
-                )
-              }
-            ]}
+            columns={receiptReviewColumns({
+              inline: initialIssuesOnly,
+              siteDisabledReason,
+              refreshing,
+              chooseSite,
+              onRefresh,
+              onVersions,
+              onOpen: setTarget
+            })}
           />
         </>
       )}
-      <ReceiptReviewDetails target={target} busy={busy} onClose={() => setTarget(null)} onChooseSite={chooseSite} />
+      <ReceiptReviewDetails
+        target={target}
+        busy={Boolean(siteDisabledReason)}
+        onClose={() => setTarget(null)}
+        onChooseSite={chooseSite}
+      />
     </Card>
   );
 }

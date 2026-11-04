@@ -1,3 +1,4 @@
+import InboundExceptionActions from "./InboundExceptionActions";
 import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
 import { Button, Card, Empty, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
@@ -22,7 +23,8 @@ export default function ExceptionReviewTable({
   sectionRef,
   transferBatch,
   onOpenDeliveryBatch,
-  transferActionTarget
+  transferActionTarget,
+  onSaved
 }: {
   selfOperated: boolean;
   review: ExceptionReview;
@@ -34,6 +36,7 @@ export default function ExceptionReviewTable({
   transferBatch?: Batch;
   onOpenDeliveryBatch?: (id: number) => void;
   transferActionTarget?: HTMLElement | null;
+  onSaved?: () => Promise<unknown>;
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
   const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch);
@@ -80,7 +83,27 @@ export default function ExceptionReviewTable({
           }}
           columns={[
             ...reviewIdentityColumns(selfOperated, fileById),
-            ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen)
+            ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen).map((column) =>
+              selfOperated && transferBatch && column.title === "操作"
+                ? {
+                    ...column,
+                    width: 330,
+                    fixed: "right" as const,
+                    render: (_: unknown, record: DeliveryException) => (
+                      <InboundExceptionActions
+                        batch={transferBatch}
+                        record={record}
+                        supplierCode={fileById[record.batch_file_id]?.supplier_code ?? ""}
+                        onOpen={onOpen}
+                        onTransfer={(row) => transfer.openRow?.(row)}
+                        onSaved={async () => {
+                          await onSaved?.();
+                        }}
+                      />
+                    )
+                  }
+                : column
+            )
           ]}
         />
         {transfer.modal}
