@@ -63,6 +63,9 @@
   padding: 16px;
   border-radius: 8px;
   background: var(--dn-surface-muted);
+  transition:
+    background-color 200ms ease,
+    color 200ms ease;
 }
 .batch-detail--compact .batch-task-copy {
   display: flex;
@@ -135,11 +138,6 @@
   align-items: baseline;
   gap: 8px;
   margin: 8px 0 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .batch-detail--compact .batch-task-spinner {
-    animation: none;
-  }
 }
 
 .batch-detail--compact .file-order-card,

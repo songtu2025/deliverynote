@@ -1,10 +1,12 @@
 import { App as AntApp, ConfigProvider, theme } from "antd";
+import zhCN from "antd/locale/zh_CN";
 
 import SessionWorkspace from "./app/SessionWorkspace";
 
 export default function App() {
   return (
     <ConfigProvider
+      locale={zhCN}
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {

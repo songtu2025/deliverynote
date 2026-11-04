@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Empty, Input, Table } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { getBatchImportRows, REVIEW_PAGE_SIZE } from "../../batchDetailApi";
@@ -13,6 +13,8 @@ export default function DeliveryImportRows({ batch }: { batch: Batch }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  // 只在首次加载或切换页码、搜索时显示加载遮罩，批次刷新时保留当前列表。
+  const loadedKey = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -21,12 +23,14 @@ export default function DeliveryImportRows({ batch }: { batch: Batch }) {
       limit: String(REVIEW_PAGE_SIZE)
     });
     if (search.trim()) params.set("search", search.trim());
-    setLoading(true);
+    const key = `${batch.id}:${params}`;
+    if (loadedKey.current !== key) setLoading(true);
     getBatchImportRows(batch.id, params)
       .then((next) => {
         if (!cancelled) {
           setResult(next);
           setError(null);
+          loadedKey.current = key;
         }
       })
       .catch((failure: unknown) => {
@@ -84,7 +88,13 @@ export default function DeliveryImportRows({ batch }: { batch: Batch }) {
               }
             : false
         }
-        locale={{ emptyText: <Empty description={search.trim() ? "没有匹配的可导入记录" : "没有可导入记录"} /> }}
+        locale={{
+          emptyText: loading ? (
+            "正在读取可导入记录"
+          ) : (
+            <Empty description={search.trim() ? "没有匹配的可导入记录" : "没有可导入记录"} />
+          )
+        }}
         columns={[
           { title: "文件", dataIndex: "file_name", width: 200, ellipsis: true },
           { title: "SKU", dataIndex: "sku", width: 150 },
