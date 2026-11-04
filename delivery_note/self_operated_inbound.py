@@ -140,8 +140,9 @@ def process_self_operated_inbound_batch(
                 previous - overreceipt_limit, 0
             )
             if manual and key in (extra_overreceipt or {}):
-                result.allocation_rows.at[index, "超收原因"] += (
-                    f"；人工追加超收：{manual}"
+                current = str(result.allocation_rows.at[index, "超收原因"])
+                result.allocation_rows.at[index, "超收原因"] = (
+                    f"{current}；人工追加超收：{manual}"
                 )
         items.append(
             SelfOperatedInboundItemResult(

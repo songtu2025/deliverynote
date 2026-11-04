@@ -154,7 +154,10 @@ def _execute_self_operated_compute(
                     item.supplier_name, row["SKU"], row["平台站点"]
                 )
                 if reasons.get(key):
-                    result.allocation_rows.at[index, "超收原因"] += f"；{reasons[key]}"
+                    current = str(result.allocation_rows.at[index, "超收原因"])
+                    result.allocation_rows.at[index, "超收原因"] = (
+                        f"{current}；{reasons[key]}"
+                    )
         payloads.append(
             {
                 "source_id": source_id,
