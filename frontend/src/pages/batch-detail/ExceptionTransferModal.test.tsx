@@ -224,8 +224,9 @@ describe("自营仓转交货", () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("compute"))).toBe(
       failure === "compute_failed"
     );
+    // 提示由 message 异步渲染，需等待出现，避免偶发失败。
     expect(
-      screen.getByText(new RegExp(failure === "compute_failed" ? "计算启动失败" : "预检未通过"))
+      await screen.findByText(new RegExp(failure === "compute_failed" ? "计算启动失败" : "预检未通过"))
     ).toBeInTheDocument();
   });
 

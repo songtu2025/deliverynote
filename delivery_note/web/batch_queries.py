@@ -1,7 +1,7 @@
 """批次详情和列表的数据读取，不修改业务状态。"""
 
 from dataclasses import dataclass
-from sqlalchemy import Nullable, and_, case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.engine import Row
 from sqlalchemy.orm import Session, load_only
 
@@ -61,7 +61,7 @@ def batch_sources(session: Session, batch_id: int) -> list[BatchFile]:
 
 def batch_source_rows(
     session: Session, batch_ids: list[int]
-) -> list[Row[tuple[int, int, int, int]]]:
+) -> list[Row[int, int, int, int]]:
     return list(
         session.execute(
             select(
@@ -138,20 +138,14 @@ def _self_operated_metadata_rows(
     session: Session, batch_ids: list[int]
 ) -> list[
     Row[
-        tuple[
-            SelfOperatedBatch,
-            SelfOperatedOverreceiptRuleVersion | None,
-            InputVersion | None,
-        ]
+        SelfOperatedBatch,
+        SelfOperatedOverreceiptRuleVersion | None,
+        InputVersion | None,
     ]
 ]:
     return list(
         session.execute(
-            select(
-                SelfOperatedBatch,
-                Nullable(SelfOperatedOverreceiptRuleVersion),
-                Nullable(InputVersion),
-            )
+            select(SelfOperatedBatch, SelfOperatedOverreceiptRuleVersion, InputVersion)
             .select_from(SelfOperatedBatch)
             .outerjoin(
                 SelfOperatedOverreceiptRuleVersion,
