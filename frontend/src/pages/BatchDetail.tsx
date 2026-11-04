@@ -22,7 +22,7 @@ import { useBatchJob } from "./batch-detail/useBatchJob";
 import { useBatchTasks } from "./batch-detail/useBatchTasks";
 import ReceiptReview from "./batch-detail/ReceiptReview";
 import SelfOperatedDetailTabs from "./batch-detail/SelfOperatedDetailTabs";
-import BatchPurchaseSnapshot, { BatchPurchaseSnapshotNotice } from "./batch-detail/BatchPurchaseSnapshot";
+import BatchPurchaseSnapshot from "./batch-detail/BatchPurchaseSnapshot";
 
 export default function BatchDetail({
   batchId,
@@ -40,7 +40,7 @@ export default function BatchDetail({
   const reviewSection = useRef<HTMLDivElement | null>(null);
   const [detailTabs, setDetailTabs] = useState<Record<number, string>>({});
   const [reviewFocusRequested, setReviewFocusRequested] = useState(false);
-  const [materialsOpen, setMaterialsOpen] = useState(false);
+  const [transferActionTarget, setTransferActionTarget] = useState<HTMLDivElement | null>(null);
   const data = useBatchDetailData(batchId, Boolean(canRefreshSupplierVersion), setSplitTarget);
   const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
   const activeJob = useBatchJob(batch, load);
@@ -96,9 +96,11 @@ export default function BatchDetail({
   }
 
   const { canEditFiles, computed } = batchPresentation(batch);
+  const receiptKey = `${batchId}:${batch.receipt?.captured_at}`;
   const selectDetailTab = (key: string) => setDetailTabs((current) => ({ ...current, [batchId]: key }));
 
   const focusReview = () => {
+    review.changeScope("unfinished");
     selectDetailTab("review");
     setReviewFocusRequested(true);
   };
@@ -114,10 +116,7 @@ export default function BatchDetail({
         focusReview={focusReview}
         reviewStats={availableReviewStats(data)}
         reviewError={Boolean(loadError)}
-        extra={selfOperated && <Button onClick={() => setMaterialsOpen(true)}>批次资料</Button>}
       />
-
-      <BatchErrorNotice batch={batch} />
 
       <BatchSummary batch={batch} />
     </>
@@ -145,7 +144,6 @@ export default function BatchDetail({
   );
   const reviewContent = computed && (
     <>
-      <BatchPurchaseSnapshotNotice />
       <BatchManualAllowances
         batch={batch}
         onSaved={async () => {
@@ -157,6 +155,7 @@ export default function BatchDetail({
         key={batchId}
         transferBatch={batch}
         onOpenDeliveryBatch={onOpenDeliveryBatch}
+        transferActionTarget={transferActionTarget}
         selfOperated={selfOperated}
         review={review}
         fileById={fileById}
@@ -183,11 +182,11 @@ export default function BatchDetail({
             reviewStats={availableReviewStats(data)}
             reviewState={review}
             onReset={() => setSplitTarget(null)}
-            materialsOpen={materialsOpen}
-            onCloseMaterials={() => setMaterialsOpen(false)}
+            extra={<div ref={setTransferActionTarget} />}
             files={fileContent}
             versions={versionContent}
-            receipts={<ReceiptReview batch={batch} runAction={runAction} load={load} />}
+            receipts={<ReceiptReview key={receiptKey} batch={batch} runAction={runAction} load={load} />}
+            receiptTodos={<ReceiptReview key={receiptKey} batch={batch} runAction={runAction} load={load} issuesOnly />}
             review={reviewContent}
           />
         ) : (
@@ -236,18 +235,5 @@ function BatchWorkbench({
       </section>
       {children}
     </div>
-  );
-}
-
-function BatchErrorNotice({ batch }: { batch: import("../types").Batch }) {
-  if (!batch.error_message) return null;
-  return (
-    <Alert
-      type="error"
-      showIcon
-      title={batch.receipt?.issue_count ? "累计实收待核对" : "任务执行失败"}
-      description={batch.error_message}
-      className="section-card"
-    />
   );
 }

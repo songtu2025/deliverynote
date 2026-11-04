@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions, fixtureJob } from "./detailFixtures";
-import BatchPurchaseSnapshot, { BatchPurchaseSnapshotNotice } from "./BatchPurchaseSnapshot";
+import BatchPurchaseSnapshot, {
+  BatchPurchaseSnapshotMetadata,
+  BatchPurchaseSnapshotNotice
+} from "./BatchPurchaseSnapshot";
 import SelfOperatedExceptionDetails from "./SelfOperatedExceptionDetails";
 
 const batch = { ...createDetailBatch(), workflow: "self_operated_inbound" as const };
@@ -34,6 +37,7 @@ function Workbench() {
   return (
     <BatchPurchaseSnapshot batch={batch}>
       <BatchPurchaseSnapshotNotice />
+      <BatchPurchaseSnapshotMetadata />
       <button onClick={() => setSku("SKU-B")}>切换 SKU</button>
       <button onClick={() => setOpen((value) => !value)}>开关详情</button>
       {open && (

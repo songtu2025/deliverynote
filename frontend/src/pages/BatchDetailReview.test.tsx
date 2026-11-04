@@ -9,12 +9,13 @@ describe("BatchDetailReview", () => {
 
   it("shows quantity conservation and prevents an invalid split", async () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     await screen.findByText("交货 160 = 可导入 100 + 待处理 60");
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
-    expect(screen.getByText("序号越小，越先扣减采购余额")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
+    fireEvent.focus(screen.getByRole("button", { name: "文件顺序说明" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("序号越小，越先扣减采购余额");
+    fireEvent.click(screen.getByRole("tab", { name: /^待办/ }));
     const task = within(screen.getByRole("region", { name: "批次任务状态" }));
     expect(await task.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
     expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
@@ -32,7 +33,7 @@ describe("BatchDetailReview", () => {
     expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
     fireEvent.click(lockedData.getByRole("button", { name: "查看锁定版本" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^待办/ }));
     expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
     const reviewButton = reviewTable.getByRole("button", { name: "审校 SKU-A", hidden: true });
     expect(reviewButton).toHaveTextContent("审校");
@@ -55,7 +56,7 @@ describe("BatchDetailReview", () => {
 
   it("filters pending rows by site, scale position, and stocking position", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     await screen.findByText("SKU-A");
     expect(screen.getByText("SKU-B")).toBeInTheDocument();
@@ -88,7 +89,7 @@ describe("BatchDetailReview", () => {
   it("keeps review navigation working across server pages", async () => {
     state.exceptions = pagedExceptions();
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     expect(await screen.findByRole("button", { name: "全部 12" })).toBeInTheDocument();
     fireEvent.click(screen.getByTitle("2"));
@@ -114,7 +115,7 @@ describe("BatchDetailReview", () => {
   it("returns to the first review page when searching from a later page", async () => {
     state.exceptions = pagedExceptions();
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     await screen.findByRole("button", { name: "全部 12" });
     fireEvent.click(screen.getByTitle("2"));
@@ -141,7 +142,7 @@ describe("BatchDetailReview", () => {
       full_site: "AMAZON:SEEKWAY:US"
     };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     const sku = await screen.findByText("SKU-EXCESS-LONG");
     const row = sku.closest("tr");
@@ -155,7 +156,7 @@ describe("BatchDetailReview", () => {
 
   it("summarizes unfinished work and saves directly into the next exception", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     const overview = await screen.findByRole("region", { name: "审校概览" });
     expect(within(overview).getByRole("button", { name: "待审校 4" })).toHaveAttribute("aria-pressed", "true");
@@ -204,7 +205,7 @@ describe("BatchDetailReview", () => {
       conserved: true
     };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     const row = (await screen.findByText("SKU-A")).closest("tr");
     expect(row).not.toBeNull();

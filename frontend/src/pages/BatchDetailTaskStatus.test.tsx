@@ -39,12 +39,13 @@ describe("交货批次任务状态条", () => {
     ["failed", "计算失败"]
   ])("准确显示 %s 并保持静止", async (status, title) => {
     state.batch.status = status;
+    state.batch.error_message = status === "failed" ? "合成失败原因" : null;
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByText(state.batch.name);
     const task = within(screen.getByRole("region", { name: "当前批次任务" }));
     expect(task.getByRole("status")).toHaveTextContent(title);
     if (status === "failed") {
-      expect(task.getByRole("status")).toHaveTextContent("原因见下方，修正后重新预检并计算");
+      expect(task.getByRole("status")).toHaveTextContent("合成失败原因");
       expect(task.getByRole("button", { name: /预检并计算/ })).toBeEnabled();
       expect(task.queryByRole("button", { name: /重新计算/ })).not.toBeInTheDocument();
     }

@@ -4,28 +4,38 @@ import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
+async function selectAllReviews() {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "审校范围" }));
+  fireEvent.click(screen.getAllByText("全部审校").at(-1)!);
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=all"), expect.anything())
+  );
+}
+
 describe("交货批次详情标签页", () => {
   const { state } = setupBatchDetailTest();
 
   it("计算后默认显示待处理，数量条按汇总显示两段", async () => {
     state.exceptions = [state.exceptions[0]];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "待办 1" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("tab", { name: "可导入 2" })).toBeInTheDocument();
     const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
     expect(bar.children).toHaveLength(2);
     expect(screen.getByText("交货 160 = 可导入 100 + 待处理 60")).toHaveClass("conservation-ok");
-    expect(screen.getByText(/2 个来源文件，更新于/)).toBeInTheDocument();
+    expect(screen.getByText(/2 个来源文件 · 更新于/)).toBeInTheDocument();
   });
 
-  it("未计算时默认来源文件且不显示数量条和待处理标签", async () => {
+  it("未计算时仍默认待办，保留全部标签和未知数量", async () => {
     state.batch.status = "draft";
     state.batch.summary = undefined;
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("tab", { name: "来源文件 2" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.queryByRole("tab", { name: /^待处理/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /^可导入/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "待办 —" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "可导入 —" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "尚未计算" })).toBeInTheDocument();
+    expect(screen.getByText("预检并计算后显示待办")).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "可导入 —" }));
+    expect(screen.getByText("计算后显示可导入明细")).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
     expect(screen.getByText("purchase-v1")).toBeVisible();
   });
@@ -38,9 +48,7 @@ describe("交货批次详情标签页", () => {
       renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
       fireEvent.click(await screen.findByRole("tab", { name: "来源文件 2" }));
       fireEvent.click(screen.getByRole("button", { name: "开始审校" }));
-      await waitFor(() =>
-        expect(screen.getByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true")
-      );
+      await waitFor(() => expect(screen.getByRole("tab", { name: "待办 1" })).toHaveAttribute("aria-selected", "true"));
       await waitFor(() => expect(document.activeElement).toHaveClass("review-section-anchor"));
       expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
       fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
@@ -141,51 +149,34 @@ describe("自营仓详情工作区", () => {
       issue_count: 0,
       captured_at: "2026-10-29T00:00:00Z"
     };
-    const originalFetch = fetch;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).includes("/receipts?")
-          ? Promise.resolve(jsonResponse({ items: [], total: 0 }))
-          : originalFetch(input, init)
-      )
-    );
   });
 
-  it("状态一次点击可达，共用审校表格且保留搜索", async () => {
+  it("待办和已处理一次点击可达，保留搜索与全部审校筛选", async () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("radio", { name: "未完成（4）" })).toBeChecked();
-    expect(screen.queryByRole("region", { name: "审校概览" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
-    const reviewCard = container.querySelector(".exception-review-card");
-    fireEvent.click(screen.getByRole("radio", { name: /^已处理/ }));
+    expect(await screen.findByRole("tab", { name: "待办 4" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.change(screen.getByLabelText("搜索待处理记录"), { target: { value: "SKU" } });
+    fireEvent.click(screen.getByRole("tab", { name: /^已处理/ }));
     await waitFor(() =>
       expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=resolved"), expect.anything())
     );
-    expect(container.querySelector(".exception-review-card")).toBe(reviewCard);
-    fireEvent.change(screen.getByLabelText("搜索待处理记录"), { target: { value: "SKU" } });
-    fireEvent.click(screen.getByRole("radio", { name: "累计实收核对" }));
-    fireEvent.click(screen.getByRole("radio", { name: /^已处理/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^累计实收核对/ }));
+    fireEvent.click(screen.getByRole("tab", { name: "待办 4" }));
     expect(screen.getByLabelText("搜索待处理记录")).toHaveValue("SKU");
     expect(container.querySelectorAll(".exception-review-card")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("radio", { name: /^全部审校/ }));
-    expect(screen.getByRole("radio", { name: /^全部审校/ })).toBeChecked();
-    expect(container.querySelector(".exception-review-card")).toBe(reviewCard);
+    await selectAllReviews();
   });
 
-  it("文件与锁定版本集中到资料抽屉，关闭后保留当前视图", async () => {
+  it("来源文件和锁定资料在标签内，移除批次资料抽屉", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("radio", { name: /^已处理/ }));
-    fireEvent.click(screen.getByRole("button", { name: "批次资料" }));
-    const drawer = within(screen.getByRole("dialog", { name: "批次资料" }));
-    expect(drawer.getByRole("columnheader", { name: "来源文件" })).toBeInTheDocument();
-    expect(drawer.getByText("purchase-v1")).toBeInTheDocument();
-    fireEvent.click(drawer.getByRole("button", { name: "Close" }));
-    expect(screen.getByRole("radio", { name: /^已处理/ })).toBeChecked();
-    expect(screen.queryByRole("radio", { name: "业务文件" })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("tab", { name: "来源文件 2" }));
+    expect(screen.getByRole("columnheader", { name: "来源文件" })).toBeVisible();
+    fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
+    expect(screen.getByText("purchase-v1")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "批次资料" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "批次资料" })).not.toBeInTheDocument();
   });
 
-  it("切换状态等待响应时保留表格、筛选和计数，不主动滚动页面", async () => {
+  it("筛选等待响应时保留表格和全批计数，不主动滚动", async () => {
     state.exceptions.push({ ...state.exceptions[0], id: 35, sku: "SKU-已处理", status: "resolved" });
     const pending = deferred<void>();
     const originalFetch = fetch;
@@ -201,14 +192,12 @@ describe("自营仓详情工作区", () => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scroll });
     try {
       const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-      await screen.findByRole("radio", { name: "未完成（4）" });
-      fireEvent.click(screen.getByRole("radio", { name: /^全部审校/ }));
-      await waitFor(() =>
-        expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=all"), expect.anything())
-      );
+      await screen.findByRole("tab", { name: "待办 4" });
+      const table = container.querySelector(".exception-review-card");
+      await selectAllReviews();
+      expect(container.querySelector(".exception-review-card")).toBe(table);
       expect(screen.getByLabelText("搜索待处理记录")).toBeVisible();
-      expect(screen.getByRole("columnheader", { name: "SKU" })).toBeVisible();
-      expect(screen.getByText("未完成（4）")).toBeVisible();
+      expect(screen.getByRole("tab", { name: "待办 4" })).toBeVisible();
       expect(scroll).not.toHaveBeenCalled();
       pending.resolve(undefined);
       await waitFor(() => expect(container.querySelectorAll(".exception-review-card .ant-table-row")).toHaveLength(5));
@@ -218,16 +207,18 @@ describe("自营仓详情工作区", () => {
     }
   });
 
-  it("未计算时直接显示文件准备和核对，不显示虚假的零条审校", async () => {
+  it("计算前保留五个标签，未知值为横线而非虚假零条", async () => {
     state.batch.status = "preflight_ready";
     state.batch.download_ready = false;
     state.batch.summary = undefined;
     state.exceptions = [];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("columnheader", { name: "来源文件" })).toBeInTheDocument();
-    expect(screen.getByText("累计实收核对")).toBeInTheDocument();
-    expect(within(screen.getByLabelText("入库数量摘要")).getByText("计算后生成")).toBeInTheDocument();
-    expect(screen.queryByRole("radiogroup")).not.toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "待办 0" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getByRole("tab", { name: "已处理 —" })).toBeInTheDocument();
+    const summary = screen.getByLabelText("入库数量摘要");
+    expect(within(summary).getAllByText("—")).toHaveLength(4);
+    expect(screen.queryByText("计算后生成")).not.toBeInTheDocument();
     expect(screen.queryByText("没有待处理，可以直接生成结果")).not.toBeInTheDocument();
   });
 });

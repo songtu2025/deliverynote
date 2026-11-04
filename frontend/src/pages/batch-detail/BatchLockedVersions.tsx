@@ -35,7 +35,7 @@ export default function BatchLockedVersions({
   );
   return (
     <Card
-      variant={batch.workflow === "self_operated_inbound" ? undefined : "borderless"}
+      variant="borderless"
       title={
         <span className="locked-data-title">
           <LockOutlined /> 批次锁定版本

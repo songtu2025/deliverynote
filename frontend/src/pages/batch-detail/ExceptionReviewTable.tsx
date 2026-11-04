@@ -2,6 +2,7 @@ import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
 import { Button, Card, Empty, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import type { Ref } from "react";
+import { createPortal } from "react-dom";
 import type { Batch, BatchFile, DeliveryException } from "../../types";
 import { remainingTransferQuantity } from "../../exceptionTransferApi";
 import { useExceptionTransfer } from "./useExceptionTransfer";
@@ -20,7 +21,8 @@ export default function ExceptionReviewTable({
   onReset,
   sectionRef,
   transferBatch,
-  onOpenDeliveryBatch
+  onOpenDeliveryBatch,
+  transferActionTarget
 }: {
   selfOperated: boolean;
   review: ExceptionReview;
@@ -31,16 +33,20 @@ export default function ExceptionReviewTable({
   sectionRef: Ref<HTMLDivElement>;
   transferBatch?: Batch;
   onOpenDeliveryBatch?: (id: number) => void;
+  transferActionTarget?: HTMLElement | null;
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
   const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch);
   return (
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
-        variant={selfOperated ? undefined : "borderless"}
+        variant="borderless"
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}
       >
+        {review.reviewStats.unfinishedCount > 0 &&
+          transferActionTarget &&
+          createPortal(transfer.action, transferActionTarget)}
         <ExceptionReviewToolbar
           selfOperated={selfOperated}
           review={review}
@@ -49,7 +55,6 @@ export default function ExceptionReviewTable({
             onReset();
           }}
         />
-        {review.reviewStats.unfinishedCount > 0 && transfer.action}
         <Table<DeliveryException>
           rowKey="id"
           rowSelection={transfer.rowSelection}

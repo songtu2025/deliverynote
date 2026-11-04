@@ -64,7 +64,8 @@
 .delivery-detail-tabs-body {
   padding: 0 20px 16px;
 }
-.delivery-detail-tabs .section-card {
+.delivery-detail-tabs .section-card,
+.self-operated-detail-tabs .section-card {
   margin-bottom: 0;
   box-shadow: none;
 }

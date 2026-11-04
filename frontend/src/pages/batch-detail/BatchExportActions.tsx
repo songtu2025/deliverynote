@@ -3,33 +3,32 @@ import { DownloadOutlined, ExportOutlined } from "@ant-design/icons";
 import type { Batch, Job } from "../../types";
 import type { useBatchTasks } from "./useBatchTasks";
 import { batchPresentation, batchFileResultName } from "./batchPresentation";
+import type { ExceptionReview } from "./useExceptionReview";
 
 export default function BatchExportActions({
   batch,
   activeJob,
   action,
   tasks,
-  focusReview
+  focusReview,
+  reviewStats
 }: {
   batch: Batch;
   activeJob?: Job;
   action: string | null;
   tasks: ReturnType<typeof useBatchTasks>;
   focusReview: () => void;
+  reviewStats?: ExceptionReview["reviewStats"];
 }) {
   const { needsReview, needsMergedGeneration } = batchPresentation(batch);
   const exportJob = batch.jobs?.export;
+  const reviewing = exportJob?.status !== "failed" && (reviewStats ? reviewStats.unfinishedCount > 0 : needsReview);
   const { downloadResult, startExport } = tasks;
   return (
     <div className="batch-result-actions">
-      {needsReview && batch.workflow !== "self_operated_inbound" && (
-        <Button aria-label="开始审校" type="primary" onClick={focusReview}>
-          开始审校
-        </Button>
-      )}
       <div className="export-action-buttons">
         {batch.download_ready && !needsMergedGeneration ? (
-          <ResultDownloadButtons batch={batch} downloadResult={downloadResult} />
+          <ResultDownloadButtons batch={batch} primary={!reviewing} downloadResult={downloadResult} />
         ) : (
           <ExportGenerationButton
             exportJob={exportJob}
@@ -37,27 +36,42 @@ export default function BatchExportActions({
             action={action}
             needsMergedGeneration={needsMergedGeneration}
             startExport={startExport}
+            primary={!reviewing}
+            disabled={!reviewStats}
           />
         )}
       </div>
+      {reviewing && (
+        <Button aria-label="开始审校" type="primary" disabled={Boolean(activeJob)} onClick={focusReview}>
+          开始审校
+        </Button>
+      )}
     </div>
   );
 }
 
 function ResultDownloadButtons({
   batch,
+  primary,
   downloadResult
 }: {
   batch: Batch;
+  primary: boolean;
   downloadResult: (path: string, filename: string) => Promise<void>;
 }) {
-  const { needsReview, hasMultipleFiles } = batchPresentation(batch);
+  const { hasMultipleFiles } = batchPresentation(batch);
   const files = batch.files ?? [];
   const selfOperated = batch.workflow === "self_operated_inbound";
   return hasMultipleFiles ? (
     <>
       <Button
-        type={needsReview ? "default" : "primary"}
+        icon={<DownloadOutlined />}
+        onClick={() => void downloadResult(`/api/batches/${batch.id}/download`, `${batch.name}_分文件.zip`)}
+      >
+        下载分文件 ZIP
+      </Button>
+      <Button
+        type={primary ? "primary" : "default"}
         icon={<DownloadOutlined />}
         onClick={() =>
           void downloadResult(
@@ -68,17 +82,11 @@ function ResultDownloadButtons({
       >
         下载合并结果
       </Button>
-      <Button
-        icon={<DownloadOutlined />}
-        onClick={() => void downloadResult(`/api/batches/${batch.id}/download`, `${batch.name}_分文件.zip`)}
-      >
-        下载分文件 ZIP
-      </Button>
     </>
   ) : (
     files[0]?.download_ready && (
       <Button
-        type={needsReview ? "default" : "primary"}
+        type={primary ? "primary" : "default"}
         icon={<DownloadOutlined />}
         onClick={() =>
           void downloadResult(
@@ -98,18 +106,23 @@ function ExportGenerationButton({
   activeJob,
   action,
   needsMergedGeneration,
-  startExport
+  startExport,
+  primary,
+  disabled
 }: {
   exportJob?: Job;
   activeJob?: Job;
   action: string | null;
   needsMergedGeneration: boolean;
   startExport: () => Promise<void>;
+  primary: boolean;
+  disabled: boolean;
 }) {
   return (
     <Button
       icon={<ExportOutlined />}
-      disabled={Boolean(activeJob)}
+      type={primary ? "primary" : "default"}
+      disabled={Boolean(activeJob) || disabled}
       loading={action === "export" || activeJob?.kind === "export"}
       onClick={() => void startExport()}
     >

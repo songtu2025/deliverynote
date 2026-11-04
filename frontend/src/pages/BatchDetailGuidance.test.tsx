@@ -10,7 +10,7 @@ describe("BatchDetailGuidance", () => {
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
     state.exceptions[2].reason = "候选站点需要确认";
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待处理 \d/ });
+    await screen.findByRole("tab", { name: /^待办 \d/ });
 
     expect(await screen.findByRole("columnheader", { name: "审校依据" })).toBeInTheDocument();
 
@@ -35,9 +35,10 @@ describe("BatchDetailGuidance", () => {
     fireEvent.click(within(noPurchaseRow!).getByRole("button", { name: /^审校 SKU-/, hidden: true }));
     drawer = screen.getByRole("dialog");
     expect(within(drawer).getByText("核对锁定采购版本")).toBeInTheDocument();
-    expect(
-      within(drawer).getByText("锁定的采购数据里没有这个 SKU 的未交量，请核对供应商、站点和目的仓。")
-    ).toBeInTheDocument();
+    fireEvent.focus(within(drawer).getByRole("button", { name: "采购核对说明" }));
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "锁定的采购数据里没有这个 SKU 的未交量，请核对供应商、站点和目的仓。"
+    );
     fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
 
     const ambiguousRow = screen.getByText("SKU-C").closest("tr");

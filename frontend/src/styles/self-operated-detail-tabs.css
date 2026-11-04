@@ -1,101 +1,12 @@
-.app-content:has(.self-operated-detail-tabs) {
-  overflow: visible;
-}
-
 .self-operated-detail-tabs {
   min-width: 0;
-  overflow: visible;
+}
+.self-operated-detail-tabs [role="tabpanel"] {
+  min-width: 0;
 }
 
-.self-operated-detail-tabs .self-operated-tab-nav {
-  position: sticky;
-  top: 0;
-  margin-bottom: 16px;
-  padding: 8px 16px;
-  overflow-x: auto;
-  border: 1px solid var(--dn-border);
-  border-radius: 6px;
-  background: var(--dn-surface);
-}
-
-.self-operated-detail-tabs .batch-detail-panel-body {
-  padding: 16px;
-}
-
-.self-operated-review-content:not([hidden]) {
-  display: flow-root;
-}
-
-.batch-detail--compact:has(.self-operated-detail-tabs) .batch-heading {
-  margin-bottom: 8px;
-}
-
-.inbound-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px 24px;
-  margin-inline: -20px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--dn-border);
-  font-variant-numeric: tabular-nums;
-}
-
-.inbound-result-totals {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-}
-
-.inbound-total strong {
-  font-size: 18px;
-}
-
-.inbound-total.import strong {
-  color: var(--dn-primary);
-}
-
-.inbound-receipt-equation {
-  color: var(--detail-muted);
-}
-
-@media (min-width: 1200px) {
-  .batch-detail--compact:has(.self-operated-detail-tabs) .batch-task-surface {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 12px 24px;
-  }
-
-  .batch-detail--compact:has(.self-operated-detail-tabs) .batch-task-bar {
-    align-self: center;
-    margin-bottom: 0;
-  }
-
-  .batch-detail--compact:has(.self-operated-detail-tabs) .batch-task-result {
-    justify-content: flex-end;
-  }
-
-  .inbound-summary {
-    grid-column: 1 / -1;
-  }
-}
-
-@media (max-width: 600px) {
-  .self-operated-detail-tabs .self-operated-tab-nav {
-    padding-inline: 8px;
-  }
-
-  .self-operated-detail-tabs .self-operated-tab-item {
-    font-size: 12px;
-  }
-
-  .self-operated-detail-tabs .batch-detail-panel-body {
-    padding: 12px;
-  }
-
-  .inbound-summary {
-    margin-inline: -12px;
-    padding: 12px;
+@media (max-width: 767px) {
+  .self-operated-detail-tabs .batch-workspace-tabs-nav {
+    flex-wrap: wrap;
   }
 }

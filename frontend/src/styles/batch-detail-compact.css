@@ -2,127 +2,89 @@
   --detail-muted: var(--dn-muted);
   min-width: 0;
   color: var(--dn-ink);
+  font-variant-numeric: tabular-nums;
 }
-
 .batch-detail--compact .batch-task-surface {
   margin-bottom: 16px;
-  padding: 20px;
-  border: 1px solid var(--dn-border);
-  border-radius: 8px;
-  background: var(--dn-surface);
 }
-
 .batch-detail--compact .batch-heading {
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 24px;
+  margin-bottom: 20px;
 }
-
-.batch-detail--compact .batch-heading > div:first-child {
+.batch-heading-copy {
   flex: 1;
   min-width: 0;
 }
-
 .batch-detail--compact .batch-title-row {
-  align-items: flex-start;
+  display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px 12px;
 }
-
 .batch-detail--compact .batch-title-row h2 {
   min-width: 0;
   max-width: 100%;
-  overflow-wrap: anywhere;
+  margin: 0;
   font-size: 24px;
-  letter-spacing: -0.02em;
-}
-
-.batch-detail--compact .batch-title-row .ant-tag {
-  flex-shrink: 0;
-  margin-top: 5px;
-}
-
-.batch-detail--compact .batch-heading .ant-typography-secondary {
-  color: var(--detail-muted);
-  font-size: 12px;
-}
-
-.batch-detail--compact .pending-value {
-  color: var(--dn-warning);
-}
-
-.batch-detail--compact .batch-task-bar {
-  min-width: 0;
-  margin-bottom: 16px;
-}
-.batch-task-say {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-  padding: 16px;
-  border-radius: 8px;
-  background: var(--dn-surface-muted);
-  transition:
-    background-color 200ms ease,
-    color 200ms ease;
-}
-.batch-detail--compact .batch-task-copy {
-  display: flex;
-  align-items: center;
-  flex: 1 1 240px;
-  gap: 12px;
-  min-width: 0;
-}
-.batch-task-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: var(--dn-surface);
-  font-size: 20px;
-}
-.batch-detail--compact .batch-task-copy strong,
-.batch-detail--compact .batch-task-copy span:not(.anticon) {
-  display: block;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
-.batch-detail--compact .batch-task-copy strong {
-  font-size: 17px;
-  font-weight: 700;
-  line-height: 24px;
+.batch-stage {
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 4px;
 }
-.batch-detail--compact .batch-task-copy span:not(.anticon),
-.batch-detail--compact .batch-task-result {
-  color: var(--detail-muted);
-  font-size: 12px;
-  line-height: 20px;
-  font-variant-numeric: tabular-nums;
+.batch-stage-waiting {
+  color: var(--dn-muted);
+  background: var(--dn-surface-muted);
 }
-.batch-detail--compact .batch-task-review {
+.batch-stage-review {
   color: var(--dn-warning);
   background: var(--dn-warning-soft);
 }
-.batch-detail--compact .batch-task-ready {
-  color: var(--dn-success);
-  background: var(--dn-primary-soft);
-}
-.batch-detail--compact .batch-task-running {
+.batch-stage-running {
   color: var(--dn-info);
   background: var(--dn-info-soft);
 }
-.batch-detail--compact .batch-task-error {
-  color: var(--dn-danger);
-  background: var(--dn-danger-soft);
+.batch-stage-ready {
+  color: var(--dn-primary);
+  background: var(--dn-primary-soft);
 }
-.batch-task-error .batch-task-icon {
+.batch-stage-error {
   color: var(--dn-surface);
   background: var(--dn-danger);
 }
-.batch-detail--compact .batch-task-actions,
-.batch-detail--compact .batch-result-actions {
+.batch-task-bar {
+  margin: 8px 0;
+}
+.batch-task-copy {
+  color: var(--dn-muted);
+  overflow-wrap: anywhere;
+}
+.batch-task-status-icon {
+  margin-right: 8px;
+}
+.batch-task-review {
+  color: var(--dn-warning);
+}
+.batch-task-error {
+  color: var(--dn-danger);
+}
+.batch-failure-reason {
+  margin: 4px 0 0;
+}
+.batch-heading-meta {
+  color: var(--dn-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.batch-task-actions,
+.batch-primary-actions,
+.batch-result-actions,
+.export-action-buttons {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -130,97 +92,167 @@
   gap: 8px;
   min-width: 0;
 }
-.batch-detail--compact .batch-task-actions .batch-primary-actions:empty {
-  display: none;
+.batch-task-actions {
+  max-width: 56%;
 }
-.batch-detail--compact .batch-task-result {
+.batch-detail--compact .batch-quantity-summary {
+  padding: 20px 24px;
+  border: 1px solid var(--dn-border);
+  border-radius: 10px;
+  background: var(--dn-surface);
+}
+.batch-quantity-metrics {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin: 8px 0 0;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin-bottom: 20px;
 }
-
+.batch-quantity-equation,
+.batch-equation-term,
+.inbound-result-totals {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+.batch-quantity-metric {
+  min-width: 64px;
+}
+.batch-quantity-metric > span {
+  display: block;
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+.batch-quantity-metric > strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.batch-equation-operator {
+  color: var(--dn-muted);
+  font-size: 20px;
+}
+.metric-import > strong {
+  color: var(--dn-primary);
+}
+.metric-pending > strong {
+  color: var(--dn-warning);
+}
+.quantity-unknown > strong {
+  color: var(--dn-muted);
+}
+.batch-detail--compact .batch-quantity-bar {
+  height: 6px;
+  border-radius: 3px;
+}
+.batch-detail--compact .batch-quantity-segment {
+  min-width: 4px;
+}
+.quantity-review-marker {
+  flex: 0 0 4px;
+}
+.quantity-uncomputed {
+  background: var(--dn-surface-muted);
+  border: 1px dashed var(--dn-border-strong);
+}
+.batch-detail--compact .batch-quantity-legend {
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+.batch-detail--compact .batch-quantity-legend strong {
+  color: inherit;
+  font-size: 12px;
+  font-weight: 500;
+}
+.batch-detail--compact .conservation-ok {
+  color: var(--dn-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.batch-detail--compact .delivery-detail-tabs,
+.batch-detail--compact .self-operated-detail-tabs {
+  min-width: 0;
+  border-radius: 10px;
+}
 .batch-detail--compact .file-order-card,
 .batch-detail--compact .locked-data-card {
-  margin-bottom: 16px;
-  border-radius: 8px;
+  margin-bottom: 0;
 }
-
-.batch-detail--compact .file-order-card .ant-card-body,
-.batch-detail--compact .locked-data-card .ant-card-body {
-  padding-inline: 16px;
+.batch-detail--compact .batch-detail-panel-body {
+  padding: 16px 0;
 }
-
-.batch-detail--compact .file-order-card .ant-table-cell {
-  font-variant-numeric: tabular-nums;
+.batch-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dn-muted);
+  cursor: help;
 }
-
-.batch-detail--compact .file-order-card .ant-table-thead > tr > th {
-  color: var(--detail-muted);
+.inbound-file-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  overflow-wrap: anywhere;
 }
-
-.batch-detail--compact .file-order-card .inline-alert {
-  margin-bottom: 8px;
-  padding-block: 8px;
+.receipt-review-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  white-space: normal;
 }
-
-.batch-detail--compact .file-order-card .muted,
-.batch-detail--compact .locked-overreceipt-rule small,
-.batch-detail--compact .locked-data-card .ant-descriptions-item-label {
-  color: var(--detail-muted);
-}
-
-.batch-detail--compact .locked-data-card .ant-descriptions-item-label {
-  padding-bottom: 2px;
+.receipt-review-title > span {
+  color: var(--dn-muted);
   font-size: 12px;
+  font-weight: 400;
 }
-
-.batch-detail--compact .locked-overreceipt-rule small {
-  font-size: 12px;
-}
-
-.batch-detail--compact .locked-data-card .ant-descriptions-item-content {
-  min-width: 0;
-  padding-bottom: 8px;
-  font-size: 13px;
-}
-
-.batch-detail--compact .locked-version-name,
-.batch-detail--compact .locked-overreceipt-rule {
+.locked-version-name,
+.locked-overreceipt-rule {
   max-width: 100%;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1200px) {
   .batch-detail--compact .batch-heading {
-    align-items: stretch;
+    flex-wrap: wrap;
   }
-  .batch-detail--compact .batch-task-actions,
-  .batch-detail--compact .batch-result-actions {
+  .batch-task-actions {
+    max-width: 100%;
+  }
+}
+@media (max-width: 767px) {
+  .batch-detail--compact .batch-heading {
+    flex-direction: column;
+  }
+  .batch-task-actions,
+  .batch-primary-actions,
+  .batch-result-actions,
+  .export-action-buttons {
     justify-content: flex-start;
   }
-  .batch-detail--compact .locked-data-card .ant-card-head-wrapper {
-    flex-wrap: wrap;
-    gap: 8px;
-    padding-block: 12px;
+  .batch-detail--compact .batch-quantity-summary {
+    padding: 16px;
   }
-}
-
-@media (max-width: 600px) {
-  .batch-detail--compact .batch-task-surface {
+  .batch-quantity-equation,
+  .batch-equation-term,
+  .inbound-result-totals {
+    gap: 12px;
+  }
+  .batch-quantity-metric {
+    min-width: 48px;
+  }
+  .batch-quantity-metric > strong {
+    font-size: 24px;
+  }
+  .delivery-detail-tabs-body {
     padding-inline: 12px;
-  }
-  .batch-detail--compact .batch-title-row h2 {
-    font-size: 22px;
-  }
-  .batch-detail--compact .file-order-card .ant-card-head {
-    padding-inline: 16px;
-  }
-  .batch-detail--compact .file-order-card .ant-card-extra {
-    padding-bottom: 8px;
-  }
-  .batch-detail--compact .locked-data-card .ant-card-extra {
-    margin-inline-start: 0;
   }
 }

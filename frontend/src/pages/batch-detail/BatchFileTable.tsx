@@ -1,6 +1,13 @@
 import { batchFileResultName } from "./batchPresentation";
-import { Alert, Button, Card, Empty, Popconfirm, Space, Table, Tooltip } from "antd";
-import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, DownloadOutlined } from "@ant-design/icons";
+import { Button, Card, Empty, Popconfirm, Space, Table, Tooltip } from "antd";
+import {
+  ArrowDownOutlined,
+  ArrowUpOutlined,
+  CheckCircleOutlined,
+  DeleteOutlined,
+  DownloadOutlined
+} from "@ant-design/icons";
+import DetailHelp from "./DetailHelp";
 import type { Batch, BatchFile } from "../../types";
 import type { BatchFiles } from "./useBatchFiles";
 import BatchTransferSources from "./BatchTransferSources";
@@ -26,28 +33,23 @@ export default function BatchFileTable({
   return (
     <Card
       title={selfOperated ? "本批次业务文件" : undefined}
-      variant={selfOperated ? undefined : "borderless"}
+      variant="borderless"
       className="section-card file-order-card"
       classNames={{ body: "batch-detail-panel-body" }}
       extra={
         <span className="order-hint">
-          {selfOperated ? "序号越小，越先扣减待入库余额和超收额度" : "序号越小，越先扣减采购余额"}
+          <DetailHelp
+            label="文件顺序说明"
+            title={
+              selfOperated
+                ? "序号越小，越先扣减待入库余额和超收额度。调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
+                : "序号越小，越先扣减采购余额。调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
+            }
+          />
         </span>
       }
     >
       {selfOperated && <InboundFileStatus batch={batch} />}
-      {canEditFiles && files.length > 1 && (
-        <Alert
-          className="inline-alert"
-          type="info"
-          showIcon
-          title={
-            selfOperated
-              ? "调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
-              : "调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
-          }
-        />
-      )}
       <Table<BatchFile>
         rowKey="id"
         loading={loading}
@@ -202,20 +204,21 @@ function InboundFileStatus({ batch }: { batch: Batch }) {
   const inboundFile = batch.inbound_file;
   const apiSource = Boolean(batch.version_ids.self_operated_inbound);
   return (
-    <Alert
-      className="inline-alert"
-      type={inboundFile?.uploaded ? "success" : "warning"}
-      showIcon
-      title={
-        inboundFile?.uploaded
-          ? `待入库数据（${apiSource ? "API锁定" : "手动上传"}）：${inboundFile.original_name}`
-          : "待入库数据尚未就绪"
-      }
-      description={
-        apiSource
-          ? "此版本记录创建来源；预检按本批交货单号获取并冻结完整历史与余额，计算使用同一份快照。"
-          : "上传文件须包含原始应收货、已入库、入库状态和唯一积加明细ID；缺少历史时不能计算。"
-      }
-    />
+    <div className="inbound-file-status">
+      {inboundFile?.uploaded && <CheckCircleOutlined className="import-value" aria-hidden />}
+      <span>
+        {inboundFile?.uploaded
+          ? `待入库数据：${inboundFile.original_name}（${apiSource ? "API 锁定" : "手动上传"}）`
+          : "待入库数据尚未就绪"}
+      </span>
+      <DetailHelp
+        label="待入库数据说明"
+        title={
+          apiSource
+            ? "此版本记录创建来源；预检按本批交货单号获取并冻结完整历史与余额，计算使用同一份快照。"
+            : "上传文件须包含原始应收货、已入库、入库状态和唯一积加明细ID；缺少历史时不能计算。"
+        }
+      />
+    </div>
   );
 }

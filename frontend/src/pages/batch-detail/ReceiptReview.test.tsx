@@ -82,9 +82,8 @@ describe("累计实收核对", () => {
   it("未知本次量显示待核对，站点选择带文件编号并触发重新核对", async () => {
     const props = fixture();
     props.batch.receipt.issue_count = 1;
-    expect(batchTaskPresentation(props.batch).description).toBe(
-      "在积加补好入库单后点「重新取数」；交货单数量有误时替换文件后重新预检。"
-    );
+    expect(batchTaskPresentation(props.batch).title).toBe("1 处累计实收待核对，处理后即可预检");
+    expect(batchTaskPresentation(props.batch).description).toBe("");
     const row = {
       ...fixtureRow,
       history: null,
@@ -131,7 +130,7 @@ describe("累计实收核对", () => {
       </>
     );
     expect(screen.getAllByText("0")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "重新取数" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "重新取数" })).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
   });
 

@@ -26,6 +26,37 @@ function computedBatch(batch: Batch) {
 
 type ReviewStats = Pick<ExceptionReview["reviewStats"], "unfinishedCount" | "unfinishedQuantity">;
 
+export function batchStagePresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats) {
+  const { computed } = batchPresentation(batch);
+  const runningKind = activeTaskKind(batch, activeJob);
+  if (runningKind) return { label: RUNNING_STAGE_LABELS[runningKind] ?? "计算中", tone: "running" };
+  const failure = failureTaskPresentation(batch);
+  if (failure) return { label: failure.tone === "review" ? "待核对" : "失败", tone: failure.tone };
+  if (computed) return computedStage(batch, reviewStats);
+  return batch.status === "preflight_ready" && receiptReady(batch)
+    ? { label: "可计算", tone: "ready" }
+    : { label: "准备文件", tone: "waiting" };
+}
+
+const RUNNING_STAGE_LABELS: Record<string, string> = { prepare: "核对中", compute: "计算中", export: "生成中" };
+
+// 返回正在进行的任务类型；整批采购数据任务不改变批次阶段。
+function activeTaskKind(batch: Batch, activeJob?: Job) {
+  const active = (status: string) => ["queued", "running"].includes(status);
+  const jobs = activeJob ? [activeJob] : Object.values(batch.jobs ?? {});
+  const job = jobs.find((item) => item.kind !== "purchase_snapshot" && active(item.status));
+  if (job) return job.kind;
+  return active(batch.status) ? "compute" : null;
+}
+
+function computedStage(batch: Batch, reviewStats?: ReviewStats) {
+  const { needsReview, needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
+  const unfinished = reviewStats ? reviewStats.unfinishedCount > 0 : needsReview;
+  if (unfinished) return { label: "待审校", tone: "review" };
+  const ready = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
+  return { label: ready ? "已完成" : "可生成结果", tone: "ready" };
+}
+
 export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats) {
   const { computed, needsReview } = batchPresentation(batch);
   if (activeJob) return jobTaskPresentation(activeJob);
@@ -40,22 +71,25 @@ export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats
 function failureTaskPresentation(batch: Batch) {
   if (batch.receipt?.issue_count)
     return {
-      title: "累计实收待核对",
-      description: "在积加补好入库单后点「重新取数」；交货单数量有误时替换文件后重新预检。",
-      tone: "error",
+      title: `${batch.receipt.issue_count} 处累计实收待核对，处理后即可预检`,
+      description: "",
+      tone: "review",
       busy: false
     };
   if (batch.status === "failed")
     return {
       title: "计算失败",
-      description:
-        batch.workflow === "self_operated_inbound" ? "原因见下方，修正后重新预检" : "原因见下方，修正后重新预检并计算",
+      description: failedBatchReason(batch),
       tone: "error",
       busy: false
     };
   if (batch.jobs?.export?.status === "failed")
-    return { title: "结果生成失败", description: "审校记录已保留，可以重新生成", tone: "error", busy: false };
+    return { title: "结果生成失败", description: batch.jobs.export.error_message ?? "", tone: "error", busy: false };
   return null;
+}
+
+function failedBatchReason(batch: Batch) {
+  return batch.error_message ?? batch.jobs?.compute?.error_message ?? batch.jobs?.prepare?.error_message ?? "";
 }
 
 function preparedTaskPresentation(batch: Batch) {
