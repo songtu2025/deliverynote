@@ -43,21 +43,12 @@ input {
   outline-offset: 3px;
 }
 
+/* 减弱动效时，大范围移动的进度条改用明暗变化；转圈图标幅度小且必须体现仍在处理，保持旋转。 */
 @keyframes dn-busy-pulse {
   from {
     opacity: 1;
   }
   to {
     opacity: 0.35;
-  }
-}
-
-/* 减弱动效时不旋转，改用明暗变化提示仍在处理。 */
-@media (prefers-reduced-motion: reduce) {
-  .anticon.anticon-spin {
-    animation: dn-busy-pulse 1.2s ease-in-out infinite alternate;
-  }
-  .anticon.anticon-spin::before {
-    animation: none;
   }
 }

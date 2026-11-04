@@ -102,4 +102,14 @@ describe("批次任务轮询生命周期", () => {
     expect(getBatchJob).toHaveBeenCalledOnce();
     expect(load).not.toHaveBeenCalled();
   });
+
+  it("任务从排队变为执行中时立即更新显示状态，不等批次刷新", async () => {
+    vi.mocked(getBatchJob).mockResolvedValue(fixtureJob({ status: "running" }));
+    const load = vi.fn(async () => null);
+    const queued: Batch = { ...createDetailBatch(), jobs: { compute: fixtureJob({ status: "queued" }) } };
+    const { result } = renderHook(() => useBatchJob(queued, load));
+    expect(result.current?.status).toBe("queued");
+    await waitFor(() => expect(result.current?.status).toBe("running"));
+    expect(load).not.toHaveBeenCalled();
+  });
 });

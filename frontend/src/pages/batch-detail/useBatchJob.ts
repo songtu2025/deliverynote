@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { App as AntApp } from "antd";
 import { ApiError } from "../../api";
 import { getBatchJob } from "../../batchDetailApi";
@@ -16,6 +16,8 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
   const pollingJob = useRef<number | null>(null);
   const announcedJobs = useRef(new Set<number>());
   const mounted = useRef(true);
+  // 轮询拿到的最新状态，让排队中到执行中的变化即时显示，而不必等任务结束才刷新批次。
+  const [liveJob, setLiveJob] = useState<Job | null>(null);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -66,6 +68,7 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
           announceJob(job, batchId);
           return;
         }
+        setLiveJob(job);
         await wait(1500);
         if (!cancelled) void poll();
       } catch (error) {
@@ -83,5 +86,5 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
     };
   }, [batchId, activeJobId, activeJobStatus, message]);
 
-  return activeJob;
+  return liveJob && liveJob.id === activeJob?.id ? liveJob : activeJob;
 }
