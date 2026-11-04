@@ -13,6 +13,19 @@ export default function App() {
           colorSuccess: "#1f6b52",
           colorWarning: "#b4381f",
           colorError: "#a3162b",
+          // 深色种子色自动派生的浅底偏灰，显式指定选中、提示和标签的底色与边框。
+          colorPrimaryBg: "#e6f1ee",
+          colorPrimaryBgHover: "#d9ebe5",
+          colorPrimaryBorder: "#cfe4df",
+          colorInfoBg: "#edf3fa",
+          colorInfoBgHover: "#e1eaf5",
+          colorInfoBorder: "#c9d8ea",
+          colorSuccessBg: "#f3fbf7",
+          colorSuccessBgHover: "#e6f4ec",
+          colorSuccessBorder: "#cfe8dd",
+          colorErrorBg: "#fff6f7",
+          colorErrorBgHover: "#fbe9eb",
+          colorErrorBorder: "#f2d1d4",
           colorText: "#182230",
           colorTextSecondary: "#667085",
           colorBgLayout: "#f1f4f8",
@@ -24,8 +37,6 @@ export default function App() {
         },
         components: {
           Button: { primaryShadow: "none", defaultShadow: "none" },
-          // 深主色自动派生的选中底色偏灰，统一改为浅绿。
-          Table: { rowSelectedBg: "#edf7f3", rowSelectedHoverBg: "#e6f3ef" },
           Layout: { siderBg: "#f8fafc" },
           Menu: {
             itemHeight: 44,
@@ -33,7 +44,6 @@ export default function App() {
             itemMarginBlock: 6,
             itemColor: "#475467",
             itemSelectedColor: "#055247",
-            itemSelectedBg: "#e6f1ee",
             itemHoverBg: "#f1f4f8",
             activeBarBorderWidth: 0
           }
