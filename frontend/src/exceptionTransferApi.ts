@@ -11,7 +11,7 @@ export type TransferOptions = {
 };
 
 export function remainingTransferQuantity(record: DeliveryException) {
-  return record.manual_quantity - (record.transferred_quantity ?? 0);
+  return record.manual_quantity - (record.transferred_quantity ?? 0) - (record.offline_quantity ?? 0);
 }
 
 export function getTransferOptions(exceptionId: number) {

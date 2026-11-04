@@ -20,6 +20,7 @@ from .batch_queries import (
 )
 from .models import Batch, BatchFile
 from .batch_transfer_sources import batch_transfer_sources
+from .manual_handling import recompute_disabled_reason
 from .serializers import (
     job_json,
     overreceipt_rule_json,
@@ -170,6 +171,18 @@ def _batch_details(
     session: Session,
 ) -> dict[str, object]:
     return {
+        **(
+            {
+                "manual_allowances": (metadata.self_operated.manual_handling or {}).get(
+                    "allowances", []
+                ),
+                "manual_allowance_disabled_reason": recompute_disabled_reason(
+                    session, batch
+                ),
+            }
+            if metadata.self_operated is not None
+            else {}
+        ),
         **(
             {"transfer_sources": batch_transfer_sources(session, batch.id)}
             if metadata.self_operated is None

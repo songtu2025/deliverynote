@@ -13,7 +13,7 @@ from ..exception_reasons import exception_reason_code
 from ..processing.models import IMPORT_COLUMNS, POSITION_VALUE_COLUMNS
 from ..processing.pending import enrich_pending_import_rows
 from .caches import PositionFrameCache
-from .exception_transfer_state import transferred_quantity_expression
+from .exception_transfer_state import remaining_quantity_expression
 from .models import Batch, BatchFile, ExceptionRecord, InputVersion, SplitRecord
 
 
@@ -51,8 +51,7 @@ def _exception_review_stats(session: Session, batch_id: int) -> dict[str, int | 
                         case(
                             (
                                 ExceptionRecord.status != "resolved",
-                                ExceptionRecord.manual_quantity
-                                - transferred_quantity_expression(),
+                                remaining_quantity_expression(),
                             ),
                             else_=0,
                         ),
@@ -189,6 +188,8 @@ def _exception_json(
         "overreceipt_allocated_quantity": exception.overreceipt_allocated_quantity,
         "overreceipt_remaining_quantity": exception.overreceipt_remaining_quantity,
         "manual_quantity": exception.manual_quantity,
+        "offline_quantity": exception.offline_quantity,
+        "offline_note": exception.offline_note,
         "reason": exception.reason,
         "reason_code": reason_code,
         "allowed_actions": allowed_actions,

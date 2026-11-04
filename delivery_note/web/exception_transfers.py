@@ -14,7 +14,7 @@ from ..excel_io import read_supplier_workbook
 from .batch_creation import DeliveryBatchCreator, validated_batch_name
 from .dependencies import RequestDependencies
 from .exception_transfer_files import TransferFile, transfer_sites
-from .exception_transfer_state import transferred_quantity_expression
+from .exception_transfer_state import remaining_quantity_expression
 from .input_versions import INPUT_KINDS, require_active_versions
 from .models import Batch, BatchFile, ExceptionRecord, Job, SelfOperatedBatch
 from .models.batches import ExceptionTransfer
@@ -90,7 +90,7 @@ class ExceptionTransferService:
         return by_id, groups
 
     def _reserve_quantity(self, session: Session, item: TransferItem) -> None:
-        remaining = ExceptionRecord.manual_quantity - transferred_quantity_expression()
+        remaining = remaining_quantity_expression()
         changed = cast(
             CursorResult[Any],
             session.execute(

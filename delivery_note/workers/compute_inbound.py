@@ -18,11 +18,13 @@ from ..inbound.receipts import prepare_receipts
 from ..self_operated_inbound import (
     process_self_operated_inbound_batch,
 )
-from ..web.models import AuditLog, ExceptionRecord
+from ..web.models import AuditLog, ExceptionRecord, SelfOperatedBatch
+from ..web.manual_handling import apply_offline_inputs
+from ..processing.keys import make_overreceipt_key
 from .compute_inputs import ComputeInputs
+from ..web.compute_state import clear_compute_results
 from .compute_records import (
     _json_records,
-    clear_compute_results,
     load_owned_compute,
     mark_compute_succeeded,
     update_compute_source,
@@ -39,7 +41,9 @@ def _save_inbound_compute(
 ) -> None:
     with context.database.session() as session:
         job, batch = load_owned_compute(session, context, batch_id)
-        clear_compute_results(session, payloads)
+        clear_compute_results(session, [payload["source_id"] for payload in payloads])
+        profile = session.get(SelfOperatedBatch, batch.id)
+        offline = (profile.manual_handling or {}).get("offline", []) if profile else []
         for payload in payloads:
             stored_source = update_compute_source(
                 session, batch.id, payload, "、".join(payload["delivery_numbers"])
@@ -48,29 +52,29 @@ def _save_inbound_compute(
             for pending in payload["pending_rows"]:
                 normal = int(pending["正常分配数量"])
                 overreceipt = int(pending["规则内超收数量"])
-                session.add(
-                    ExceptionRecord(
-                        batch_file_id=stored_source.id,
-                        sku=str(pending["SKU"]),
-                        original_site=str(pending["原始站点"] or ""),
-                        full_site=str(pending["完整站点"] or ""),
-                        destination="",
-                        delivery_quantity=int(pending["质检合格数量"]),
-                        allocated_quantity=normal + overreceipt,
-                        purchase_allocated_quantity=normal,
-                        overreceipt_allocated_quantity=overreceipt,
-                        overreceipt_remaining_quantity=(
-                            0
-                            if pending["待处理原因"]
-                            == ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
-                            else None
-                        ),
-                        manual_quantity=int(pending["待处理数量"]),
-                        reason=str(pending["待处理原因"]),
-                        reason_code=exception_reason_code(pending["待处理原因"]),
-                        status="pending",
-                    )
+                record = ExceptionRecord(
+                    batch_file_id=stored_source.id,
+                    sku=str(pending["SKU"]),
+                    original_site=str(pending["原始站点"] or ""),
+                    full_site=str(pending["完整站点"] or ""),
+                    destination="",
+                    delivery_quantity=int(pending["质检合格数量"]),
+                    allocated_quantity=normal + overreceipt,
+                    purchase_allocated_quantity=normal,
+                    overreceipt_allocated_quantity=overreceipt,
+                    overreceipt_remaining_quantity=(
+                        0
+                        if pending["待处理原因"]
+                        == ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
+                        else None
+                    ),
+                    manual_quantity=int(pending["待处理数量"]),
+                    reason=str(pending["待处理原因"]),
+                    reason_code=exception_reason_code(pending["待处理原因"]),
+                    status="pending",
                 )
+                apply_offline_inputs(record, offline)
+                session.add(record)
 
         mark_compute_succeeded(job, batch)
         session.add(
@@ -121,6 +125,14 @@ def _execute_self_operated_compute(
         product_rows,
         inbound_rows,
         overreceipt_limit=self_operated_data["overreceipt_limit"],
+        extra_overreceipt={
+            make_overreceipt_key(
+                item["supplier_name"], item["sku"], item["full_site"]
+            ): item["quantity"]
+            for item in self_operated_data.get("manual_handling", {}).get(
+                "allowances", []
+            )
+        },
         file_site_overrides=choices,
     )
     _heartbeat(database, job_id, claim_token)
@@ -128,6 +140,21 @@ def _execute_self_operated_compute(
     for item in batch_result.items:
         source_id = int(item.source_id)
         result = item.result
+        reasons = {
+            make_overreceipt_key(
+                entry["supplier_name"], entry["sku"], entry["full_site"]
+            ): entry["reason"]
+            for entry in self_operated_data.get("manual_handling", {}).get(
+                "allowances", []
+            )
+        }
+        for index, row in result.allocation_rows.iterrows():
+            if "人工追加超收：" in row["超收原因"]:
+                key = make_overreceipt_key(
+                    item.supplier_name, row["SKU"], row["平台站点"]
+                )
+                if reasons.get(key):
+                    result.allocation_rows.at[index, "超收原因"] += f"；{reasons[key]}"
         payloads.append(
             {
                 "source_id": source_id,

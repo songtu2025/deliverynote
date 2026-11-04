@@ -49,6 +49,8 @@ export default function ExceptionReviewDrawer({
             <SelfOperatedExceptionDetails
               exception={splitTarget}
               supplierCode={fileById[splitTarget.batch_file_id].supplier_code}
+              batch={batch}
+              onSaved={editor.manualSaved}
             />
           ) : (
             <ReasonGuidance exception={splitTarget} hasOverreceiptRule={Boolean(batch.overreceipt_rule)} />

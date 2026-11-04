@@ -9,6 +9,7 @@ from delivery_note.web.models import (
     ExceptionRecord,
     OverreceiptRuleVersion,
     PurchaseSyncJob,
+    SelfOperatedBatch,
 )
 from tests.support.postgres import PostgreSQLCase
 
@@ -58,6 +59,8 @@ class MigrationTests(PostgreSQLCase):
         self.assertTrue(receipt_columns["receipt_context"]["nullable"])
         self.assertTrue(receipt_columns["receipt_sites"]["nullable"])
         self.assertTrue(snapshot_columns["receipt_snapshot"]["nullable"])
+        self.assertFalse(snapshot_columns["manual_handling"]["nullable"])
+        self.assertTrue({"offline_quantity", "offline_note"} <= exception_columns)
 
     def test_unified_migration_upgrades_legacy_schema_and_preserves_data(self):
         migrate_schema(self.database_url)
@@ -74,6 +77,12 @@ class MigrationTests(PostgreSQLCase):
                     supplier_version_id=versions["supplier"],
                 )
                 session.add_all([batch, sync_job])
+                session.add(
+                    SelfOperatedBatch(
+                        batch_id=batch.id,
+                        template_version_id=versions["template"],
+                    )
+                )
                 session.flush()
                 source = BatchFile(
                     batch_id=batch.id,
@@ -110,6 +119,9 @@ class MigrationTests(PostgreSQLCase):
                     ("batch_files", "receipt_context"),
                     ("batch_files", "receipt_sites"),
                     ("self_operated_batches", "receipt_snapshot"),
+                    ("self_operated_batches", "manual_handling"),
+                    ("exceptions", "offline_quantity"),
+                    ("exceptions", "offline_note"),
                 ):
                     connection.execute(
                         text(f"ALTER TABLE {table} DROP COLUMN {column}")
@@ -176,6 +188,12 @@ class MigrationTests(PostgreSQLCase):
                 self.assertEqual(sync_job.status, "succeeded")
                 self.assertEqual(exception.reason, "产品信息站点不唯一")
                 self.assertEqual(exception.reason_code, "ambiguous_product_site")
+                self.assertEqual(
+                    (exception.offline_quantity, exception.offline_note), (0, "")
+                )
+                self.assertEqual(
+                    session.get(SelfOperatedBatch, batch_id).manual_handling, {}
+                )
                 source = session.get(BatchFile, source_id)
                 self.assertEqual(source.document_note, "历史单据备注、LN2608179025")
                 long_note = "、".join(f"交货单号-{index:06d}" for index in range(100))

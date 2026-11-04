@@ -20,6 +20,34 @@ from tests.support.release import SHA, OLD_SHA
 
 
 class SchemaReleaseTests(unittest.TestCase):
+    def test_manual_handling_requires_full_api_worker_release(self):
+        change = REVIEWED_SCHEMA_CHANGES["self-operated-manual-handling"]
+        self.assertTrue(change.requires_full_release)
+        self.assertEqual(
+            change.fields,
+            frozenset(
+                {
+                    "SelfOperatedBatch.manual_handling",
+                    "ExceptionRecord.offline_quantity",
+                    "ExceptionRecord.offline_note",
+                }
+            ),
+        )
+        for config in (
+            replace(
+                self.config,
+                schema_changes=("self-operated-manual-handling",),
+                services=("api",),
+            ),
+            replace(
+                self.config,
+                schema_changes=("self-operated-manual-handling",),
+                web_image=None,
+            ),
+        ):
+            with self.assertRaises(BackupError):
+                publish_backend(config, runner=BackendRunner(), check_only=True)
+
     def setUp(self):
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)

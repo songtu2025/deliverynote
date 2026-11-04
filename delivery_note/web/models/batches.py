@@ -62,6 +62,9 @@ class SelfOperatedBatch(Base):
     inbound_original_name: Mapped[str] = mapped_column(String(255), default="")
     inbound_storage_path: Mapped[str] = mapped_column(Text, default="")
     receipt_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    manual_handling: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, server_default="{}"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -139,6 +142,10 @@ class ExceptionRecord(Base):
         nullable=True,
     )
     manual_quantity: Mapped[int] = mapped_column(Integer)
+    offline_quantity: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0"
+    )
+    offline_note: Mapped[str] = mapped_column(Text, default="", server_default="")
     reason: Mapped[str] = mapped_column(String(255))
     reason_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")

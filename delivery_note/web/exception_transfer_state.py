@@ -17,6 +17,14 @@ def transferred_quantity_expression() -> ColumnElement[int]:
     )
 
 
+def remaining_quantity_expression() -> ColumnElement[int]:
+    return (
+        ExceptionRecord.manual_quantity
+        - transferred_quantity_expression()
+        - ExceptionRecord.offline_quantity
+    )
+
+
 def require_no_transfer_links(session: Session, batch_ids: list[int]) -> None:
     source_ids = (
         select(ExceptionRecord.id)

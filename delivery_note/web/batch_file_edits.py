@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .batch_views import batch_json
 from .dependencies import RequestDependencies
 from .exception_transfer_state import require_no_transfer_links
-from .models import BatchFile, ExceptionRecord, SplitRecord
+from .models import BatchFile
+from .compute_state import clear_compute_results
 from .receipt_state import invalidate_receipts
 from .schemas import FileOrderPayload
 from .uploads import _unlink_after_commit
@@ -42,16 +43,7 @@ class BatchFileEditor:
             raise HTTPException(status_code=404, detail="交货文件不存在")
         storage_path = Path(source.storage_path)
         require_no_transfer_links(session, [batch.id])
-        exception_ids = session.scalars(
-            select(ExceptionRecord.id).where(ExceptionRecord.batch_file_id == source.id)
-        ).all()
-        if exception_ids:
-            session.execute(
-                delete(SplitRecord).where(SplitRecord.exception_id.in_(exception_ids))
-            )
-            session.execute(
-                delete(ExceptionRecord).where(ExceptionRecord.id.in_(exception_ids))
-            )
+        clear_compute_results(session, [source.id])
         session.delete(source)
         session.flush()
         invalidate_receipts(session, batch)

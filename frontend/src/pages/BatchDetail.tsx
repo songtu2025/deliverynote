@@ -14,6 +14,7 @@ import { useBatchFiles } from "./batch-detail/useBatchFiles";
 import { useBatchAction } from "./batch-detail/useBatchAction";
 import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
 import ExceptionReviewDrawer from "./batch-detail/ExceptionReviewDrawer";
+import BatchManualAllowances from "./batch-detail/BatchManualAllowances";
 import { useExceptionEditor } from "./batch-detail/useExceptionEditor";
 import { useBatchDetailData } from "./batch-detail/useBatchDetailData";
 import type { BatchDetailData } from "./batch-detail/useBatchDetailData";
@@ -145,6 +146,13 @@ export default function BatchDetail({
   const reviewContent = computed && (
     <>
       <BatchPurchaseSnapshotNotice />
+      <BatchManualAllowances
+        batch={batch}
+        onSaved={async () => {
+          setSplitTarget(null);
+          await load(true);
+        }}
+      />
       <ExceptionReviewTable
         key={batchId}
         transferBatch={batch}

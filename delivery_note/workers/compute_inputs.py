@@ -109,6 +109,7 @@ def _load_compute_inputs(database: Database, batch_id: int) -> ComputeInputs:
                 else None
             )
             self_operated_data = {
+                "manual_handling": profile.manual_handling or {},
                 "receipt_snapshot": profile.receipt_snapshot,
                 "inbound_path": inbound_path,
                 "template_path": Path(template.storage_path),
