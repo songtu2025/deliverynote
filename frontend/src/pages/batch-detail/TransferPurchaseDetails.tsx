@@ -79,7 +79,7 @@ export default function TransferPurchaseDetails({ data, site }: { data: Transfer
 
 function PurchaseRows({ purchases }: { purchases: PurchaseOption[] }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto", columnGap: 8 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr) auto", columnGap: 8 }}>
       {purchases.map((purchase) => (
         <div key={purchase.id} style={{ display: "contents" }}>
           <Typography.Text ellipsis title={purchase.po_code}>

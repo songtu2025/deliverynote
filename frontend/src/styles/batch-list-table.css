@@ -127,12 +127,7 @@
 
 .batch-list-table .ant-table-tbody > tr.ant-table-row-selected > td {
   color: var(--dn-ink);
-  background: #edf7f3 !important;
   border-bottom-color: #d8e9e4;
-}
-
-.batch-list-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
-  background: #e6f3ef !important;
 }
 
 .batch-list-table .ant-table-tbody > tr.ant-table-row-selected > td:first-child {

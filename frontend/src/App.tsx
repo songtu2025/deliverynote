@@ -24,6 +24,8 @@ export default function App() {
         },
         components: {
           Button: { primaryShadow: "none", defaultShadow: "none" },
+          // 深主色自动派生的选中底色偏灰，统一改为浅绿。
+          Table: { rowSelectedBg: "#edf7f3", rowSelectedHoverBg: "#e6f3ef" },
           Layout: { siderBg: "#f8fafc" },
           Menu: {
             itemHeight: 44,

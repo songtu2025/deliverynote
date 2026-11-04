@@ -88,7 +88,7 @@ export default function ExceptionTransferModal({
     <Modal
       title={"转交货批次（" + records.length + " 条）"}
       open
-      width={1100}
+      width={1320}
       style={{ maxWidth: "calc(100vw - 32px)" }}
       okText="创建交货批次"
       cancelText="取消"
@@ -145,14 +145,14 @@ export default function ExceptionTransferModal({
           pagination={false}
           loading={loading}
           dataSource={records}
-          scroll={{ x: 1060, y: "min(440px, calc(100vh - 280px))" }}
+          scroll={{ x: 1262, y: "min(440px, calc(100vh - 280px))" }}
           onRow={() => ({ style: { verticalAlign: "middle" } })}
           columns={[
             { title: "SKU", dataIndex: "sku", width: 150 },
-            { title: "原站点", dataIndex: "full_site", width: 140 },
+            { title: "原站点", dataIndex: "full_site", width: 190 },
             {
               title: "可转",
-              width: 60,
+              width: 56,
               align: "right",
               render: (_, record) => (
                 <span style={{ fontVariantNumeric: "tabular-nums" }}>{remainingTransferQuantity(record)}</span>
@@ -160,7 +160,7 @@ export default function ExceptionTransferModal({
             },
             {
               title: "转交数量",
-              width: 110,
+              width: 96,
               align: "right",
               render: (_, record, index) => (
                 <Form.Item
@@ -195,7 +195,7 @@ export default function ExceptionTransferModal({
             },
             {
               title: "目标站点",
-              width: 200,
+              width: 280,
               render: (_, record, index) => (
                 <Form.Item
                   style={{ marginBottom: 0 }}
@@ -212,6 +212,7 @@ export default function ExceptionTransferModal({
                   <Select
                     aria-label={record.sku + " 目标站点"}
                     showSearch
+                    popupMatchSelectWidth={false}
                     optionFilterProp="value"
                     options={sites[index] ? transferSiteOptions(sites[index]) : []}
                   />
@@ -220,14 +221,14 @@ export default function ExceptionTransferModal({
             },
             {
               title: "采购去向",
-              width: 240,
+              width: 340,
               render: (_, record, index) => (
                 <TransferPurchaseDetails data={sites[index]} site={items?.[index]?.full_site ?? record.full_site} />
               )
             },
             {
               title: "预计",
-              width: 160,
+              width: 150,
               render: (_, __, index) => {
                 const row = estimate.rows[index];
                 if (!row) return <Typography.Text type="secondary">—</Typography.Text>;
