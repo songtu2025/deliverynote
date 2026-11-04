@@ -83,6 +83,8 @@ def register_inbound_exception_routes(
                 "normal_quantity": row.get("正常分配数量"),
                 "overreceipt_quantity": row.get("规则内超收数量"),
                 "current_quantity": row.get("本次入库"),
+                "max_receive_quantity": row.get("最大可收货"),
+                "received_quantity": row.get("已收货"),
             }
             for index, row in enumerate(source.import_rows or [])
             if key(row.get("SKU")) == key(exception.sku)

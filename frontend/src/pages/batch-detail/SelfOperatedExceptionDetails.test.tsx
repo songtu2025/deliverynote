@@ -30,7 +30,9 @@ describe("自营仓异常依据", () => {
         history_quantity: 3,
         normal_quantity: 67,
         overreceipt_quantity: 5,
-        current_quantity: 72
+        current_quantity: 72,
+        max_receive_quantity: 75,
+        received_quantity: 10
       }
     ]
   };
@@ -86,6 +88,7 @@ describe("自营仓异常依据", () => {
     expect(await screen.findByText("PO-UK")).toBeInTheDocument();
     const allocated = within(screen.getByRole("region", { name: "本次入库分配明细" }));
     expect(await allocated.findByText("WV-1")).toBeInTheDocument();
+    expect(allocated.getByText("超出最大可收货，积加可能拒收")).toBeVisible();
     for (const name of ["关联交货单", "历史已入库", "正常分配", "规则内超收", "本次分配"]) {
       expect(allocated.getByRole("columnheader", { name })).toBeInTheDocument();
     }

@@ -20,6 +20,7 @@ from .processing.allocation import AllocationSummary
 from .processing.delivery_sites import resolve_delivery_sites
 from .processing.site_overrides import _apply_site_overrides
 from .processing.models import OverreceiptAllowance, OverreceiptKey
+from .processing.keys import make_overreceipt_key
 
 
 def _joined_original_sites(values: pd.Series) -> str:
@@ -98,6 +99,7 @@ def process_self_operated_inbound_batch(
     inbound_rows: pd.DataFrame,
     *,
     overreceipt_limit: int = 0,
+    extra_overreceipt: Mapping[OverreceiptKey, int] | None = None,
     site_overrides: Mapping[tuple[str, str], str] | None = None,
     file_site_overrides: Mapping[str | int, Mapping[tuple[str, str], str]]
     | None = None,
@@ -107,7 +109,11 @@ def process_self_operated_inbound_batch(
     if overreceipt_limit < 0:
         raise ValueError("允许超收数量必须为非负整数")
     receivable_balances: dict[int, int] = {}
-    overreceipt_allowances: dict[OverreceiptKey, OverreceiptAllowance] = {}
+    overreceipt_allowances = {
+        key: OverreceiptAllowance(overreceipt_limit + extra, "")
+        for key, extra in (extra_overreceipt or {}).items()
+    }
+    consumed: dict[OverreceiptKey, int] = {}
     items: list[SelfOperatedInboundItemResult] = []
     for file_order, delivery in enumerate(deliveries, start=1):
         result = process_self_operated_inbound(
@@ -123,6 +129,21 @@ def process_self_operated_inbound_batch(
             overreceipt_limit=overreceipt_limit,
             receivable_balances=receivable_balances,
         )
+        for index, row in result.allocation_rows.iterrows():
+            key = make_overreceipt_key(
+                delivery.supplier_name, row["SKU"], row["平台站点"]
+            )
+            quantity = int(row["规则内超收数量"])
+            previous = consumed.get(key, 0)
+            consumed[key] = previous + quantity
+            manual = max(previous + quantity - overreceipt_limit, 0) - max(
+                previous - overreceipt_limit, 0
+            )
+            if manual and key in (extra_overreceipt or {}):
+                current = str(result.allocation_rows.at[index, "超收原因"])
+                result.allocation_rows.at[index, "超收原因"] = (
+                    f"{current}；人工追加超收：{manual}"
+                )
         items.append(
             SelfOperatedInboundItemResult(
                 source_id=delivery.source_id,

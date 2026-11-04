@@ -1,5 +1,5 @@
 import { api, ApiError } from "./api";
-import type { Job } from "./types";
+import type { Batch, DeliveryException, Job } from "./types";
 
 export type PurchaseOption = {
   id: string;
@@ -20,6 +20,8 @@ export type InboundAllocation = {
   normal_quantity: number | null;
   overreceipt_quantity: number | null;
   current_quantity: number | null;
+  max_receive_quantity?: number | string | null;
+  received_quantity?: number | string | null;
 };
 
 type SnapshotPurchaseOption = PurchaseOption & { supplier_code: string; sku: string };
@@ -92,3 +94,20 @@ export async function readCompletePurchaseSnapshot(batchId: number, first: Purch
 
 export const getInboundAllocations = (exceptionId: number) =>
   api<InboundAllocations>(`/api/exceptions/${exceptionId}/inbound-allocation`);
+
+export const saveManualAllowance = (
+  batchId: number,
+  input: {
+    supplier_code: string;
+    sku: string;
+    full_site: string;
+    quantity: number;
+    reason: string;
+  }
+) => api<Batch>(`/api/batches/${batchId}/manual-allowances`, { method: "PUT", body: JSON.stringify(input) });
+
+export const saveOfflineHandling = (exceptionId: number, input: { quantity: number; note: string }) =>
+  api<DeliveryException>(`/api/exceptions/${exceptionId}/offline-handling`, {
+    method: "PUT",
+    body: JSON.stringify(input)
+  });

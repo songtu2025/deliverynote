@@ -12,6 +12,9 @@ from .batch_file_document_note_text import (
 )
 from .exception_reason_codes import migrate as migrate_exception_reason_codes
 from .exception_transfers import migrate as migrate_exception_transfers
+from .self_operated_manual_handling import (
+    migrate as migrate_self_operated_manual_handling,
+)
 from .inbound_receipts import migrate as migrate_inbound_receipts
 from .overreceipt_rules import migrate as migrate_overreceipt_rules
 from .position_draft_row_index import migrate as migrate_position_draft_row_index
@@ -32,6 +35,7 @@ MIGRATIONS: tuple[Callable[[str], None], ...] = (
     migrate_inbound_receipts,
     migrate_batch_file_document_note_text,
     migrate_exception_transfers,
+    migrate_self_operated_manual_handling,
 )
 
 

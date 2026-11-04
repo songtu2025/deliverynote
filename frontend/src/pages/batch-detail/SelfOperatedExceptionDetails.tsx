@@ -1,16 +1,21 @@
 import type { ReactNode } from "react";
 import { Alert, Button, Card, Descriptions, Flex, Table, Typography } from "antd";
 import { formatBeijingDateTime } from "../../dateTime";
-import type { DeliveryException } from "../../types";
+import type { Batch, DeliveryException } from "../../types";
+import ManualHandling from "./ManualHandling";
 import type { InboundAllocation, PurchaseOption } from "../../inboundExceptionApi";
 import { useInboundExceptionDetails } from "./useInboundExceptionDetails";
 
 export default function SelfOperatedExceptionDetails({
   exception,
-  supplierCode
+  supplierCode,
+  batch,
+  onSaved
 }: {
   exception: DeliveryException;
   supplierCode: string;
+  batch?: Batch;
+  onSaved?: (updated?: DeliveryException) => Promise<void>;
 }) {
   const { purchases, allocations } = useInboundExceptionDetails(exception.id, supplierCode, exception.sku);
   return (
@@ -32,6 +37,9 @@ export default function SelfOperatedExceptionDetails({
       />
       <PurchaseEvidence state={purchases} />
       <AllocationEvidence state={allocations} />
+      {batch && onSaved && (
+        <ManualHandling batch={batch} exception={exception} supplierCode={supplierCode} onSaved={onSaved} />
+      )}
     </Flex>
   );
 }
@@ -92,7 +100,26 @@ function AllocationEvidence({ state: allocations }: { state: Evidence["allocatio
           { title: "历史已入库", dataIndex: "history_quantity", width: 100, align: "right", render: showValue },
           { title: "正常分配", dataIndex: "normal_quantity", width: 100, align: "right", render: showValue },
           { title: "规则内超收", dataIndex: "overreceipt_quantity", width: 100, align: "right", render: showValue },
-          { title: "本次分配", dataIndex: "current_quantity", width: 100, align: "right", render: showValue }
+          {
+            title: "本次分配",
+            dataIndex: "current_quantity",
+            width: 160,
+            align: "right",
+            render: (value, row) => (
+              <>
+                {showValue(value)}
+                {row.max_receive_quantity != null &&
+                  row.max_receive_quantity !== "" &&
+                  row.received_quantity != null &&
+                  row.received_quantity !== "" &&
+                  Number(value) > Math.max(Number(row.max_receive_quantity) - Number(row.received_quantity), 0) && (
+                    <div>
+                      <Typography.Text type="warning">超出最大可收货，积加可能拒收</Typography.Text>
+                    </div>
+                  )}
+              </>
+            )
+          }
         ]}
       />
     </EvidenceSection>

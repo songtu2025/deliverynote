@@ -26,6 +26,15 @@ export interface BatchFile {
 }
 
 export interface Batch {
+  manual_allowances?: {
+    supplier_code: string;
+    supplier_name: string;
+    sku: string;
+    full_site: string;
+    quantity: number;
+    reason: string;
+  }[];
+  manual_allowance_disabled_reason?: string | null;
   id: number;
   name: string;
   status: string;
@@ -128,6 +137,8 @@ export interface DeliveryException {
   overreceipt_remaining_quantity: number | null;
   manual_quantity: number;
   transferred_quantity?: number;
+  offline_quantity?: number;
+  offline_note?: string;
   transfers?: { target_batch_id: number; quantity: number; full_site: string }[];
   reason: string;
   reason_code: ExceptionReasonCode;

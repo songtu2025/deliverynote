@@ -41,6 +41,18 @@ class SchemaChange:
 
 
 REVIEWED_SCHEMA_CHANGES = {
+    "self-operated-manual-handling": SchemaChange(
+        migration="self_operated_manual_handling",
+        migration_function="migrate_self_operated_manual_handling",
+        fields=frozenset(
+            {
+                "SelfOperatedBatch.manual_handling",
+                "ExceptionRecord.offline_quantity",
+                "ExceptionRecord.offline_note",
+            }
+        ),
+        requires_full_release=True,
+    ),
     "exception-transfers": SchemaChange(
         migration="exception_transfers",
         migration_function="migrate_exception_transfers",

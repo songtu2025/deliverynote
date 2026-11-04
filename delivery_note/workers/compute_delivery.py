@@ -20,9 +20,9 @@ from ..web.database import Database
 from ..web.models import AuditLog, ExceptionRecord
 from .compute_inbound import _execute_self_operated_compute
 from .compute_inputs import _load_compute_inputs
+from ..web.compute_state import clear_compute_results
 from .compute_records import (
     _json_records,
-    clear_compute_results,
     load_owned_compute,
     mark_compute_succeeded,
     update_compute_source,
@@ -38,7 +38,7 @@ def _save_delivery_compute(
 ) -> None:
     with context.database.session() as session:
         job, batch = load_owned_compute(session, context, batch_id)
-        clear_compute_results(session, payloads)
+        clear_compute_results(session, [payload["source_id"] for payload in payloads])
 
         for payload in payloads:
             source = update_compute_source(

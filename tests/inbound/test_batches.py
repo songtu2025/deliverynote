@@ -7,9 +7,55 @@ from delivery_note.self_operated_inbound import (
 
 
 from tests.support.inbound import InboundAllocationCase
+from delivery_note.processing.keys import make_overreceipt_key
 
 
 class InboundBatchesTests(InboundAllocationCase):
+    def test_extra_allowance_is_shared_in_file_order_on_last_candidate(self):
+        requests = [
+            SelfOperatedInboundRequest(
+                source_id=name,
+                delivery_lines=self.delivery(8),
+                delivery_numbers=("LN2608179011",),
+                supplier_name="Yu feng",
+            )
+            for name in ("first", "second")
+        ]
+        key = make_overreceipt_key("Yu feng", "SKU-A", "AMAZON:RIVMOUNT:US")
+        inbound = self.inbound(
+            [
+                {"应收货": 3, "入库单号": "WV-1", "关联采购单": "PO-1"},
+                {"应收货": 2, "入库单号": "WV-2", "关联采购单": "PO-2"},
+            ]
+        )
+        for limit, expected in ((0, [8, 1]), (2, [8, 3])):
+            with self.subTest(limit=limit):
+                result = process_self_operated_inbound_batch(
+                    requests,
+                    self.products(),
+                    inbound,
+                    overreceipt_limit=limit,
+                    extra_overreceipt={key: 4},
+                )
+                self.assertEqual(
+                    [item.result.import_total for item in result.items], expected
+                )
+                self.assertEqual(
+                    result.qualified_total, result.import_total + result.pending_total
+                )
+                for item in result.items:
+                    extra = item.result.allocation_rows.query("规则内超收数量 > 0")
+                    self.assertEqual(extra.iloc[0]["入库单号"], "WV-2")
+                    self.assertIn("人工追加超收：", extra.iloc[0]["超收原因"])
+        reversed_result = process_self_operated_inbound_batch(
+            reversed(requests),
+            self.products(),
+            inbound,
+            extra_overreceipt={key: 4},
+        )
+        self.assertEqual(reversed_result.items[0].source_id, "second")
+        self.assertEqual(reversed_result.items[0].result.import_total, 8)
+
     def test_batch_files_share_receivable_balance_in_user_order(self) -> None:
         requests = [
             SelfOperatedInboundRequest(
