@@ -6,7 +6,15 @@ export type {
   InputVersionInspection
 } from "./types/inputVersions";
 export type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "./types/rules";
-export type { BatchFile, Batch, Job, SplitPart, DeliveryException, DeliveryImportRow } from "./types/batches";
+export type {
+  BatchFile,
+  Batch,
+  Job,
+  SplitPart,
+  DeliveryException,
+  DeliveryImportRow,
+  InboundImportRow
+} from "./types/batches";
 export type {
   PositionDiff,
   PositionDraft,

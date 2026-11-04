@@ -1,10 +1,12 @@
 import { api } from "./api";
-import type { Batch, BatchFile, DeliveryException, DeliveryImportRow, Job, SplitPart } from "./types";
+import type { Batch, BatchFile, DeliveryException, DeliveryImportRow, InboundImportRow, Job, SplitPart } from "./types";
 
 export const REVIEW_PAGE_SIZE = 10;
 
 export function getBatchImportRows(batchId: number, params: URLSearchParams) {
-  return api<{ items: DeliveryImportRow[]; total: number }>(`/api/batches/${batchId}/import-rows?${params}`);
+  return api<{ items: (DeliveryImportRow | InboundImportRow)[]; total: number; kind: "inbound" | "delivery" }>(
+    `/api/batches/${batchId}/import-rows?${params}`
+  );
 }
 
 export type ExceptionPage = {
@@ -73,5 +75,16 @@ export function saveExceptionSplit(exceptionId: number, parts: SplitPart[]) {
   return api<DeliveryException>(`/api/exceptions/${exceptionId}/split`, {
     method: "PUT",
     body: JSON.stringify({ parts })
+  });
+}
+
+export function chooseReceiptSite(
+  batchId: number,
+  row: { file_id: number; sku: string; original_site: string },
+  site: string
+) {
+  return api(`/api/batches/${batchId}/files/${row.file_id}/receipt-site`, {
+    method: "PUT",
+    body: JSON.stringify({ sku: row.sku, original_site: row.original_site, full_site: site })
   });
 }

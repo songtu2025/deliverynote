@@ -1,9 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Card, Empty, Tabs } from "antd";
 import type { ExceptionReview } from "./useExceptionReview";
 import type { Batch } from "../../types";
 import DeliveryImportRows from "./DeliveryImportRows";
-import { getBatchImportRows } from "../../batchDetailApi";
+import { useImportRowCount } from "./useImportRowCount";
 
 export default function DeliveryDetailTabs({
   batch,
@@ -58,25 +58,4 @@ export default function DeliveryDetailTabs({
       />
     </Card>
   );
-}
-
-// 标签与「待处理」一致按记录条数计数，件数见数量条。
-function useImportRowCount(batch: Batch, computed: boolean) {
-  const [count, setCount] = useState<number>();
-  useEffect(() => {
-    if (!computed) return;
-    let active = true;
-    getBatchImportRows(batch.id, new URLSearchParams({ offset: "0", limit: "1" })).then(
-      (result) => {
-        if (active) setCount(result.total);
-      },
-      () => {
-        if (active) setCount(undefined);
-      }
-    );
-    return () => {
-      active = false;
-    };
-  }, [batch.id, batch.updated_at, computed]);
-  return count;
 }

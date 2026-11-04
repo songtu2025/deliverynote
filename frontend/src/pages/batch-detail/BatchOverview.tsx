@@ -1,4 +1,5 @@
-import { Button, Popconfirm, Tag, Typography } from "antd";
+import ReceiptRefreshButton from "./ReceiptRefreshButton";
+import { Tag, Typography } from "antd";
 import { ExclamationCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { Batch, Job } from "../../types";
@@ -49,15 +50,11 @@ export default function BatchOverview(props: OverviewProps) {
       </div>
       <div className="batch-task-actions">
         {selfOperated && (
-          <Popconfirm
-            title="重新获取历史？"
-            description="会清除当前计算与导出结果，再按本批单号获取最新历史。"
+          <ReceiptRefreshButton
+            disabled={Boolean(activeJob) || !batch.files?.length}
+            loading={action === "refresh-history"}
             onConfirm={tasks.refreshHistory}
-          >
-            <Button disabled={Boolean(activeJob) || !batch.files?.length} loading={action === "refresh-history"}>
-              重新取数
-            </Button>
-          </Popconfirm>
+          />
         )}
         <BatchPurchaseSnapshotNotice />
         {computed ? <BatchExportActions {...props} /> : <BatchPreparationActions {...props} />}

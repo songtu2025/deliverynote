@@ -85,6 +85,20 @@ export interface DeliveryImportRow {
   delivery_note: string;
 }
 
+export interface InboundImportRow {
+  file_id: number;
+  file_name: string;
+  row_index: number;
+  warehouse: string;
+  sku: string;
+  quantity: number;
+  site: string;
+  inbound_no: string;
+  po_code: string;
+  delivery_no: string;
+  overreceipt_reason: string | null;
+}
+
 export interface Job {
   id: number;
   batch_id: number;

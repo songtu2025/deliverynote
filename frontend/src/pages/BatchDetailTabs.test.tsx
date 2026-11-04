@@ -151,6 +151,23 @@ describe("自营仓详情工作区", () => {
     };
   });
 
+  it("可入库标签在累计核对之后，计数使用接口行数", async () => {
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const tab = await screen.findByRole("tab", { name: "可入库 2" });
+    const names = screen.getAllByRole("tab").map((item) => item.textContent);
+    expect(names.indexOf("可入库 2")).toBe(names.findIndex((name) => name?.startsWith("累计实收核对")) + 1);
+    fireEvent.click(tab);
+    expect(await screen.findByText("没有可入库记录")).toBeInTheDocument();
+  });
+  it("未计算时可入库显示未知数量与空状态", async () => {
+    state.batch.status = "draft";
+    state.batch.download_ready = false;
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "可入库 —" }));
+    expect(screen.getByText("计算后显示可入库明细")).toBeInTheDocument();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("import-rows"))).toBe(false);
+  });
+
   it("待办和已处理一次点击可达，保留搜索与全部审校筛选", async () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "待办 4" })).toHaveAttribute("aria-selected", "true");
@@ -214,7 +231,7 @@ describe("自营仓详情工作区", () => {
     state.exceptions = [];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "待办 0" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getAllByRole("tab")).toHaveLength(5);
+    expect(screen.getAllByRole("tab")).toHaveLength(6);
     expect(screen.getByRole("tab", { name: "已处理 —" })).toBeInTheDocument();
     const summary = screen.getByLabelText("入库数量摘要");
     expect(within(summary).getAllByText("—")).toHaveLength(4);

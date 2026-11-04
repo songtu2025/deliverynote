@@ -15,9 +15,15 @@ MAX_LIST_PAGE_SIZE = 200
 
 
 def _import_rows_page(
-    session: Session, batch_id: int, offset: int, limit: int, search: str
+    session: Session,
+    batch_id: int,
+    offset: int,
+    limit: int,
+    search: str,
+    *,
+    inbound: bool = False,
 ) -> dict[str, object]:
-    fields = (
+    fields: tuple[str, ...] = (
         "warehouse",
         "supplier_code",
         "sku",
@@ -26,6 +32,30 @@ def _import_rows_page(
         "document_note",
         "delivery_note",
     )
+    columns = IMPORT_COLUMNS
+    search_fields: tuple[str, ...] = ("sku", "site", "warehouse", "file_name")
+    if inbound:
+        fields = (
+            "inbound_no",
+            "po_code",
+            "delivery_no",
+            "warehouse",
+            "sku",
+            "site",
+            "quantity",
+            "overreceipt_reason",
+        )
+        columns = [
+            "入库单号",
+            "关联采购单",
+            "关联交货单/调拨单",
+            "入库仓",
+            "SKU",
+            "平台站点",
+            "本次入库",
+            "超收原因",
+        ]
+        search_fields += ("inbound_no", "po_code")
     keyword = search.strip().casefold()
     items: list[dict[str, object]] = []
     total = 0
@@ -36,17 +66,20 @@ def _import_rows_page(
     )
     for file_id, file_name, rows in session.execute(query):
         for row_index, row in enumerate(rows or []):
-            item = dict(zip(fields, (row.get(column, "") for column in IMPORT_COLUMNS)))
+            item = dict(zip(fields, (row.get(column, "") for column in columns)))
             item.update(file_id=file_id, file_name=file_name, row_index=row_index)
             if keyword and not any(
-                keyword in str(item[field]).casefold()
-                for field in ("sku", "site", "warehouse", "file_name")
+                keyword in str(item[field]).casefold() for field in search_fields
             ):
                 continue
             if offset <= total < offset + limit:
                 items.append(item)
             total += 1
-    return {"items": items, "total": total}
+    return {
+        "items": items,
+        "total": total,
+        "kind": "inbound" if inbound else "delivery",
+    }
 
 
 def register_batch_read_routes(
@@ -140,8 +173,18 @@ def register_batch_read_routes(
         search: str = "",
     ) -> dict[str, object]:
         batch = get_batch_or_404(batch_id, session)
-        if session.get(SelfOperatedBatch, batch.id) is not None or not (
-            batch.status == "succeeded" or batch.zip_path
-        ):
-            return {"items": [], "total": 0}
-        return _import_rows_page(session, batch.id, offset, limit, search)
+        inbound = session.get(SelfOperatedBatch, batch.id) is not None
+        computed = (
+            batch.status == "succeeded"
+            if inbound
+            else (batch.status == "succeeded" or bool(batch.zip_path))
+        )
+        if not computed:
+            return {
+                "items": [],
+                "total": 0,
+                "kind": "inbound" if inbound else "delivery",
+            }
+        return _import_rows_page(
+            session, batch.id, offset, limit, search, inbound=inbound
+        )

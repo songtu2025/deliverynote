@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Button, Flex, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { Batch, DeliveryException } from "../../types";
-import { getTransferOptions, remainingTransferQuantity } from "../../exceptionTransferApi";
+import { getTransferOptions, remainingTransferQuantity, transferDisabledReason } from "../../exceptionTransferApi";
 import type { TransferOptions } from "../../exceptionTransferApi";
 import { workspacePath } from "../../app/workspaceRoutes";
 import ExceptionTransferModal from "./ExceptionTransferModal";
@@ -42,9 +42,8 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
   const [open, setOpen] = useState(false);
   const { optionsCache, loadOptions, clearOptions } = useTransferOptions();
   if (!batch || batch.workflow !== "self_operated_inbound" || batch.status !== "succeeded") {
-    return { rowSelection: undefined, reset: () => setSelected([]), action: null, modal: null };
+    return { rowSelection: undefined, reset: () => setSelected([]), action: null, modal: null, openRow: undefined };
   }
-  const exportStatus = batch.jobs?.export?.status ?? "";
   const rowSelection: TableProps<DeliveryException>["rowSelection"] = {
     selectedRowKeys: selected.map((record) => record.id),
     preserveSelectedRowKeys: true,
@@ -62,14 +61,15 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
   };
   return {
     rowSelection,
+    openRow: (record: DeliveryException) => {
+      setSelected([record]);
+      setOpen(true);
+    },
     reset: () => setSelected([]),
     action: (
       <Flex justify="end" align="center" gap="small">
         <Typography.Text type="secondary">已选 {selected.length} 条</Typography.Text>
-        <Button
-          disabled={!selected.length || ["queued", "running"].includes(exportStatus)}
-          onClick={() => setOpen(true)}
-        >
+        <Button disabled={!selected.length || Boolean(transferDisabledReason(batch))} onClick={() => setOpen(true)}>
           转交货批次
         </Button>
       </Flex>

@@ -89,3 +89,46 @@ describe("可导入明细", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
+
+describe("可入库明细", () => {
+  it("共用分页搜索与静默刷新，自营仓显示入库列", async () => {
+    const inbound = { ...row, inbound_no: "WV-1", po_code: "PO-1", overreceipt_reason: null };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ items: [inbound], total: 11, kind: "inbound" }))
+    );
+    const batch = { ...createDetailBatch(), workflow: "self_operated_inbound" as const };
+    const { rerender } = render(<DeliveryImportRows batch={batch} />);
+    expect(await screen.findByText("WV-1")).toBeInTheDocument();
+    expect(screen.getByText("PO-1")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "本次入库" })).toHaveStyle({ textAlign: "right" });
+    expect(screen.getAllByRole("columnheader").map((item) => item.textContent)).toEqual([
+      "文件",
+      "SKU",
+      "站点",
+      "入库单号",
+      "PO",
+      "入库仓",
+      "本次入库",
+      "超收原因"
+    ]);
+    fireEvent.click(screen.getByTitle("2"));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("offset=10"), expect.anything())
+    );
+    rerender(<DeliveryImportRows batch={{ ...batch, updated_at: "2026-11-05" }} />);
+    expect(screen.getByText("WV-1")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("搜索可入库记录"), { target: { value: "PO" } });
+    await waitFor(() =>
+      expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining("offset=0&limit=10&search=PO"), expect.anything())
+    );
+  });
+  it("共用空状态", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ items: [], total: 0, kind: "inbound" }))
+    );
+    render(<DeliveryImportRows batch={{ ...createDetailBatch(), workflow: "self_operated_inbound" }} />);
+    expect(await screen.findByText("没有可入库记录")).toBeInTheDocument();
+  });
+});

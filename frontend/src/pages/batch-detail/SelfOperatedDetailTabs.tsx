@@ -1,3 +1,5 @@
+import DeliveryImportRows from "./DeliveryImportRows";
+import { useImportRowCount } from "./useImportRowCount";
 import type { ReactNode } from "react";
 import { Card, Empty, Tabs } from "antd";
 import type { Batch } from "../../types";
@@ -22,6 +24,7 @@ type DetailTabsProps = {
 export default function SelfOperatedDetailTabs(props: DetailTabsProps) {
   const { batch, activeKey, onChange, reviewState, onReset, extra } = props;
   const { computed } = batchPresentation(batch);
+  const importCount = useImportRowCount(batch, computed);
   const selected = activeKey ?? "review";
   const select = (key: string) => {
     if (key === "review" || key === "resolved") {
@@ -37,13 +40,13 @@ export default function SelfOperatedDetailTabs(props: DetailTabsProps) {
         activeKey={selected}
         onChange={select}
         tabBarExtraContent={computed && ["review", "resolved"].includes(selected) ? extra : undefined}
-        items={workspaceItems(props, computed)}
+        items={workspaceItems(props, computed, importCount)}
       />
     </Card>
   );
 }
 
-function workspaceItems(props: DetailTabsProps, computed: boolean) {
+function workspaceItems(props: DetailTabsProps, computed: boolean, importCount?: number) {
   const { batch, reviewStats, review, receipts, receiptTodos, files, versions } = props;
   const counts = workspaceCounts(batch, reviewStats, computed);
   return [
@@ -69,6 +72,15 @@ function workspaceItems(props: DetailTabsProps, computed: boolean) {
         <span>累计实收核对{counts.receipts ? <span className="pending-value"> {counts.receipts}</span> : null}</span>
       ),
       children: receipts
+    },
+    {
+      key: "imports",
+      label: `可入库 ${computed ? (importCount ?? "—") : "—"}`,
+      children: computed ? (
+        <DeliveryImportRows key={batch.id} batch={batch} />
+      ) : (
+        <Empty description="计算后显示可入库明细" />
+      )
     },
     { key: "files", label: `来源文件 ${counts.files}`, children: files },
     { key: "versions", label: "锁定资料", children: versions }
