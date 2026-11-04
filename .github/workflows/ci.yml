@@ -16,8 +16,33 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: 改动范围判断
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.scope.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 判断是否只改前端
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # 仅 PR 且全部改动位于 frontend/ 时跳过后端检查与隔离演练；master 推送始终全量。
+          if [ "$EVENT" != "pull_request" ] || git diff --name-only "$BASE" "$GITHUB_SHA" | grep -qv '^frontend/'; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+
   backend:
     name: 后端与 Python 质量检查
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -251,4 +276,6 @@ jobs:
 
   drills:
     name: 隔离演练
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     uses: ./.github/workflows/drills.yml

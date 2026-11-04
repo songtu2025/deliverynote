@@ -376,7 +376,7 @@ docker compose config
 git diff --check
 ```
 
-CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、配置范围内的 Mypy 与格式检查、后端测试、前端增量格式检查、类型检查、增量及全量 ESLint、质量门禁测试、重复/死代码/导入循环检查、前端测试与构建、依赖审计和 Compose 配置校验，并包含隔离 Docker 发布及备份恢复业务演练。实际覆盖以工作流为准；GitHub 分支是否要求这些检查通过后才能合并，需要另外核验，不能仅根据 CI 配置推断。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
+CI 会在 Pull Request 和 `master` 分支推送时执行 Ruff、配置范围内的 Mypy 与格式检查、后端测试、前端增量格式检查、类型检查、增量及全量 ESLint、质量门禁测试、重复/死代码/导入循环检查、前端测试与构建、依赖审计和 Compose 配置校验，并包含隔离 Docker 发布及备份恢复业务演练。Pull Request 的改动全部位于 `frontend/` 时跳过后端任务与隔离演练；`master` 推送始终全量执行，发布脚本只认可全部任务成功的 `master` 推送 CI。实际覆盖以工作流为准；GitHub 分支是否要求这些检查通过后才能合并，需要另外核验，不能仅根据 CI 配置推断。后端任务会启动 PostgreSQL 17，并额外验证新库迁移、旧结构升级的数据保留、部分唯一索引以及两个 Worker 并发 claim 的 `SKIP LOCKED` 语义。本地未设置 `POSTGRES_TEST_URL` 时，这组 PostgreSQL 专项测试会明确跳过。
 
 也可以显式运行统一迁移命令：
 
