@@ -117,7 +117,9 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
 
         restored.create_inbound_batch()
         fresh = restored.batch()
-        self.assertIsNone(fresh["receipt"]["requested_total"])
+        # 站点不唯一只影响该行：本次申请含该行累计实收，历史未确认 1 行。
+        self.assertEqual(fresh["receipt"]["requested_total"], 18)
+        self.assertEqual(fresh["receipt"]["unconfirmed_count"], 1)
         self.assertEqual(fresh["version_ids"], before["version_ids"])
         self.assertNotEqual(fresh["jobs"]["prepare"]["id"], job["id"])
         restored.choose_site()
@@ -156,7 +158,8 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
         self.assertIn("自营仓收货入库单不存在", job["error_message"])
         batch = restored.batch()
         self.assertEqual(batch["status"], "failed")
-        self.assertNotIn("compute", batch["jobs"])
+        # 行级问题不再阻塞，备份中的批次已计算过；重新核对失败后旧计算必须失效。
+        self.assertNotEqual(batch["jobs"].get("compute", {}).get("status"), "succeeded")
         restored.request("POST", f"/api/batches/{restored.batch_id}/compute", 409)
         self.assertFalse(batch["download_ready"])
         self.assertFalse(batch["merged_download_ready"])
