@@ -63,7 +63,13 @@ function workspaceItems(props: DetailTabsProps, computed: boolean) {
       destroyOnHidden: true,
       children: computed ? review : <Empty description="计算后显示已处理记录" />
     },
-    { key: "receipts", label: `累计实收核对 ${counts.receipts}`, children: receipts },
+    {
+      key: "receipts",
+      label: (
+        <span>累计实收核对{counts.receipts ? <span className="pending-value"> {counts.receipts}</span> : null}</span>
+      ),
+      children: receipts
+    },
     { key: "files", label: `来源文件 ${counts.files}`, children: files },
     { key: "versions", label: "锁定资料", children: versions }
   ];
@@ -71,7 +77,8 @@ function workspaceItems(props: DetailTabsProps, computed: boolean) {
 
 function workspaceCounts(batch: Batch, stats: DetailTabsProps["reviewStats"], computed: boolean) {
   const reviewCounts = computed && stats ? stats : { unfinishedCount: "—", resolvedCount: "—" };
-  const receipts = batch.receipt?.issue_count ?? "—";
+  // 标签只在有待核对项时显示数量，避免 0 被误读为没有核对数据。
+  const receipts = batch.receipt?.issue_count ?? 0;
   return {
     todo: computed ? reviewCounts.unfinishedCount : receipts,
     resolved: reviewCounts.resolvedCount,

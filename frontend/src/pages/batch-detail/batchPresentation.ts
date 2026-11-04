@@ -64,7 +64,7 @@ export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats
   if (failure) return failure;
   if (batch.status === "queued" || batch.status === "running")
     return jobTaskPresentation({ kind: "compute", status: batch.status });
-  if (computed) return reviewTaskPresentation(needsReview, reviewStats);
+  if (computed) return reviewTaskPresentation(batch, needsReview, reviewStats);
   return preparedTaskPresentation(batch);
 }
 
@@ -143,7 +143,9 @@ function jobTaskPresentation(job: Pick<Job, "kind" | "status">) {
   };
 }
 
-function reviewTaskPresentation(needsReview: boolean, stats?: ReviewStats) {
+function reviewTaskPresentation(batch: Batch, needsReview: boolean, stats?: ReviewStats) {
+  const { needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
+  const downloadable = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
   if (!stats)
     return {
       title: "计算完成",
@@ -155,7 +157,9 @@ function reviewTaskPresentation(needsReview: boolean, stats?: ReviewStats) {
     title:
       stats.unfinishedCount > 0
         ? `${stats.unfinishedCount} 条待审校，共 ${stats.unfinishedQuantity} 件`
-        : "审校完成，可以生成结果",
+        : downloadable
+          ? "结果已生成，可以下载"
+          : "审校完成，可以生成结果",
     description: "",
     tone: stats.unfinishedCount > 0 || needsReview ? "review" : "ready",
     busy: false

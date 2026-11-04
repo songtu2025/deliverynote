@@ -136,7 +136,7 @@ describe("BatchDetailWorkbench", () => {
       await waitFor(() => expect(document.activeElement).toHaveClass("review-section-anchor"));
       expect(scroll).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
     } else {
-      expect(await task.findByText("审校完成，可以生成结果")).toBeInTheDocument();
+      expect(await task.findByText("结果已生成，可以下载")).toBeInTheDocument();
       expect(task.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
     }
     expect(task.getByText("结果可下载")).toBeInTheDocument();
