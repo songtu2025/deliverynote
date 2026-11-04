@@ -31,11 +31,10 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
                 ("260817-狂飙-A质检交货单.xlsx", 7, 3),
             ],
         )
-        self.assertIsNone(ambiguous["batch"]["receipt"]["requested_total"])
-        self.assertEqual(ambiguous["batch"]["receipt"]["issue_count"], 1)
-        self.assertEqual(
-            ambiguous["receipts"]["items"][0]["issue"], "产品信息站点不唯一"
-        )
+        self.assertEqual(ambiguous["batch"]["receipt"]["requested_total"], 18)
+        self.assertEqual(ambiguous["batch"]["receipt"]["issue_count"], 0)
+        self.assertEqual(ambiguous["batch"]["receipt"]["unconfirmed_count"], 1)
+        self.assertEqual(ambiguous["exceptions"][0]["reason"], "产品信息站点不唯一")
         self.assertEqual(
             selected["receipts"]["items"][0]["full_site"], "AMAZON:RIVMOUNT:US"
         )

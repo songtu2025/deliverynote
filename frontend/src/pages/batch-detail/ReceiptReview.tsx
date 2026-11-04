@@ -40,7 +40,7 @@ export default function ReceiptReview({
     }
   }, [issuesOnly, issueCount]);
 
-  const chooseSite = useReceiptSite(batch.id, runAction, load, () => setTarget(null));
+  const chooseSite = useReceiptSite(batch.id, runAction, load, () => setTarget(null), batch.status === "succeeded");
   const siteDisabledReason = receiptSiteDisabledReason(batch);
   const refreshing = receiptInputBusy(batch);
 

@@ -14,6 +14,53 @@ from tests.support.receipt_worker import ReceiptWorkerCase
 
 
 class ReceiptWorkerTests(ReceiptWorkerCase):
+    def test_missing_product_row_does_not_block_confirmed_rows(self):
+        batch_id = self.create_receipt_batch(managed=True)
+        with self.app.state.database.session() as session:
+            source = session.scalar(
+                select(BatchFile).where(BatchFile.batch_id == batch_id)
+            )
+            path = source.storage_path
+        book = load_workbook(path)
+        book["明细"].append(["SKU-MISSING", 4, "FBT", "LN2608179025"])
+        book.save(path)
+        book.close()
+        order = inbound_order()
+        order.update(supplierName="KuangBiao", releatedCode="LN2608179025")
+        with patch(
+            "delivery_note.workers.prepare_inbound.GerpgoClient.from_config"
+        ) as factory:
+            factory.return_value.list_self_operated_inbound_orders.return_value = [
+                order
+            ]
+            batch = self.preflight(batch_id)
+            self.assertEqual(batch["status"], "preflight_ready")
+            self.assertEqual(batch["receipt"]["unconfirmed_count"], 1)
+            self.assertEqual(batch["receipt"]["requested_total"], 20)
+            result = self.client.post(
+                f"/api/batches/{batch_id}/compute", headers=self.headers
+            )
+            self.assertEqual(result.status_code, 202, result.text)
+            run_once(self.database_url, self.storage_root)
+            factory.return_value.list_self_operated_inbound_orders.assert_called_once()
+        batch = self.client.get(f"/api/batches/{batch_id}", headers=self.headers).json()
+        self.assertEqual(batch["status"], "succeeded", batch)
+        self.assertEqual(
+            batch["summary"],
+            {
+                "delivery_total": 20,
+                "import_total": 16,
+                "manual_total": 4,
+                "conserved": True,
+            },
+        )
+        pending = self.client.get(
+            f"/api/batches/{batch_id}/exceptions", headers=self.headers
+        ).json()
+        self.assertEqual(
+            (pending[0]["reason"], pending[0]["manual_quantity"]), ("产品信息未匹配", 4)
+        )
+
     def test_completed_history_can_compute_without_exporting_history(self):
         batch_id = self.create_receipt_batch(cumulative=183, managed=True)
         order = inbound_order()

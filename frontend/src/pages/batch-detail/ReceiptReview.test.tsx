@@ -79,17 +79,19 @@ describe("累计实收核对", () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining("page=2"), expect.anything()));
   });
 
-  it("未知本次量显示待核对，站点选择带文件编号并触发重新核对", async () => {
+  it("未确认站点不计待核对，站点选择带文件编号并触发重新核对", async () => {
     const props = fixture();
-    props.batch.receipt.issue_count = 1;
-    expect(batchTaskPresentation(props.batch).title).toBe("1 处累计实收待核对，处理后即可预检");
-    expect(batchTaskPresentation(props.batch).description).toBe("");
+    props.batch.status = "preflight_ready";
+    props.batch.receipt.history_total = 0;
+    props.batch.receipt.requested_total = 19;
+    expect(batchTaskPresentation(props.batch).title).toBe("预检通过，可以计算");
     const row = {
       ...fixtureRow,
       history: null,
-      requested: null,
-      issue: "产品信息站点不唯一",
-      notice: "未匹配到入库明细，该数量将进入待处理",
+      requested: 19,
+      issue: "",
+      reason: "产品信息站点不唯一",
+      notice: "产品信息站点不唯一：历史未确认，全部进入待处理",
       candidates: ["AMAZON:SEEKWAY:US", "AMAZON:RIVMOUNT:US"]
     };
     vi.stubGlobal(
@@ -99,9 +101,9 @@ describe("累计实收核对", () => {
       )
     );
     renderDetail(<ReceiptReview {...props} />);
-    expect(await screen.findAllByText("待核对")).toHaveLength(2);
-    expect(screen.getByRole("switch", { name: "仅显示待核对" })).toBeInTheDocument();
-    expect(screen.getByText(row.issue)).toHaveClass("ant-typography-danger");
+    expect(await screen.findByText("未确认")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "仅显示待核对" })).not.toBeInTheDocument();
+    expect(screen.getByText(row.notice)).toHaveClass("ant-typography-warning");
     fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择该文件的完整站点" }));
     fireEvent.click(screen.getAllByText("AMAZON:RIVMOUNT:US").at(-1)!);

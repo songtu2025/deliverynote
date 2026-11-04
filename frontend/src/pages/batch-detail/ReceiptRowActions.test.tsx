@@ -33,11 +33,13 @@ const batch = {
 };
 const runAction = async (_name: string, operation: () => Promise<void>) => operation();
 afterEach(() => vi.unstubAllGlobals());
-function show(issue = row.issue) {
+function show(issue = row.issue, overrides: Partial<ReceiptRow> = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (_url: unknown, init?: RequestInit) =>
-      init?.method === "PUT" ? jsonResponse(batch) : jsonResponse({ items: [{ ...row, issue }], total: 1 })
+      init?.method === "PUT"
+        ? jsonResponse(batch)
+        : jsonResponse({ items: [{ ...row, issue, ...overrides }], total: 1 })
     )
   );
   const load = vi.fn(async () => undefined);
@@ -56,6 +58,12 @@ function show(issue = row.issue) {
   return { load, onRefresh, onVersions };
 }
 describe("计算前行内处理", () => {
+  it("行级提醒沿用原因提供站点操作，历史显示未确认而不是待核对", async () => {
+    show("", { reason: "产品信息站点不唯一", requested: 19, notice: "历史未确认，全部进入待处理" });
+    expect(await screen.findByRole("combobox", { name: "选择站点" })).toBeEnabled();
+    expect(screen.getByText("历史未确认，全部进入待处理")).toHaveClass("ant-typography-warning");
+    expect(screen.getByText("未确认")).toBeInTheDocument();
+  });
   it("站点选择使用原接口，保存后刷新并提示", async () => {
     const { load } = show();
     fireEvent.mouseDown(await screen.findByRole("combobox", { name: "选择站点" }));

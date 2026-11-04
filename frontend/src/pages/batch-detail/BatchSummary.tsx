@@ -1,13 +1,18 @@
 import type { Batch } from "../../types";
 import { batchPresentation } from "./batchPresentation";
 
-type QuantityMetric = { label: string; value?: number | null; tone?: string; operator?: string };
+type QuantityMetric = { label: string; value?: number | null; tone?: string; operator?: string; note?: string };
 
 function quantityMetrics(batch: Batch, known: boolean): QuantityMetric[] {
   if (batch.workflow === "self_operated_inbound")
     return [
       { label: "累计实收", value: batch.receipt?.cumulative_total },
-      { label: "历史已入库", value: batch.receipt?.history_total, operator: "−" },
+      {
+        label: "历史已入库",
+        value: batch.receipt?.history_total,
+        operator: "−",
+        note: batch.receipt?.unconfirmed_count ? ` · ${batch.receipt.unconfirmed_count} 行未确认` : undefined
+      },
       { label: "本次申请", value: batch.receipt?.requested_total, operator: "=" }
     ];
   const { totals } = batchPresentation(batch);
@@ -125,12 +130,13 @@ function Conservation({ batch }: { batch: Batch }) {
   );
 }
 
-function QuantityMetric({ label, value, tone }: QuantityMetric) {
+function QuantityMetric({ label, value, tone, note }: QuantityMetric) {
   return (
     <div
       className={`batch-quantity-metric ${value == null ? "quantity-unknown" : `metric-${value === 0 ? "total" : (tone ?? "total")}`}`}
     >
       <span>{label}</span> <strong>{value == null ? "—" : value.toLocaleString("zh-CN")}</strong>
+      {note && <span>{note}</span>}
     </div>
   );
 }

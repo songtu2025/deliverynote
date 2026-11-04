@@ -117,9 +117,10 @@ def _execute_self_operated_compute(
         raise ValueError("累计实收存在待核对记录，请重新预检")
     for request in requests:
         for row in contexts[request.source_id]["rows"]:
-            choices[request.source_id][(row["sku"], row["original_site"])] = row[
-                "full_site"
-            ]
+            if row["history"] is not None:
+                choices[request.source_id][(row["sku"], row["original_site"])] = row[
+                    "full_site"
+                ]
     batch_result = process_self_operated_inbound_batch(
         requests,
         product_rows,

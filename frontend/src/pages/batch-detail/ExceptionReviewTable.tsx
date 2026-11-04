@@ -24,6 +24,7 @@ export default function ExceptionReviewTable({
   transferBatch,
   onOpenDeliveryBatch,
   transferActionTarget,
+  onVersions,
   onSaved
 }: {
   selfOperated: boolean;
@@ -36,6 +37,7 @@ export default function ExceptionReviewTable({
   transferBatch?: Batch;
   onOpenDeliveryBatch?: (id: number) => void;
   transferActionTarget?: HTMLElement | null;
+  onVersions?: () => void;
   onSaved?: () => Promise<unknown>;
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
@@ -96,6 +98,7 @@ export default function ExceptionReviewTable({
                         supplierCode={fileById[record.batch_file_id]?.supplier_code ?? ""}
                         onOpen={onOpen}
                         onTransfer={(row) => transfer.openRow?.(row)}
+                        onVersions={onVersions}
                         onSaved={async () => {
                           await onSaved?.();
                         }}

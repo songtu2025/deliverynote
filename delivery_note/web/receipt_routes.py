@@ -21,9 +21,17 @@ class ReceiptSitePayload(BaseModel):
 
 
 def queue_receipt_preflight(
-    session: Session, batch: Batch, user: User, queue_job: Callable[..., Any]
+    session: Session,
+    batch: Batch,
+    user: User,
+    queue_job: Callable[..., Any],
+    *,
+    allow_succeeded: bool = False,
 ) -> dict[str, object]:
-    if batch.status not in {"draft", "preflight_ready", "failed"}:
+    allowed = {"draft", "preflight_ready", "failed"}
+    if allow_succeeded:
+        allowed.add("succeeded")
+    if batch.status not in allowed:
         raise HTTPException(status_code=409, detail="当前批次状态不可预检")
     count = session.scalar(
         select(BatchFile.id).where(BatchFile.batch_id == batch.id).limit(1)
@@ -85,7 +93,13 @@ def register_receipt_routes(
         user: Annotated[User, Depends(dependencies.current_user)],
         session: Annotated[Session, Depends(dependencies.get_session)],
     ) -> dict[str, object]:
-        batch = dependencies.get_editable_batch(batch_id, session, for_update=True)
+        batch = dependencies.get_editable_batch(
+            batch_id,
+            session,
+            for_update=True,
+            allow_succeeded=True,
+            detail="当前批次状态不可预检",
+        )
         source = session.get(BatchFile, file_id)
         if source is None or source.batch_id != batch.id:
             raise HTTPException(status_code=404, detail="质检文件不存在")
@@ -113,7 +127,9 @@ def register_receipt_routes(
             file_id,
             payload.model_dump(),
         )
-        return queue_receipt_preflight(session, batch, user, queue_job)
+        return queue_receipt_preflight(
+            session, batch, user, queue_job, allow_succeeded=True
+        )
 
     @app.post("/api/batches/{batch_id}/receipts/refresh", response_model=None)
     def refresh_history(

@@ -38,7 +38,7 @@ export function receiptReviewColumns({
       dataIndex: "cumulative",
       width: 115
     },
-    { title: "历史已入库", dataIndex: "history", width: 100, render: (value) => value ?? "待核对" },
+    { title: "历史已入库", dataIndex: "history", width: 100, render: (value) => value ?? "未确认" },
     { title: "本次申请", dataIndex: "requested", width: 100, render: (value) => value ?? "待核对" },
     {
       title: "核对结果",
@@ -60,7 +60,7 @@ export function receiptReviewColumns({
             row={row}
             disabledReason={siteDisabledReason}
             refreshing={refreshing}
-            onChooseSite={chooseSite}
+            onChooseSite={(_, site) => chooseSite(row, site)}
             onRefresh={onRefresh}
             onVersions={onVersions}
             onOpen={() => onOpen(row)}
