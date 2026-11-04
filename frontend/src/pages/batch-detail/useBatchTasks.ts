@@ -1,5 +1,5 @@
 import { App as AntApp } from "antd";
-import { download } from "../../api";
+import { api, download } from "../../api";
 import { adoptSupplierVersion, preflightBatch, startBatchJob } from "../../batchDetailApi";
 import type { BatchDetailData } from "./useBatchDetailData";
 import type { BatchAction } from "./useBatchAction";
@@ -57,5 +57,20 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
 
   const downloadResult = (path: string, filename: string) => runAction("download", () => download(path, filename));
 
-  return { preflight, preflightAndCompute, refreshSupplierVersion, compute, startExport, downloadResult };
+  const refreshHistory = () =>
+    runAction("refresh-history", async () => {
+      await api(`/api/batches/${batchId}/receipts/refresh`, { method: "POST" });
+      await load(true);
+      message.info("已重新排队获取历史，原计算与导出已失效");
+    });
+
+  return {
+    preflight,
+    preflightAndCompute,
+    refreshSupplierVersion,
+    compute,
+    startExport,
+    downloadResult,
+    refreshHistory
+  };
 }

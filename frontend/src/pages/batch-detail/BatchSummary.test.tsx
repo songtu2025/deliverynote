@@ -37,17 +37,50 @@ describe("BatchSummary", () => {
     expect(screen.getByText("数量不守恒：交货 161 ≠ 可导入 100 + 待处理 60")).toHaveClass("conservation-bad");
   });
 
-  it("没有计算结果时不显示数量条", () => {
+  it("没有计算结果时保留卡片与未知值，不用警告色", () => {
     const batch = createDetailBatch();
     batch.status = "draft";
     render(<BatchSummary batch={batch} />);
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "尚未计算" })).toHaveClass("quantity-uncomputed");
+    expect(screen.getAllByText("—")).toHaveLength(5);
+    expect(document.querySelectorAll(".quantity-unknown")).toHaveLength(3);
+    expect(document.querySelector(".metric-pending")).not.toBeInTheDocument();
   });
 
   it("缺少批次汇总时不显示数量条", () => {
     const batch = createDetailBatch();
     delete batch.summary;
     render(<BatchSummary batch={batch} />);
-    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "尚未计算" })).toHaveClass("quantity-uncomputed");
+  });
+
+  it("自营仓未知值为灰色横线，待核对只标记珊瑚段", () => {
+    const batch = {
+      ...createDetailBatch(),
+      workflow: "self_operated_inbound" as const,
+      status: "draft",
+      receipt: { cumulative_total: 100, history_total: null, requested_total: null, issue_count: 1 }
+    };
+    const { container } = render(<BatchSummary batch={batch} />);
+    expect(container.querySelectorAll(".quantity-unknown")).toHaveLength(4);
+    expect(screen.queryByText("计算后生成")).not.toBeInTheDocument();
+    expect(screen.queryByText("待核对", { selector: ".batch-quantity-metric strong" })).not.toBeInTheDocument();
+    const bar = screen.getByRole("img", { name: "1 处待核对，其余未计算" });
+    expect(bar.children).toHaveLength(1);
+    expect(bar.firstElementChild).toHaveClass("quantity-pending");
+    expect(container.querySelector(".quantity-import")).not.toBeInTheDocument();
+  });
+
+  it("零数量不画虚假的最小色段，自营仓使用真实汇总比例", () => {
+    const batch = {
+      ...createDetailBatch(),
+      workflow: "self_operated_inbound" as const,
+      receipt: { requested_total: 160 }
+    };
+    batch.summary = { delivery_total: 160, import_total: 160, manual_total: 0, conserved: true };
+    render(<BatchSummary batch={batch} />);
+    const bar = screen.getByRole("img", { name: "可入库 160，待处理 0" });
+    expect(bar.children).toHaveLength(1);
+    expect(bar.firstElementChild).toHaveStyle({ flexGrow: "160" });
   });
 });

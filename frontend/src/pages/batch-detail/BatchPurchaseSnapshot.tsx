@@ -1,5 +1,5 @@
 import { useContext, type ReactNode } from "react";
-import { Alert, Button, theme } from "antd";
+import { Button, Tooltip } from "antd";
 import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import {
@@ -25,23 +25,23 @@ function snapshotTitle(state: BatchPurchaseSnapshotState, busy: boolean) {
 }
 
 export function BatchPurchaseSnapshotNotice() {
-  const { token } = theme.useToken();
   const state = useContext(PurchaseSnapshotContext);
   if (!state?.enabled) return null;
   const { error, loading, metadata } = state;
   const busy = loading || (!error && isPurchaseSnapshotActive(metadata));
   return (
-    <Alert
-      styles={{ root: { background: token.colorBgContainer, marginBottom: token.marginSM } }}
-      showIcon
-      type={error ? "warning" : "info"}
-      title={snapshotTitle(state, busy)}
-      description={error}
-      action={
-        <Button size="small" loading={busy} onClick={state.refresh}>
-          {error ? "重试整批采购数据" : "刷新整批采购数据"}
-        </Button>
-      }
-    />
+    <Tooltip title={snapshotTitle(state, busy)} trigger={["hover", "focus"]}>
+      <Button loading={busy} onClick={state.refresh}>
+        {error ? "重试整批采购数据" : "刷新整批采购数据"}
+      </Button>
+    </Tooltip>
   );
+}
+
+export function BatchPurchaseSnapshotMetadata() {
+  const state = useContext(PurchaseSnapshotContext);
+  if (!state?.enabled) return null;
+  const { error, loading, metadata } = state;
+  const busy = loading || (!error && isPurchaseSnapshotActive(metadata));
+  return <div className={error ? "pending-value" : "batch-heading-meta"}>{error || snapshotTitle(state, busy)}</div>;
 }

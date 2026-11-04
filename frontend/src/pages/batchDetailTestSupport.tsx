@@ -79,6 +79,7 @@ export function setupBatchDetailTest() {
         if (url.endsWith("/api/batches/7/exceptions/filters")) return jsonResponse(exceptionFilters());
         if (url.includes("/api/batches/7/exceptions?")) return jsonResponse(exceptionPage(url));
         if (url.includes("/api/batches/7/import-rows?")) return jsonResponse({ items: [], total: 2 });
+        if (url.includes("/api/batches/7/receipts?")) return jsonResponse({ items: [], total: 0 });
         if (url.endsWith("/api/input-versions")) {
           return jsonResponse([{ ...fixtureVersion(9, "supplier"), name: "supplier-v2" }]);
         }

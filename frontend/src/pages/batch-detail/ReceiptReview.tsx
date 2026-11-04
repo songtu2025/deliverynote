@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App, Button, Card, Popconfirm, Space, Switch, Table, Typography } from "antd";
+import { Alert, App, Button, Card, Space, Switch, Table, Typography } from "antd";
+import DetailHelp from "./DetailHelp";
 import { api } from "../../api";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { Batch } from "../../types";
@@ -10,15 +11,17 @@ import type { BatchAction } from "./useBatchAction";
 export default function ReceiptReview({
   batch,
   runAction,
-  load
+  load,
+  issuesOnly: initialIssuesOnly = false
 }: {
   batch: Batch;
   runAction: BatchAction;
   load: (silent?: boolean) => Promise<unknown>;
+  issuesOnly?: boolean;
 }) {
   const { message } = App.useApp();
   const [page, setPage] = useState(1);
-  const [issuesOnly, setIssuesOnly] = useState(false);
+  const [issuesOnly, setIssuesOnly] = useState(initialIssuesOnly);
   const [target, setTarget] = useState<ReceiptRow | null>(null);
   const busy = receiptBusy(batch);
   const captured = batch.receipt?.captured_at;
@@ -32,14 +35,6 @@ export default function ReceiptReview({
     }
   }, [issuesOnly, issueCount]);
 
-  const refresh = () =>
-    runAction("refresh-history", async () => {
-      await api(`/api/batches/${batch.id}/receipts/refresh`, { method: "POST" });
-      setTarget(null);
-      setPage(1);
-      await load(true);
-      message.info("已重新排队获取历史，原计算与导出已失效");
-    });
   const chooseSite = (row: ReceiptRow, site: string) =>
     runAction("receipt-site", async () => {
       await api(`/api/batches/${batch.id}/files/${row.file_id}/receipt-site`, {
@@ -53,24 +48,15 @@ export default function ReceiptReview({
 
   return (
     <Card
-      title="累计实收核对"
+      title={<ReceiptTitle captured={captured} />}
+      variant="borderless"
       className="section-card"
       classNames={{ body: "batch-detail-panel-body" }}
-      extra={
-        <Popconfirm
-          title="重新获取历史？"
-          description="会清除当前计算与导出结果，再按本批单号获取最新历史。"
-          onConfirm={refresh}
-        >
-          <Button disabled={busy || !batch.files?.length}>重新取数</Button>
-        </Popconfirm>
-      }
     >
-      <ReceiptNotice batch={batch} />
       {error && <Alert type="error" title={error} />}
       {captured && (
         <>
-          {issueCount > 0 && (
+          {issueCount > 0 && !initialIssuesOnly && (
             <Space className="inline-alert">
               <Switch
                 checked={issuesOnly}
@@ -101,7 +87,19 @@ export default function ReceiptReview({
               { title: "文件", dataIndex: "filename", ellipsis: true, width: 200 },
               { title: "SKU", dataIndex: "sku", width: 170 },
               { title: "完整站点", dataIndex: "full_site", width: 200, ellipsis: true },
-              { title: "累计实收", dataIndex: "cumulative", width: 90 },
+              {
+                title: (
+                  <span>
+                    累计实收
+                    <DetailHelp
+                      label="累计实收口径"
+                      title="表格「实收数量」按单份 Excel 内的累计实收解释，不跨文件累计。重复计算复用此快照；已完结单据只核算历史。"
+                    />
+                  </span>
+                ),
+                dataIndex: "cumulative",
+                width: 115
+              },
               { title: "历史已入库", dataIndex: "history", width: 100, render: (value) => value ?? "待核对" },
               { title: "本次申请", dataIndex: "requested", width: 100, render: (value) => value ?? "待核对" },
               {
@@ -129,6 +127,15 @@ export default function ReceiptReview({
       )}
       <ReceiptReviewDetails target={target} busy={busy} onClose={() => setTarget(null)} onChooseSite={chooseSite} />
     </Card>
+  );
+}
+
+function ReceiptTitle({ captured }: { captured?: string }) {
+  return (
+    <div className="receipt-review-title">
+      累计实收核对{" "}
+      <span>本次申请 = 累计实收 − 历史已入库{captured && ` · 快照 ${formatBeijingDateTime(captured)}`}</span>
+    </div>
   );
 }
 
@@ -184,20 +191,4 @@ function useReceiptRows(batch: Batch, busy: boolean, page: number, issuesOnly: b
   }, [batch.id, batch.updated_at, captured, busy, blocked, page, issuesOnly]);
 
   return { rows, total, loading, error };
-}
-
-function ReceiptNotice({ batch }: { batch: Batch }) {
-  const captured = batch.receipt?.captured_at;
-  const description = captured
-    ? `本次申请 = 累计实收 − 历史已入库。快照时间：${formatBeijingDateTime(captured)}。重复计算复用此快照；已完结单据只核算历史。`
-    : "执行预检后获取完整历史。历史未确认时不计算、不导出；旧批次需要重新预检。";
-  return (
-    <Alert
-      type={batch.receipt?.issue_count ? "warning" : "info"}
-      showIcon
-      className="inline-alert"
-      title="表格「实收数量」按单份 Excel 内的累计实收解释，不跨文件累计。"
-      description={description}
-    />
-  );
 }

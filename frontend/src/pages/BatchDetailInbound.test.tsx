@@ -35,7 +35,7 @@ describe("自营仓批次详情", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
-    expect(await screen.findByRole("radio", { name: "未完成（1）" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "待办 1" })).toBeInTheDocument();
     expect(task.getByText("本次申请")).toBeInTheDocument();
     expect(task.getByLabelText("入库数量摘要")).toHaveTextContent("累计实收 163 − 历史已入库 3 = 本次申请 160");
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
@@ -66,14 +66,15 @@ describe("自营仓批次详情", () => {
       delete state.batch.versions.self_operated_inbound;
     }
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    fireEvent.click(await screen.findByRole("button", { name: "批次资料" }));
-    const materials = within(screen.getByRole("dialog", { name: "批次资料" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "来源文件 2" }));
+    const materials = within(screen.getByRole("tabpanel", { name: "来源文件 2" }));
     expect(materials.getByRole("columnheader", { name: "本次申请" })).toBeInTheDocument();
     expect(materials.getByRole("columnheader", { name: "可入库" })).toBeInTheDocument();
     expect(
-      await screen.findByText(new RegExp(`待入库数据（${apiSource ? "API锁定" : "手动上传"}）`))
+      await screen.findByText(new RegExp(`待入库数据：.*（${apiSource ? "API 锁定" : "手动上传"}）`))
     ).toBeInTheDocument();
     if (apiSource) {
+      fireEvent.click(screen.getByRole("tab", { name: "锁定资料" }));
       expect(screen.getByText("待入库 API 数据")).toBeInTheDocument();
     }
   });
@@ -105,7 +106,7 @@ describe("自营仓批次详情", () => {
     expect(task.queryByRole("button", { name: /预检并计算/ })).not.toBeInTheDocument();
     expect(task.queryByRole("button", { name: /重新计算/ }) !== null).toBe(status === "failed");
     expect(task.getByRole("status")).toHaveTextContent(
-      status === "draft" ? "2 份质检交货单已上传，确认顺序后预检" : "原因见下方，修正后重新预检"
+      status === "draft" ? "2 份质检交货单已上传，确认顺序后预检" : "计算失败"
     );
     fireEvent.click(button);
     expect(await screen.findByText("已提交后台预检，正在获取历史并核对累计实收")).toBeInTheDocument();
@@ -125,7 +126,7 @@ describe("自营仓批次详情", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     const summary = task.getByLabelText("入库数量摘要");
-    expect(summary).toHaveTextContent(hasSummary ? "可入库 0 件" : "可入库 —");
-    expect(summary).toHaveTextContent(hasSummary ? "待处理 0 件" : "待处理 计算后生成");
+    expect(summary).toHaveTextContent(hasSummary ? "可入库 0" : "可入库 —");
+    expect(summary).toHaveTextContent(hasSummary ? "待处理 0" : "待处理 —");
   });
 });

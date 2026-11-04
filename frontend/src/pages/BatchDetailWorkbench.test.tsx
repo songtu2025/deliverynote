@@ -8,11 +8,22 @@ import { jsonResponse } from "./admin/positionDraftTestSupport";
 describe("BatchDetailWorkbench", () => {
   const { state } = setupBatchDetailTest();
 
+  it("生成失败时主按钮重试生成，原因保留在页头", async () => {
+    state.batch.jobs.export = fixtureJob({ kind: "export", status: "failed", error_message: "合成导出错误" });
+    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("合成导出错误");
+    const primary = container.querySelectorAll(".batch-heading .ant-btn-primary");
+    expect(primary).toHaveLength(1);
+    expect(primary[0]).toHaveTextContent("生成结果");
+    expect(screen.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
+  });
+
   it.each([
     ["draft", true, false],
     ["preflight_ready", false, true],
-    ["queued", false, false],
-    ["running", false, false],
+    ["queued", true, false],
+    ["running", true, false],
     ["failed", true, false],
     ["succeeded", false, false]
   ] as const)("preserves actions in %s", async (status, preflight, compute) => {
@@ -23,7 +34,9 @@ describe("BatchDetailWorkbench", () => {
     const task = screen.getByRole("region", { name: "当前批次任务" });
     expect(within(task).queryByRole("button", { name: /预检并计算/ }) !== null).toBe(preflight);
     expect(within(task).queryByRole("button", { name: /开始计算|重新计算/ }) !== null).toBe(compute);
-    expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(preflight || compute);
+    expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(
+      ["draft", "preflight_ready", "failed"].includes(status)
+    );
     expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
     expect(within(task).queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
     if (status !== "succeeded") expect(within(task).queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
@@ -36,6 +49,8 @@ describe("BatchDetailWorkbench", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("button", { name: /预检/ })).toBeDisabled();
     expect(container.querySelector('.batch-primary-actions input[type="file"]')).toHaveAttribute("multiple");
+    expect(screen.getByRole("tab", { name: "待办 —" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "来源文件 0" }));
     expect(screen.getByText("请先上传一个或多个交货 Excel")).toBeInTheDocument();
   });
 
@@ -71,6 +86,7 @@ describe("BatchDetailWorkbench", () => {
       state.batch.status = "draft";
       const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
       await screen.findByText(state.batch.name);
+      fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
       const fileTable = within(container.querySelector(".file-order-card") as HTMLElement);
       expect(fileTable.getByLabelText("上移 KuangBiao-A交货单.xlsx")).toBeDisabled();
       expect(fileTable.getByLabelText("下移 KuangBiao-B交货单.xlsx")).toBeDisabled();
@@ -88,6 +104,7 @@ describe("BatchDetailWorkbench", () => {
   it("does not delete a source file when confirmation is cancelled", async () => {
     state.batch.status = "draft";
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "来源文件 2" }));
     fireEvent.click(await screen.findByLabelText("删除 KuangBiao-A交货单.xlsx"));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
@@ -162,5 +179,55 @@ describe("BatchDetailWorkbench", () => {
     expect(await screen.findByRole("button", { name: /生成结果/ })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("正在生成结果");
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it.each(["draft", "preflight_ready", "queued", "running", "succeeded", "failed"])(
+    "%s 页头只有一个主按钮且位于操作组末尾",
+    async (status) => {
+      state.batch.status = status;
+      const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+      await screen.findByText(state.batch.name);
+      const actions = container.querySelector(".batch-task-actions")!;
+      const primary = actions.querySelectorAll(".ant-btn-primary");
+      expect(primary).toHaveLength(1);
+      expect(Array.from(actions.querySelectorAll("button")).at(-1)).toBe(primary[0]);
+      if (["queued", "running"].includes(status)) expect(primary[0]).toBeDisabled();
+    }
+  );
+
+  it("失败原因紧随状态句，只出现一次且没有独立错误 Alert", async () => {
+    state.batch.status = "failed";
+    state.batch.error_message = "合成文件缺少 SKU 列";
+    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("计算失败合成文件缺少 SKU 列");
+    expect(screen.getAllByText("合成文件缺少 SKU 列")).toHaveLength(1);
+    expect(container.querySelector(".batch-failure-reason")?.parentElement).toBe(status);
+    expect(container.querySelector(".batch-stage-error")).toHaveTextContent("失败");
+    expect(container.querySelector(".ant-alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/原因见下方/)).not.toBeInTheDocument();
+  });
+
+  it("累计实收待核对显示真实阶段和待办，不重复状态提示", async () => {
+    state.batch.workflow = "self_operated_inbound";
+    state.batch.status = "failed";
+    state.batch.error_message = "累计实收核对失败";
+    state.batch.receipt = {
+      cumulative_total: 20,
+      history_total: null,
+      requested_total: null,
+      issue_count: 1,
+      captured_at: "2026-11-04T00:00:00Z"
+    };
+    state.batch.inbound_file = { uploaded: true, original_name: "合成待入库.xlsx" };
+    const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    expect(await screen.findByRole("tab", { name: "待办 1" })).toHaveAttribute("aria-selected", "true");
+    expect(container.querySelector(".batch-stage-review")).toHaveTextContent("待核对");
+    expect(screen.getAllByText("1 处累计实收待核对，处理后即可预检")).toHaveLength(1);
+    expect(screen.queryByText("累计实收核对失败")).not.toBeInTheDocument();
+    expect(container.querySelector(".ant-alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /预检/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "重新取数" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "累计实收口径" })).toBeInTheDocument();
   });
 });
