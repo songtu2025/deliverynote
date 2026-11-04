@@ -42,3 +42,22 @@ input {
   outline: 2px solid var(--dn-primary);
   outline-offset: 3px;
 }
+
+@keyframes dn-busy-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+
+/* 减弱动效时不旋转，改用明暗变化提示仍在处理。 */
+@media (prefers-reduced-motion: reduce) {
+  .anticon.anticon-spin {
+    animation: dn-busy-pulse 1.2s ease-in-out infinite alternate;
+  }
+  .anticon.anticon-spin::before {
+    animation: none;
+  }
+}

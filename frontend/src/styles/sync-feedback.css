@@ -83,8 +83,7 @@
 @media (prefers-reduced-motion: reduce) {
   .purchase-sync-progress-track.is-indeterminate span {
     width: 100%;
-    animation: none;
-    opacity: 0.6;
+    animation: dn-busy-pulse 1.2s ease-in-out infinite alternate;
   }
 }
 
