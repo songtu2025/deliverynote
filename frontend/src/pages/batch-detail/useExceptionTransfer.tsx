@@ -1,14 +1,31 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Button, Flex, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { Batch, DeliveryException } from "../../types";
-import { remainingTransferQuantity } from "../../exceptionTransferApi";
+import { getTransferOptions, remainingTransferQuantity } from "../../exceptionTransferApi";
+import type { TransferOptions } from "../../exceptionTransferApi";
 import { workspacePath } from "../../app/workspaceRoutes";
 import ExceptionTransferModal from "./ExceptionTransferModal";
 
 export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: number) => void) {
   const [selected, setSelected] = useState<DeliveryException[]>([]);
   const [open, setOpen] = useState(false);
+  const optionsCache = useRef(new Map<number, TransferOptions>());
+  const pendingOptions = useRef(new Map<number, Promise<TransferOptions>>());
+  const loadOptions = useCallback((id: number) => {
+    const cached = optionsCache.current.get(id);
+    if (cached) return Promise.resolve(cached);
+    const pending = pendingOptions.current.get(id);
+    if (pending) return pending;
+    const request = getTransferOptions(id)
+      .then((result) => {
+        optionsCache.current.set(id, result);
+        return result;
+      })
+      .finally(() => pendingOptions.current.delete(id));
+    pendingOptions.current.set(id, request);
+    return request;
+  }, []);
   if (!batch || batch.workflow !== "self_operated_inbound" || batch.status !== "succeeded") {
     return { rowSelection: undefined, reset: () => setSelected([]), action: null, modal: null };
   }
@@ -22,6 +39,7 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
     })
   };
   const success = (id: number) => {
+    optionsCache.current.clear();
     setOpen(false);
     setSelected([]);
     if (onOpen) onOpen(id);
@@ -45,6 +63,8 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
       <ExceptionTransferModal
         batchId={batch.id}
         records={selected}
+        optionsCache={optionsCache.current}
+        loadOptions={loadOptions}
         onClose={() => setOpen(false)}
         onSuccess={success}
       />

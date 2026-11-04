@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import HTTPException
@@ -18,19 +17,26 @@ def transfer_sites(session: Session, batch: Batch, sku: str) -> list[str]:
     version = session.get(InputVersion, batch.product_version_id)
     if version is None:
         raise HTTPException(status_code=409, detail="批次锁定的商品资料不存在")
-    products = read_product_workbook(Path(version.storage_path))
-    return sorted(
-        {
-            "AMAZON:" + str(site).strip()
-            for site in products.loc[products["SKU"].eq(sku), "店铺/站点"].dropna()
-            if str(site).strip()
-        }
-    )
+    return list(_product_sites(version.id, version.storage_path).get(sku, ()))
+
+
+@lru_cache(maxsize=8)
+def _product_sites(version_id: int, storage_path: str) -> dict[str, tuple[str, ...]]:
+    """缓存锁定版本的站点映射；路径用于隔离不同数据库的同号版本。"""
+    products = read_product_workbook(Path(storage_path))
+    sites: dict[str, set[str]] = {}
+    for sku, site in (
+        products[["SKU", "店铺/站点"]].dropna().itertuples(index=False, name=None)
+    ):
+        if str(site).strip():
+            sites.setdefault(str(sku), set()).add("AMAZON:" + str(site).strip())
+    return {sku: tuple(sorted(values)) for sku, values in sites.items()}
 
 
 @dataclass
 class TransferFile:
     supplier_code: str
+    original_name: str
     rows: dict[tuple[str, str], int] = field(default_factory=dict)
     sites: dict[str, str] = field(default_factory=dict)
 
@@ -40,7 +46,7 @@ class TransferFile:
         if key in self.sites and self.sites[key] != full_site:
             raise HTTPException(
                 status_code=400,
-                detail=f"{sku} / {short_site} 对应多个完整站点，请分批转交该供应商",
+                detail=f"{sku} / {short_site} 对应多个完整站点，请分批转交该文件",
             )
         self.sites[key] = full_site
         row_key = (sku, short_site)
@@ -56,9 +62,7 @@ class TransferFile:
                 status_code=400,
                 detail=f"启用供应商资料中找不到编码 {self.supplier_code}",
             )
-        supplier_name = str(enabled.iloc[0]["供应商名称"]).strip()
-        date_label = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%y%m%d")
-        name = _safe_filename(f"{date_label}-{supplier_name}-转交货0箱.xlsx")
+        name = _safe_filename(self.original_name)
         supplier = resolve_supplier(Path(name), suppliers)
         if supplier.code != self.supplier_code:
             raise HTTPException(

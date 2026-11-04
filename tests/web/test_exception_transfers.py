@@ -94,6 +94,37 @@ class ExceptionTransferTests(ExceptionTransferCase):
             self.assertEqual(rows["交货量"].tolist(), [8])
             self.assertEqual(rows["原始站点"].tolist(), ["US"])
 
+    def test_options_cache_reads_product_once_and_keeps_purchase_error(self):
+        from delivery_note.excel_io import read_product_workbook
+
+        path = f"/api/exceptions/{self.exception_id}/transfer-options"
+        with patch(
+            "delivery_note.web.exception_transfer_files.read_product_workbook",
+            wraps=read_product_workbook,
+        ) as reader:
+            for _ in range(2):
+                response = self.client.get(path, headers=self.headers)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["sites"], ["AMAZON:SEEKWAY:US"])
+                self.assertEqual(response.json()["purchases"], [])
+                self.assertIn("采购数据", response.json()["purchase_error"])
+            reader.assert_called_once()
+
+    def test_options_missing_supplier_still_returns_sites(self):
+        with self.app.state.database.session() as session:
+            source = session.scalar(
+                select(BatchFile).where(BatchFile.batch_id == self.batch_id)
+            )
+            source.supplier_code = ""
+            session.commit()
+        response = self.client.get(
+            f"/api/exceptions/{self.exception_id}/transfer-options",
+            headers=self.headers,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["sites"])
+        self.assertIn("供应商编码", response.json()["purchase_error"])
+
     def test_supplier_filename_mismatch_rejected(self):
         with self.app.state.database.session() as session:
             source = session.scalar(
@@ -175,6 +206,9 @@ class ExceptionTransferTests(ExceptionTransferCase):
                 select(BatchFile).where(BatchFile.batch_id == target)
             )
             self.assertEqual(source.import_rows[0]["*站点"], "AMAZON:OTHER:US")
+            self.assertEqual(
+                source.import_rows[0]["单据备注"], "261008-KuangBiao-01-194箱"
+            )
             self.assertEqual(source.import_total, 8)
         exported = self.client.post(
             f"/api/batches/{target}/export", headers=self.headers
@@ -193,11 +227,17 @@ class ExceptionTransferTests(ExceptionTransferCase):
     def test_same_short_site_different_full_sites_are_rejected(self):
         second = self.add_source(order=2)
         with self.app.state.database.session() as session:
+            from delivery_note.web.models import ExceptionRecord
+
+            session.get(ExceptionRecord, second).batch_file_id = session.get(
+                ExceptionRecord, self.exception_id
+            ).batch_file_id
             version = session.get(InputVersion, self.versions["product"])
             workbook = load_workbook(version.storage_path)
             workbook.active.append(["SKU-A", "OTHER:US", "水鞋", ""])
             workbook.save(version.storage_path)
             workbook.close()
+            session.commit()
         response = self.client.post(
             f"/api/batches/{self.batch_id}/exceptions/transfer-to-delivery",
             headers=self.headers,

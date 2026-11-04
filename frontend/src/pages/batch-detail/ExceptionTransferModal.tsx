@@ -1,52 +1,56 @@
 import { useEffect, useState } from "react";
-import { Alert, App, Button, Form, InputNumber, Modal, Select, Table } from "antd";
+import { Alert, App, Button, Form, InputNumber, Modal, Select, Table, Typography } from "antd";
 import type { DeliveryException } from "../../types";
-import {
-  getTransferPurchases,
-  getTransferSites,
-  remainingTransferQuantity,
-  transferExceptions
-} from "../../exceptionTransferApi";
-import type { TransferItem } from "../../exceptionTransferApi";
-
-type SiteOptions = { options: { value: string; label: string }[]; purchaseError: string | null };
+import { remainingTransferQuantity, transferExceptions } from "../../exceptionTransferApi";
+import type { TransferItem, TransferOptions } from "../../exceptionTransferApi";
+import { preflightBatch, startBatchJob } from "../../batchDetailApi";
+import TransferPurchaseDetails, { transferSiteOptions } from "./TransferPurchaseDetails";
+import { formatBeijingDateTime } from "../../dateTime";
 
 export default function ExceptionTransferModal({
   batchId,
   records,
+  optionsCache,
+  loadOptions,
   onClose,
   onSuccess
 }: {
   batchId: number;
   records: DeliveryException[];
+  optionsCache: Map<number, TransferOptions>;
+  loadOptions: (id: number) => Promise<TransferOptions>;
   onClose: () => void;
   onSuccess: (id: number) => void;
 }) {
   const [form] = Form.useForm<{ items: TransferItem[] }>();
   const { message } = App.useApp();
-  const [sites, setSites] = useState<SiteOptions[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [sites, setSites] = useState(() => records.map((record) => optionsCache.get(record.id)));
+  const [loading, setLoading] = useState(() => records.some((record) => !optionsCache.has(record.id)));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const items = Form.useWatch("items", form) as TransferItem[] | undefined;
+  const queriedAt = sites.find((site) => site?.queried_at)?.queried_at;
   useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
+    let active = true;
+    setLoading(records.some((record) => !optionsCache.has(record.id)));
     setError(null);
-    void Promise.all(records.map((record) => loadSites(record.id, controller.signal)))
+    void Promise.all(records.map((record) => loadOptions(record.id)))
       .then(
         (result) => {
-          if (!controller.signal.aborted) setSites(result);
+          if (active) setSites(result);
         },
         (failure: unknown) => {
-          if (!controller.signal.aborted) setError(errorMessage(failure));
+          if (active) setError(errorMessage(failure));
         }
       )
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        if (active) setLoading(false);
       });
-    return () => controller.abort();
-  }, [records, attempt]);
+    return () => {
+      active = false;
+    };
+  }, [records, attempt, optionsCache, loadOptions]);
 
   async function submit() {
     const values = await form.validateFields().catch(() => null);
@@ -56,7 +60,7 @@ export default function ExceptionTransferModal({
     try {
       const items = values.items.map((item, index) => ({ ...item, exception_id: records[index].id }));
       const result = await transferExceptions(batchId, items);
-      void message.success("已创建交货批次");
+      await computeCreatedBatch(result.id);
       onSuccess(result.id);
     } catch (failure) {
       setError(errorMessage(failure));
@@ -65,15 +69,30 @@ export default function ExceptionTransferModal({
     }
   }
 
+  async function computeCreatedBatch(id: number) {
+    let preflightReady = false;
+    try {
+      const result = await preflightBatch(id);
+      preflightReady = result.status === "preflight_ready";
+      if (preflightReady) await startBatchJob(id, "compute");
+      void message.success(preflightReady ? `已创建交货批次 #${id} 并开始计算` : `已创建交货批次 #${id}，预检未通过`);
+    } catch (failure) {
+      void message.warning(
+        `已创建交货批次 #${id}，${preflightReady ? "计算启动失败" : "预检未通过"}：${errorMessage(failure)}`
+      );
+    }
+  }
+
   return (
     <Modal
       title={"转交货批次（" + records.length + " 条）"}
       open
-      width={940}
+      width={1100}
+      style={{ maxWidth: "calc(100vw - 32px)" }}
       okText="创建交货批次"
       cancelText="取消"
       confirmLoading={submitting}
-      okButtonProps={{ disabled: loading || sites.length !== records.length }}
+      okButtonProps={{ disabled: loading || sites.some((site) => !site) }}
       cancelButtonProps={{ disabled: submitting }}
       closable={!submitting}
       mask={{ closable: !submitting }}
@@ -87,13 +106,16 @@ export default function ExceptionTransferModal({
           showIcon
           title={error}
           action={
-            !sites.length && (
+            sites.some((site) => !site) && (
               <Button type="link" onClick={() => setAttempt((value) => value + 1)}>
                 重试
               </Button>
             )
           }
         />
+      )}
+      {queriedAt && (
+        <Typography.Text type="secondary">采购数据时间：{formatBeijingDateTime(queriedAt)}</Typography.Text>
       )}
       <Form
         form={form}
@@ -110,7 +132,22 @@ export default function ExceptionTransferModal({
           pagination={false}
           loading={loading}
           dataSource={records}
-          scroll={{ x: 820, y: 360 }}
+          scroll={{ x: 1000, y: 440 }}
+          onRow={() => ({ style: { verticalAlign: "middle" } })}
+          expandable={{
+            defaultExpandAllRows: true,
+            expandedRowRender: (record, index) => {
+              const site = items?.[index]?.full_site ?? record.full_site;
+              const quantity = records.reduce(
+                (total, row, rowIndex) =>
+                  row.sku === record.sku && (items?.[rowIndex]?.full_site ?? row.full_site) === site
+                    ? total + (Number(items?.[rowIndex]?.quantity ?? remainingTransferQuantity(row)) || 0)
+                    : total,
+                0
+              );
+              return <TransferPurchaseDetails data={sites[index]} site={site} quantity={quantity} />;
+            }
+          }}
           columns={[
             { title: "SKU", dataIndex: "sku", width: 130 },
             { title: "原站点", dataIndex: "full_site", width: 190 },
@@ -123,8 +160,10 @@ export default function ExceptionTransferModal({
             {
               title: "转交数量",
               width: 130,
+              align: "right",
               render: (_, record, index) => (
                 <Form.Item
+                  style={{ marginBottom: 0 }}
                   name={["items", index, "quantity"]}
                   rules={[
                     {
@@ -140,6 +179,7 @@ export default function ExceptionTransferModal({
                 >
                   <InputNumber
                     aria-label={record.sku + " 转交数量"}
+                    styles={{ input: { textAlign: "right" } }}
                     min={1}
                     max={remainingTransferQuantity(record)}
                     step={1}
@@ -153,25 +193,25 @@ export default function ExceptionTransferModal({
             },
             {
               title: "目标站点",
-              width: 300,
+              width: 350,
               render: (_, record, index) => (
                 <Form.Item
+                  style={{ marginBottom: 0 }}
                   name={["items", index, "full_site"]}
                   rules={[
                     {
                       validator: (_, value: string) =>
-                        sites[index]?.options.some((option) => option.value === value)
+                        sites[index]?.sites.includes(value)
                           ? Promise.resolve()
                           : Promise.reject(new Error("请选择商品资料中的完整站点"))
                     }
                   ]}
-                  extra={sites[index]?.purchaseError}
                 >
                   <Select
                     aria-label={record.sku + " 目标站点"}
                     showSearch
-                    optionFilterProp="label"
-                    options={sites[index]?.options ?? []}
+                    optionFilterProp="value"
+                    options={sites[index] ? transferSiteOptions(sites[index]) : []}
                   />
                 </Form.Item>
               )
@@ -185,29 +225,4 @@ export default function ExceptionTransferModal({
 
 function errorMessage(failure: unknown) {
   return failure instanceof Error ? failure.message : "转交失败，请重试";
-}
-
-async function loadSites(exceptionId: number, signal: AbortSignal): Promise<SiteOptions> {
-  const [sites, purchases] = await Promise.all([
-    getTransferSites(exceptionId, signal),
-    getTransferPurchases(exceptionId, signal).then(
-      (value) => ({ items: value.items, error: null }),
-      (failure: unknown) => ({ items: [], error: errorMessage(failure) })
-    )
-  ]);
-  return {
-    options: sites.sites.map((site) => ({
-      value: site,
-      label:
-        site +
-        "（未交 " +
-        (purchases.error
-          ? "—"
-          : purchases.items
-              .filter((item) => item.site === site)
-              .reduce((total, item) => total + item.remaining_quantity, 0)) +
-        " 件）"
-    })),
-    purchaseError: purchases.error
-  };
 }

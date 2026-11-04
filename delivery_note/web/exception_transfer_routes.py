@@ -1,13 +1,13 @@
 from typing import Annotated
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .dependencies import RequestDependencies
 from .exception_transfer_files import transfer_sites
 from .exception_transfers import ExceptionTransferService, TransferItem
-from .inbound_exception_routes import _load_source
+from .inbound_exception_routes import _load_source, load_purchase_options
 from .models import User
 
 
@@ -33,8 +33,27 @@ def register_exception_transfer_routes(
         _user: Annotated[User, Depends(dependencies.current_user)],
         session: Annotated[Session, Depends(dependencies.get_session)],
     ) -> dict[str, object]:
-        exception, _, batch, _ = _load_source(session, exception_id)
-        return {"sites": transfer_sites(session, batch, exception.sku)}
+        exception, source, batch, _ = _load_source(session, exception_id)
+        sites = transfer_sites(session, batch, exception.sku)
+        try:
+            purchases = load_purchase_options(
+                session, exception, source, batch, service.creator.storage
+            )
+        except HTTPException as error:
+            if error.status_code != 409:
+                raise
+            return {
+                "sites": sites,
+                "purchases": [],
+                "queried_at": None,
+                "purchase_error": error.detail,
+            }
+        return {
+            "sites": sites,
+            "purchases": purchases["items"],
+            "queried_at": purchases["queried_at"],
+            "purchase_error": None,
+        }
 
     @app.post(
         "/api/batches/{batch_id}/exceptions/transfer-to-delivery",
