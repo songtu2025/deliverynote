@@ -75,7 +75,7 @@ class ExceptionTransferFileTests(ExceptionTransferCase):
         with self.app.state.database.session() as session:
             self.assertEqual(session.get(BatchFile, file_id).receipt_sites, selected)
 
-    def test_supplier_groups_preserve_selection_order_and_merge_matching_rows(self):
+    def test_source_files_preserve_selection_order_and_original_names(self):
         second = self.add_source(supplier_code="GYS-024", order=2)
         third = self.add_source(order=3)
         response = self.client.post(
@@ -131,15 +131,30 @@ class ExceptionTransferFileTests(ExceptionTransferCase):
                 )
             )
             self.assertEqual(
-                [source.supplier_code for source in files], ["GYS-024", "GYS-023"]
+                [source.supplier_code for source in files],
+                ["GYS-024", "GYS-023", "GYS-023"],
             )
             self.assertEqual(
                 [
                     read_delivery_workbook(Path(source.storage_path))["交货量"].tolist()
                     for source in files
                 ],
-                [[2], [7]],
+                [[2], [3], [4]],
             )
+            self.assertEqual(
+                [source.original_name for source in files],
+                [
+                    "261008-HaiLang-2-交货194箱.xlsx",
+                    "261008-KuangBiao-1-交货194箱.xlsx",
+                    "261008-KuangBiao-3-交货194箱.xlsx",
+                ],
+            )
+            transfers = list(session.scalars(select(ExceptionTransfer)))
+            self.assertEqual(
+                [item.target_file_id for item in transfers],
+                [source.id for source in files],
+            )
+            self.assertTrue(all(source.receipt_sites for source in files))
             self.assertEqual(len(list(session.scalars(select(ExceptionTransfer)))), 3)
 
     def test_filename_resolver_must_return_original_supplier_code(self):
@@ -150,6 +165,44 @@ class ExceptionTransferFileTests(ExceptionTransferCase):
             response = self.transfer()
         self.assertEqual(response.status_code, 400, response.text)
         self.assertIn("不一致", response.json()["detail"])
+
+    def test_file_limit_counts_sources_even_for_the_same_supplier(self):
+        second = self.add_source(order=2)
+        self.app.state.max_batch_upload_files = 1
+        response = self.client.post(
+            f"/api/batches/{self.batch_id}/exceptions/transfer-to-delivery",
+            headers=self.headers,
+            json={
+                "items": [
+                    {
+                        "exception_id": record_id,
+                        "quantity": 3,
+                        "full_site": "AMAZON:SEEKWAY:US",
+                    }
+                    for record_id in (self.exception_id, second)
+                ]
+            },
+        )
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertTrue(
+            all(record["transferred_quantity"] == 0 for record in self.records())
+        )
+
+    def test_filename_sanitization_keeps_supplier_and_original_metadata(self):
+        with self.app.state.database.session() as session:
+            source = session.scalar(
+                select(BatchFile).where(BatchFile.batch_id == self.batch_id)
+            )
+            source.original_name = "261008-KuangBiao:交货194箱.xlsx"
+            session.commit()
+        response = self.transfer(3)
+        self.assertEqual(response.status_code, 201, response.text)
+        with self.app.state.database.session() as session:
+            source = session.scalar(
+                select(BatchFile).where(BatchFile.batch_id == response.json()["id"])
+            )
+            self.assertEqual(source.original_name, "261008-KuangBiao_交货194箱.xlsx")
+            self.assertEqual(source.supplier_code, "GYS-023")
 
     def test_self_check_failure_and_commit_failure_remove_every_file(self):
         for target, failure in (
@@ -193,7 +246,7 @@ class ExceptionTransferFileTests(ExceptionTransferCase):
     def test_file_reader_detects_short_site_normalization(self):
         from delivery_note.web.exception_transfer_files import TransferFile
 
-        group = TransferFile("GYS-023")
+        group = TransferFile("GYS-023", "261008-KuangBiao-194箱.xlsx")
         group.add("SKU-A", "AMAZON:SHOP:US站", 1)
         suppliers = pd.DataFrame(
             [["GYS-023", "KuangBiao", "启用"]],

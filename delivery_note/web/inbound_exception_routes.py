@@ -28,6 +28,30 @@ def _load_source(
     return exception, source, batch, profile
 
 
+def load_purchase_options(
+    session: Session,
+    exception: ExceptionRecord,
+    source: BatchFile,
+    batch: Batch,
+    storage: Path,
+) -> dict[str, Any]:
+    """从整批快照提取同一供应商和 SKU 的未交采购。"""
+    if not source.supplier_code:
+        raise HTTPException(
+            status_code=409, detail="来源文件缺少供应商编码，无法精确查询采购数据"
+        )
+    state, snapshot = snapshot_document(session, batch, storage)
+    if state != "ready":
+        raise HTTPException(status_code=409, detail="请先加载或刷新整批采购数据")
+    rows = [
+        row
+        for row in snapshot["items"]
+        if row["supplier_code"] == key(source.supplier_code)
+        and row["sku"] == key(exception.sku)
+    ]
+    return {"items": rows, "queried_at": snapshot["completed_at"]}
+
+
 def register_inbound_exception_routes(
     app: FastAPI, dependencies: RequestDependencies, storage: Path
 ) -> None:
@@ -38,20 +62,7 @@ def register_inbound_exception_routes(
         session: Annotated[Session, Depends(dependencies.get_session)],
     ) -> dict[str, Any]:
         exception, source, batch, _ = _load_source(session, exception_id)
-        if not source.supplier_code:
-            raise HTTPException(
-                status_code=409, detail="来源文件缺少供应商编码，无法精确查询采购数据"
-            )
-        state, snapshot = snapshot_document(session, batch, storage)
-        if state != "ready":
-            raise HTTPException(status_code=409, detail="请先加载或刷新整批采购数据")
-        rows = [
-            row
-            for row in snapshot["items"]
-            if row["supplier_code"] == key(source.supplier_code)
-            and row["sku"] == key(exception.sku)
-        ]
-        return {"items": rows, "queried_at": snapshot["completed_at"]}
+        return load_purchase_options(session, exception, source, batch, storage)
 
     @app.get("/api/exceptions/{exception_id}/inbound-allocation", response_model=None)
     def inbound_allocation(

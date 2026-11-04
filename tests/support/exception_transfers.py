@@ -22,7 +22,10 @@ class ExceptionTransferCase(WebApiCase):
             batch.status = "succeeded"
             source = BatchFile(
                 batch_id=batch.id,
-                original_name=f"来源{order}.xlsx",
+                original_name=(
+                    f"261008-{'HaiLang' if supplier_code == 'GYS-024' else 'KuangBiao'}"
+                    f"-{order}-交货194箱.xlsx"
+                ),
                 storage_path="synthetic",
                 file_order=order,
                 supplier_name="KuangBiao",

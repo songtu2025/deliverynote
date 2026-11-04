@@ -51,7 +51,7 @@ class ExceptionTransferService:
 
     def _reserve(
         self, session: Session, batch: Batch, items: list[TransferItem]
-    ) -> tuple[dict[int, ExceptionRecord], dict[str, TransferFile]]:
+    ) -> tuple[dict[int, ExceptionRecord], dict[int, TransferFile]]:
         ids = [item.exception_id for item in items]
         if len(ids) != len(set(ids)):
             raise HTTPException(status_code=400, detail="待处理记录不可重复选择")
@@ -68,7 +68,7 @@ class ExceptionTransferService:
         by_id = {record.id: record for record in records}
         if set(by_id) != set(ids):
             raise HTTPException(status_code=400, detail="所选待处理记录不属于该批次")
-        groups: dict[str, TransferFile] = {}
+        groups: dict[int, TransferFile] = {}
         sites_by_sku: dict[str, list[str]] = {}
         for item in items:
             record = by_id[item.exception_id]
@@ -83,7 +83,7 @@ class ExceptionTransferService:
             if source is None or not source.supplier_code:
                 raise HTTPException(status_code=400, detail="来源文件缺少供应商编码")
             group = groups.setdefault(
-                source.supplier_code, TransferFile(source.supplier_code)
+                source.id, TransferFile(source.supplier_code, source.original_name)
             )
             group.add(record.sku, item.full_site, item.quantity)
             self._reserve_quantity(session, item)
@@ -133,16 +133,18 @@ class ExceptionTransferService:
             records, groups = self._reserve(session, batch, items)
             if len(groups) > self.creator.app.state.max_batch_upload_files:
                 raise HTTPException(
-                    status_code=413, detail="供应商分组数量超过单批次文件上限"
+                    status_code=413, detail="来源文件数量超过单批次文件上限"
                 )
             versions = require_active_versions(session, INPUT_KINDS)
             suppliers = read_supplier_workbook(Path(versions["supplier"].storage_path))
             temporary_root = self.creator.storage / "temporary" / "exception-transfers"
             temporary_root.mkdir(parents=True, exist_ok=True)
             with TemporaryDirectory(dir=temporary_root) as directory:
-                files = [
-                    group.write(Path(directory), suppliers) for group in groups.values()
-                ]
+                files = []
+                for source_id, group in groups.items():
+                    file_directory = Path(directory) / str(source_id)
+                    file_directory.mkdir()
+                    files.append(group.write(file_directory, suppliers))
                 target = self.creator.stage_files(
                     session,
                     batch_name,
@@ -158,11 +160,11 @@ class ExceptionTransferService:
                     .order_by(BatchFile.file_order)
                 )
             )
-            file_by_supplier = dict(zip(groups, target_files))
-            for code, source in file_by_supplier.items():
-                source.supplier_code = code
-                source.receipt_sites = groups[code].sites
-            self._save_transfers(session, records, items, target, file_by_supplier)
+            file_by_source = dict(zip(groups, target_files))
+            for source_id, target_file in file_by_source.items():
+                target_file.supplier_code = groups[source_id].supplier_code
+                target_file.receipt_sites = groups[source_id].sites
+            self._save_transfers(session, records, items, target, file_by_source)
             session.commit()
             return target.id
         except Exception as error:
@@ -181,20 +183,17 @@ class ExceptionTransferService:
         records: dict[int, ExceptionRecord],
         items: list[TransferItem],
         target: Batch,
-        files: dict[str, BatchFile],
+        files: dict[int, BatchFile],
     ) -> None:
         for item in items:
             record = records[item.exception_id]
-            source = session.get(BatchFile, record.batch_file_id)
-            if source is None:
-                raise RuntimeError("来源文件不存在")
             session.add(
                 ExceptionTransfer(
                     exception_id=record.id,
                     quantity=item.quantity,
                     full_site=item.full_site,
                     target_batch_id=target.id,
-                    target_file_id=files[source.supplier_code].id,
+                    target_file_id=files[record.batch_file_id].id,
                     created_by=target.created_by,
                 )
             )

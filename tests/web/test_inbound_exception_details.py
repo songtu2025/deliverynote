@@ -181,6 +181,15 @@ class InboundExceptionDetailsTests(WebApiCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["items"], [row])
         self.assertTrue(response.json()["queried_at"])
+        with patch(
+            "delivery_note.web.exception_transfer_routes.transfer_sites",
+            return_value=["AMAZON:SEEKWAY:US"],
+        ):
+            transfer = self.client.get(self.path("transfer-options"), headers=operator)
+        self.assertEqual(transfer.status_code, 200, transfer.text)
+        self.assertEqual(transfer.json()["purchases"], [row])
+        self.assertEqual(transfer.json()["queried_at"], response.json()["queried_at"])
+        self.assertIsNone(transfer.json()["purchase_error"])
         factory.assert_not_called()
 
     def test_missing_snapshot_does_not_prevent_allocation_read(self):
