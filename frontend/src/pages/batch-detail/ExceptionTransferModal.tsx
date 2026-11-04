@@ -145,7 +145,7 @@ export default function ExceptionTransferModal({
           pagination={false}
           loading={loading}
           dataSource={records}
-          scroll={{ x: 1262, y: "min(440px, calc(100vh - 280px))" }}
+          scroll={{ x: 1200, y: "min(440px, calc(100vh - 280px))" }}
           onRow={() => ({ style: { verticalAlign: "middle" } })}
           columns={[
             { title: "SKU", dataIndex: "sku", width: 150 },
@@ -221,7 +221,6 @@ export default function ExceptionTransferModal({
             },
             {
               title: "采购去向",
-              width: 340,
               render: (_, record, index) => (
                 <TransferPurchaseDetails data={sites[index]} site={items?.[index]?.full_site ?? record.full_site} />
               )
