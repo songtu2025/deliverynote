@@ -9,10 +9,10 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..job_queues import PURCHASE_SNAPSHOT_KIND
 from .models import Batch, BatchFile, Job, SelfOperatedBatch
 from .serializers import job_json
 
-PURCHASE_SNAPSHOT_KIND = "purchase_snapshot"
 SNAPSHOT_PAGE_SIZE = 200
 PURCHASE_SNAPSHOT_ERROR = (
     "整批采购数据加载失败，请重试；持续失败时请联系管理员检查来源文件和积加接口"

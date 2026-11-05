@@ -64,7 +64,18 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
       message.info("已重新排队获取历史，原计算与导出已失效");
     });
 
+  const retry = () => {
+    const batch = data.batch;
+    if (batch?.status === "failed") {
+      const prepare = batch.jobs?.prepare;
+      const computed = batch.jobs?.compute;
+      return computed?.status === "failed" && prepare?.status !== "failed" ? compute() : preflight();
+    }
+    return startExport();
+  };
+
   return {
+    retry,
     preflight,
     preflightAndCompute,
     refreshSupplierVersion,

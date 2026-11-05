@@ -104,6 +104,7 @@ export interface InboundImportRow {
 }
 
 export interface Job {
+  queue_position?: number | null;
   id: number;
   batch_id: number;
   kind: "compute" | "export" | "prepare" | "purchase_snapshot";

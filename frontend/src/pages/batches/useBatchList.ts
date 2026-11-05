@@ -77,7 +77,7 @@ export function useBatchList(workflow: BatchWorkflow, active: boolean) {
   );
 
   useEffect(() => {
-    if (!loadedRef.current || active) void load(loadedRef.current);
+    if (active) void load(loadedRef.current);
   }, [active, load]);
 
   return {

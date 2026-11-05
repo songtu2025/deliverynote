@@ -94,6 +94,7 @@ export function useExceptionReview(batchId: number, batchStatus?: string) {
   };
 
   useEffect(() => {
+    if (batchStatus === undefined) return;
     let cancelled = false;
     void getBatchExceptionFilters(batchId)
       .then((filters) => {

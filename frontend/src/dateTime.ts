@@ -11,7 +11,7 @@ export interface BeijingDateTimeParts {
   second: string;
 }
 
-function parseApiDateTime(value: string): Date {
+export function parseApiDateTime(value: string): Date {
   const normalized = TIMEZONE_SUFFIX.test(value) ? value : `${value}Z`;
   return new Date(normalized);
 }

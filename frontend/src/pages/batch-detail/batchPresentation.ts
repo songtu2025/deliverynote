@@ -59,13 +59,14 @@ function computedStage(batch: Batch, reviewStats?: ReviewStats) {
   return { label: ready ? "已完成" : "可生成结果", tone: "ready" };
 }
 
-export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats) {
+export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats, elapsedSeconds = 0) {
   const { computed, needsReview } = batchPresentation(batch);
-  if (activeJob) return jobTaskPresentation(activeJob);
+  const selfOperated = batch.workflow === "self_operated_inbound";
+  if (activeJob) return jobTaskPresentation(activeJob, selfOperated, elapsedSeconds);
   const failure = failureTaskPresentation(batch);
   if (failure) return failure;
   if (batch.status === "queued" || batch.status === "running")
-    return jobTaskPresentation({ kind: "compute", status: batch.status });
+    return jobTaskPresentation({ kind: "compute", status: batch.status }, selfOperated, elapsedSeconds);
   if (computed) return reviewTaskPresentation(batch, needsReview, reviewStats);
   return preparedTaskPresentation(batch);
 }
@@ -127,8 +128,13 @@ function preparedTaskPresentation(batch: Batch) {
   };
 }
 
-function jobTaskPresentation(job: Pick<Job, "kind" | "status">) {
+function jobTaskPresentation(
+  job: Pick<Job, "kind" | "status" | "queue_position">,
+  selfOperated: boolean,
+  elapsedSeconds: number
+) {
   const queued = job.status === "queued";
+  if (selfOperated) return inboundJobTask(job, elapsedSeconds);
   if (job.kind === "prepare")
     return {
       title: queued ? "历史核对排队中" : "正在获取历史并核对累计实收",
@@ -140,6 +146,21 @@ function jobTaskPresentation(job: Pick<Job, "kind" | "status">) {
   return {
     title: queued ? (compute ? "计算排队中" : "结果排队中") : compute ? "正在计算" : "正在生成结果",
     description: "可以先离开此页",
+    tone: queued ? "waiting" : "running",
+    busy: !queued
+  };
+}
+
+function inboundJobTask(job: Pick<Job, "kind" | "status" | "queue_position">, elapsedSeconds: number) {
+  const queued = job.status === "queued";
+  const step = { prepare: "正在核对累计实收（1/3", compute: "正在计算（2/3" };
+  const title =
+    job.kind === "prepare" || job.kind === "compute"
+      ? `${step[job.kind]}，已用 ${elapsedSeconds} 秒）`
+      : "正在生成结果（3/3）";
+  return {
+    title: queued ? (job.queue_position == null ? "排队中" : `排队中，前面还有 ${job.queue_position} 个任务`) : title,
+    description: "",
     tone: queued ? "waiting" : "running",
     busy: !queued
   };

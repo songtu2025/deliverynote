@@ -3,6 +3,33 @@ import { batchStagePresentation, batchTaskPresentation } from "./batchPresentati
 import { createDetailBatch, fixtureJob } from "./detailFixtures";
 
 describe("批次真实阶段", () => {
+  it.each([
+    ["prepare", "正在核对累计实收（1/3，已用 9 秒）"],
+    ["compute", "正在计算（2/3，已用 9 秒）"],
+    ["export", "正在生成结果（3/3）"]
+  ] as const)("自营仓 %s 使用步骤状态句", (kind, title) => {
+    const batch = { ...createDetailBatch(), workflow: "self_operated_inbound" as const };
+    expect(batchTaskPresentation(batch, fixtureJob({ kind }), undefined, 9).title).toBe(title);
+    for (const position of [undefined, null, 0, 3]) {
+      const job = fixtureJob({ kind, status: "queued", queue_position: position });
+      expect(batchTaskPresentation(batch, job).title).toBe(
+        position == null ? "排队中" : `排队中，前面还有 ${position} 个任务`
+      );
+    }
+  });
+
+  it("交货批次保留原来的排队和运行文案", () => {
+    for (const [kind, queued, running] of [
+      ["prepare", "历史核对排队中", "正在获取历史并核对累计实收"],
+      ["compute", "计算排队中", "正在计算"],
+      ["export", "结果排队中", "正在生成结果"]
+    ] as const) {
+      const job = fixtureJob({ kind, queue_position: 5 });
+      expect(batchTaskPresentation(createDetailBatch(), { ...job, status: "queued" }).title).toBe(queued);
+      expect(batchTaskPresentation(createDetailBatch(), job).title).toBe(running);
+    }
+  });
+
   it.each(["delivery", "self_operated_inbound"] as const)("%s 覆盖准备、计算与失败阶段", (workflow) => {
     const batch = { ...createDetailBatch(), workflow, download_ready: false, receipt: { requested_total: 160 } };
     for (const [status, label] of [

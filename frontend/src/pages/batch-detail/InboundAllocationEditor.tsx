@@ -7,13 +7,16 @@ import { useTargetedAllowances } from "./useTargetedAllowances";
 export default function InboundAllocationEditor({
   data,
   exception,
+  locked = false,
   onSaved
 }: {
   data: InboundAllocations;
   exception: DeliveryException;
+  locked?: boolean;
   onSaved?: () => Promise<unknown>;
 }) {
-  const editor = useTargetedAllowances(data, exception, onSaved);
+  const adjustments = useTargetedAllowances(data, exception, onSaved);
+  const editor = { ...adjustments, busy: adjustments.busy || locked };
   return (
     <Flex vertical gap="small">
       {Boolean(data.inactive_allowances?.length) && (
@@ -33,6 +36,14 @@ export default function InboundAllocationEditor({
         locale={{ emptyText: "当前文件的该 SKU 在此站点暂无可入库分配" }}
         columns={allocationColumns(editor)}
       />
+      <AllowanceControls editor={editor} />
+    </Flex>
+  );
+}
+
+function AllowanceControls({ editor }: { editor: AllowanceEditor }) {
+  return (
+    <>
       <label htmlFor="targeted-allowance-reason">原因（选填）</label>
       <Input
         id="targeted-allowance-reason"
@@ -50,13 +61,13 @@ export default function InboundAllocationEditor({
         <Button
           type="primary"
           loading={editor.busy}
-          disabled={!editor.changed || Boolean(editor.error) || Boolean(editor.disabledReason)}
+          disabled={editor.busy || !editor.changed || Boolean(editor.error) || Boolean(editor.disabledReason)}
           onClick={() => void editor.submit()}
         >
           保存并重算
         </Button>
       </Flex>
-    </Flex>
+    </>
   );
 }
 

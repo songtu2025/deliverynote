@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from ..job_queues import BATCH_JOB_KINDS
 from .exception_transfer_state import (
     remaining_quantity_expression,
     require_no_transfer_links,
@@ -46,7 +47,9 @@ def recompute_disabled_reason(session: Session, batch: Batch) -> str | None:
         return "批次尚未计算成功或当前状态不可重算"
     if session.scalar(
         select(Job.id).where(
-            Job.batch_id == batch.id, Job.status.in_(("queued", "running"))
+            Job.batch_id == batch.id,
+            Job.kind.in_(BATCH_JOB_KINDS),
+            Job.status.in_(("queued", "running")),
         )
     ):
         return "后台任务进行中，请完成后再修改输入"

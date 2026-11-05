@@ -71,7 +71,7 @@ class PurchaseSnapshotTests(WebApiCase):
             run_once(
                 str(self.app.state.database.engine.url),
                 self.app.state.storage_root,
-                "batch",
+                "purchase-sync",
             )
             return client
 
@@ -129,7 +129,7 @@ class PurchaseSnapshotTests(WebApiCase):
             run_once(
                 str(self.app.state.database.engine.url),
                 self.app.state.storage_root,
-                "batch",
+                "purchase-sync",
             )
         after = self.client.post(self.path, headers=self.headers).json()
         self.assertEqual(after["snapshot_id"], before["snapshot_id"])
@@ -188,7 +188,7 @@ class PurchaseSnapshotTests(WebApiCase):
             run_once(
                 str(self.app.state.database.engine.url),
                 self.app.state.storage_root,
-                "batch",
+                "purchase-sync",
             )
         data = self.client.get(self.path, headers=operator).json()
         self.assertEqual(
@@ -224,7 +224,7 @@ class PurchaseSnapshotTests(WebApiCase):
             execute_purchase_snapshot(
                 context, self.batch_id, self.app.state.storage_root
             )
-        _recover_stale_jobs(database, queue="batch")
+        _recover_stale_jobs(database, queue="purchase-sync")
         with database.session() as session:
             self.assertEqual(session.get(Batch, self.batch_id).status, "succeeded")
             self.assertIsNone(session.get(Batch, self.batch_id).error_message)
@@ -282,7 +282,7 @@ class PurchaseSnapshotTests(WebApiCase):
             run_once(
                 str(self.app.state.database.engine.url),
                 self.app.state.storage_root,
-                "batch",
+                "purchase-sync",
             )
         ready = self.client.get(self.path, headers=self.headers).json()
         self.assertEqual(

@@ -93,6 +93,29 @@ class InboundExceptionDetailsTests(WebApiCase):
     def path(self, suffix):
         return f"/api/exceptions/{self.exception_id}/{suffix}"
 
+    def test_allocation_can_refresh_by_identity_after_pending_record_is_removed(self):
+        with self.app.state.database.session() as session:
+            session.delete(session.get(ExceptionRecord, self.exception_id))
+            session.commit()
+        response = self.client.get(
+            self.path("inbound-allocation"),
+            headers=self.headers,
+            params={
+                "file_id": self.source_id,
+                "sku": "SKU-A",
+                "full_site": "AMAZON:SEEKWAY:US",
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["items"][0]["current_quantity"], 72)
+        self.assertEqual(response.json()["remaining_quantity"], 0)
+        self.assertEqual(
+            self.client.get(
+                self.path("inbound-allocation"), headers=self.headers
+            ).status_code,
+            404,
+        )
+
     def test_allocation_is_scoped_to_the_source_sku_and_site_without_erp_calls(self):
         with patch("delivery_note.gerpgo.GerpgoClient.from_config") as factory:
             response = self.client.get(

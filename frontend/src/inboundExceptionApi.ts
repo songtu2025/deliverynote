@@ -1,5 +1,5 @@
 import { api, ApiError } from "./api";
-import type { Batch, Job } from "./types";
+import type { Batch, DeliveryException, Job } from "./types";
 
 export type PurchaseOption = {
   id: string;
@@ -40,6 +40,7 @@ export type PurchaseSnapshot = {
   items: SnapshotPurchaseOption[];
 };
 export type InboundAllocations = {
+  remaining_quantity?: number;
   items: InboundAllocation[];
   batch_updated_at: string;
   history_captured_at: string | null;
@@ -101,8 +102,20 @@ export async function readCompletePurchaseSnapshot(batchId: number, first: Purch
   }
 }
 
-export const getInboundAllocations = (exceptionId: number) =>
-  api<InboundAllocations>(`/api/exceptions/${exceptionId}/inbound-allocation`);
+export function getInboundAllocations(
+  exceptionId: number,
+  identity?: Pick<DeliveryException, "batch_file_id" | "sku" | "full_site">
+) {
+  const query = identity
+    ? "?" +
+      new URLSearchParams({
+        file_id: String(identity.batch_file_id),
+        sku: identity.sku,
+        full_site: identity.full_site
+      })
+    : "";
+  return api<InboundAllocations>(`/api/exceptions/${exceptionId}/inbound-allocation${query}`);
+}
 
 export type ManualAllowanceInput = {
   supplier_code: string;

@@ -10,9 +10,12 @@ function wait(milliseconds: number) {
 function isActiveJob(job: Job | undefined): job is Job {
   return Boolean(job && (job.status === "queued" || job.status === "running"));
 }
-function jobSuccessMessage(job: Job, selfOperated: boolean) {
+function jobRunKey(job: Job) {
+  return JSON.stringify([job.id, job.claimed_at, job.finished_at]);
+}
+function jobSuccessMessage(job: Job) {
   if (job.kind === "prepare") {
-    return selfOperated ? "预检完成，通过后自动计算" : "历史获取与累计核对完成，请查看核对结果";
+    return "历史获取与累计核对完成，请查看核对结果";
   }
   return job.kind === "compute" ? "批次计算完成" : "导出文件已生成";
 }
@@ -20,7 +23,8 @@ function jobSuccessMessage(job: Job, selfOperated: boolean) {
 export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Promise<unknown>) {
   const { message } = AntApp.useApp();
   const pollingJob = useRef<number | null>(null);
-  const announcedJobs = useRef(new Set<number>());
+  const announcedJobs = useRef(new Set<string>());
+  const observedChain = useRef<number | null>(null);
   const mounted = useRef(true);
   // 轮询拿到的最新状态，让排队中到执行中的变化即时显示，而不必等任务结束才刷新批次。
   const [liveJob, setLiveJob] = useState<Job | null>(null);
@@ -38,19 +42,40 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
     return undefined;
   }, [batch?.jobs]);
 
+  const batchId = batch?.id;
+  useEffect(() => {
+    observedChain.current = null;
+  }, [batchId]);
+  useEffect(() => {
+    if (batch?.workflow !== "self_operated_inbound") return;
+    if (activeJob) {
+      observedChain.current = batch.id;
+      return;
+    }
+    const exported = batch.jobs?.export;
+    if (observedChain.current !== batch.id || exported?.status !== "succeeded" || !batch.download_ready) return;
+    const key = jobRunKey(exported);
+    if (!announcedJobs.current.has(key)) {
+      announcedJobs.current.add(key);
+      message.success("计算完成，结果已生成");
+    }
+    observedChain.current = null;
+  }, [batch, activeJob, message]);
+
   const refreshAfterJob = useEffectEvent(() => load(true));
   const announceJob = useEffectEvent((job: Job, completedBatchId: number | undefined) => {
     if (!mounted.current || batch?.id !== completedBatchId) return;
-    if (!announcedJobs.current.has(job.id)) {
-      announcedJobs.current.add(job.id);
+    const key = jobRunKey(job);
+    if (!announcedJobs.current.has(key)) {
+      if (job.status === "succeeded" && batch?.workflow === "self_operated_inbound") return;
+      announcedJobs.current.add(key);
       if (job.status === "succeeded") {
-        message.success(jobSuccessMessage(job, batch?.workflow === "self_operated_inbound"));
+        message.success(jobSuccessMessage(job));
       } else {
         message.error(job.error_message ?? "后台任务失败");
       }
     }
   });
-  const batchId = batch?.id;
   const activeJobId = activeJob?.id;
   const activeJobStatus = activeJob?.status;
   useEffect(() => {

@@ -8,6 +8,8 @@ import {
 } from "./useBatchPurchaseSnapshot";
 import { isPurchaseSnapshotActive } from "../../inboundExceptionApi";
 
+export const PURCHASE_LOADING_MESSAGE = "正在获取采购数据，约 1 分钟，不影响计算和下载";
+
 export default function BatchPurchaseSnapshot({ batch, children }: { batch: Batch; children: ReactNode }) {
   const state = useBatchPurchaseSnapshot(batch);
   return <PurchaseSnapshotContext value={state}>{children}</PurchaseSnapshotContext>;
@@ -15,11 +17,12 @@ export default function BatchPurchaseSnapshot({ batch, children }: { batch: Batc
 
 function snapshotTitle(state: BatchPurchaseSnapshotState, busy: boolean) {
   const { metadata, data } = state;
-  let title = busy ? "正在加载整批采购数据" : "整批采购数据尚未加载";
+  if (busy) return PURCHASE_LOADING_MESSAGE;
+  let title = "整批采购数据尚未加载";
   if (metadata?.state === "stale") title = "批次范围已变化，请刷新整批采购数据";
   if (metadata?.state === "unavailable") title = "采购快照不可读取，请刷新整批采购数据";
   if (data)
-    title = `${busy ? "正在刷新，当前" : ""}采购数据更新于：${formatBeijingDateTime(data.completed_at ?? "")}，覆盖 ${data.supplier_count} 家供应商、${data.sku_count} 个 SKU`;
+    title = `采购数据更新于：${formatBeijingDateTime(data.completed_at ?? "")}，覆盖 ${data.supplier_count} 家供应商、${data.sku_count} 个 SKU`;
   return title;
 }
 

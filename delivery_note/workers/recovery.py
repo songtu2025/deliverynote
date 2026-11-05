@@ -6,6 +6,7 @@ from typing import cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..job_queues import queue_job_kinds
 from ..web.database import Database
 from ..web.models import Batch, Job, PurchaseSyncJob, SelfOperatedInboundSyncJob
 from .leases import WORKER_QUEUES
@@ -15,10 +16,14 @@ from ..web.purchase_snapshot import PURCHASE_SNAPSHOT_KIND
 LOGGER = logging.getLogger("delivery_note.worker")
 
 
-def _recover_batch_jobs(session: Session, cutoff: datetime, max_attempts: int) -> int:
+def _recover_batch_jobs(
+    session: Session, cutoff: datetime, max_attempts: int, queue: str
+) -> int:
     recovered = 0
     jobs = session.scalars(
-        select(Job).where(Job.status == "running").with_for_update(skip_locked=True)
+        select(Job)
+        .where(Job.status == "running", Job.kind.in_(queue_job_kinds(queue)))
+        .with_for_update(skip_locked=True)
     ).all()
     for job in jobs:
         marker = job.heartbeat_at or job.claimed_at
@@ -93,8 +98,8 @@ def _recover_stale_jobs(
     cutoff = datetime.utcnow() - stale_after
     recovered = 0
     with database.session() as session:
-        if queue in {"all", "batch"}:
-            recovered += _recover_batch_jobs(session, cutoff, max_attempts)
+        if queue in {"all", "batch", "purchase-sync"}:
+            recovered += _recover_batch_jobs(session, cutoff, max_attempts, queue)
         if queue in {"all", "purchase-sync"}:
             recovered += _recover_sync_jobs(
                 session, PurchaseSyncJob, cutoff, max_attempts

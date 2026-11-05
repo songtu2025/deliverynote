@@ -15,6 +15,7 @@ from .targeted_allowances import (
     allocation_allowances,
     allocation_extra,
     allocation_rows,
+    pending_capacity,
 )
 
 
@@ -58,6 +59,23 @@ def load_purchase_options(
     return {"items": rows, "queried_at": snapshot["completed_at"]}
 
 
+def _load_allocation_source(
+    session: Session, exception_id: int, file_id: int | None, sku: str, full_site: str
+) -> tuple[ExceptionRecord, BatchFile, Batch, SelfOperatedBatch]:
+    if file_id is None:
+        return _load_source(session, exception_id)
+    source = session.get(BatchFile, file_id)
+    batch = session.get(Batch, source.batch_id) if source else None
+    profile = session.get(SelfOperatedBatch, batch.id) if batch else None
+    if source is None or batch is None or profile is None:
+        raise HTTPException(status_code=404, detail="自营仓来源文件不存在")
+    if batch.status != "succeeded":
+        raise HTTPException(
+            status_code=409, detail="批次尚未计算成功，请完成计算后查看"
+        )
+    return ExceptionRecord(sku=sku, full_site=full_site), source, batch, profile
+
+
 def register_inbound_exception_routes(
     app: FastAPI, dependencies: RequestDependencies, storage: Path
 ) -> None:
@@ -75,8 +93,13 @@ def register_inbound_exception_routes(
         exception_id: int,
         _user: Annotated[User, Depends(dependencies.current_user)],
         session: Annotated[Session, Depends(dependencies.get_session)],
+        file_id: int | None = None,
+        sku: str = "",
+        full_site: str = "",
     ) -> dict[str, Any]:
-        exception, source, batch, profile = _load_source(session, exception_id)
+        exception, source, batch, profile = _load_allocation_source(
+            session, exception_id, file_id, sku, full_site
+        )
         allowances = allocation_allowances(session, profile, source, exception)
         items = [
             {
@@ -102,6 +125,9 @@ def register_inbound_exception_routes(
         return {
             **allowances,
             "batch_id": batch.id,
+            "remaining_quantity": pending_capacity(
+                session, source, exception.sku, exception.full_site
+            ),
             "recompute_disabled_reason": recompute_disabled_reason(session, batch),
             "supplier_name": source.supplier_name,
             "supplier_code": source.supplier_code,

@@ -21,6 +21,7 @@ from .leases import (
     JobContext,
     LeaseKeeper,
     _claim_job,
+    _claim_purchase_work,
     _claim_sync_job,
     _heartbeat,
     _sync_heartbeat,
@@ -75,10 +76,11 @@ def _run_batch_job(
     storage_root: Path | str,
 ) -> int:
     job_id, batch_id, kind, claim_token = claimed
+    queue = "purchase-sync" if kind == PURCHASE_SNAPSHOT_KIND else "batch"
     try:
         with LeaseKeeper(
             lambda: _heartbeat(database, job_id, claim_token),
-            "batch",
+            queue,
             job_id,
             claim_token,
         ) as lease_keeper:
@@ -112,7 +114,8 @@ def _run_batch_job(
                 raise RuntimeError(f"未知任务类型：{kind}")
     except Exception as error:
         LOGGER.exception(
-            "Worker 任务执行失败 queue=batch job_id=%s claim=%s",
+            "Worker 任务执行失败 queue=%s job_id=%s claim=%s",
+            queue,
             job_id,
             claim_token[:8],
         )
@@ -197,20 +200,21 @@ def _run_once(
 ) -> int | None:
     if queue not in WORKER_QUEUES:
         raise ValueError(f"未知 Worker 队列：{queue}")
-    claimed = _claim_job(database) if queue in {"all", "batch"} else None
+    if queue == "purchase-sync":
+        snapshot, sync = _claim_purchase_work(database)
+        if snapshot is not None:
+            return _run_batch_job(database, snapshot, storage_root)
+        return _run_purchase_job(database, sync, storage_root) if sync else None
+    claimed = _claim_job(database, queue) if queue in {"all", "batch"} else None
     if claimed is not None:
         return _run_batch_job(database, claimed, storage_root)
     if queue == "batch":
         return None
     sync_claimed = (
-        _claim_sync_job(database, PurchaseSyncJob)
-        if queue in {"all", "purchase-sync"}
-        else None
+        _claim_sync_job(database, PurchaseSyncJob) if queue == "all" else None
     )
     if sync_claimed is not None:
         return _run_purchase_job(database, sync_claimed, storage_root)
-    if queue == "purchase-sync":
-        return None
     inbound_sync_claimed = _claim_sync_job(database, SelfOperatedInboundSyncJob)
     if inbound_sync_claimed is None:
         return None
