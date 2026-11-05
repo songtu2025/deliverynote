@@ -14,6 +14,7 @@ from .job_queue import queue_followup_job
 from .job_routes import AuditCallback, JobQueue
 from .manual_handling import prepare_recompute, replace_input, save_offline
 from .models import Batch, BatchFile, ExceptionRecord, SelfOperatedBatch, User
+from .targeted_allowances import targeted_input, validate_targeted_totals
 
 
 class OfflinePayload(BaseModel):
@@ -40,10 +41,19 @@ class AllowancePayload(BaseModel):
     full_site: str = Field(min_length=1)
     quantity: int = Field(ge=0, strict=True)
     reason: str = ""
+    file_id: int | None = None
+    inbound_no: str = ""
+    po_code: str = ""
 
     @model_validator(mode="after")
     def strip_reason(self) -> "AllowancePayload":
         self.reason = self.reason.strip()
+        self.inbound_no = self.inbound_no.strip()
+        self.po_code = self.po_code.strip()
+        if (self.inbound_no or self.po_code or self.file_id is not None) and not (
+            self.inbound_no and self.po_code and self.file_id is not None
+        ):
+            raise ValueError("指定追加须同时提供来源文件、入库单号和关联采购单")
         return self
 
 
@@ -57,9 +67,12 @@ def allowance_input(
     profile: SelfOperatedBatch,
     payload: AllowancePayload,
 ) -> tuple[dict[str, str], dict[str, object]]:
+    if payload.inbound_no:
+        return targeted_input(session, batch_id, profile, payload.model_dump())
     identity = {
         key: getattr(payload, key) for key in ("supplier_code", "sku", "full_site")
     }
+    identity["inbound_no"] = ""
     source = session.scalar(
         select(BatchFile)
         .join(ExceptionRecord)
@@ -74,7 +87,7 @@ def allowance_input(
         (
             item
             for item in (profile.manual_handling or {}).get("allowances", [])
-            if all(item[key] == value for key, value in identity.items())
+            if all(item.get(key, "") == value for key, value in identity.items())
         ),
         None,
     )
@@ -102,6 +115,9 @@ def allowance_inputs(
         raise HTTPException(
             status_code=400, detail="追加额度不可重复指定同一供应商、SKU 和站点"
         )
+    validate_targeted_totals(
+        session, profile, [item.model_dump() for item in items if item.inbound_no]
+    )
     return inputs
 
 
@@ -120,7 +136,7 @@ def save_allowance_inputs(
             "save_manual_allowance",
             "batch",
             profile.batch_id,
-            {**identity, "quantity": values["quantity"], "reason": values["reason"]},
+            {**identity, **values},
         )
 
 

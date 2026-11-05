@@ -10,6 +10,12 @@ from ..processing.keys import _normalize_position_text as key
 from .dependencies import RequestDependencies
 from .models import Batch, BatchFile, ExceptionRecord, SelfOperatedBatch, User
 from .purchase_snapshot import snapshot_document
+from .manual_handling import recompute_disabled_reason
+from .targeted_allowances import (
+    allocation_allowances,
+    allocation_extra,
+    allocation_rows,
+)
 
 
 def _load_source(
@@ -71,8 +77,10 @@ def register_inbound_exception_routes(
         session: Annotated[Session, Depends(dependencies.get_session)],
     ) -> dict[str, Any]:
         exception, source, batch, profile = _load_source(session, exception_id)
+        allowances = allocation_allowances(session, profile, source, exception)
         items = [
             {
+                **allocation_extra(row, allowances["saved_allowances"]),
                 "id": str(index),
                 "po_code": row.get("关联采购单"),
                 "delivery_no": row.get("关联交货单/调拨单"),
@@ -85,12 +93,16 @@ def register_inbound_exception_routes(
                 "current_quantity": row.get("本次入库"),
                 "max_receive_quantity": row.get("最大可收货"),
                 "received_quantity": row.get("已收货"),
+                "targeted_quantity": row.get("追加超收数量", 0),
             }
-            for index, row in enumerate(source.import_rows or [])
-            if key(row.get("SKU")) == key(exception.sku)
-            and key(row.get("平台站点")) == key(exception.full_site)
+            for index, row in enumerate(
+                allocation_rows(source, exception.sku, exception.full_site)
+            )
         ]
         return {
+            **allowances,
+            "batch_id": batch.id,
+            "recompute_disabled_reason": recompute_disabled_reason(session, batch),
             "supplier_name": source.supplier_name,
             "supplier_code": source.supplier_code,
             "batch_updated_at": batch.updated_at.isoformat(),

@@ -8,7 +8,6 @@ import InboundExceptionActions from "./InboundExceptionActions";
 import InboundAdjustmentActions from "./InboundAdjustmentActions";
 import { useInboundAdjustments } from "./useInboundAdjustments";
 import BatchManualAllowances from "./BatchManualAllowances";
-import { allowanceKey } from "./inboundHandling";
 
 const batch: Batch = {
   ...createDetailBatch(),
@@ -22,11 +21,13 @@ afterEach(() => vi.unstubAllGlobals());
 function Editor({
   rows = [record],
   currentBatch = batch,
-  saved = vi.fn()
+  saved = vi.fn(),
+  opened = vi.fn()
 }: {
   rows?: DeliveryException[];
   currentBatch?: Batch;
   saved?: () => Promise<unknown>;
+  opened?: (row: DeliveryException) => void;
 }) {
   const adjustments = useInboundAdjustments(currentBatch, saved);
   return (
@@ -36,80 +37,46 @@ function Editor({
         <InboundExceptionActions
           key={row.id}
           record={row}
-          supplierCode="GYS-023"
+          onOpen={opened}
           adjustments={adjustments}
           onVersions={vi.fn()}
         />
       ))}
-      <BatchManualAllowances
-        batch={currentBatch}
-        adjustments={adjustments}
-        visibleKeys={new Set(rows.map((row) => allowanceKey("GYS-023", row)))}
-      />
+      <BatchManualAllowances batch={currentBatch} onSaved={saved} />
     </>
   );
 }
 
-describe("计算后行内调整草稿", () => {
-  it("已无待办行的追加额度仍可填零，统一提交撤销", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(batch))
-    );
-    const currentBatch = {
-      ...batch,
-      manual_allowances: [
-        {
-          supplier_code: "GYS-023",
-          supplier_name: "合成",
-          sku: record.sku,
-          full_site: record.full_site,
-          quantity: 6,
-          reason: ""
-        }
-      ]
-    };
-    const { rerender } = renderDetail(<Editor currentBatch={currentBatch} />);
-    expect(screen.queryByText("已追加额度")).not.toBeInTheDocument();
-    rerender(<Editor rows={[]} currentBatch={currentBatch} />);
-    fireEvent.click(screen.getByText("已追加额度"));
-    const input = screen.getByRole("spinbutton", { name: "本批追加" });
-    expect(input).toHaveValue("6");
-    fireEvent.change(input, { target: { value: "0" } });
-    fireEvent.click(screen.getByRole("button", { name: "按调整重算（1 处）" }));
-    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).allowances[0].quantity).toBe(0);
-  });
-  it("追加默认为空，不再显示旧处理按钮，重复记录合并为一处", () => {
-    renderDetail(<Editor rows={[record, { ...record, id: 100 }]} />);
-    const inputs = screen.getAllByRole("spinbutton", { name: "本批追加" });
-    expect(inputs[0]).toHaveValue("");
-    for (const name of ["追加超收", "线下处理", "转交货", "查看并处理"])
-      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
-    fireEvent.change(inputs[0], { target: { value: "3" } });
-    expect(inputs[1]).toHaveValue("3");
-    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeEnabled();
+describe("计算后行内调整", () => {
+  it("超收行只显示指定超收，点击打开对应详情", () => {
+    const opened = vi.fn();
+    renderDetail(<Editor rows={[record, { ...record, id: 100, reason: "超出应收货" }]} opened={opened} />);
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
+    const buttons = screen.getAllByRole("button", { name: "指定超收" });
+    fireEvent.click(buttons[0]);
+    expect(opened).toHaveBeenCalledWith(record);
+    fireEvent.click(buttons[1]);
+    expect(opened).toHaveBeenLastCalledWith(expect.objectContaining({ id: 100 }));
   });
 
-  it("追加与站点只保存草稿，一次请求提交并阻止重复提交", async () => {
+  it("站点仍只保存草稿，一次请求提交并阻止重复提交", async () => {
     const saved = vi.fn(async () => undefined);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse(batch))
     );
     renderDetail(<Editor rows={[record, siteRecord]} saved={saved} />);
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "4" } });
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
     fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
     expect(fetch).not.toHaveBeenCalled();
-    const submit = screen.getByRole("button", { name: "按调整重算（2 处）" });
+    const submit = screen.getByRole("button", { name: "按调整重算（1 处）" });
     fireEvent.click(submit);
     fireEvent.click(submit);
     await waitFor(() => expect(saved).toHaveBeenCalledOnce());
     expect(fetch).toHaveBeenCalledOnce();
-    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/batches/7/adjustments");
     expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toEqual({
-      allowances: [{ supplier_code: "GYS-023", sku: record.sku, full_site: record.full_site, quantity: 4, reason: "" }],
+      allowances: [],
       sites: [
         {
           file_id: siteRecord.batch_file_id,
@@ -122,22 +89,24 @@ describe("计算后行内调整草稿", () => {
     expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
   });
 
-  it("翻页或筛选后保留草稿，放弃修改统一清空", () => {
-    const { rerender } = renderDetail(<Editor />);
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "7" } });
-    rerender(<Editor rows={[siteRecord]} />);
-    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeInTheDocument();
+  it("站点草稿翻页保留，放弃修改清空", () => {
+    const { rerender } = renderDetail(<Editor rows={[siteRecord]} />);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
+    fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
     rerender(<Editor />);
-    expect(screen.getByRole("spinbutton")).toHaveValue("7");
+    expect(screen.getByRole("button", { name: /按调整重算/ })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
-    expect(screen.getByRole("spinbutton")).toHaveValue("");
     expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
   });
 
-  it("剩余为零仍能把已有追加改为零撤销", () => {
+  it("无待办的旧格式额度仍能通过统一接口撤销", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(batch))
+    );
     renderDetail(
       <Editor
-        rows={[{ ...record, offline_quantity: record.manual_quantity }]}
+        rows={[]}
         currentBatch={{
           ...batch,
           manual_allowances: [
@@ -153,28 +122,25 @@ describe("计算后行内调整草稿", () => {
         }}
       />
     );
-    const input = screen.getByRole("spinbutton");
-    expect(input).toHaveValue("6");
-    expect(input).toBeEnabled();
-    fireEvent.change(input, { target: { value: "0" } });
-    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeEnabled();
+    fireEvent.click(screen.getByText("已追加额度"));
+    fireEvent.click(screen.getByRole("button", { name: "撤销追加" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).allowances[0].quantity).toBe(0);
   });
 
-  it("失败保留草稿；有转交关联禁用调整并说明原因", async () => {
+  it("失败保留站点草稿；转交后禁用重算但仍可查看详情", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse({ detail: "输入已变化" }, 409))
     );
-    const { rerender } = renderDetail(<Editor />);
-    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "2" } });
+    const { rerender } = renderDetail(<Editor rows={[siteRecord]} />);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
+    fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
     fireEvent.click(screen.getByRole("button", { name: /按调整重算/ }));
     expect(await screen.findByText("输入已变化")).toBeVisible();
-    expect(screen.getByRole("spinbutton")).toHaveValue("2");
     rerender(<Editor currentBatch={{ ...batch, manual_allowance_disabled_reason: "批次已有转交记录" }} />);
-    const input = screen.getByRole("spinbutton");
-    expect(input).toBeDisabled();
-    fireEvent.focus(input.closest(".ant-input-number")!.parentElement!);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("批次已有转交记录");
+    expect(screen.getByRole("button", { name: /按调整重算/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "指定超收" })).toBeEnabled();
   });
 
   it("未匹配仅显示资料链接，其他原因为空", () => {
@@ -188,6 +154,5 @@ describe("计算后行内调整草稿", () => {
     );
     expect(screen.getByRole("button", { name: "查看锁定资料" })).toBeInTheDocument();
     expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "查看并处理" })).not.toBeInTheDocument();
   });
 });

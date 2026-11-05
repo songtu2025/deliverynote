@@ -13,12 +13,14 @@ export default function ExceptionReviewDrawer({
   editor,
   batch,
   fileById,
-  action
+  action,
+  onSaved
 }: {
   editor: ExceptionEditor;
   batch: Batch;
   fileById: Record<number, BatchFile>;
   action: string | null;
+  onSaved?: () => Promise<unknown>;
 }) {
   const { splitTarget, setSplitTarget } = editor;
   const selfOperated = batch.workflow === "self_operated_inbound";
@@ -40,6 +42,10 @@ export default function ExceptionReviewDrawer({
             <SelfOperatedExceptionDetails
               exception={splitTarget}
               supplierCode={fileById[splitTarget.batch_file_id].supplier_code}
+              onSaved={async () => {
+                setSplitTarget(null);
+                await onSaved?.();
+              }}
             />
           ) : (
             <ReasonGuidance exception={splitTarget} hasOverreceiptRule={Boolean(batch.overreceipt_rule)} />

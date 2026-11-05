@@ -27,6 +27,7 @@ def read_receipt_sources(inputs):
                 delivery.delivery_lines,
                 delivery.delivery_numbers,
                 supplier.name,
+                supplier.code,
             )
         )
     choices = {

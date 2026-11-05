@@ -34,6 +34,9 @@ export interface Batch {
     full_site: string;
     quantity: number;
     reason: string;
+    file_id?: number;
+    inbound_no?: string;
+    po_code?: string;
   }[];
   manual_allowance_disabled_reason?: string | null;
   id: number;

@@ -14,7 +14,6 @@ import ExceptionReviewToolbar from "./ExceptionReviewToolbar";
 import { useInboundAdjustments } from "./useInboundAdjustments";
 import InboundAdjustmentActions from "./InboundAdjustmentActions";
 import BatchManualAllowances from "./BatchManualAllowances";
-import { allowanceKey } from "./inboundHandling";
 
 export default function ExceptionReviewTable({
   selfOperated,
@@ -101,7 +100,7 @@ export default function ExceptionReviewTable({
                     render: (_: unknown, record: DeliveryException) => (
                       <InboundExceptionActions
                         record={record}
-                        supplierCode={fileById[record.batch_file_id]?.supplier_code ?? ""}
+                        onOpen={onOpen}
                         adjustments={adjustments}
                         onVersions={onVersions}
                       />
@@ -111,19 +110,7 @@ export default function ExceptionReviewTable({
             )
           ]}
         />
-        {selfOperated && transferBatch && (
-          <BatchManualAllowances
-            batch={transferBatch}
-            adjustments={adjustments}
-            visibleKeys={
-              new Set(
-                exceptions
-                  .filter((record) => ["超出允许超收量", "超出应收货"].includes(record.reason))
-                  .map((record) => allowanceKey(fileById[record.batch_file_id]?.supplier_code ?? "", record))
-              )
-            }
-          />
-        )}
+        {selfOperated && transferBatch && <BatchManualAllowances batch={transferBatch} onSaved={onSaved} />}
         {transfer.modal}
       </Card>
     </div>

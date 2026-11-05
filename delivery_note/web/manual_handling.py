@@ -27,7 +27,7 @@ def replace_input(
     entries = [
         entry
         for entry in (profile.manual_handling or {}).get(section, [])
-        if any(entry[key] != value for key, value in identity.items())
+        if any(entry.get(key, "") != value for key, value in identity.items())
     ]
     if values["quantity"]:
         entries.append(

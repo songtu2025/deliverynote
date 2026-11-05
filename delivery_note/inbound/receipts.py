@@ -225,7 +225,11 @@ def prepare_receipts(
             )
             requests.append(
                 SelfOperatedInboundRequest(
-                    item.source_id, lines, item.delivery_numbers, item.supplier_name
+                    item.source_id,
+                    lines,
+                    item.delivery_numbers,
+                    item.supplier_name,
+                    item.supplier_code,
                 )
             )
     if any(context["issue_count"] for context in contexts.values()):

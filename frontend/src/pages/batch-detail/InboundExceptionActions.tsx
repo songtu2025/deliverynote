@@ -1,23 +1,23 @@
 import type { DeliveryException } from "../../types";
 import { candidateSites } from "./reviewDraft";
 import ReceiptRowActions from "./ReceiptRowActions";
-import InboundAllowanceInput from "./InboundAllowanceInput";
+import { Button } from "antd";
 import type { InboundAdjustments } from "./useInboundAdjustments";
 
 export default function InboundExceptionActions({
   record,
-  supplierCode,
+  onOpen,
   adjustments,
   onVersions
 }: {
   record: DeliveryException;
-  supplierCode: string;
+  onOpen: (record: DeliveryException) => void;
   adjustments: InboundAdjustments;
   onVersions?: () => void;
 }) {
   const disabledReason = adjustments.busy ? "正在保存调整" : adjustments.disabledReason;
   if (["超出允许超收量", "超出应收货"].includes(record.reason))
-    return <InboundAllowanceInput record={record} supplierCode={supplierCode} adjustments={adjustments} />;
+    return <Button onClick={() => onOpen(record)}>指定超收</Button>;
   return (
     <ReceiptRowActions
       row={{
