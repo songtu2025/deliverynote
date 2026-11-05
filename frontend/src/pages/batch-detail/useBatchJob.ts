@@ -10,6 +10,12 @@ function wait(milliseconds: number) {
 function isActiveJob(job: Job | undefined): job is Job {
   return Boolean(job && (job.status === "queued" || job.status === "running"));
 }
+function jobSuccessMessage(job: Job, selfOperated: boolean) {
+  if (job.kind === "prepare") {
+    return selfOperated ? "预检完成，通过后自动计算" : "历史获取与累计核对完成，请查看核对结果";
+  }
+  return job.kind === "compute" ? "批次计算完成" : "导出文件已生成";
+}
 
 export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Promise<unknown>) {
   const { message } = AntApp.useApp();
@@ -38,13 +44,7 @@ export function useBatchJob(batch: Batch | null, load: (silent?: boolean) => Pro
     if (!announcedJobs.current.has(job.id)) {
       announcedJobs.current.add(job.id);
       if (job.status === "succeeded") {
-        message.success(
-          job.kind === "prepare"
-            ? "历史获取与累计核对完成，请查看核对结果"
-            : job.kind === "compute"
-              ? "批次计算完成"
-              : "导出文件已生成"
-        );
+        message.success(jobSuccessMessage(job, batch?.workflow === "self_operated_inbound"));
       } else {
         message.error(job.error_message ?? "后台任务失败");
       }

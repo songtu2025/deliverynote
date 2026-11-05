@@ -76,7 +76,7 @@ describe("计算前行内处理", () => {
       original_site: "US",
       full_site: "AMAZON:OTHER:US"
     });
-    expect(await screen.findByText("已保存该文件的站点选择，正在重新核对")).toBeInTheDocument();
+    expect(await screen.findByText("已保存该文件的站点选择，正在重新核对并计算")).toBeInTheDocument();
   });
   it("未匹配商品跳转锁定资料，不调用不存在的版本更新接口", async () => {
     const { onVersions } = show("产品信息未匹配");

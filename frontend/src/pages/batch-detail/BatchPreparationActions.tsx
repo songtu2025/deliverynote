@@ -1,5 +1,5 @@
 import { Button, Upload } from "antd";
-import { CloudUploadOutlined, PlayCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
+import { CloudUploadOutlined, PlayCircleOutlined } from "@ant-design/icons";
 import type { Batch, Job } from "../../types";
 import type { BatchFiles } from "./useBatchFiles";
 import type { useBatchTasks } from "./useBatchTasks";
@@ -14,23 +14,13 @@ type PreparationProps = {
 };
 
 export default function BatchPreparationActions(props: PreparationProps) {
-  const { batch, activeJob, action, tasks } = props;
-  const { canCompute, canPreflight } = batchPresentation(batch);
+  const { batch } = props;
   const selfOperated = batch.workflow === "self_operated_inbound";
-  const compute = batch.status === "preflight_ready" || (selfOperated && canCompute);
+  const compute = selfOperated ? batch.status === "failed" : batch.status === "preflight_ready";
   const main = preparationAction(props, compute);
   return (
     <div className="batch-primary-actions">
       <BatchFileUploads {...props} />
-      {canPreflight && compute && selfOperated && (
-        <Button
-          icon={<SafetyCertificateOutlined />}
-          disabled={Boolean(activeJob || action)}
-          onClick={() => void tasks.preflight()}
-        >
-          预检
-        </Button>
-      )}
       <Button type="primary" icon={<PlayCircleOutlined />} {...main} />
     </div>
   );
@@ -41,6 +31,7 @@ function preparationAction({ batch, activeJob, action, tasks }: PreparationProps
   const next = compute ? tasks.compute : selfOperated ? tasks.preflight : tasks.preflightAndCompute;
   return {
     children: preparationLabel(batch, compute),
+    "aria-label": preparationLabel(batch, compute),
     loading: ["compute", "preflight", "preflight-compute"].includes(action ?? ""),
     disabled: Boolean(activeJob || action) || !preparationReady(batch, compute),
     onClick: () => void next()
@@ -49,14 +40,14 @@ function preparationAction({ batch, activeJob, action, tasks }: PreparationProps
 
 function preparationLabel(batch: Batch, compute: boolean) {
   if (compute) return batch.status === "failed" ? "重新计算" : "开始计算";
-  return batch.workflow === "self_operated_inbound" ? "预检" : "预检并计算";
+  return "预检并计算";
 }
 
 function preparationReady(batch: Batch, compute: boolean) {
   const { canCompute, canPreflight } = batchPresentation(batch);
   if (!batch.files?.length || batch.receipt?.issue_count) return false;
   if (batch.workflow === "self_operated_inbound" && !batch.inbound_file?.uploaded) return false;
-  return compute ? canCompute : canPreflight;
+  return compute ? canCompute : canPreflight || canCompute;
 }
 
 function BatchFileUploads({ batch, action, activeJob, fileActions }: PreparationProps) {

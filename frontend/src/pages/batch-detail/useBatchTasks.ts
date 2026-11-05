@@ -11,7 +11,7 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
     runAction("preflight", async () => {
       const result = await preflightBatch(batchId);
       await load(true);
-      if (result.workflow === "self_operated_inbound") message.info("已提交后台预检，正在获取历史并核对累计实收");
+      if (result.workflow === "self_operated_inbound") message.info("已提交预检，通过后自动计算");
       else message.success("预检通过");
     });
 

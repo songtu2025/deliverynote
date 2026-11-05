@@ -20,10 +20,8 @@ class OfflinePayload(BaseModel):
     note: str = ""
 
     @model_validator(mode="after")
-    def require_note(self) -> "OfflinePayload":
+    def strip_note(self) -> "OfflinePayload":
         self.note = self.note.strip()
-        if self.quantity and not self.note:
-            raise ValueError("请填写线下处理备注")
         return self
 
 
@@ -35,11 +33,52 @@ class AllowancePayload(BaseModel):
     reason: str = ""
 
     @model_validator(mode="after")
-    def require_reason(self) -> "AllowancePayload":
+    def strip_reason(self) -> "AllowancePayload":
         self.reason = self.reason.strip()
-        if self.quantity and not self.reason:
-            raise ValueError("请填写追加超收原因")
         return self
+
+
+class AllowanceBatchPayload(BaseModel):
+    items: list[AllowancePayload] = Field(min_length=1)
+
+
+def allowance_input(
+    session: Session,
+    batch_id: int,
+    profile: SelfOperatedBatch,
+    payload: AllowancePayload,
+) -> tuple[dict[str, str], dict[str, object]]:
+    identity = {
+        key: getattr(payload, key) for key in ("supplier_code", "sku", "full_site")
+    }
+    source = session.scalar(
+        select(BatchFile)
+        .join(ExceptionRecord)
+        .where(
+            BatchFile.batch_id == batch_id,
+            BatchFile.supplier_code == payload.supplier_code,
+            ExceptionRecord.sku == payload.sku,
+            ExceptionRecord.full_site == payload.full_site,
+        )
+    )
+    previous = next(
+        (
+            item
+            for item in (profile.manual_handling or {}).get("allowances", [])
+            if all(item[key] == value for key, value in identity.items())
+        ),
+        None,
+    )
+    if source is None and previous is None:
+        raise HTTPException(status_code=400, detail="追加额度必须对应本批待处理记录")
+    supplier_name = (
+        source.supplier_name if source else (previous or {})["supplier_name"]
+    )
+    return identity, {
+        "supplier_name": supplier_name,
+        "quantity": payload.quantity,
+        "reason": payload.reason,
+    }
 
 
 def register_manual_handling_routes(
@@ -51,7 +90,7 @@ def register_manual_handling_routes(
     @app.put("/api/batches/{batch_id}/manual-allowances", response_model=None)
     def save_allowance(
         batch_id: int,
-        payload: AllowancePayload,
+        payload: AllowancePayload | AllowanceBatchPayload,
         user: Annotated[User, Depends(dependencies.current_user)],
         session: Annotated[Session, Depends(dependencies.get_session)],
     ) -> dict[str, object]:
@@ -59,55 +98,26 @@ def register_manual_handling_routes(
         profile = session.get(SelfOperatedBatch, batch.id)
         if profile is None:
             raise HTTPException(status_code=400, detail="仅自营仓批次可以追加超收")
-        identity = {
-            key: getattr(payload, key) for key in ("supplier_code", "sku", "full_site")
-        }
-        source = session.scalar(
-            select(BatchFile)
-            .join(ExceptionRecord)
-            .where(
-                BatchFile.batch_id == batch.id,
-                BatchFile.supplier_code == payload.supplier_code,
-                ExceptionRecord.sku == payload.sku,
-                ExceptionRecord.full_site == payload.full_site,
-            )
+        items = (
+            payload.items if isinstance(payload, AllowanceBatchPayload) else [payload]
         )
-        # 已追加后待处理可能消失，仍须允许按原有键修改或撤销。
-        previous = next(
-            (
-                item
-                for item in (profile.manual_handling or {}).get("allowances", [])
-                if all(item[key] == value for key, value in identity.items())
-            ),
-            None,
-        )
-        if source is None and previous is None:
+        inputs = [allowance_input(session, batch.id, profile, item) for item in items]
+        keys = [tuple(identity.values()) for identity, _values in inputs]
+        if len(keys) != len(set(keys)):
             raise HTTPException(
-                status_code=400, detail="追加额度必须对应本批待处理记录"
+                status_code=400, detail="追加额度不可重复指定同一供应商、SKU 和站点"
             )
-        supplier_name = (
-            source.supplier_name if source else (previous or {})["supplier_name"]
-        )
         prepare_recompute(session, batch)
-        replace_input(
-            profile,
-            "allowances",
-            identity,
-            {
-                "supplier_name": supplier_name,
-                "quantity": payload.quantity,
-                "reason": payload.reason,
-            },
-            user.id,
-        )
-        audit(
-            session,
-            user.id,
-            "save_manual_allowance",
-            "batch",
-            batch.id,
-            payload.model_dump(),
-        )
+        for item, (identity, values) in zip(items, inputs):
+            replace_input(profile, "allowances", identity, values, user.id)
+            audit(
+                session,
+                user.id,
+                "save_manual_allowance",
+                "batch",
+                batch.id,
+                item.model_dump(),
+            )
         queue_job(batch, "compute", user, session)
         batch.status = "queued"
         session.commit()

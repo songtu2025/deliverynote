@@ -20,16 +20,17 @@ export default function BatchExportActions({
   focusReview: () => void;
   reviewStats?: ExceptionReview["reviewStats"];
 }) {
-  const { needsReview, needsMergedGeneration } = batchPresentation(batch);
+  const { needsMergedGeneration } = batchPresentation(batch);
   const exportJob = batch.jobs?.export;
-  const reviewing = exportJob?.status !== "failed" && (reviewStats ? reviewStats.unfinishedCount > 0 : needsReview);
+  const selfOperated = batch.workflow === "self_operated_inbound";
+  const { canRetry, reviewing } = exportActionState(batch, reviewStats);
   const { downloadResult, startExport } = tasks;
   return (
     <div className="batch-result-actions">
       <div className="export-action-buttons">
         {batch.download_ready && !needsMergedGeneration ? (
           <ResultDownloadButtons batch={batch} primary={!reviewing} downloadResult={downloadResult} />
-        ) : (
+        ) : canRetry ? (
           <ExportGenerationButton
             exportJob={exportJob}
             activeJob={activeJob}
@@ -39,15 +40,24 @@ export default function BatchExportActions({
             primary={!reviewing}
             disabled={!reviewStats}
           />
-        )}
+        ) : null}
       </div>
-      {reviewing && (
+      {reviewing && !selfOperated && (
         <Button aria-label="开始审校" type="primary" disabled={Boolean(activeJob)} onClick={focusReview}>
           开始审校
         </Button>
       )}
     </div>
   );
+}
+
+function exportActionState(batch: Batch, stats?: ExceptionReview["reviewStats"]) {
+  const { needsReview } = batchPresentation(batch);
+  const exportStatus = batch.jobs?.export?.status;
+  const unfinished = stats ? stats.unfinishedCount > 0 : needsReview;
+  const reviewing = exportStatus !== "failed" && unfinished;
+  if (batch.workflow !== "self_operated_inbound") return { reviewing, canRetry: true };
+  return { reviewing, canRetry: Boolean(stats && !unfinished && ["failed", "stale"].includes(exportStatus ?? "")) };
 }
 
 function ResultDownloadButtons({

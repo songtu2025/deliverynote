@@ -1,5 +1,6 @@
 import { api, ApiError } from "./api";
 import type { Batch, DeliveryException, Job } from "./types";
+import { getBatchDetail } from "./batchDetailApi";
 
 export type PurchaseOption = {
   id: string;
@@ -95,19 +96,42 @@ export async function readCompletePurchaseSnapshot(batchId: number, first: Purch
 export const getInboundAllocations = (exceptionId: number) =>
   api<InboundAllocations>(`/api/exceptions/${exceptionId}/inbound-allocation`);
 
-export const saveManualAllowance = (
-  batchId: number,
-  input: {
-    supplier_code: string;
-    sku: string;
-    full_site: string;
-    quantity: number;
-    reason: string;
-  }
-) => api<Batch>(`/api/batches/${batchId}/manual-allowances`, { method: "PUT", body: JSON.stringify(input) });
+export type ManualAllowanceInput = {
+  supplier_code: string;
+  sku: string;
+  full_site: string;
+  quantity: number;
+  reason: string;
+};
+
+export const saveManualAllowance = (batchId: number, input: ManualAllowanceInput | { items: ManualAllowanceInput[] }) =>
+  api<Batch>(`/api/batches/${batchId}/manual-allowances`, { method: "PUT", body: JSON.stringify(input) });
 
 export const saveOfflineHandling = (exceptionId: number, input: { quantity: number; note: string }) =>
   api<DeliveryException>(`/api/exceptions/${exceptionId}/offline-handling`, {
     method: "PUT",
     body: JSON.stringify(input)
   });
+
+export async function saveOfflineHandlingBatch(inputs: { id: number; quantity: number; note: string }[]) {
+  let succeeded = 0;
+  const failures: string[] = [];
+  for (const input of inputs) {
+    try {
+      await saveOfflineHandling(input.id, { quantity: input.quantity, note: input.note });
+      succeeded += 1;
+    } catch (failure) {
+      failures.push(failure instanceof Error ? failure.message : "保存失败");
+    }
+  }
+  return { succeeded, failures };
+}
+
+export async function waitForHandlingIdle(batchId: number) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const batch = await getBatchDetail(batchId);
+    if (!Object.values(batch.jobs ?? {}).some((job) => ["queued", "running"].includes(job.status))) return;
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+  }
+  throw new Error("后台任务仍在进行，请完成后重试撤销");
+}

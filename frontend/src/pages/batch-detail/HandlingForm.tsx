@@ -64,12 +64,7 @@ export default function HandlingForm({
               onInput={(value) => form.setFieldValue("quantity", value.trim() ? Number(value) : null)}
             />
           </Form.Item>
-          <Form.Item
-            label={reasonLabel}
-            name="reason"
-            style={{ flex: "1 1 220px" }}
-            rules={[{ required: true, whitespace: true, message: `请填写${reasonLabel}` }]}
-          >
+          <Form.Item label={reasonLabel} name="reason" style={{ flex: "1 1 220px" }}>
             <Input />
           </Form.Item>
         </Flex>

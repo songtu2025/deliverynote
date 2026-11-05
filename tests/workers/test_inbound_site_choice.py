@@ -73,7 +73,7 @@ class WorkerIntegrationTests(WorkerCase):
         with self.app.state.database.session() as session:
             source = session.get(BatchFile, uploaded.json()["id"])
             self.assertEqual(source.document_note, expected_note)
-            self.assertEqual(session.get(Batch, batch_id).status, "preflight_ready")
+            self.assertEqual(session.get(Batch, batch_id).status, "queued")
         compute = self.client.post(
             f"/api/batches/{batch_id}/compute", headers=self.headers
         )
@@ -170,7 +170,8 @@ class WorkerIntegrationTests(WorkerCase):
         prepared = self.client.get(
             f"/api/batches/{batch_id}", headers=self.headers
         ).json()
-        self.assertEqual(prepared["status"], "preflight_ready", prepared)
+        self.assertEqual(prepared["status"], "queued", prepared)
+        self.assertEqual(prepared["jobs"]["compute"]["status"], "queued")
         self.assertEqual(
             prepared["receipt"]["captured_at"], before["receipt"]["captured_at"]
         )

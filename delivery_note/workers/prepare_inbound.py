@@ -21,6 +21,7 @@ from ..web.receipt_state import receipt_signature
 from .compute_inputs import _load_compute_inputs
 from .compute_records import _json_records, load_owned_compute
 from .receipt_inputs import read_receipt_sources
+from ..web.job_queue import queue_followup_job
 
 
 def _capture_snapshot(managed, numbers, storage, batch_id, inbound_path):
@@ -120,13 +121,15 @@ def execute_prepare_inbound(context, batch_id: int, storage: Path) -> None:
             source.supplier_code = identities[source.id].code
             source.document_note = "、".join(contexts[source.id]["delivery_numbers"])
         blocked = any(item["issue_count"] for item in contexts.values())
-        batch.status = "draft" if blocked else "preflight_ready"
+        batch.status = "draft" if blocked else "queued"
         batch.error_message = (
             "累计实收存在待核对记录，请查看核对明细" if blocked else None
         )
         job.status = "succeeded"
         job.claim_token = None
         job.finished_at = job.heartbeat_at = datetime.utcnow()
+        if not blocked:
+            queue_followup_job(session, batch, "compute")
         session.add(
             AuditLog(
                 user_id=None,

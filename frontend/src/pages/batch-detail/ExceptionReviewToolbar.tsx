@@ -64,11 +64,11 @@ export default function ExceptionReviewToolbar({
     <div className="table-toolbar exception-toolbar">
       {selfOperated && reviewScope !== "resolved" && (
         <Select
-          aria-label="审校范围"
+          aria-label="处理范围"
           value={reviewScope}
           options={[
             { value: "unfinished", label: "未完成" },
-            { value: "all", label: "全部审校" }
+            { value: "all", label: "全部待处理" }
           ]}
           onChange={(scope) => {
             changeScope(scope);

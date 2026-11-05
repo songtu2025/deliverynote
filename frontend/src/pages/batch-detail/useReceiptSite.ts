@@ -16,12 +16,12 @@ export function useReceiptSite(
         await chooseReceiptSite(batchId, row, site);
         onSaved();
         await load(true);
-        message.info("已保存该文件的站点选择，正在重新核对");
+        message.info("已保存该文件的站点选择，正在重新核对并计算");
       });
     if (confirmRecompute) {
       modal.confirm({
         title: "选择站点并重新核对整批？",
-        content: "将重新核对并重新计算整批，现有结果需要重新生成",
+        content: "将重新核对并计算整批",
         okText: "重新核对",
         cancelText: "取消",
         onOk: save

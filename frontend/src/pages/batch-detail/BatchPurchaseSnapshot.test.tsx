@@ -4,10 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions, fixtureJob } from "./detailFixtures";
-import BatchPurchaseSnapshot, {
-  BatchPurchaseSnapshotMetadata,
-  BatchPurchaseSnapshotNotice
-} from "./BatchPurchaseSnapshot";
+import BatchPurchaseSnapshot, { BatchPurchaseSnapshotMetadata } from "./BatchPurchaseSnapshot";
+import BatchMoreActions from "./BatchMoreActions";
 import SelfOperatedExceptionDetails from "./SelfOperatedExceptionDetails";
 
 const batch = { ...createDetailBatch(), workflow: "self_operated_inbound" as const };
@@ -36,7 +34,7 @@ function Workbench() {
   const [open, setOpen] = useState(true);
   return (
     <BatchPurchaseSnapshot batch={batch}>
-      <BatchPurchaseSnapshotNotice />
+      <BatchMoreActions disabled={false} refreshHistory={vi.fn()} />
       <BatchPurchaseSnapshotMetadata />
       <button onClick={() => setSku("SKU-B")}>切换 SKU</button>
       <button onClick={() => setOpen((value) => !value)}>开关详情</button>
@@ -97,10 +95,12 @@ describe("整批采购快照工作区", () => {
     vi.stubGlobal("fetch", fetcher);
     renderDetail(<Workbench />);
     expect(await screen.findByText("PO-SKU-A")).toBeVisible();
-    fireEvent.click(await screen.findByRole("button", { name: "刷新整批采购数据" }));
+    fireEvent.click(screen.getByRole("button", { name: /更多/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "刷新整批采购数据" }));
     expect(await screen.findByText("整批刷新失败，旧结果保留")).toBeVisible();
     expect(screen.getByText("PO-SKU-A")).toBeVisible();
-    fireEvent.click(await screen.findByRole("button", { name: "重试整批采购数据" }));
+    fireEvent.click(screen.getByRole("button", { name: /更多/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "刷新整批采购数据" }));
     expect(await screen.findByText("NEW-SKU-A")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "切换 SKU" }));
     expect(await screen.findByText("NEW-SKU-B")).toBeVisible();
