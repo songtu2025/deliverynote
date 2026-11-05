@@ -94,15 +94,6 @@ export function useExceptionEditor({
   };
 
   return {
-    manualSaved: async (updated?: DeliveryException) => {
-      if (updated) {
-        replaceException(updated);
-        setSplitTarget(updated);
-      } else {
-        setSplitTarget(null);
-      }
-      await load(true);
-    },
     splitTarget,
     setSplitTarget,
     splitForm,

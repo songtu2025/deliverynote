@@ -30,6 +30,31 @@ function show(workflow: "delivery" | "self_operated_inbound", status?: string, u
 }
 
 describe("自营仓自动生成与重试入口", () => {
+  it.each([false, true])("有待处理时下载仍是主按钮，多文件：%s", (multiple) => {
+    const original = createDetailBatch();
+    const batch = {
+      ...original,
+      workflow: "self_operated_inbound" as const,
+      download_ready: true,
+      merged_download_ready: multiple,
+      files: original.files.slice(0, multiple ? 2 : 1).map((file) => ({ ...file, download_ready: true }))
+    };
+    const download = vi.fn();
+    renderDetail(
+      <BatchExportActions
+        batch={batch}
+        action={null}
+        tasks={{ downloadResult: download, startExport: vi.fn() } as unknown as ReturnType<typeof useBatchTasks>}
+        focusReview={vi.fn()}
+        reviewStats={{ unfinishedCount: 2, unfinishedQuantity: 8, totalCount: 2, resolvedCount: 0 }}
+      />
+    );
+    const button = screen.getByRole("button", { name: multiple ? /下载合并结果/ : /下载结果/ });
+    expect(button).toHaveClass("ant-btn-primary");
+    fireEvent.click(button);
+    expect(download).toHaveBeenCalledOnce();
+    if (multiple) expect(screen.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
+  });
   it.each([undefined, "queued", "running"])("自营仓 %s 不要求手动生成", (status) => {
     show("self_operated_inbound", status);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
@@ -39,9 +64,11 @@ describe("自营仓自动生成与重试入口", () => {
     fireEvent.click(screen.getByRole("button", { name: /生成结果/ }));
     expect(start).toHaveBeenCalledOnce();
   });
-  it.each(["failed", "stale"])("仍有待处理时 %s 不显示生成或开始审校", (status) => {
-    show("self_operated_inbound", status, 1);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  it.each(["failed", "stale"])("仍有待处理时 %s 可重试生成", (status) => {
+    const start = show("self_operated_inbound", status, 1);
+    fireEvent.click(screen.getByRole("button", { name: /生成结果/ }));
+    expect(start).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
   });
   it("交货批次保留开始审校和生成结果", () => {
     show("delivery", undefined, 1);

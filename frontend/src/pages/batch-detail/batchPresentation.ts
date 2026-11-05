@@ -148,24 +148,37 @@ function jobTaskPresentation(job: Pick<Job, "kind" | "status">) {
 function reviewTaskPresentation(batch: Batch, needsReview: boolean, stats?: ReviewStats) {
   const { needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
   const downloadable = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
+  if (batch.workflow === "self_operated_inbound") return inboundResultTask(batch, Boolean(downloadable), stats);
   if (!stats)
     return {
       title: "计算完成",
-      description: batch.workflow === "self_operated_inbound" ? "正在读取待处理统计…" : "正在读取审校统计…",
+      description: "正在读取审校统计…",
       tone: "waiting",
       busy: false
     };
   return {
     title:
       stats.unfinishedCount > 0
-        ? `${stats.unfinishedCount} 条${batch.workflow === "self_operated_inbound" ? "待处理" : "待审校"}，共 ${stats.unfinishedQuantity} 件`
+        ? `${stats.unfinishedCount} 条待审校，共 ${stats.unfinishedQuantity} 件`
         : downloadable
           ? "结果已生成，可以下载"
-          : batch.workflow === "self_operated_inbound"
-            ? "正在生成结果"
-            : "审校完成，可以生成结果",
+          : "审校完成，可以生成结果",
     description: "",
     tone: stats.unfinishedCount > 0 || needsReview ? "review" : "ready",
+    busy: false
+  };
+}
+
+function inboundResultTask(batch: Batch, downloadable: boolean, stats?: ReviewStats) {
+  const pending = stats?.unfinishedCount ? ` · 还有 ${stats.unfinishedCount} 条待处理` : "";
+  return {
+    title: downloadable
+      ? `结果已生成，可以下载${pending}`
+      : batch.jobs?.export?.status === "stale"
+        ? "需要重新生成结果"
+        : "正在生成结果",
+    description: "",
+    tone: downloadable ? "ready" : "waiting",
     busy: false
   };
 }

@@ -42,20 +42,22 @@ class InboundJobChainTests(ReceiptWorkerCase):
         self.assertEqual(prepared["status"], "draft")
         self.assertNotIn("compute", prepared["jobs"])
 
-    def test_remaining_pending_does_not_queue_export(self):
+    def test_remaining_pending_still_queues_export(self):
         batch_id = self.create_receipt_batch(cumulative=50)
         self.preflight(batch_id)
         run_once(self.database_url, self.storage_root)
         with self.app.state.database.session() as session:
-            self.assertIsNone(
+            self.assertEqual(
                 session.scalar(
                     select(Job).where(Job.batch_id == batch_id, Job.kind == "export")
-                )
+                ).status,
+                "queued",
             )
 
     def test_refresh_requeues_compute_after_preflight(self):
         batch_id = self.create_receipt_batch(cumulative=50)
         self.preflight(batch_id)
+        run_once(self.database_url, self.storage_root)
         run_once(self.database_url, self.storage_root)
         refreshed = self.client.post(
             f"/api/batches/{batch_id}/receipts/refresh", headers=self.headers

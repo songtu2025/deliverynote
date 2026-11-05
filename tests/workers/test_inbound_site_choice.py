@@ -145,6 +145,7 @@ class WorkerIntegrationTests(WorkerCase):
             f"/api/batches/{batch_id}/exceptions", headers=self.headers
         ).json()[0]
         self.assertEqual(pending["reason"], "产品信息站点不唯一")
+        run_once(self.database_url, self.storage_root)
         endpoint = f"/api/batches/{batch_id}/files/{rows[0]['file_id']}/receipt-site"
         payload = {
             "sku": "SKU-A",

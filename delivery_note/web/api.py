@@ -10,6 +10,7 @@ from .auth_routes import register_auth_routes
 from .health_routes import register_health_routes
 from .job_routes import build_job_queue, register_job_routes
 from .manual_handling_routes import register_manual_handling_routes
+from .adjustment_routes import register_adjustment_routes
 from .self_operated_creation import SelfOperatedBatchCreator
 from .self_operated_creation_routes import register_self_operated_creation_routes
 from .batch_creation import DeliveryBatchCreator
@@ -214,6 +215,7 @@ def create_app(
 
     register_job_routes(app, dependencies, queue_job, _audit)
     register_manual_handling_routes(app, dependencies, queue_job, _audit)
+    register_adjustment_routes(app, dependencies, queue_job, _audit)
 
     register_exception_write_routes(
         app=app,

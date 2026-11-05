@@ -18,11 +18,10 @@ type DetailTabsProps = {
   receipts: ReactNode;
   receiptTodos: ReactNode;
   review: ReactNode;
-  extra: ReactNode;
 };
 
 export default function SelfOperatedDetailTabs(props: DetailTabsProps) {
-  const { batch, activeKey, onChange, reviewState, onReset, extra } = props;
+  const { batch, activeKey, onChange, reviewState, onReset } = props;
   const { computed } = batchPresentation(batch);
   const importCount = useImportRowCount(batch, computed);
   const selected = activeKey ?? "review";
@@ -39,7 +38,6 @@ export default function SelfOperatedDetailTabs(props: DetailTabsProps) {
         classNames={{ header: "batch-workspace-tabs-nav" }}
         activeKey={selected}
         onChange={select}
-        tabBarExtraContent={computed && ["review", "resolved"].includes(selected) ? extra : undefined}
         items={workspaceItems(props, computed, importCount)}
       />
     </Card>

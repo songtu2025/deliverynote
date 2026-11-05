@@ -1,21 +1,16 @@
 import type { ReactNode } from "react";
 import { Alert, Button, Card, Descriptions, Flex, Table, Typography } from "antd";
 import { formatBeijingDateTime } from "../../dateTime";
-import type { Batch, DeliveryException } from "../../types";
-import ManualHandling from "./ManualHandling";
+import type { DeliveryException } from "../../types";
 import type { InboundAllocation, PurchaseOption } from "../../inboundExceptionApi";
 import { useInboundExceptionDetails } from "./useInboundExceptionDetails";
 
 export default function SelfOperatedExceptionDetails({
   exception,
-  supplierCode,
-  batch,
-  onSaved
+  supplierCode
 }: {
   exception: DeliveryException;
   supplierCode: string;
-  batch?: Batch;
-  onSaved?: (updated?: DeliveryException) => Promise<void>;
 }) {
   const { purchases, allocations } = useInboundExceptionDetails(exception.id, supplierCode, exception.sku);
   return (
@@ -37,9 +32,6 @@ export default function SelfOperatedExceptionDetails({
       />
       <PurchaseEvidence state={purchases} />
       <AllocationEvidence state={allocations} />
-      {batch && onSaved && (
-        <ManualHandling batch={batch} exception={exception} supplierCode={supplierCode} onSaved={onSaved} />
-      )}
     </Flex>
   );
 }

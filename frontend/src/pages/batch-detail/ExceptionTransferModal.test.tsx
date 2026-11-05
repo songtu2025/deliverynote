@@ -82,13 +82,12 @@ describe("自营仓转交货", () => {
   it("勾选后打开弹窗，默认剩余量与原站点，换站点提交并跳转", async () => {
     const onSuccess = vi.fn();
     renderDetail(<Selection onSuccess={onSuccess} />);
-    const transfer = screen.getByRole("button", { name: "转交货批次" });
-    expect(transfer).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "转交货批次" })).not.toBeInTheDocument();
     const boxes = screen.getAllByRole("checkbox");
     expect(boxes[2]).toBeDisabled();
     fireEvent.click(boxes[1]);
     expect(screen.getByText("已选 1 条")).toBeInTheDocument();
-    fireEvent.click(transfer);
+    fireEvent.click(screen.getByRole("button", { name: "转交货批次" }));
     const quantity = await screen.findByRole("spinbutton", { name: "SKU-A 转交数量" });
     expect(quantity).toHaveValue("5");
     await waitFor(() => expect(screen.getByRole("button", { name: "创建交货批次" })).toBeEnabled());

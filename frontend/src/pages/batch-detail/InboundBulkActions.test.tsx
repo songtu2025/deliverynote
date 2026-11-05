@@ -21,21 +21,6 @@ function showSelectedRows() {
 }
 
 describe("勾选后的批量处理", () => {
-  it("同一供应商、SKU、站点聚合剩余量，一次追加并统一刷新", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(batch))
-    );
-    const saved = showSelectedRows();
-    fireEvent.click(screen.getByRole("button", { name: "追加超收" }));
-    await waitFor(() => expect(saved).toHaveBeenCalledOnce());
-    expect(fetch).toHaveBeenCalledOnce();
-    const input = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
-    expect(input.items).toHaveLength(1);
-    expect(input.items[0]).toMatchObject({ quantity: 9, reason: "" });
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
   it.each([false, true])("线下逐条处理后统一刷新并汇总，首条失败：%s", async (failFirst) => {
     vi.stubGlobal(
       "fetch",
@@ -45,25 +30,29 @@ describe("勾选后的批量处理", () => {
         .mockResolvedValueOnce(jsonResponse(second))
     );
     const saved = showSelectedRows();
+    fireEvent.change(screen.getByRole("textbox", { name: "线下备注（选填）" }), { target: { value: "统一备注" } });
     fireEvent.click(screen.getByRole("button", { name: "线下处理" }));
     await waitFor(() => expect(saved).toHaveBeenCalledOnce());
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(init?.body as string).quantity)).toEqual([6, 4]);
+    expect(vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(init?.body as string).note)).toEqual([
+      "统一备注",
+      "统一备注"
+    ]);
     const summary = failFirst ? "已线下处理 1 条，失败 1 条：记录已变化" : "已线下处理 2 条";
     expect(await screen.findByText(summary)).toBeVisible();
   });
 
-  it("不适用追加的行禁用并提供 Tooltip，空选禁用所有操作", async () => {
+  it("不再提供批量追加；空选禁用线下处理并说明原因", async () => {
     const { rerender } = renderDetail(
       <InboundBulkActions batch={batch} records={[{ ...first, reason: "产品信息未匹配" }]} onSaved={vi.fn()} />
     );
-    const append = screen.getByRole("button", { name: "追加超收" });
-    expect(append).toBeDisabled();
-    fireEvent.focus(append.parentElement!);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("所选行的待处理原因不适用追加超收");
+    expect(screen.queryByRole("button", { name: "追加超收" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();
     rerender(<InboundBulkActions batch={batch} records={[]} onSaved={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "追加超收" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "线下处理" })).toBeDisabled();
+    const offline = screen.getByRole("button", { name: "线下处理" });
+    expect(offline).toBeDisabled();
+    fireEvent.focus(offline.parentElement!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("请先勾选待处理行");
   });
 });

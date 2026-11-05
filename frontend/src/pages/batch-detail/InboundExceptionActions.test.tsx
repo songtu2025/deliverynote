@@ -1,172 +1,193 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Batch } from "../../types";
+import type { Batch, DeliveryException } from "../../types";
 import { renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
-import { createDetailBatch, createDetailExceptions, fixtureJob } from "./detailFixtures";
+import { createDetailBatch, createDetailExceptions } from "./detailFixtures";
 import InboundExceptionActions from "./InboundExceptionActions";
-import { useExceptionTransfer } from "./useExceptionTransfer";
+import InboundAdjustmentActions from "./InboundAdjustmentActions";
+import { useInboundAdjustments } from "./useInboundAdjustments";
+import BatchManualAllowances from "./BatchManualAllowances";
+import { allowanceKey } from "./inboundHandling";
 
 const batch: Batch = {
   ...createDetailBatch(),
   workflow: "self_operated_inbound",
-  status: "succeeded",
   manual_allowance_disabled_reason: null
 };
-const record = { ...createDetailExceptions()[3], manual_quantity: 8, transferred_quantity: 2, offline_quantity: 1 };
+const record = createDetailExceptions()[3];
+const siteRecord = createDetailExceptions()[2];
 afterEach(() => vi.unstubAllGlobals());
 
-function show(overrides: Partial<Batch> = {}, remaining = record, onSaved = vi.fn(async () => undefined)) {
-  const onTransfer = vi.fn();
-  const onOpen = vi.fn();
-  const onVersions = vi.fn();
-  renderDetail(
-    <InboundExceptionActions
-      batch={{ ...batch, ...overrides }}
-      record={remaining}
-      supplierCode="GYS-023"
-      onOpen={onOpen}
-      onTransfer={onTransfer}
-      onVersions={onVersions}
-      onSaved={onSaved}
-    />
+function Editor({
+  rows = [record],
+  currentBatch = batch,
+  saved = vi.fn()
+}: {
+  rows?: DeliveryException[];
+  currentBatch?: Batch;
+  saved?: () => Promise<unknown>;
+}) {
+  const adjustments = useInboundAdjustments(currentBatch, saved);
+  return (
+    <>
+      <InboundAdjustmentActions adjustments={adjustments} />
+      {rows.map((row) => (
+        <InboundExceptionActions
+          key={row.id}
+          record={row}
+          supplierCode="GYS-023"
+          adjustments={adjustments}
+          onVersions={vi.fn()}
+        />
+      ))}
+      <BatchManualAllowances
+        batch={currentBatch}
+        adjustments={adjustments}
+        visibleKeys={new Set(rows.map((row) => allowanceKey("GYS-023", row)))}
+      />
+    </>
   );
-  return { onTransfer, onOpen, onSaved, onVersions };
 }
 
-describe("计算后行内处理", () => {
-  it("超量显示三种操作，其他原因不显示追加，查看仍打开原详情", () => {
-    const { onOpen, onTransfer } = show();
-    fireEvent.click(screen.getByRole("button", { name: "查看并处理" }));
-    expect(onOpen).toHaveBeenCalledWith(record);
-    fireEvent.click(screen.getByRole("button", { name: "转交货" }));
-    expect(onTransfer).toHaveBeenCalledWith(record);
-    expect(screen.getByRole("button", { name: "追加超收" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();
-  });
-  it.each(["其他"])("%s 仅线下处理和转交", (reason) => {
-    show({}, { ...record, reason });
-    expect(screen.queryByRole("button", { name: "追加超收" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "转交货" })).toBeEnabled();
-  });
-  it("未匹配商品仅查看锁定资料和线下处理，不显示转交货", () => {
-    const { onVersions } = show({}, { ...record, reason: "产品信息未匹配" });
-    fireEvent.click(screen.getByRole("button", { name: "查看锁定资料" }));
-    expect(onVersions).toHaveBeenCalledOnce();
-    expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "转交货" })).not.toBeInTheDocument();
-  });
-  it("歧义行选站点先确认，确认后才保存并刷新", async () => {
+describe("计算后行内调整草稿", () => {
+  it("已无待办行的追加额度仍可填零，统一提交撤销", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => jsonResponse({}))
+      vi.fn(async () => jsonResponse(batch))
     );
-    const { onSaved } = show(
-      {},
-      {
-        ...record,
-        reason: "产品信息站点不唯一",
-        full_site: "AMAZON:SEEKWAY:US、AMAZON:OTHER:US"
-      }
-    );
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
-    fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
-    expect(await screen.findByText("将重新核对并计算整批")).toBeInTheDocument();
-    expect(fetch).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
-    fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
-    fireEvent.click(screen.getByRole("button", { name: "重新核对" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(true));
-    expect(fetch).toHaveBeenCalledWith(
-      `/api/batches/7/files/${record.batch_file_id}/receipt-site`,
-      expect.objectContaining({
-        method: "PUT",
-        body: JSON.stringify({
+    const currentBatch = {
+      ...batch,
+      manual_allowances: [
+        {
+          supplier_code: "GYS-023",
+          supplier_name: "合成",
           sku: record.sku,
-          original_site: record.original_site,
+          full_site: record.full_site,
+          quantity: 6,
+          reason: ""
+        }
+      ]
+    };
+    const { rerender } = renderDetail(<Editor currentBatch={currentBatch} />);
+    expect(screen.queryByText("已追加额度")).not.toBeInTheDocument();
+    rerender(<Editor rows={[]} currentBatch={currentBatch} />);
+    fireEvent.click(screen.getByText("已追加额度"));
+    const input = screen.getByRole("spinbutton", { name: "本批追加" });
+    expect(input).toHaveValue("6");
+    fireEvent.change(input, { target: { value: "0" } });
+    fireEvent.click(screen.getByRole("button", { name: "按调整重算（1 处）" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string).allowances[0].quantity).toBe(0);
+  });
+  it("追加默认为空，不再显示旧处理按钮，重复记录合并为一处", () => {
+    renderDetail(<Editor rows={[record, { ...record, id: 100 }]} />);
+    const inputs = screen.getAllByRole("spinbutton", { name: "本批追加" });
+    expect(inputs[0]).toHaveValue("");
+    for (const name of ["追加超收", "线下处理", "转交货", "查看并处理"])
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    fireEvent.change(inputs[0], { target: { value: "3" } });
+    expect(inputs[1]).toHaveValue("3");
+    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeEnabled();
+  });
+
+  it("追加与站点只保存草稿，一次请求提交并阻止重复提交", async () => {
+    const saved = vi.fn(async () => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(batch))
+    );
+    renderDetail(<Editor rows={[record, siteRecord]} saved={saved} />);
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "4" } });
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
+    fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
+    expect(fetch).not.toHaveBeenCalled();
+    const submit = screen.getByRole("button", { name: "按调整重算（2 处）" });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/batches/7/adjustments");
+    expect(JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string)).toEqual({
+      allowances: [{ supplier_code: "GYS-023", sku: record.sku, full_site: record.full_site, quantity: 4, reason: "" }],
+      sites: [
+        {
+          file_id: siteRecord.batch_file_id,
+          sku: siteRecord.sku,
+          original_site: siteRecord.original_site,
           full_site: "AMAZON:OTHER:US"
-        })
-      })
+        }
+      ]
+    });
+    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
+  });
+
+  it("翻页或筛选后保留草稿，放弃修改统一清空", () => {
+    const { rerender } = renderDetail(<Editor />);
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "7" } });
+    rerender(<Editor rows={[siteRecord]} />);
+    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeInTheDocument();
+    rerender(<Editor />);
+    expect(screen.getByRole("spinbutton")).toHaveValue("7");
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+    expect(screen.getByRole("spinbutton")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
+  });
+
+  it("剩余为零仍能把已有追加改为零撤销", () => {
+    renderDetail(
+      <Editor
+        rows={[{ ...record, offline_quantity: record.manual_quantity }]}
+        currentBatch={{
+          ...batch,
+          manual_allowances: [
+            {
+              supplier_code: "GYS-023",
+              supplier_name: "合成",
+              sku: record.sku,
+              full_site: record.full_site,
+              quantity: 6,
+              reason: ""
+            }
+          ]
+        }}
+      />
     );
-    expect(screen.queryByRole("button", { name: "转交货" })).not.toBeInTheDocument();
+    const input = screen.getByRole("spinbutton");
+    expect(input).toHaveValue("6");
+    expect(input).toBeEnabled();
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeEnabled();
   });
-  it("转交关联和后台任务禁用选站点，并显示原因", async () => {
-    show(
-      { manual_allowance_disabled_reason: "批次已有转交记录" },
-      {
-        ...record,
-        reason: "产品信息站点不唯一",
-        full_site: "AMAZON:SEEKWAY:US、AMAZON:OTHER:US"
-      }
-    );
-    const select = screen.getByRole("combobox", { name: "选择站点" });
-    expect(select).toBeDisabled();
-    fireEvent.focus(select.closest(".ant-select")!.parentElement!);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("批次已有转交记录");
-  });
-  it("后端追加禁用原因和导出期间禁用沿用现有逻辑", async () => {
-    show({ manual_allowance_disabled_reason: "批次已有转交记录", jobs: { export: fixtureJob({ kind: "export" }) } });
-    for (const name of ["追加超收", "线下处理", "转交货"]) expect(screen.getByRole("button", { name })).toBeDisabled();
-    fireEvent.mouseEnter(screen.getByRole("button", { name: "追加超收" }).parentElement!);
-    expect(await screen.findByRole("tooltip")).toHaveTextContent("批次已有转交记录");
-  });
-  it("全部转交与线下处理后只保留详情", () => {
-    show({}, { ...record, transferred_quantity: 5, offline_quantity: 3 });
-    expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "查看并处理" })).toBeEnabled();
-  });
-  it.each(["追加超收", "线下处理"])("%s 一键保存全部剩余量，无弹窗并可撤销回原值", async (label) => {
+
+  it("失败保留草稿；有转交关联禁用调整并说明原因", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => jsonResponse(record))
+      vi.fn(async () => jsonResponse({ detail: "输入已变化" }, 409))
     );
-    const { onSaved } = show();
-    fireEvent.click(screen.getByRole("button", { name: label }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    const allowance = label === "追加超收";
-    expect(fetch).toHaveBeenCalledWith(
-      allowance ? "/api/batches/7/manual-allowances" : `/api/exceptions/${record.id}/offline-handling`,
-      expect.objectContaining({ body: expect.stringContaining(allowance ? '"quantity":5' : '"quantity":6') })
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "撤销" }));
-    await waitFor(() =>
-      expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(2)
-    );
-    // 撤销恢复操作前的数量：追加超收原为 0，线下处理原为 1。
-    expect(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body).toContain(allowance ? '"quantity":0' : '"quantity":1');
+    const { rerender } = renderDetail(<Editor />);
+    fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: /按调整重算/ }));
+    expect(await screen.findByText("输入已变化")).toBeVisible();
+    expect(screen.getByRole("spinbutton")).toHaveValue("2");
+    rerender(<Editor currentBatch={{ ...batch, manual_allowance_disabled_reason: "批次已有转交记录" }} />);
+    const input = screen.getByRole("spinbutton");
+    expect(input).toBeDisabled();
+    fireEvent.focus(input.closest(".ant-input-number")!.parentElement!);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("批次已有转交记录");
   });
-  it("单行转交直接使用原 hook 的弹窗并仅选中当前行", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () =>
-        jsonResponse({ sites: [record.full_site], purchases: [], queried_at: "2026-11-04", purchase_error: null })
-      )
+
+  it("未匹配仅显示资料链接，其他原因为空", () => {
+    renderDetail(
+      <Editor
+        rows={[
+          { ...record, reason: "产品信息未匹配" },
+          { ...record, id: 99, reason: "其他" }
+        ]}
+      />
     );
-    function Row() {
-      const transfer = useExceptionTransfer(batch, vi.fn());
-      return (
-        <>
-          {transfer.action}
-          <InboundExceptionActions
-            batch={batch}
-            record={record}
-            supplierCode="GYS-023"
-            onOpen={vi.fn()}
-            onTransfer={(row) => transfer.openRow?.(row)}
-            onSaved={vi.fn()}
-          />
-          {transfer.modal}
-        </>
-      );
-    }
-    renderDetail(<Row />);
-    fireEvent.click(screen.getByRole("button", { name: "转交货" }));
-    expect(screen.getByText("已选 1 条")).toBeInTheDocument();
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("spinbutton", { name: `${record.sku} 转交数量` })).toHaveValue("5");
+    expect(screen.getByRole("button", { name: "查看锁定资料" })).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "查看并处理" })).not.toBeInTheDocument();
   });
 });

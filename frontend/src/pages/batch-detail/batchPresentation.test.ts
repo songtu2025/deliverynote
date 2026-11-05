@@ -86,11 +86,12 @@ describe("批次真实阶段", () => {
     const pending = { unfinishedCount: 1, unfinishedQuantity: 5 };
     const resolved = { unfinishedCount: 0, unfinishedQuantity: 0 };
     expect(batchStagePresentation(batch, undefined, pending).label).toBe("待处理");
-    expect(batchTaskPresentation(batch, undefined, pending).title).toBe("1 条待处理，共 5 件");
+    expect(batchTaskPresentation(batch, undefined, pending).title).toBe("正在生成结果");
     expect(batchStagePresentation(batch, undefined, resolved).label).toBe("生成中");
     expect(batchTaskPresentation(batch, undefined, resolved).title).toBe("正在生成结果");
     batch.download_ready = true;
     batch.merged_download_ready = true;
+    expect(batchTaskPresentation(batch, undefined, pending).title).toBe("结果已生成，可以下载 · 还有 1 条待处理");
     expect(batchTaskPresentation(batch, undefined, resolved).title).toBe("结果已生成，可以下载");
   });
 });

@@ -3,8 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .exception_transfer_state import remaining_quantity_expression
-from .models import AuditLog, Batch, BatchFile, ExceptionRecord, Job, SelfOperatedBatch
+from .models import AuditLog, Batch, Job
 from .purchase_snapshot import PURCHASE_SNAPSHOT_KIND
 
 
@@ -52,21 +51,3 @@ def queue_followup_job(session: Session, batch: Batch, kind: str) -> Job:
             )
         )
     return job
-
-
-def queue_inbound_export(session: Session, batch: Batch) -> None:
-    if batch.status != "succeeded" or session.get(SelfOperatedBatch, batch.id) is None:
-        return
-    session.flush()
-    pending = session.scalar(
-        select(ExceptionRecord.id)
-        .join(BatchFile)
-        .where(
-            BatchFile.batch_id == batch.id,
-            ExceptionRecord.status == "pending",
-            remaining_quantity_expression() > 0,
-        )
-        .limit(1)
-    )
-    if pending is None:
-        queue_followup_job(session, batch, "export")

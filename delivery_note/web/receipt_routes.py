@@ -20,6 +20,34 @@ class ReceiptSitePayload(BaseModel):
     full_site: str
 
 
+def validate_receipt_site(
+    session: Session, batch_id: int, file_id: int, payload: ReceiptSitePayload
+) -> BatchFile:
+    source = session.get(BatchFile, file_id)
+    if source is None or source.batch_id != batch_id:
+        raise HTTPException(status_code=404, detail="质检文件不存在")
+    rows = (source.receipt_context or {}).get("rows", [])
+    match = next(
+        (
+            row
+            for row in rows
+            if row["sku"] == payload.sku
+            and row["original_site"] == payload.original_site
+        ),
+        None,
+    )
+    if not match or payload.full_site not in match["candidates"]:
+        raise HTTPException(status_code=400, detail="所选站点不在该文件候选范围")
+    return source
+
+
+def save_receipt_site(source: BatchFile, payload: ReceiptSitePayload) -> None:
+    source.receipt_sites = {
+        **(source.receipt_sites or {}),
+        f"{payload.sku}\t{payload.original_site}": payload.full_site,
+    }
+
+
 def queue_receipt_preflight(
     session: Session,
     batch: Batch,
@@ -100,25 +128,8 @@ def register_receipt_routes(
             allow_succeeded=True,
             detail="当前批次状态不可预检",
         )
-        source = session.get(BatchFile, file_id)
-        if source is None or source.batch_id != batch.id:
-            raise HTTPException(status_code=404, detail="质检文件不存在")
-        rows = (source.receipt_context or {}).get("rows", [])
-        match = next(
-            (
-                row
-                for row in rows
-                if row["sku"] == payload.sku
-                and row["original_site"] == payload.original_site
-            ),
-            None,
-        )
-        if not match or payload.full_site not in match["candidates"]:
-            raise HTTPException(status_code=400, detail="所选站点不在该文件候选范围")
-        source.receipt_sites = {
-            **(source.receipt_sites or {}),
-            f"{payload.sku}\t{payload.original_site}": payload.full_site,
-        }
+        source = validate_receipt_site(session, batch.id, file_id, payload)
+        save_receipt_site(source, payload)
         audit(
             session,
             user.id,

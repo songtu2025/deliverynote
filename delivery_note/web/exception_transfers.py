@@ -18,7 +18,6 @@ from .exception_transfer_state import remaining_quantity_expression
 from .input_versions import INPUT_KINDS, require_active_versions
 from .models import Batch, BatchFile, ExceptionRecord, Job, SelfOperatedBatch
 from .models.batches import ExceptionTransfer
-from .job_queue import queue_inbound_export
 
 
 @dataclass(frozen=True)
@@ -166,7 +165,6 @@ class ExceptionTransferService:
                 target_file.supplier_code = groups[source_id].supplier_code
                 target_file.receipt_sites = groups[source_id].sites
             self._save_transfers(session, records, items, target, file_by_source)
-            queue_inbound_export(session, batch)
             session.commit()
             return target.id
         except Exception as error:

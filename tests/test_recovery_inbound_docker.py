@@ -35,6 +35,18 @@ class RecoveryInboundDockerTests(InboundRecoveryCase):
         self.assertEqual(ambiguous["batch"]["receipt"]["issue_count"], 0)
         self.assertEqual(ambiguous["batch"]["receipt"]["unconfirmed_count"], 1)
         self.assertEqual(ambiguous["exceptions"][0]["reason"], "产品信息站点不唯一")
+        self.assertEqual(ambiguous["batch"]["jobs"]["export"]["status"], "succeeded")
+        self.assertTrue(ambiguous["batch"]["download_ready"])
+        self.assertIsNotNone(ambiguous["download"])
+        self.assertEqual(
+            ambiguous["batch"]["summary"],
+            {
+                "delivery_total": 18,
+                "import_total": 0,
+                "manual_total": 18,
+                "conserved": True,
+            },
+        )
         self.assertEqual(
             selected["receipts"]["items"][0]["full_site"], "AMAZON:RIVMOUNT:US"
         )
