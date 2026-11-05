@@ -1,6 +1,5 @@
-import { act, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ReactNode } from "react";
 import { renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions } from "./detailFixtures";
@@ -130,27 +129,22 @@ describe("转交选项缓存", () => {
       "fetch",
       vi.fn(() => new Promise<Response>((resolve) => resolvers.push(resolve)))
     );
-    let state = snapshot("2026-11-04T00:00:00Z");
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <PurchaseSnapshotContext value={state}>{children}</PurchaseSnapshotContext>
-    );
-    const { result, rerender } = renderHook(() => useExceptionTransfer(batch, vi.fn()), { wrapper });
-    act(() => result.current.openRow?.(record));
-    const load = result.current.modal && result.current.modal.props.loadOptions;
-    expect(load).toBeTypeOf("function");
-    const oldRequest = load(record.id);
-    expect(load(record.id)).toBe(oldRequest);
-    state = snapshot("2026-11-04T00:01:00Z");
-    rerender();
-    const newRequest = load(record.id);
-    expect(newRequest).not.toBe(oldRequest);
-    resolvers[0](jsonResponse(options));
-    await oldRequest;
-    expect(load(record.id)).toBe(newRequest);
-    const fresh = { ...options, queried_at: "2026-11-04T00:01:00Z" };
-    resolvers[1](jsonResponse(fresh));
-    await newRequest;
-    expect(await load(record.id)).toEqual(fresh);
+    const { rerender } = renderDetail(<Selection state={snapshot("2026-11-04T00:00:00Z")} />);
+    fireEvent.click(screen.getByRole("button", { name: "选择记录" }));
+    fireEvent.click(screen.getByRole("button", { name: "转交货批次" }));
+    expect(transferRequests()).toHaveLength(1);
+    rerender(<Selection state={snapshot("2026-11-04T00:01:00Z")} />);
+    await closeSelection();
+    fireEvent.click(screen.getByRole("button", { name: "转交货批次" }));
+    expect(transferRequests()).toHaveLength(2);
+    await act(async () => resolvers[0](jsonResponse(options)));
+    expect(screen.queryByText("PO-OLD")).not.toBeInTheDocument();
+    const fresh = { ...options, purchases: [{ ...options.purchases[0], po_code: "PO-NEW" }] };
+    await act(async () => resolvers[1](jsonResponse(fresh)));
+    expect(await screen.findByText("PO-NEW")).toBeInTheDocument();
+    await closeSelection();
+    fireEvent.click(screen.getByRole("button", { name: "转交货批次" }));
+    expect(screen.getByText("PO-NEW")).toBeInTheDocument();
     expect(transferRequests()).toHaveLength(2);
   });
 });

@@ -29,7 +29,7 @@ export default function BatchExportActions({
     <div className="batch-result-actions">
       <div className="export-action-buttons">
         {batch.download_ready && !needsMergedGeneration ? (
-          <ResultDownloadButtons batch={batch} primary={!reviewing} downloadResult={downloadResult} />
+          <ResultDownloadButtons batch={batch} primary={selfOperated || !reviewing} downloadResult={downloadResult} />
         ) : canRetry ? (
           <ExportGenerationButton
             exportJob={exportJob}
@@ -37,8 +37,8 @@ export default function BatchExportActions({
             action={action}
             needsMergedGeneration={needsMergedGeneration}
             startExport={startExport}
-            primary={!reviewing}
-            disabled={!reviewStats}
+            primary={selfOperated || !reviewing}
+            disabled={!selfOperated && !reviewStats}
           />
         ) : null}
       </div>
@@ -57,7 +57,7 @@ function exportActionState(batch: Batch, stats?: ExceptionReview["reviewStats"])
   const unfinished = stats ? stats.unfinishedCount > 0 : needsReview;
   const reviewing = exportStatus !== "failed" && unfinished;
   if (batch.workflow !== "self_operated_inbound") return { reviewing, canRetry: true };
-  return { reviewing, canRetry: Boolean(stats && !unfinished && ["failed", "stale"].includes(exportStatus ?? "")) };
+  return { reviewing, canRetry: ["failed", "stale"].includes(exportStatus ?? "") };
 }
 
 function ResultDownloadButtons({

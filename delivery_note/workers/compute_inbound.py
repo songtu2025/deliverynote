@@ -20,7 +20,7 @@ from ..self_operated_inbound import (
 )
 from ..web.models import AuditLog, ExceptionRecord, SelfOperatedBatch
 from ..web.manual_handling import apply_offline_inputs
-from ..web.job_queue import queue_inbound_export
+from ..web.job_queue import queue_followup_job
 from ..processing.keys import make_overreceipt_key
 from .compute_inputs import ComputeInputs
 from ..web.compute_state import clear_compute_results
@@ -78,7 +78,7 @@ def _save_inbound_compute(
                 session.add(record)
 
         mark_compute_succeeded(job, batch)
-        queue_inbound_export(session, batch)
+        queue_followup_job(session, batch, "export")
         session.add(
             AuditLog(
                 user_id=None,

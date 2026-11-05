@@ -1,8 +1,8 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
-import { fixtureJob, fixtureVersion } from "./batch-detail/detailFixtures";
+import { createDetailExceptions, fixtureJob, fixtureVersion } from "./batch-detail/detailFixtures";
 import { jsonResponse } from "./admin/positionDraftTestSupport";
 
 describe("自营仓批次详情", () => {
@@ -43,7 +43,12 @@ describe("自营仓批次详情", () => {
     expect(page.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
     expect(page.queryByLabelText("备货定位筛选")).not.toBeInTheDocument();
     expect(page.queryByRole("columnheader", { name: "规模定位" })).not.toBeInTheDocument();
-    expect(page.getByText("查看并处理").closest("button")).toBeEnabled();
+    expect(page.queryByText("查看并处理")).not.toBeInTheDocument();
+    fireEvent.click(page.getByRole("button", { name: state.exceptions[0].sku }));
+    const drawer = within(await screen.findByRole("dialog"));
+    expect(drawer.getByText("处理依据 · " + state.exceptions[0].sku)).toBeVisible();
+    expect(drawer.queryByRole("spinbutton")).not.toBeInTheDocument();
+    expect(drawer.queryByRole("button", { name: /保存|追加|线下处理/ })).not.toBeInTheDocument();
     expect(page.queryByText("保存并重新计算")).not.toBeInTheDocument();
   });
 
@@ -58,6 +63,32 @@ describe("自营仓批次详情", () => {
     expect(await screen.findByRole("status")).toHaveTextContent(title);
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("翻页和搜索保留追加草稿，勾选后显示收尾操作", async () => {
+    const base = createDetailExceptions()[3];
+    state.exceptions = Array.from({ length: 12 }, (_, index) => ({
+      ...base,
+      id: 100 + index,
+      sku: `SKU-${index + 1}`
+    }));
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const first = (await screen.findAllByRole("spinbutton", { name: "本批追加" }))[0];
+    fireEvent.change(first, { target: { value: "4" } });
+    fireEvent.click(screen.getAllByTitle("2")[0]);
+    await waitFor(() => expect(screen.getAllByRole("spinbutton", { name: "本批追加" })).toHaveLength(2));
+    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeEnabled();
+    fireEvent.click(screen.getAllByTitle("1")[0]);
+    await waitFor(() => expect(screen.getAllByRole("spinbutton", { name: "本批追加" })[0]).toHaveValue("4"));
+    const search = screen.getByRole("textbox", { name: "搜索待处理记录" });
+    fireEvent.change(search, { target: { value: "SKU-12" } });
+    await waitFor(() => expect(screen.getAllByRole("spinbutton", { name: "本批追加" })).toHaveLength(1));
+    expect(screen.getByRole("button", { name: /按调整重算/ })).toBeEnabled();
+    fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
+    expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "转交货批次" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
+    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
   });
 
   it.each([true, false])("准确展示API锁定和手动来源：%s", async (apiSource) => {

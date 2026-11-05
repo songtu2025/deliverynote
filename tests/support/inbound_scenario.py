@@ -86,6 +86,7 @@ class InboundScenario(DeliveryScenario):
             return
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
         self.wait_job(job.json()["id"])
+        self.wait_job(self.batch()["jobs"]["export"]["id"])
 
     def choose_site(
         self, *, expected_status: Literal["succeeded", "failed"] = "succeeded"
@@ -108,7 +109,9 @@ class InboundScenario(DeliveryScenario):
         if expected_status == "failed":
             return prepared_job
         job = self.request("POST", f"/api/batches/{self.batch_id}/compute", 202)
-        return self.wait_job(job.json()["id"])
+        computed = self.wait_job(job.json()["id"])
+        self.wait_job(self.batch()["jobs"]["export"]["id"])
+        return computed
 
     def snapshot(self) -> dict[str, Any]:
         # 一次捕获所有批次，保留各自锁定资料和规则版本。

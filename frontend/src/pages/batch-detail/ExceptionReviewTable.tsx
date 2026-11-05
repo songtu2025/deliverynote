@@ -1,9 +1,8 @@
 import InboundExceptionActions from "./InboundExceptionActions";
 import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
-import { Button, Card, Empty, Table, Tag, Typography } from "antd";
+import { Button, Card, Empty, Flex, Table, Tag, Typography } from "antd";
 import type { TableColumnsType } from "antd";
 import type { Ref } from "react";
-import { createPortal } from "react-dom";
 import type { Batch, BatchFile, DeliveryException } from "../../types";
 import { remainingTransferQuantity } from "../../exceptionTransferApi";
 import { useExceptionTransfer } from "./useExceptionTransfer";
@@ -12,6 +11,10 @@ import type { ExceptionReview } from "./useExceptionReview";
 import { ExceptionReason, ExceptionEvidence, ExceptionStatusTag, formatPositionValue } from "./ExceptionEvidence";
 import { candidateSites } from "./reviewDraft";
 import ExceptionReviewToolbar from "./ExceptionReviewToolbar";
+import { useInboundAdjustments } from "./useInboundAdjustments";
+import InboundAdjustmentActions from "./InboundAdjustmentActions";
+import BatchManualAllowances from "./BatchManualAllowances";
+import { allowanceKey } from "./inboundHandling";
 
 export default function ExceptionReviewTable({
   selfOperated,
@@ -23,7 +26,6 @@ export default function ExceptionReviewTable({
   sectionRef,
   transferBatch,
   onOpenDeliveryBatch,
-  transferActionTarget,
   onVersions,
   onSaved
 }: {
@@ -36,12 +38,18 @@ export default function ExceptionReviewTable({
   sectionRef: Ref<HTMLDivElement>;
   transferBatch?: Batch;
   onOpenDeliveryBatch?: (id: number) => void;
-  transferActionTarget?: HTMLElement | null;
   onVersions?: () => void;
   onSaved?: () => Promise<unknown>;
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
   const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch, onSaved);
+  const adjustments = useInboundAdjustments(transferBatch, onSaved);
+  const actions = selfOperated && (adjustments.count > 0 || transfer.action) && (
+    <Flex className="table-toolbar" justify="end" align="center" gap="small" wrap>
+      <InboundAdjustmentActions adjustments={adjustments} />
+      {transfer.action}
+    </Flex>
+  );
   return (
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
@@ -49,9 +57,6 @@ export default function ExceptionReviewTable({
         className="section-card exception-review-card"
         classNames={{ body: "batch-detail-panel-body" }}
       >
-        {review.reviewStats.unfinishedCount > 0 &&
-          transferActionTarget &&
-          createPortal(transfer.action, transferActionTarget)}
         <ExceptionReviewToolbar
           selfOperated={selfOperated}
           review={review}
@@ -60,6 +65,7 @@ export default function ExceptionReviewTable({
             onReset();
           }}
         />
+        {actions}
         <Table<DeliveryException>
           rowKey="id"
           rowSelection={transfer.rowSelection}
@@ -84,25 +90,20 @@ export default function ExceptionReviewTable({
             emptyText: <Empty description={reviewEmptyText(review, selfOperated)} />
           }}
           columns={[
-            ...reviewIdentityColumns(selfOperated, fileById),
+            ...reviewIdentityColumns(selfOperated, fileById, onOpen),
             ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen).map((column) =>
               selfOperated && transferBatch && column.title === "操作"
                 ? {
                     ...column,
-                    width: 330,
+                    title: "本批调整",
+                    width: 230,
                     fixed: "right" as const,
                     render: (_: unknown, record: DeliveryException) => (
                       <InboundExceptionActions
-                        batch={transferBatch}
                         record={record}
                         supplierCode={fileById[record.batch_file_id]?.supplier_code ?? ""}
-                        onOpen={onOpen}
-                        onTransfer={(row) => transfer.openRow?.(row)}
+                        adjustments={adjustments}
                         onVersions={onVersions}
-                        onSaved={async () => {
-                          transfer.reset();
-                          await onSaved?.();
-                        }}
                       />
                     )
                   }
@@ -110,6 +111,19 @@ export default function ExceptionReviewTable({
             )
           ]}
         />
+        {selfOperated && transferBatch && (
+          <BatchManualAllowances
+            batch={transferBatch}
+            adjustments={adjustments}
+            visibleKeys={
+              new Set(
+                exceptions
+                  .filter((record) => ["超出允许超收量", "超出应收货"].includes(record.reason))
+                  .map((record) => allowanceKey(fileById[record.batch_file_id]?.supplier_code ?? "", record))
+              )
+            }
+          />
+        )}
         {transfer.modal}
       </Card>
     </div>
@@ -129,7 +143,8 @@ function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: Except
 
 function reviewIdentityColumns(
   selfOperated: boolean,
-  fileById: Record<number, BatchFile>
+  fileById: Record<number, BatchFile>,
+  onOpen: (record: DeliveryException) => void
 ): TableColumnsType<DeliveryException> {
   return [
     {
@@ -153,7 +168,13 @@ function reviewIdentityColumns(
       width: selfOperated ? 130 : 160,
       render: (value: string, record: DeliveryException) => (
         <>
-          <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
+          {selfOperated ? (
+            <Button type="link" onClick={() => onOpen(record)}>
+              {value || "—"}
+            </Button>
+          ) : (
+            <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
+          )}
           {!selfOperated && (
             <span
               className="exception-identifier-value exception-site-value exception-site-secondary"
@@ -240,17 +261,17 @@ function reviewDetailColumns(
       title: "操作",
       width: selfOperated ? 100 : 80,
       render: (_, record) =>
-        !selfOperated && record.allowed_actions.length === 0 ? (
+        selfOperated ? null : record.allowed_actions.length === 0 ? (
           <Typography.Text type="secondary">待处理</Typography.Text>
         ) : (
           <Button
-            type={selfOperated ? "link" : record.status === "resolved" ? "text" : "primary"}
-            size={selfOperated ? undefined : "small"}
-            autoInsertSpace={selfOperated}
-            aria-label={selfOperated ? undefined : `${record.status === "resolved" ? "修改" : "审校"} ${record.sku}`}
+            type={record.status === "resolved" ? "text" : "primary"}
+            size="small"
+            autoInsertSpace={false}
+            aria-label={`${record.status === "resolved" ? "修改" : "审校"} ${record.sku}`}
             onClick={() => onOpen(record)}
           >
-            {selfOperated ? "查看并处理" : record.status === "resolved" ? "修改" : "审校"}
+            {record.status === "resolved" ? "修改" : "审校"}
           </Button>
         )
     }

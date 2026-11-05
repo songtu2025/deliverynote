@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
-import { App, Button, Tooltip } from "antd";
+import { App, Button, Input, Space, Tooltip } from "antd";
 import type { Batch, DeliveryException } from "../../types";
-import { saveManualAllowance, saveOfflineHandlingBatch } from "../../inboundExceptionApi";
+import { saveOfflineHandlingBatch } from "../../inboundExceptionApi";
 import { remainingTransferQuantity } from "../../exceptionTransferApi";
-import { allowanceItems, handlingDisabledReason, type HandlingKind } from "./inboundHandling";
+import { offlineSelectionDisabledReason } from "./inboundHandling";
 
 export default function InboundBulkActions({
   batch,
@@ -15,49 +15,54 @@ export default function InboundBulkActions({
   onSaved: () => Promise<unknown>;
 }) {
   const { message } = App.useApp();
-  const [busy, setBusy] = useState<HandlingKind | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
   const saving = useRef(false);
-  const save = async (kind: HandlingKind) => {
-    if (saving.current) return;
+  const reason = offlineSelectionDisabledReason(batch, records);
+  const save = async () => {
+    if (saving.current || reason) return;
     saving.current = true;
-    setBusy(kind);
-    let succeeded = 0;
-    let failures: string[] = [];
+    setBusy(true);
     try {
-      if (kind === "allowance") {
-        const files = Object.fromEntries((batch.files ?? []).map((file) => [file.id, file]));
-        await saveManualAllowance(batch.id, { items: allowanceItems(batch, records, files) });
-        succeeded = records.length;
-      } else {
-        ({ succeeded, failures } = await saveOfflineHandlingBatch(
-          records.map((record) => ({
-            id: record.id,
-            quantity: remainingTransferQuantity(record) + (record.offline_quantity ?? 0),
-            note: record.offline_note ?? ""
-          }))
-        ));
-      }
+      const { succeeded, failures } = await saveOfflineHandlingBatch(
+        records.map((record) => ({
+          id: record.id,
+          quantity: remainingTransferQuantity(record) + (record.offline_quantity ?? 0),
+          note
+        }))
+      );
       await onSaved();
-      const summary = `已${kind === "allowance" ? "追加超收" : "线下处理"} ${succeeded} 条`;
+      const summary = `已线下处理 ${succeeded} 条`;
       if (failures.length) message.warning(`${summary}，失败 ${failures.length} 条：${failures[0]}`);
-      else message.success(summary);
+      else {
+        setNote("");
+        message.success(summary);
+      }
     } catch (failure) {
       message.error(failure instanceof Error ? failure.message : "批量处理失败");
     } finally {
       saving.current = false;
-      setBusy(null);
+      setBusy(false);
     }
   };
-  return (["allowance", "offline"] as const).map((kind) => {
-    const reason = handlingDisabledReason(batch, records, kind);
-    return (
-      <Tooltip key={kind} title={reason} trigger={["hover", "focus"]}>
+  return (
+    <Space wrap>
+      <label htmlFor="inbound-offline-note">线下备注（选填）</label>
+      <Input
+        id="inbound-offline-note"
+        aria-label="线下备注（选填）"
+        value={note}
+        disabled={busy}
+        style={{ width: 180 }}
+        onChange={(event) => setNote(event.target.value)}
+      />
+      <Tooltip title={reason} trigger={["hover", "focus"]}>
         <span tabIndex={reason ? 0 : undefined}>
-          <Button disabled={Boolean(reason) || busy !== null} loading={busy === kind} onClick={() => void save(kind)}>
-            {kind === "allowance" ? "追加超收" : "线下处理"}
+          <Button disabled={Boolean(reason) || busy} loading={busy} onClick={() => void save()}>
+            线下处理
           </Button>
         </span>
       </Tooltip>
-    );
-  });
+    </Space>
+  );
 }

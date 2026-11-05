@@ -1,18 +1,9 @@
-export type InboundRowAction = "site" | "versions" | "refresh" | "allowance" | "offline" | "transfer";
+type InboundRowAction = "site" | "versions" | "refresh";
 
-export function inboundRowActions(
-  reason: string,
-  computed: boolean,
-  options: { candidates?: string[]; remaining?: number } = {}
-): InboundRowAction[] {
-  const { remaining = 0, candidates = [] } = options;
-  if (computed) {
-    if (remaining <= 0) return [];
-    const actions = computedActions[reason] ?? ["offline", "transfer"];
-    return actions.filter((action) => action !== "site" || candidates.length > 0);
-  }
+export function inboundRowActions(reason: string, computed: boolean, candidates: string[] = []): InboundRowAction[] {
   const action = receiptActions[reason];
   if (action === "site" && !candidates.length) return [];
+  if (computed && action === "refresh") return [];
   return action ? [action] : [];
 }
 
@@ -23,11 +14,4 @@ const receiptActions: Record<string, InboundRowAction> = {
   供应商不一致: "refresh",
   PO名称为空: "refresh",
   应收货无效: "refresh"
-};
-
-const computedActions: Record<string, InboundRowAction[]> = {
-  产品信息未匹配: ["versions", "offline"],
-  产品信息站点不唯一: ["site", "offline"],
-  超出允许超收量: ["allowance", "offline", "transfer"],
-  超出应收货: ["allowance", "offline", "transfer"]
 };

@@ -1,6 +1,5 @@
 import { api, ApiError } from "./api";
 import type { Batch, DeliveryException, Job } from "./types";
-import { getBatchDetail } from "./batchDetailApi";
 
 export type PurchaseOption = {
   id: string;
@@ -104,10 +103,19 @@ export type ManualAllowanceInput = {
   reason: string;
 };
 
-export const saveManualAllowance = (batchId: number, input: ManualAllowanceInput | { items: ManualAllowanceInput[] }) =>
-  api<Batch>(`/api/batches/${batchId}/manual-allowances`, { method: "PUT", body: JSON.stringify(input) });
+export type SiteAdjustmentInput = {
+  file_id: number;
+  sku: string;
+  original_site: string;
+  full_site: string;
+};
 
-export const saveOfflineHandling = (exceptionId: number, input: { quantity: number; note: string }) =>
+export const saveInboundAdjustments = (
+  batchId: number,
+  input: { allowances: ManualAllowanceInput[]; sites: SiteAdjustmentInput[] }
+) => api<Batch>(`/api/batches/${batchId}/adjustments`, { method: "PUT", body: JSON.stringify(input) });
+
+const saveOfflineHandling = (exceptionId: number, input: { quantity: number; note: string }) =>
   api<DeliveryException>(`/api/exceptions/${exceptionId}/offline-handling`, {
     method: "PUT",
     body: JSON.stringify(input)
@@ -125,13 +133,4 @@ export async function saveOfflineHandlingBatch(inputs: { id: number; quantity: n
     }
   }
   return { succeeded, failures };
-}
-
-export async function waitForHandlingIdle(batchId: number) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const batch = await getBatchDetail(batchId);
-    if (!Object.values(batch.jobs ?? {}).some((job) => ["queued", "running"].includes(job.status))) return;
-    await new Promise((resolve) => window.setTimeout(resolve, 1500));
-  }
-  throw new Error("后台任务仍在进行，请完成后重试撤销");
 }

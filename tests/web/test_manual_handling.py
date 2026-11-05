@@ -106,11 +106,6 @@ class ManualHandlingTests(ExceptionTransferCase):
         ).json()
         self.assertEqual(page["stats"]["unfinished_quantity"], 5)
         self.assertEqual(self.offline(8).json()["status"], "resolved")
-        with self.app.state.database.session() as session:
-            session.scalar(
-                select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
-            ).status = "succeeded"
-            session.commit()
         self.assertEqual(self.offline(4).json()["status"], "pending")
         summary = self.client.get(
             f"/api/batches/{self.batch_id}", headers=self.headers
@@ -136,7 +131,7 @@ class ManualHandlingTests(ExceptionTransferCase):
                 [],
             )
 
-    def test_offline_validation_transfer_capacity_and_export_invalidation(self):
+    def test_offline_validation_transfer_capacity_and_export_preservation(self):
         for quantity, note in (
             (9, "原因"),
             (True, "原因"),
@@ -152,14 +147,17 @@ class ManualHandlingTests(ExceptionTransferCase):
             export = session.scalar(
                 select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
             )
-            self.assertEqual(export.status, "queued")
+            self.assertEqual(export.status, "succeeded")
+            self.assertEqual(export.output_path, "old.xlsx")
             export.status = "succeeded"
             session.commit()
         self.assertEqual(self.offline(4).status_code, 400)
         self.assertEqual(self.records()[0]["status"], "resolved")
         with self.app.state.database.session() as session:
             batch = session.get(Batch, self.batch_id)
-            self.assertIsNone(batch.zip_path)
+            self.assertEqual(batch.zip_path, "old.zip")
+            source = session.get(BatchFile, self.records()[0]["batch_file_id"])
+            self.assertEqual(source.result_path, "old.xlsx")
             export = session.scalar(
                 select(Job).where(Job.batch_id == batch.id, Job.kind == "export")
             )

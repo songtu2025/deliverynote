@@ -81,6 +81,40 @@ def allowance_input(
     }
 
 
+def allowance_inputs(
+    session: Session,
+    batch_id: int,
+    profile: SelfOperatedBatch,
+    items: list[AllowancePayload],
+) -> list[tuple[dict[str, str], dict[str, object]]]:
+    inputs = [allowance_input(session, batch_id, profile, item) for item in items]
+    keys = [tuple(identity.values()) for identity, _values in inputs]
+    if len(keys) != len(set(keys)):
+        raise HTTPException(
+            status_code=400, detail="追加额度不可重复指定同一供应商、SKU 和站点"
+        )
+    return inputs
+
+
+def save_allowance_inputs(
+    session: Session,
+    profile: SelfOperatedBatch,
+    inputs: list[tuple[dict[str, str], dict[str, object]]],
+    user_id: int,
+    audit: AuditCallback,
+) -> None:
+    for identity, values in inputs:
+        replace_input(profile, "allowances", identity, values, user_id)
+        audit(
+            session,
+            user_id,
+            "save_manual_allowance",
+            "batch",
+            profile.batch_id,
+            {**identity, "quantity": values["quantity"], "reason": values["reason"]},
+        )
+
+
 def register_manual_handling_routes(
     app: FastAPI,
     dependencies: RequestDependencies,
@@ -101,23 +135,9 @@ def register_manual_handling_routes(
         items = (
             payload.items if isinstance(payload, AllowanceBatchPayload) else [payload]
         )
-        inputs = [allowance_input(session, batch.id, profile, item) for item in items]
-        keys = [tuple(identity.values()) for identity, _values in inputs]
-        if len(keys) != len(set(keys)):
-            raise HTTPException(
-                status_code=400, detail="追加额度不可重复指定同一供应商、SKU 和站点"
-            )
+        inputs = allowance_inputs(session, batch.id, profile, items)
         prepare_recompute(session, batch)
-        for item, (identity, values) in zip(items, inputs):
-            replace_input(profile, "allowances", identity, values, user.id)
-            audit(
-                session,
-                user.id,
-                "save_manual_allowance",
-                "batch",
-                batch.id,
-                item.model_dump(),
-            )
+        save_allowance_inputs(session, profile, inputs, user.id, audit)
         queue_job(batch, "compute", user, session)
         batch.status = "queued"
         session.commit()

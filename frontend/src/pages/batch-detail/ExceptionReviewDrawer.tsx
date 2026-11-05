@@ -29,7 +29,7 @@ export default function ExceptionReviewDrawer({
       open={splitTarget !== null}
       onClose={() => setSplitTarget(null)}
       extra={splitTarget ? <ExceptionStatusTag status={splitTarget.status} selfOperated={selfOperated} /> : null}
-      footer={<ExceptionReviewActions editor={editor} action={action} />}
+      footer={selfOperated ? null : <ExceptionReviewActions editor={editor} action={action} />}
     >
       {splitTarget && (
         <>
@@ -40,8 +40,6 @@ export default function ExceptionReviewDrawer({
             <SelfOperatedExceptionDetails
               exception={splitTarget}
               supplierCode={fileById[splitTarget.batch_file_id].supplier_code}
-              batch={batch}
-              onSaved={editor.manualSaved}
             />
           ) : (
             <ReasonGuidance exception={splitTarget} hasOverreceiptRule={Boolean(batch.overreceipt_rule)} />
@@ -59,7 +57,7 @@ function ReviewDrawerTitle({ editor, selfOperated }: { editor: ExceptionEditor; 
   return (
     <div className="review-drawer-title">
       <strong>
-        {selfOperated ? "处理" : "审校处理"} · {splitTarget?.sku ?? ""}
+        {selfOperated ? "处理依据" : "审校处理"} · {splitTarget?.sku ?? ""}
       </strong>
       {currentReviewIndex >= 0 && (
         <span>

@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
-import { Button, Flex, Typography } from "antd";
+import { Button, Flex, Tooltip, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { Batch, DeliveryException } from "../../types";
 import { getTransferOptions, remainingTransferQuantity, transferDisabledReason } from "../../exceptionTransferApi";
@@ -47,7 +47,7 @@ export function useExceptionTransfer(
   const [open, setOpen] = useState(false);
   const { optionsCache, loadOptions, clearOptions } = useTransferOptions();
   if (!batch || batch.workflow !== "self_operated_inbound" || batch.status !== "succeeded") {
-    return { rowSelection: undefined, reset: () => setSelected([]), action: null, modal: null, openRow: undefined };
+    return { rowSelection: undefined, reset: () => setSelected([]), action: null, modal: null };
   }
   const rowSelection: TableProps<DeliveryException>["rowSelection"] = {
     selectedRowKeys: selected.map((record) => record.id),
@@ -66,12 +66,8 @@ export function useExceptionTransfer(
   };
   return {
     rowSelection,
-    openRow: (record: DeliveryException) => {
-      setSelected([record]);
-      setOpen(true);
-    },
     reset: () => setSelected([]),
-    action: (
+    action: selected.length > 0 && (
       <Flex justify="end" align="center" gap="small" wrap>
         <Typography.Text type="secondary">已选 {selected.length} 条</Typography.Text>
         {onSaved && (
@@ -84,9 +80,13 @@ export function useExceptionTransfer(
             }}
           />
         )}
-        <Button disabled={!selected.length || Boolean(transferDisabledReason(batch))} onClick={() => setOpen(true)}>
-          转交货批次
-        </Button>
+        <Tooltip title={selectionDisabledReason(batch, selected)} trigger={["hover", "focus"]}>
+          <span tabIndex={selectionDisabledReason(batch, selected) ? 0 : undefined}>
+            <Button disabled={Boolean(selectionDisabledReason(batch, selected))} onClick={() => setOpen(true)}>
+              转交货批次
+            </Button>
+          </span>
+        </Tooltip>
       </Flex>
     ),
     modal: open && (
@@ -100,4 +100,10 @@ export function useExceptionTransfer(
       />
     )
   };
+}
+
+function selectionDisabledReason(batch: Batch, selected: DeliveryException[]) {
+  if (selected.some((record) => ["产品信息未匹配", "产品信息站点不唯一"].includes(record.reason)))
+    return "所选行需先确认产品与站点，暂不可转交货";
+  return transferDisabledReason(batch);
 }

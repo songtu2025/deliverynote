@@ -14,7 +14,6 @@ import { useBatchFiles } from "./batch-detail/useBatchFiles";
 import { useBatchAction } from "./batch-detail/useBatchAction";
 import ExceptionReviewTable from "./batch-detail/ExceptionReviewTable";
 import ExceptionReviewDrawer from "./batch-detail/ExceptionReviewDrawer";
-import BatchManualAllowances from "./batch-detail/BatchManualAllowances";
 import { useExceptionEditor } from "./batch-detail/useExceptionEditor";
 import { useBatchDetailData } from "./batch-detail/useBatchDetailData";
 import type { BatchDetailData } from "./batch-detail/useBatchDetailData";
@@ -40,7 +39,6 @@ export default function BatchDetail({
   const reviewSection = useRef<HTMLDivElement | null>(null);
   const [detailTabs, setDetailTabs] = useState<Record<number, string>>({});
   const [reviewFocusRequested, setReviewFocusRequested] = useState(false);
-  const [transferActionTarget, setTransferActionTarget] = useState<HTMLDivElement | null>(null);
   const data = useBatchDetailData(batchId, Boolean(canRefreshSupplierVersion), setSplitTarget);
   const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
   const activeJob = useBatchJob(batch, load);
@@ -144,20 +142,12 @@ export default function BatchDetail({
   );
   const reviewContent = computed && (
     <>
-      <BatchManualAllowances
-        batch={batch}
-        onSaved={async () => {
-          setSplitTarget(null);
-          await load(true);
-        }}
-      />
       <ExceptionReviewTable
         key={batchId}
         transferBatch={batch}
         onVersions={() => selectDetailTab("versions")}
         onSaved={() => load(true)}
         onOpenDeliveryBatch={onOpenDeliveryBatch}
-        transferActionTarget={transferActionTarget}
         selfOperated={selfOperated}
         review={review}
         fileById={fileById}
@@ -184,7 +174,6 @@ export default function BatchDetail({
             reviewStats={availableReviewStats(data)}
             reviewState={review}
             onReset={() => setSplitTarget(null)}
-            extra={<div ref={setTransferActionTarget} />}
             files={fileContent}
             versions={versionContent}
             receipts={<ReceiptReview key={receiptKey} batch={batch} runAction={runAction} load={load} />}

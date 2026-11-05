@@ -14,7 +14,6 @@ from .exception_transfer_state import (
 from .models import Batch, BatchFile, ExceptionRecord, Job, SelfOperatedBatch
 from .receipt_state import require_receipts
 from .compute_state import clear_compute_results
-from .job_queue import queue_inbound_export
 
 
 def replace_input(
@@ -107,15 +106,6 @@ def save_offline(
         select(remaining_quantity_expression()).where(ExceptionRecord.id == record.id)
     )
     record.status = "resolved" if remaining == 0 else "pending"
-    if export:
-        export.status = "stale"
-        export.output_path = None
-    batch.zip_path = None
-    for source in session.scalars(
-        select(BatchFile).where(BatchFile.batch_id == batch.id)
-    ):
-        source.result_path = None
-    queue_inbound_export(session, batch)
 
 
 def apply_offline_inputs(

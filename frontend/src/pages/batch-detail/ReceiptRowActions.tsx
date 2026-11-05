@@ -8,9 +8,9 @@ type ActionRow = Pick<ReceiptRow, "file_id" | "sku" | "original_site" | "issue" 
 export default function ReceiptRowActions({
   row,
   computed = false,
-  remaining,
   disabledReason,
   refreshing,
+  siteValue,
   onChooseSite,
   onRefresh,
   onVersions,
@@ -18,34 +18,22 @@ export default function ReceiptRowActions({
 }: {
   row: ActionRow;
   computed?: boolean;
-  remaining?: number;
   disabledReason: string | null;
   refreshing: boolean;
-  onChooseSite: (row: ActionRow, site: string) => Promise<void>;
+  siteValue?: string;
+  onChooseSite: (row: ActionRow, site: string) => Promise<void> | void;
   onRefresh?: () => Promise<void>;
   onVersions?: () => void;
   onOpen?: () => void;
 }) {
-  const actions = inboundRowActions(row.reason || row.issue, computed, { candidates: row.candidates, remaining });
+  const actions = inboundRowActions(row.reason || row.issue, computed, row.candidates);
   return (
     <Space wrap size="small">
       {actions.includes("site") && (
-        <Tooltip title={disabledReason} trigger={["hover", "focus"]}>
-          <span tabIndex={disabledReason ? 0 : undefined}>
-            <Select<string>
-              aria-label="选择站点"
-              value={null}
-              placeholder="选择站点"
-              style={{ width: 210 }}
-              disabled={Boolean(disabledReason)}
-              options={row.candidates.map((value) => ({ value, label: value }))}
-              onChange={(site) => void onChooseSite(row, site)}
-            />
-          </span>
-        </Tooltip>
+        <ReceiptSiteSelect row={row} value={siteValue} disabledReason={disabledReason} onChooseSite={onChooseSite} />
       )}
       {actions.includes("versions") && (
-        <Button color="primary" variant="outlined" onClick={onVersions}>
+        <Button type={computed ? "link" : "default"} onClick={onVersions}>
           查看锁定资料
         </Button>
       )}
@@ -58,5 +46,33 @@ export default function ReceiptRowActions({
         </Button>
       )}
     </Space>
+  );
+}
+
+function ReceiptSiteSelect({
+  row,
+  value,
+  disabledReason,
+  onChooseSite
+}: {
+  row: ActionRow;
+  value?: string;
+  disabledReason: string | null;
+  onChooseSite: (row: ActionRow, site: string) => Promise<void> | void;
+}) {
+  return (
+    <Tooltip title={disabledReason} trigger={["hover", "focus"]}>
+      <span tabIndex={disabledReason ? 0 : undefined}>
+        <Select<string>
+          aria-label="选择站点"
+          value={value ?? null}
+          placeholder="选择站点"
+          style={{ width: 210 }}
+          disabled={Boolean(disabledReason)}
+          options={row.candidates.map((candidate) => ({ value: candidate, label: candidate }))}
+          onChange={(site) => void onChooseSite(row, site)}
+        />
+      </span>
+    </Tooltip>
   );
 }
