@@ -2,7 +2,7 @@ import { Button } from "antd";
 import { DownloadOutlined, ExportOutlined } from "@ant-design/icons";
 import type { Batch, Job } from "../../types";
 import type { useBatchTasks } from "./useBatchTasks";
-import { batchPresentation, batchFileResultName } from "./batchPresentation";
+import { batchPresentation, batchFileResultName, exportActive } from "./batchPresentation";
 import type { ExceptionReview } from "./useExceptionReview";
 
 export default function BatchExportActions({
@@ -57,7 +57,8 @@ function exportActionState(batch: Batch, stats?: ExceptionReview["reviewStats"])
   const unfinished = stats ? stats.unfinishedCount > 0 : needsReview;
   const reviewing = exportStatus !== "failed" && unfinished;
   if (batch.workflow !== "self_operated_inbound") return { reviewing, canRetry: true };
-  return { reviewing, canRetry: ["failed", "stale"].includes(exportStatus ?? "") };
+  // 自营仓自动生成结果；无导出任务（如旧批次）、失败或失效时允许手动生成。
+  return { reviewing, canRetry: !exportActive(batch) };
 }
 
 function ResultDownloadButtons({

@@ -55,9 +55,14 @@ describe("自营仓自动生成与重试入口", () => {
     expect(download).toHaveBeenCalledOnce();
     if (multiple) expect(screen.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
   });
-  it.each([undefined, "queued", "running"])("自营仓 %s 不要求手动生成", (status) => {
+  it.each(["queued", "running"])("自营仓导出 %s 时不要求手动生成", (status) => {
     show("self_operated_inbound", status);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
+  });
+  it("自营仓没有导出任务（旧批次）时可手动生成", () => {
+    const start = show("self_operated_inbound", undefined, 1);
+    fireEvent.click(screen.getByRole("button", { name: /生成结果/ }));
+    expect(start).toHaveBeenCalledOnce();
   });
   it.each(["failed", "stale"])("无待处理时 %s 可重试生成", (status) => {
     const start = show("self_operated_inbound", status);
