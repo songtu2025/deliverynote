@@ -46,6 +46,20 @@ function Workbench() {
 }
 
 describe("整批采购快照工作区", () => {
+  it("顶部和抽屉采购等待文案一致，且不阻塞分配明细", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) =>
+        String(input).includes("purchase-snapshot")
+          ? new Promise<Response>(() => undefined)
+          : Promise.resolve(jsonResponse({ items: [{ id: "1", po_code: "PO-分配" }] }))
+      )
+    );
+    renderDetail(<Workbench />);
+    expect(await screen.findByText("PO-分配")).toBeVisible();
+    expect(screen.getAllByText("正在获取采购数据，约 1 分钟，不影响计算和下载")).toHaveLength(2);
+  });
+
   it("首次仅创建一次任务，切换和重开详情不查询，重进页面只读已保存快照", async () => {
     let exists = false;
     const fetcher = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

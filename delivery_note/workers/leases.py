@@ -11,9 +11,11 @@ from uuid import uuid4
 
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
+from sqlalchemy.orm import Session
 
+from ..job_queues import PURCHASE_SNAPSHOT_KIND, queue_job_kinds
 from ..web.database import Database
-from ..web.models import Batch, Job
+from ..web.models import Batch, Job, PurchaseSyncJob
 from .sync_models import SYNC_METADATA, SyncJob, SyncJobModel
 
 WORKER_QUEUES = ("all", "batch", "purchase-sync", "inbound-sync")
@@ -112,25 +114,61 @@ def _mark_claimed(job: Job | SyncJob) -> str:
     return claim_token
 
 
-def _claim_job(database: Database) -> tuple[int, int, str, str] | None:
+def _claim_batch_record(session: Session, job: Job) -> tuple[int, int, str, str]:
+    claim_token = _mark_claimed(job)
+    batch = session.get(Batch, job.batch_id)
+    if batch is None:
+        raise RuntimeError("任务关联的批次不存在")
+    if job.kind in {"compute", "prepare"}:
+        batch.status = "running"
+        batch.error_message = None
+    session.commit()
+    return job.id, job.batch_id, job.kind, claim_token
+
+
+def _claim_job(
+    database: Database, queue: str = "all"
+) -> tuple[int, int, str, str] | None:
     with database.session() as session:
         job = session.scalar(
             select(Job)
-            .where(Job.status == "queued")
+            .where(Job.status == "queued", Job.kind.in_(queue_job_kinds(queue)))
             .order_by(Job.id)
+            .limit(1)
             .with_for_update(skip_locked=True)
         )
         if job is None:
             return None
-        claim_token = _mark_claimed(job)
-        batch = session.get(Batch, job.batch_id)
-        if batch is None:
-            raise RuntimeError("任务关联的批次不存在")
-        if job.kind in {"compute", "prepare"}:
-            batch.status = "running"
-            batch.error_message = None
+        return _claim_batch_record(session, job)
+
+
+def _claim_purchase_work(
+    database: Database,
+) -> tuple[tuple[int, int, str, str] | None, tuple[int, str] | None]:
+    with database.session() as session:
+        snapshot = session.scalar(
+            select(Job)
+            .where(Job.status == "queued", Job.kind == PURCHASE_SNAPSHOT_KIND)
+            .order_by(Job.created_at, Job.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        sync = session.scalar(
+            select(PurchaseSyncJob)
+            .where(PurchaseSyncJob.status == "queued")
+            .order_by(PurchaseSyncJob.created_at, PurchaseSyncJob.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        if snapshot is not None and (
+            sync is None or snapshot.created_at <= sync.created_at
+        ):
+            return _claim_batch_record(session, snapshot), None
+        if sync is None:
+            return None, None
+        token = _mark_claimed(sync)
         session.commit()
-        return job.id, job.batch_id, job.kind, claim_token
+        return None, (sync.id, token)
 
 
 def _heartbeat(database: Database, job_id: int, claim_token: str) -> None:

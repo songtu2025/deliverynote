@@ -5,6 +5,39 @@ import App from "../App";
 
 describe("AppNavigation", () => {
   const state = setupAppTests();
+  it.each(["/batches/7", "/self-operated/7"])("直接进入 %s 只请求详情首屏所需数据一次", async (path) => {
+    state.authenticatedUser = adminUser;
+    window.history.replaceState({}, "", path);
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) =>
+        String(input).endsWith("/api/batches/7")
+          ? Promise.resolve(
+              new Response(
+                JSON.stringify({
+                  ...routeBatch,
+                  status: "draft",
+                  workflow: path.startsWith("/self-operated") ? "self_operated_inbound" : "delivery"
+                })
+              )
+            )
+          : originalFetch(input)
+      )
+    );
+    render(<App />);
+    await screen.findByRole("heading", { name: "路由测试批次" });
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
+    const paths = vi.mocked(fetch).mock.calls.map(([input]) => new URL(String(input), window.location.origin).pathname);
+    expect(paths.sort()).toEqual([
+      "/api/auth/me",
+      "/api/batches/7",
+      "/api/batches/7/exceptions",
+      "/api/batches/7/exceptions/filters",
+      "/api/input-versions"
+    ]);
+  });
+
   it("redirects an operator's admin URL without loading admin data", async () => {
     state.authenticatedUser = operatorUser;
     window.history.replaceState({}, "", "/admin");

@@ -47,7 +47,8 @@ describe("BatchDetail", () => {
         vi.fn(async () => new Response(JSON.stringify({ detail: "未登录" }), { status: 401 }))
       );
       renderDetail(<BatchDetail batchId={7} canRefreshSupplierVersion onBack={vi.fn()} />);
-      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/exceptions/filters"))).toBe(false);
       await waitFor(() => expect(expired).toHaveBeenCalledOnce());
       expect(screen.queryByText("未登录")).not.toBeInTheDocument();
       expect(screen.queryByText("读取批次失败")).not.toBeInTheDocument();

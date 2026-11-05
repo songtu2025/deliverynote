@@ -50,14 +50,15 @@ export function useBatchDetailData(
           if (pendingTarget !== undefined) setSplitTarget(pendingTarget);
           return result;
         });
-        const versionsRequest = canRefreshSupplierVersion
-          ? getBatchInputVersions().then((versions) => {
-              if (request !== loadRequestRef.current) return;
-              setActiveSupplierVersion(
-                versions.find((version) => version.kind === "supplier" && version.active) ?? null
-              );
-            })
-          : Promise.resolve();
+        const versionsRequest =
+          canRefreshSupplierVersion && !silent
+            ? getBatchInputVersions().then((versions) => {
+                if (request !== loadRequestRef.current) return;
+                setActiveSupplierVersion(
+                  versions.find((version) => version.kind === "supplier" && version.active) ?? null
+                );
+              })
+            : Promise.resolve();
         const [, loadedPage] = await Promise.all([batchRequest, exceptionsRequest, versionsRequest]);
         if (request === loadRequestRef.current) setLoadError(null);
         return request === loadRequestRef.current ? loadedPage : null;

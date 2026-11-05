@@ -1,9 +1,9 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import BatchDetail from "./BatchDetail";
 import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { createDetailExceptions, fixtureJob, fixtureVersion } from "./batch-detail/detailFixtures";
-import { jsonResponse } from "./admin/positionDraftTestSupport";
+import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
 describe("自营仓批次详情", () => {
   const { state } = setupBatchDetailTest();
@@ -53,9 +53,9 @@ describe("自营仓批次详情", () => {
   });
 
   it.each([
-    ["compute", "queued", "计算排队中"],
+    ["compute", "queued", "排队中"],
     ["compute", "running", "正在计算"],
-    ["export", "queued", "结果排队中"],
+    ["export", "queued", "排队中"],
     ["export", "running", "正在生成结果"]
   ] as const)("恢复真实任务状态 %s/%s", async (kind, status, title) => {
     state.batch.jobs = { [kind]: fixtureJob({ kind, status }) };
@@ -85,32 +85,41 @@ describe("自营仓批次详情", () => {
     expect(screen.getByRole("button", { name: "转交货批次" })).toBeEnabled();
   });
 
-  it("指定超收打开该行抽屉，保存一次后关闭并刷新批次", async () => {
+  it("指定超收保存后保持抽屉锁定，整链完成自动刷新分配并提示差值", async () => {
     const record = createDetailExceptions()[3];
     state.exceptions = [record];
+    const computed = deferred<Response>();
+    const exported = deferred<Response>();
+    let allocationReads = 0;
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith("/inbound-allocation"))
+        if (url.endsWith("/api/jobs/88")) return computed.promise;
+        if (url.endsWith("/api/jobs/89")) return exported.promise;
+        if (url.includes("/inbound-allocation")) {
+          allocationReads += 1;
           return jsonResponse({
             batch_id: 7,
             supplier_code: "GYS-023",
             batch_updated_at: state.batch.updated_at,
             allowance_limit: record.manual_quantity,
+            remaining_quantity: allocationReads === 1 ? record.manual_quantity : 5,
             items: [
               {
                 id: "1",
                 inbound_no: "WV-1",
                 po_code: "PO-1",
-                current_quantity: 10,
+                current_quantity: allocationReads === 1 ? 10 : 20,
                 extra_quantity: 0
               }
             ]
           });
+        }
         if (url.endsWith("/adjustments")) {
           state.batch.status = "queued";
+          state.batch.jobs = { compute: fixtureJob({ status: "queued" }) };
           return jsonResponse(state.batch);
         }
         return originalFetch(input, init);
@@ -122,8 +131,43 @@ describe("自营仓批次详情", () => {
     expect(drawer.getByText("处理依据 · " + record.sku)).toBeVisible();
     fireEvent.change(await drawer.findByRole("spinbutton", { name: "追加超收 PO-1 WV-1" }), { target: { value: "2" } });
     fireEvent.click(drawer.getByRole("button", { name: "保存并重算" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(await drawer.findByText("正在重算整批，完成后自动刷新")).toBeVisible();
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(drawer.getByRole("spinbutton", { name: "追加超收 PO-1 WV-1" })).toBeDisabled();
+    expect(drawer.getByRole("textbox", { name: "原因" })).toBeDisabled();
     expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/adjustments"))).toHaveLength(1);
+    state.batch = {
+      ...state.batch,
+      status: "succeeded",
+      jobs: {
+        compute: fixtureJob({ status: "succeeded", finished_at: "2026-11-05T00:00:10Z" }),
+        export: fixtureJob({ id: 89, kind: "export", status: "queued" })
+      }
+    };
+    await act(async () => {
+      computed.resolve(jsonResponse(state.batch.jobs.compute));
+    });
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith("/api/jobs/89"))).toBe(true)
+    );
+    expect(drawer.getByRole("spinbutton", { name: "追加超收 PO-1 WV-1" })).toBeDisabled();
+    expect(allocationReads).toBe(1);
+    state.batch.download_ready = true;
+    state.batch.updated_at = "2026-11-05T00:00:20Z";
+    state.batch.jobs.export = fixtureJob({
+      id: 89,
+      kind: "export",
+      status: "succeeded",
+      finished_at: state.batch.updated_at
+    });
+    state.exceptions = [];
+    await act(async () => {
+      exported.resolve(jsonResponse(state.batch.jobs.export));
+    });
+    expect(await drawer.findByText("本次分配 +10，待处理剩余 5")).toBeVisible();
+    expect(drawer.getByRole("spinbutton", { name: "追加超收 PO-1 WV-1" })).toBeEnabled();
+    expect(screen.getByRole("dialog")).toBeVisible();
+    expect(allocationReads).toBe(2);
   });
 
   it.each([true, false])("准确展示API锁定和手动来源：%s", async (apiSource) => {

@@ -40,12 +40,11 @@ export default function ExceptionReviewDrawer({
 
           {selfOperated ? (
             <SelfOperatedExceptionDetails
+              key={`${batch.id}:${splitTarget.batch_file_id}:${splitTarget.sku}:${splitTarget.full_site}`}
+              batch={batch}
               exception={splitTarget}
               supplierCode={fileById[splitTarget.batch_file_id].supplier_code}
-              onSaved={async () => {
-                setSplitTarget(null);
-                await onSaved?.();
-              }}
+              onSaved={onSaved}
             />
           ) : (
             <ReasonGuidance exception={splitTarget} hasOverreceiptRule={Boolean(batch.overreceipt_rule)} />

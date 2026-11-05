@@ -2,11 +2,16 @@
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func, select
+from sqlalchemy.orm import object_session
+
+from ..job_queues import PURCHASE_SNAPSHOT_KIND, queue_job_kinds
 from ..gerpgo import GerpgoSettings
 from .models import (
     InputVersion,
     ExceptionRecord,
     Job,
+    PurchaseSyncJob,
     OverreceiptRuleVersion,
     SelfOperatedOverreceiptRuleVersion,
     User,
@@ -111,4 +116,38 @@ def job_json(job: Job) -> dict[str, object]:
         "claimed_at": utc_isoformat(job.claimed_at) if job.claimed_at else None,
         "heartbeat_at": utc_isoformat(job.heartbeat_at) if job.heartbeat_at else None,
         "finished_at": utc_isoformat(job.finished_at) if job.finished_at else None,
+        **({"queue_position": _queue_position(job)} if job.status == "queued" else {}),
     }
+
+
+def _queue_position(job: Job) -> int | None:
+    session = object_session(job)
+    if session is None:
+        return None
+    queue = "purchase-sync" if job.kind == PURCHASE_SNAPSHOT_KIND else "batch"
+    count = (
+        session.scalar(
+            select(func.count())
+            .select_from(Job)
+            .where(
+                Job.id < job.id,
+                Job.kind.in_(queue_job_kinds(queue)),
+                Job.status.in_(("queued", "running")),
+            )
+        )
+        or 0
+    )
+    if queue == "purchase-sync":
+        count += (
+            session.scalar(
+                select(func.count())
+                .select_from(PurchaseSyncJob)
+                .where(
+                    PurchaseSyncJob.status.in_(("queued", "running")),
+                    (PurchaseSyncJob.status == "running")
+                    | (PurchaseSyncJob.created_at < job.created_at),
+                )
+            )
+            or 0
+        )
+    return count

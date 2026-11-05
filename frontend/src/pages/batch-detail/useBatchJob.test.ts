@@ -13,6 +13,64 @@ vi.mock("../../batchDetailApi", () => ({ getBatchJob: vi.fn() }));
 const runningBatch = (): Batch => ({ ...createDetailBatch(), jobs: { compute: fixtureJob() } });
 
 describe("批次任务轮询生命周期", () => {
+  it("自营仓只在结果可下载时提示一次，同一 Job 再次执行可再次提示", async () => {
+    const pending = deferred<Job>();
+    vi.mocked(getBatchJob).mockReturnValue(pending.promise);
+    const load = vi.fn(async () => null);
+    const current: Batch = { ...runningBatch(), workflow: "self_operated_inbound" };
+    const { rerender } = renderHook(({ batch }) => useBatchJob(batch, load), { initialProps: { batch: current } });
+    await act(async () => {
+      pending.resolve(fixtureJob({ status: "succeeded" }));
+    });
+    expect(feedback.success).not.toHaveBeenCalled();
+    const exported = fixtureJob({ id: 89, kind: "export", status: "running" });
+    vi.mocked(getBatchJob).mockReturnValue(deferred<Job>().promise);
+    rerender({ batch: { ...current, jobs: { export: exported } } });
+    const ready: Batch = {
+      ...current,
+      download_ready: true,
+      jobs: { export: { ...exported, status: "succeeded", finished_at: "2026-11-05T00:00:10Z" } }
+    };
+    rerender({ batch: ready });
+    rerender({ batch: { ...ready } });
+    expect(feedback.success).toHaveBeenCalledExactlyOnceWith("计算完成，结果已生成");
+    rerender({ batch: { ...current, jobs: { export: exported } } });
+    rerender({
+      batch: { ...ready, jobs: { export: { ...ready.jobs!.export!, finished_at: "2026-11-05T00:00:20Z" } } }
+    });
+    expect(feedback.success).toHaveBeenCalledTimes(2);
+  });
+
+  it("重进已完成的自营仓批次不重复播报历史结果", () => {
+    const batch: Batch = {
+      ...createDetailBatch(),
+      workflow: "self_operated_inbound",
+      download_ready: true,
+      jobs: { export: fixtureJob({ kind: "export", status: "succeeded" }) }
+    };
+    renderHook(() => useBatchJob(batch, vi.fn()));
+    expect(feedback.success).not.toHaveBeenCalled();
+  });
+
+  it("切走后返回已完成的自营仓批次不播报离开期间的完成", () => {
+    vi.mocked(getBatchJob).mockReturnValue(deferred<Job>().promise);
+    const current: Batch = { ...runningBatch(), workflow: "self_operated_inbound" };
+    const { rerender } = renderHook(({ batch }) => useBatchJob(batch, vi.fn()), {
+      initialProps: { batch: current }
+    });
+    rerender({ batch: { ...createDetailBatch(), id: 8 } });
+    rerender({
+      batch: {
+        ...current,
+        download_ready: true,
+        jobs: {
+          export: fixtureJob({ kind: "export", status: "succeeded" })
+        }
+      }
+    });
+    expect(feedback.success).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
