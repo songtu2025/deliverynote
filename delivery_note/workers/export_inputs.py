@@ -18,6 +18,10 @@ from ..web.models import (
 from ..workers.compute_inputs import _version_paths
 from ..web.serializers import exception_row
 from ..web.receipt_state import require_receipts
+from ..web.exception_transfer_state import (
+    remaining_quantity_expression,
+    transferred_quantity_expression,
+)
 
 
 def _load_export_inputs(
@@ -131,12 +135,47 @@ def _load_inbound_export_inputs(
         ).all()
         if not sources:
             raise RuntimeError("自营仓入库批次没有质检交货单")
+        sources_by_id = {source.id: source for source in sources}
+        pending_by_source: dict[int, list[dict[str, Any]]] = {}
+        records = session.execute(
+            select(
+                ExceptionRecord,
+                transferred_quantity_expression(),
+                remaining_quantity_expression(),
+            )
+            .where(ExceptionRecord.batch_file_id.in_(sources_by_id))
+            .order_by(ExceptionRecord.id)
+        )
+        for record, transferred, remaining in records:
+            source = sources_by_id[record.batch_file_id]
+            pending_by_source.setdefault(source.id, []).append(
+                {
+                    "id": record.id,
+                    "来源文件": source.original_name,
+                    "供应商": source.supplier_name,
+                    "关联交货单": source.document_note,
+                    "SKU": record.sku,
+                    "原始站点": record.original_site,
+                    "完整站点": record.full_site,
+                    "本次申请": record.delivery_quantity,
+                    "正常分配": record.purchase_allocated_quantity,
+                    "规则内超收": record.overreceipt_allocated_quantity,
+                    "待处理数量": record.manual_quantity,
+                    "待处理原因": record.reason,
+                    "已转交": transferred,
+                    "线下处理": record.offline_quantity,
+                    "线下备注": record.offline_note,
+                    "剩余待处理": remaining,
+                }
+            )
         source_data = [
             {
                 "id": source.id,
                 "original_name": source.original_name,
+                "delivery_total": source.delivery_total,
                 "import_total": source.import_total,
                 "import_rows": source.import_rows or [],
+                "pending_rows": pending_by_source.get(source.id, []),
             }
             for source in sources
         ]

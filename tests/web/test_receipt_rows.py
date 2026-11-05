@@ -166,6 +166,7 @@ class ReceiptSiteRouteTests(ExceptionTransferCase):
 
     def test_site_choice_rejects_transfer_links_without_changing_input(self):
         self.assertEqual(self.transfer(1).status_code, 201)
+        self.complete_export()
         response = self.client.put(
             self.endpoint, headers=self.headers, json=self.choice
         )

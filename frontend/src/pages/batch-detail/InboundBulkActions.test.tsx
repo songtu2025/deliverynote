@@ -21,28 +21,28 @@ function showSelectedRows() {
 }
 
 describe("勾选后的批量处理", () => {
-  it.each([false, true])("线下逐条处理后统一刷新并汇总，首条失败：%s", async (failFirst) => {
-    vi.stubGlobal(
-      "fetch",
-      vi
-        .fn()
-        .mockResolvedValueOnce(failFirst ? jsonResponse({ detail: "记录已变化" }, 409) : jsonResponse(first))
-        .mockResolvedValueOnce(jsonResponse(second))
-    );
+  it("批量线下处理一次提交全部所选行并刷新", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse(batch)));
     const saved = showSelectedRows();
     fireEvent.change(screen.getByRole("textbox", { name: "线下备注（选填）" }), { target: { value: "统一备注" } });
     fireEvent.click(screen.getByRole("button", { name: "线下处理" }));
     await waitFor(() => expect(saved).toHaveBeenCalledOnce());
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(init?.body as string).quantity)).toEqual([6, 4]);
-    expect(vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(init?.body as string).note)).toEqual([
-      "统一备注",
-      "统一备注"
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetch).mock.calls[0];
+    expect(url).toBe(`/api/batches/${batch.id}/offline-handling`);
+    expect(JSON.parse(init?.body as string).items).toEqual([
+      { exception_id: first.id, quantity: 6, note: "统一备注" },
+      { exception_id: second.id, quantity: 4, note: "统一备注" }
     ]);
-    const summary = failFirst ? "已线下处理 1 条，失败 1 条：记录已变化" : "已线下处理 2 条";
-    expect(await screen.findByText(summary)).toBeVisible();
+    expect(await screen.findByText("已线下处理 2 条，正在更新结果")).toBeVisible();
   });
-
+  it("批量线下处理失败时整体不保存并提示原因", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(jsonResponse({ detail: "记录已变化" }, 409)));
+    const saved = showSelectedRows();
+    fireEvent.click(screen.getByRole("button", { name: "线下处理" }));
+    expect(await screen.findByText("记录已变化")).toBeVisible();
+    expect(saved).not.toHaveBeenCalled();
+  });
   it("不再提供批量追加；空选禁用线下处理并说明原因", async () => {
     const { rerender } = renderDetail(
       <InboundBulkActions batch={batch} records={[{ ...first, reason: "产品信息未匹配" }]} onSaved={vi.fn()} />

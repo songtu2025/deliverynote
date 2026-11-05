@@ -20,6 +20,7 @@ class ExceptionTransferTests(ExceptionTransferCase):
         self.assertEqual(record["manual_quantity"], 8)
         self.assertEqual(record["transferred_quantity"], 3)
         self.assertEqual(record["status"], "pending")
+        self.complete_export()
         second = self.transfer(5)
         self.assertEqual(second.status_code, 201, second.text)
         record = self.records()[0]
@@ -36,7 +37,8 @@ class ExceptionTransferTests(ExceptionTransferCase):
             headers=self.headers,
         ).json()
         self.assertEqual(pending, [])
-        self.assertNotIn("export", detail["jobs"])
+        self.assertEqual(detail["jobs"]["export"]["status"], "queued")
+        self.complete_export()
         self.assertEqual(self.transfer().status_code, 400)
 
     def test_invalid_quantities_sites_and_duplicate_items_leave_no_results(self):
@@ -64,6 +66,8 @@ class ExceptionTransferTests(ExceptionTransferCase):
 
     def test_repeated_partial_submission_cannot_exceed_remaining(self):
         self.assertEqual(self.transfer(5).status_code, 201)
+        self.assertEqual(self.transfer(1).status_code, 409)
+        self.complete_export()
         self.assertEqual(self.transfer(5).status_code, 400)
         self.assertEqual(self.records()[0]["transferred_quantity"], 5)
 
@@ -140,8 +144,9 @@ class ExceptionTransferTests(ExceptionTransferCase):
     def test_concurrent_requests_do_not_overtransfer(self):
         with ThreadPoolExecutor(max_workers=2) as executor:
             responses = list(executor.map(lambda _: self.transfer(5), range(2)))
-        self.assertEqual(
-            sorted(response.status_code for response in responses), [201, 400]
+        self.assertEqual(sum(response.status_code == 201 for response in responses), 1)
+        self.assertTrue(
+            all(response.status_code in (201, 400, 409) for response in responses)
         )
         self.assertEqual(self.records()[0]["transferred_quantity"], 5)
 
@@ -196,7 +201,8 @@ class ExceptionTransferTests(ExceptionTransferCase):
             source_export = session.scalar(
                 select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
             )
-            self.assertIsNone(source_export)
+            self.assertEqual(source_export.status, "queued")
+        self.complete_export()
         preflight = self.client.post(
             f"/api/batches/{target}/preflight", headers=self.headers
         )

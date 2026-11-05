@@ -161,6 +161,7 @@ class AdjustmentTests(ExceptionTransferCase):
         finally:
             anonymous.close()
         self.assertEqual(self.transfer(1).status_code, 201)
+        self.complete_export()
         for payload in ({"allowances": [self.allowance()]}, {"sites": [self.site()]}):
             self.assertIn("先处理超收再转交", self.save(payload).text)
         with self.app.state.database.session() as session:

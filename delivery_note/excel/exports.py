@@ -20,6 +20,25 @@ from .styles import (
 from .templates import _populate_import_sheet, _validate_template_headers
 
 
+INBOUND_PENDING_COLUMNS = [
+    "来源文件",
+    "供应商",
+    "关联交货单",
+    "SKU",
+    "原始站点",
+    "完整站点",
+    "本次申请",
+    "正常分配",
+    "规则内超收",
+    "待处理数量",
+    "待处理原因",
+    "已转交",
+    "线下处理",
+    "线下备注",
+    "剩余待处理",
+]
+
+
 def write_import_workbook(
     template_path: Path,
     output_path: Path,
@@ -37,6 +56,7 @@ def write_self_operated_inbound_workbook(
     template_path: Path,
     output_path: Path,
     allocation_rows: pd.DataFrame,
+    pending_rows: pd.DataFrame | None = None,
 ) -> None:
     """复制积加入库模板，从第 2 行写入本次可入库数据。"""
     missing = [
@@ -74,6 +94,23 @@ def write_self_operated_inbound_workbook(
             cell = sheet.cell(row=row_offset, column=column)
             cast(_StyledCell, cell)._style = copy(styles[column - 1])
             cell.value = _excel_value(value)
+
+    pending_sheet = workbook.create_sheet("待处理明细", 1)
+    pending_sheet.append(INBOUND_PENDING_COLUMNS)
+    pending_sheet.freeze_panes = "A2"
+    for cell in pending_sheet[1]:
+        font = copy(cell.font)
+        font.bold = True
+        cell.font = font
+        pending_sheet.column_dimensions[cell.column_letter].width = (
+            32 if cell.column in {1, 3, 6, 11, 14} else 18
+        )
+    if pending_rows is not None:
+        for values in pending_rows[INBOUND_PENDING_COLUMNS].itertuples(
+            index=False, name=None
+        ):
+            pending_sheet.append([_excel_value(value) for value in values])
+    workbook.active = 0
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     workbook.save(output_path)

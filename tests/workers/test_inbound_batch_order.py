@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from delivery_note.web.models import (
     Batch,
 )
+from delivery_note.excel.exports import INBOUND_PENDING_COLUMNS
 
 from delivery_note.worker import (
     run_once,
@@ -161,6 +162,12 @@ class WorkerIntegrationTests(WorkerCase):
         )
         self.assertEqual(merged_response.status_code, 200, merged_response.text)
         merged_book = load_workbook(BytesIO(merged_response.content), data_only=True)
+        self.assertEqual(merged_book.sheetnames, ["批量入库", "待处理明细"])
+        pending = merged_book["待处理明细"]
+        self.assertEqual([cell.value for cell in pending[1]], INBOUND_PENDING_COLUMNS)
+        self.assertEqual(pending.max_row, 2)
+        self.assertEqual(pending.cell(2, 1).value, "260817-狂飙-A质检交货单.xlsx")
+        self.assertEqual(pending.cell(2, 10).value, 3)
         merged_sheet = merged_book["批量入库"]
         self.assertEqual(merged_sheet.max_row, 3)
         self.assertEqual(
@@ -184,6 +191,17 @@ class WorkerIntegrationTests(WorkerCase):
                     "260817-狂飙-B质检交货单_积加入库.xlsx",
                 ],
             )
+            for name in archive.namelist():
+                book = load_workbook(BytesIO(archive.read(name)))
+                self.assertEqual(book.sheetnames, ["批量入库", "待处理明细"])
+                sheet = book["待处理明细"]
+                self.assertEqual(sheet.max_row, 2 if "-A" in name else 1)
+                if sheet.max_row == 2:
+                    self.assertEqual(
+                        sheet.cell(2, 1).value, "260817-狂飙-A质检交货单.xlsx"
+                    )
+                    self.assertEqual(sheet.cell(2, 10).value, 3)
+                book.close()
 
         for source in exported["files"]:
             response = self.client.get(

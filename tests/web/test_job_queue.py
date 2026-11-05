@@ -1,4 +1,4 @@
-"""任务接续幂等，人工收尾不触发导出或改变结果状态。"""
+"""任务接续幂等，人工收尾自动刷新导出且保持数量守恒。"""
 
 from sqlalchemy import func, select
 
@@ -20,13 +20,14 @@ class InboundExportQueueTests(ExceptionTransferCase):
             json={"quantity": quantity, "note": note},
         )
 
-    def test_partial_and_full_offline_never_queue_export(self):
+    def test_partial_and_full_offline_requeue_export(self):
         for quantity in (3, 8):
             saved = self.offline(quantity, "  备注  ")
             self.assertEqual(saved.status_code, 200, saved.text)
             self.assertEqual(saved.json()["offline_note"], "备注")
             with self.app.state.database.session() as session:
-                self.assertIsNone(self.export_job(session))
+                self.assertEqual(self.export_job(session).status, "queued")
+            self.complete_export()
         self.assertEqual(saved.json()["status"], "resolved")
         with self.app.state.database.session() as session:
             log = session.scalar(
@@ -35,12 +36,13 @@ class InboundExportQueueTests(ExceptionTransferCase):
             self.assertIsNotNone(log.user_id)
             self.assertIn("quantity", log.details)
 
-    def test_transfer_finishes_remaining_without_queueing_export(self):
+    def test_transfer_finishes_remaining_and_requeues_export(self):
         self.assertEqual(self.offline(3).status_code, 200)
+        self.complete_export()
         transferred = self.transfer(5)
         self.assertEqual(transferred.status_code, 201, transferred.text)
         with self.app.state.database.session() as session:
-            self.assertIsNone(self.export_job(session))
+            self.assertEqual(self.export_job(session).status, "queued")
             self.assertEqual(
                 session.get(ExceptionRecord, self.exception_id).status, "resolved"
             )
@@ -68,24 +70,18 @@ class InboundExportQueueTests(ExceptionTransferCase):
             self.assertEqual(export.status, "queued")
             self.assertIsNone(export.output_path)
 
-    def test_revoke_after_export_preserves_result_and_conservation(self):
+    def test_revoke_after_export_refreshes_result_and_preserves_conservation(self):
         self.assertEqual(self.offline(8).status_code, 200)
+        self.complete_export()
         with self.app.state.database.session() as session:
-            session.add(
-                Job(
-                    batch_id=self.batch_id,
-                    kind="export",
-                    status="succeeded",
-                    output_path="synthetic.xlsx",
-                )
-            )
+            self.export_job(session).output_path = "synthetic.xlsx"
             session.commit()
         revoked = self.offline(0)
         self.assertEqual(revoked.status_code, 200, revoked.text)
         self.assertEqual(revoked.json()["status"], "pending")
         with self.app.state.database.session() as session:
-            self.assertEqual(self.export_job(session).status, "succeeded")
-            self.assertEqual(self.export_job(session).output_path, "synthetic.xlsx")
+            self.assertEqual(self.export_job(session).status, "queued")
+            self.assertIsNone(self.export_job(session).output_path)
         summary = self.client.get(
             f"/api/batches/{self.batch_id}", headers=self.headers
         ).json()["summary"]

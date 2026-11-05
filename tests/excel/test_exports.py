@@ -55,6 +55,29 @@ class ExcelOutputTests(unittest.TestCase):
 
             result = load_workbook(output_path)
             result_sheet = cast(Worksheet, result.active)
+            self.assertEqual(result.sheetnames, ["批量入库", "待处理明细"])
+            self.assertEqual(
+                list(result["待处理明细"].values),
+                [
+                    (
+                        "来源文件",
+                        "供应商",
+                        "关联交货单",
+                        "SKU",
+                        "原始站点",
+                        "完整站点",
+                        "本次申请",
+                        "正常分配",
+                        "规则内超收",
+                        "待处理数量",
+                        "待处理原因",
+                        "已转交",
+                        "线下处理",
+                        "线下备注",
+                        "剩余待处理",
+                    )
+                ],
+            )
             self.assertEqual(result_sheet.max_row, 2)
             self.assertEqual(result_sheet["A2"].value, "WV-1")
             self.assertEqual(result_sheet["Q2"].value, 20)
