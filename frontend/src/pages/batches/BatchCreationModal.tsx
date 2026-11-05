@@ -20,8 +20,17 @@ export default function BatchCreationModal({
   activeSelfOperatedRule,
   activeOverreceiptRule
 }: Props) {
-  const { form, creating, sourceFiles, deliveryFiles, create, closeCreate, selectSourceFiles, selectDeliveryFiles } =
-    creation;
+  const {
+    form,
+    creating,
+    submitting,
+    sourceFiles,
+    deliveryFiles,
+    create,
+    closeCreate,
+    selectSourceFiles,
+    selectDeliveryFiles
+  } = creation;
   return (
     <Modal
       className="batch-creation-modal--compact"
@@ -29,8 +38,12 @@ export default function BatchCreationModal({
       open={creating}
       onCancel={closeCreate}
       onOk={() => void create()}
-      okText={workflow === "self_operated_inbound" ? "创建批次" : "创建并上传文件"}
+      confirmLoading={submitting}
+      okText={submitting ? "正在校验并创建" : workflow === "self_operated_inbound" ? "创建批次" : "创建并上传文件"}
       cancelText="取消"
+      cancelButtonProps={{ disabled: submitting }}
+      closable={!submitting}
+      mask={{ closable: !submitting }}
       okButtonProps={{
         disabled: workflow === "self_operated_inbound" ? !sourceFiles.length : !deliveryFiles.length
       }}

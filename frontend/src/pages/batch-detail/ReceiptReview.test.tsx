@@ -132,7 +132,7 @@ describe("累计实收核对", () => {
       </>
     );
     expect(screen.getAllByText("0")).toHaveLength(2);
-    expect(screen.queryByRole("button", { name: "重新取数" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "同步积加入库记录" })).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
   });
 
