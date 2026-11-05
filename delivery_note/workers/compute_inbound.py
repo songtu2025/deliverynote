@@ -15,6 +15,7 @@ from ..inbound.models import (
     SelfOperatedInboundBatchResult,
 )
 from ..inbound.receipts import prepare_receipts
+from ..inbound.targeted_allowances import TargetedAllowance
 from ..self_operated_inbound import (
     process_self_operated_inbound_batch,
 )
@@ -60,7 +61,9 @@ def _save_inbound_compute(
                     full_site=str(pending["完整站点"] or ""),
                     destination="",
                     delivery_quantity=int(pending["质检合格数量"]),
-                    allocated_quantity=normal + overreceipt,
+                    allocated_quantity=normal
+                    + overreceipt
+                    + int(pending["追加超收数量"]),
                     purchase_allocated_quantity=normal,
                     overreceipt_allocated_quantity=overreceipt,
                     overreceipt_remaining_quantity=(
@@ -135,7 +138,23 @@ def _execute_self_operated_compute(
             for item in self_operated_data.get("manual_handling", {}).get(
                 "allowances", []
             )
+            if not item.get("inbound_no")
         },
+        targeted_allowances=[
+            TargetedAllowance(
+                supplier_code=item["supplier_code"],
+                sku=item["sku"],
+                full_site=item["full_site"],
+                inbound_no=item["inbound_no"],
+                po_code=item["po_code"],
+                remaining=item["quantity"],
+                reason=item["reason"],
+            )
+            for item in self_operated_data.get("manual_handling", {}).get(
+                "allowances", []
+            )
+            if item.get("inbound_no")
+        ],
         file_site_overrides=choices,
     )
     _heartbeat(database, job_id, claim_token)
@@ -150,6 +169,7 @@ def _execute_self_operated_compute(
             for entry in self_operated_data.get("manual_handling", {}).get(
                 "allowances", []
             )
+            if not entry.get("inbound_no")
         }
         for index, row in result.allocation_rows.iterrows():
             if "人工追加超收：" in row["超收原因"]:

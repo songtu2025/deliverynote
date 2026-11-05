@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Iterable, Mapping, MutableMapping, Sequence
 
 import pandas as pd
@@ -16,6 +17,8 @@ from .inbound.models import (
     SelfOperatedInboundResult,
 )
 from .inbound.receipts import allocation_frame
+from .inbound.targeted_allowances import TargetedAllowance
+from .processing.keys import _normalize_position_text as normalize_text
 from .processing.allocation import AllocationSummary
 from .processing.delivery_sites import resolve_delivery_sites
 from .processing.site_overrides import _apply_site_overrides
@@ -39,6 +42,7 @@ def process_self_operated_inbound(
     site_overrides: Mapping[tuple[str, str], str] | None = None,
     overreceipt_limit: int | None = None,
     receivable_balances: MutableMapping[int, int] | None = None,
+    targeted_allowances: tuple[TargetedAllowance, ...] = (),
 ) -> SelfOperatedInboundResult:
     """按 PO 单号升序分配自营仓实收数量。"""
     if overreceipt_limit is not None and overreceipt_limit < 0:
@@ -53,6 +57,7 @@ def process_self_operated_inbound(
         balances=receivable_balances,
         allowances=overreceipt_allowances,
         overreceipt_limit=overreceipt_limit,
+        targeted_allowances=targeted_allowances,
     )
     for _, row in resolved[resolved["异常原因"].ne("")].iterrows():
         allocator.add_pending(
@@ -100,6 +105,7 @@ def process_self_operated_inbound_batch(
     *,
     overreceipt_limit: int = 0,
     extra_overreceipt: Mapping[OverreceiptKey, int] | None = None,
+    targeted_allowances: Sequence[TargetedAllowance] = (),
     site_overrides: Mapping[tuple[str, str], str] | None = None,
     file_site_overrides: Mapping[str | int, Mapping[tuple[str, str], str]]
     | None = None,
@@ -114,6 +120,7 @@ def process_self_operated_inbound_batch(
         for key, extra in (extra_overreceipt or {}).items()
     }
     consumed: dict[OverreceiptKey, int] = {}
+    targets = tuple(replace(entry) for entry in targeted_allowances)
     items: list[SelfOperatedInboundItemResult] = []
     for file_order, delivery in enumerate(deliveries, start=1):
         result = process_self_operated_inbound(
@@ -128,6 +135,12 @@ def process_self_operated_inbound_batch(
             ),
             overreceipt_limit=overreceipt_limit,
             receivable_balances=receivable_balances,
+            targeted_allowances=tuple(
+                entry
+                for entry in targets
+                if normalize_text(entry.supplier_code)
+                == normalize_text(delivery.supplier_code)
+            ),
         )
         for index, row in result.allocation_rows.iterrows():
             key = make_overreceipt_key(

@@ -26,9 +26,3 @@ export function offlineSelectionDisabledReason(batch: Batch, records: DeliveryEx
   }
   return null;
 }
-
-export function allowanceFor(batch: Batch, supplierCode: string, sku: string, fullSite: string) {
-  return batch.manual_allowances?.find(
-    (item) => item.supplier_code === supplierCode && item.sku === sku && item.full_site === fullSite
-  );
-}

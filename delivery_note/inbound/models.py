@@ -18,6 +18,7 @@ INBOUND_COLUMNS = {
 ALLOCATION_COLUMNS = [
     "正常分配数量",
     "规则内超收数量",
+    "追加超收数量",
     "本次入库",
     "入库库位",
     "本次退货",
@@ -54,6 +55,7 @@ PENDING_COLUMNS = [
     "质检合格数量",
     "正常分配数量",
     "规则内超收数量",
+    "追加超收数量",
     "超过超收规则数量",
     "待处理数量",
     "待处理原因",
@@ -84,6 +86,7 @@ class SelfOperatedInboundRequest:
     delivery_lines: pd.DataFrame
     delivery_numbers: Sequence[str]
     supplier_name: str
+    supplier_code: str = ""
 
 
 @dataclass(frozen=True)

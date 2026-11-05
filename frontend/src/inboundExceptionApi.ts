@@ -22,6 +22,9 @@ export type InboundAllocation = {
   current_quantity: number | null;
   max_receive_quantity?: number | string | null;
   received_quantity?: number | string | null;
+  extra_quantity?: number;
+  extra_reason?: string;
+  targeted_quantity?: number;
 };
 
 type SnapshotPurchaseOption = PurchaseOption & { supplier_code: string; sku: string };
@@ -40,6 +43,12 @@ export type InboundAllocations = {
   items: InboundAllocation[];
   batch_updated_at: string;
   history_captured_at: string | null;
+  batch_id?: number;
+  supplier_code?: string;
+  allowance_limit?: number;
+  recompute_disabled_reason?: string | null;
+  saved_allowances?: ManualAllowanceInput[];
+  inactive_allowances?: ManualAllowanceInput[];
 };
 
 const snapshotPath = (batchId: number) => `/api/self-operated-batches/${batchId}/purchase-snapshot`;
@@ -101,6 +110,9 @@ export type ManualAllowanceInput = {
   full_site: string;
   quantity: number;
   reason: string;
+  file_id?: number;
+  inbound_no?: string;
+  po_code?: string;
 };
 
 export type SiteAdjustmentInput = {

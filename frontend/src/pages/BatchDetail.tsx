@@ -204,7 +204,13 @@ export default function BatchDetail({
           />
         )}
 
-        <ExceptionReviewDrawer editor={editor} batch={batch} fileById={fileById} action={action} />
+        <ExceptionReviewDrawer
+          editor={editor}
+          batch={batch}
+          fileById={fileById}
+          action={action}
+          onSaved={() => load(true)}
+        />
       </BatchWorkbench>
     </BatchPurchaseSnapshot>
   );

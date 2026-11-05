@@ -65,6 +65,132 @@ class AdjustmentTests(ExceptionTransferCase):
             headers=self.headers,
         )
 
+    def targeted(self, **changes):
+        return self.allowance(
+            file_id=self.file_id, inbound_no="WV-1", po_code="PO-1", **changes
+        )
+
+    def set_allocations(self):
+        with self.app.state.database.session() as session:
+            source = session.get(BatchFile, self.file_id)
+            source.import_rows = [
+                {
+                    "SKU": "SKU-A",
+                    "平台站点": "AMAZON:SEEKWAY:US",
+                    "入库单号": "WV-1",
+                    "关联采购单": "PO-1",
+                    "本次入库": 12,
+                    "最大可收货": 10,
+                    "已收货": 10,
+                },
+                {
+                    "SKU": "SKU-A",
+                    "平台站点": "AMAZON:SEEKWAY:US",
+                    "入库单号": "WV-2",
+                    "关联采购单": "PO-2",
+                    "本次入库": 1,
+                },
+            ]
+            session.commit()
+
+    def test_targeted_changes_queue_once_and_keep_business_identity(self):
+        self.set_allocations()
+        response = self.save({"allowances": [self.targeted()], "reason": "确认"})
+        self.assertEqual(response.status_code, 200, response.text)
+        saved = response.json()["manual_allowances"][0]
+        self.assertEqual(
+            (saved["inbound_no"], saved["po_code"], saved["quantity"]),
+            ("WV-1", "PO-1", 3),
+        )
+        self.assertEqual(saved["reason"], "确认")
+        with self.app.state.database.session() as session:
+            self.assertEqual(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AuditLog)
+                    .where(AuditLog.action == "queue_compute")
+                ),
+                1,
+            )
+            self.assertEqual(
+                session.scalar(
+                    select(func.count())
+                    .select_from(AuditLog)
+                    .where(AuditLog.action == "save_manual_allowance")
+                ),
+                1,
+            )
+
+    def test_targeted_limits_and_invalid_targets_are_atomic(self):
+        self.set_allocations()
+        for items in (
+            [self.targeted(quantity=9)],
+            [
+                self.targeted(quantity=5),
+                {
+                    **self.targeted(),
+                    "inbound_no": "WV-2",
+                    "po_code": "PO-2",
+                    "quantity": 4,
+                },
+            ],
+            [{**self.targeted(), "inbound_no": "MISSING"}],
+            [{**self.targeted(), "file_id": 99999}],
+            [self.targeted(), self.targeted()],
+        ):
+            with self.subTest(items=items):
+                response = self.save({"allowances": items, "sites": [self.site()]})
+                self.assertEqual(response.status_code, 400, response.text)
+                with self.app.state.database.session() as session:
+                    self.assertFalse(
+                        session.get(SelfOperatedBatch, self.batch_id).manual_handling
+                    )
+                    self.assertIsNotNone(
+                        session.get(ExceptionRecord, self.exception_id)
+                    )
+                    self.assertFalse(session.get(BatchFile, self.file_id).receipt_sites)
+                    self.assertIsNone(
+                        session.scalar(select(Job).where(Job.batch_id == self.batch_id))
+                    )
+
+    def test_saved_target_can_be_replaced_or_revoked_and_missing_target_warns(self):
+        self.set_allocations()
+        with self.app.state.database.session() as session:
+            profile = session.get(SelfOperatedBatch, self.batch_id)
+            profile.manual_handling = {
+                "allowances": [
+                    {
+                        **self.targeted(quantity=4),
+                        "supplier_name": "KuangBiao",
+                        "reason": "旧原因",
+                    }
+                ]
+            }
+            session.commit()
+        path = f"/api/exceptions/{self.exception_id}/inbound-allocation"
+        detail = self.client.get(path, headers=self.headers).json()
+        self.assertEqual(detail["items"][0]["extra_quantity"], 4)
+        self.assertEqual(detail["allowance_limit"], 12)
+        self.assertEqual(
+            self.save({"allowances": [self.targeted(quantity=13)]}).status_code, 400
+        )
+        with self.app.state.database.session() as session:
+            source = session.get(BatchFile, self.file_id)
+            source.import_rows = []
+            session.commit()
+        detail = self.client.get(path, headers=self.headers).json()
+        self.assertEqual(detail["inactive_allowances"][0]["po_code"], "PO-1")
+        self.assertEqual(
+            self.save({"allowances": [self.targeted(quantity=0)]}).status_code, 200
+        )
+        with self.app.state.database.session() as session:
+            self.assertEqual(
+                session.get(SelfOperatedBatch, self.batch_id).manual_handling[
+                    "allowances"
+                ],
+                [],
+            )
+
     def test_allowances_queue_one_compute_and_audit_each_change(self):
         self.add_source(sku="SKU-B", order=2)
         with self.app.state.database.session() as session:

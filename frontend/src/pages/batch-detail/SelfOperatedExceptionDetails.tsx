@@ -2,15 +2,18 @@ import type { ReactNode } from "react";
 import { Alert, Button, Card, Descriptions, Flex, Table, Typography } from "antd";
 import { formatBeijingDateTime } from "../../dateTime";
 import type { DeliveryException } from "../../types";
-import type { InboundAllocation, PurchaseOption } from "../../inboundExceptionApi";
+import type { PurchaseOption } from "../../inboundExceptionApi";
 import { useInboundExceptionDetails } from "./useInboundExceptionDetails";
+import InboundAllocationEditor from "./InboundAllocationEditor";
 
 export default function SelfOperatedExceptionDetails({
   exception,
-  supplierCode
+  supplierCode,
+  onSaved
 }: {
   exception: DeliveryException;
   supplierCode: string;
+  onSaved?: () => Promise<unknown>;
 }) {
   const { purchases, allocations } = useInboundExceptionDetails(exception.id, supplierCode, exception.sku);
   return (
@@ -31,7 +34,7 @@ export default function SelfOperatedExceptionDetails({
         ]}
       />
       <PurchaseEvidence state={purchases} />
-      <AllocationEvidence state={allocations} />
+      <AllocationEvidence state={allocations} exception={exception} onSaved={onSaved} />
     </Flex>
   );
 }
@@ -64,56 +67,31 @@ function PurchaseEvidence({ state: purchases }: { state: Evidence["purchases"] }
   );
 }
 
-function AllocationEvidence({ state: allocations }: { state: Evidence["allocations"] }) {
+function AllocationEvidence({
+  state: allocations,
+  exception,
+  onSaved
+}: {
+  state: Evidence["allocations"];
+  exception: DeliveryException;
+  onSaved?: () => Promise<unknown>;
+}) {
   return (
     <EvidenceSection title="本次入库分配明细" retryLabel="重新读取分配" state={allocations}>
       <Typography.Paragraph type="secondary">
         当前来源文件、SKU 和站点的计算结果。“本次分配”表示可生成入库导入文件，不代表 ERP 已完成入库。
-        {allocations.data && ` 批次更新：${formatBeijingDateTime(allocations.data.batch_updated_at)}`}
+        {allocations.data && " 批次更新：" + formatBeijingDateTime(allocations.data.batch_updated_at)}
         {allocations.data?.history_captured_at &&
-          `；历史快照：${formatBeijingDateTime(allocations.data.history_captured_at)}`}
+          "；历史快照：" + formatBeijingDateTime(allocations.data.history_captured_at)}
       </Typography.Paragraph>
-      <Table<InboundAllocation>
-        size="small"
-        rowKey="id"
-        loading={allocations.loading}
-        dataSource={allocations.data?.items ?? []}
-        scroll={{ x: 1180 }}
-        pagination={{ pageSize: 10, showSizeChanger: false, hideOnSinglePage: true }}
-        locale={{
-          emptyText: allocations.loading ? "正在读取本次分配明细" : "当前文件的该 SKU 在此站点暂无可入库分配"
-        }}
-        columns={[
-          { title: "PO 单号", dataIndex: "po_code", width: 150, render: showValue },
-          { title: "关联交货单", dataIndex: "delivery_no", width: 150, render: showValue },
-          { title: "入库单号", dataIndex: "inbound_no", width: 150, render: showValue },
-          { title: "完整站点", dataIndex: "site", width: 190, render: showValue },
-          { title: "入库仓", dataIndex: "warehouse", width: 140, render: showValue },
-          { title: "历史已入库", dataIndex: "history_quantity", width: 100, align: "right", render: showValue },
-          { title: "正常分配", dataIndex: "normal_quantity", width: 100, align: "right", render: showValue },
-          { title: "规则内超收", dataIndex: "overreceipt_quantity", width: 100, align: "right", render: showValue },
-          {
-            title: "本次分配",
-            dataIndex: "current_quantity",
-            width: 160,
-            align: "right",
-            render: (value, row) => (
-              <>
-                {showValue(value)}
-                {row.max_receive_quantity != null &&
-                  row.max_receive_quantity !== "" &&
-                  row.received_quantity != null &&
-                  row.received_quantity !== "" &&
-                  Number(value) > Math.max(Number(row.max_receive_quantity) - Number(row.received_quantity), 0) && (
-                    <div>
-                      <Typography.Text type="warning">超出最大可收货，积加可能拒收</Typography.Text>
-                    </div>
-                  )}
-              </>
-            )
-          }
-        ]}
-      />
+      {allocations.data && (
+        <InboundAllocationEditor
+          key={exception.id + ":" + allocations.data.batch_updated_at}
+          data={allocations.data}
+          exception={exception}
+          onSaved={onSaved}
+        />
+      )}
     </EvidenceSection>
   );
 }

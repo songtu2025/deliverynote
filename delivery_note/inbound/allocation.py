@@ -9,6 +9,7 @@ from ..processing.keys import make_overreceipt_key
 from ..processing.models import OverreceiptAllowance, OverreceiptKey
 from .history import receipt_quantity
 from .models import ALLOCATION_COLUMNS, PENDING_COLUMNS, SelfOperatedInboundResult
+from .targeted_allowances import TargetedAllowance, allocate_targeted
 
 
 def completed_history_summary(
@@ -33,6 +34,7 @@ class InboundAllocator:
     balances: MutableMapping[int, int] | None
     allowances: MutableMapping[OverreceiptKey, OverreceiptAllowance] | None
     overreceipt_limit: int | None
+    targeted_allowances: tuple[TargetedAllowance, ...] = ()
     records: dict[int, dict[str, Any]] = field(default_factory=dict, init=False)
     pending: list[dict[str, Any]] = field(default_factory=list, init=False)
     generated_allowances: dict[OverreceiptKey, OverreceiptAllowance] = field(
@@ -45,6 +47,7 @@ class InboundAllocator:
             {
                 "正常分配数量": 0,
                 "规则内超收数量": 0,
+                "追加超收数量": 0,
                 "本次入库": 0,
                 "入库库位": "未分配库位",
                 "本次退货": pd.NA,
@@ -60,6 +63,7 @@ class InboundAllocator:
         summary: AllocationSummary,
         reason: str,
         over_limit: int = 0,
+        targeted_quantity: int = 0,
     ) -> None:
         self.pending.append(
             {
@@ -70,6 +74,7 @@ class InboundAllocator:
                 "质检合格数量": int(row["交货量"]),
                 "正常分配数量": summary.purchase,
                 "规则内超收数量": summary.overreceipt,
+                "追加超收数量": targeted_quantity,
                 "超过超收规则数量": over_limit,
                 "待处理数量": summary.remaining,
                 "待处理原因": reason,
@@ -136,13 +141,34 @@ class InboundAllocator:
         self._allocate_normal(candidates, summary)
         allowance = self._allowance(row)
         self._allocate_overreceipt(candidates, summary, allowance)
+        targeted = allocate_targeted(
+            (
+                self.records[index]
+                for index in candidates.index
+                if index in self.records
+            ),
+            tuple(
+                entry
+                for entry in self.targeted_allowances
+                if make_overreceipt_key("", entry.sku, entry.full_site)
+                == make_overreceipt_key("", row["SKU"], row["完整站点"])
+            ),
+            summary.remaining,
+        )
+        summary.remaining -= targeted
         if summary.remaining > 0:
             reason = (
                 ExceptionReason.OVERRECEIPT_LIMIT_EXCEEDED
                 if allowance is not None
                 else ExceptionReason.RECEIVABLE_EXCEEDED
             )
-            self.add_pending(row, summary, reason, over_limit=summary.remaining)
+            self.add_pending(
+                row,
+                summary,
+                reason,
+                over_limit=summary.remaining,
+                targeted_quantity=targeted,
+            )
 
     def result(self, qualified_total: int) -> SelfOperatedInboundResult:
         columns = [

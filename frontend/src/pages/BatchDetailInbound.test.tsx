@@ -65,30 +65,65 @@ describe("自营仓批次详情", () => {
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 
-  it("翻页和搜索保留追加草稿，勾选后显示收尾操作", async () => {
+  it("翻页和搜索显示指定超收入口，勾选后显示收尾操作", async () => {
     const base = createDetailExceptions()[3];
     state.exceptions = Array.from({ length: 12 }, (_, index) => ({
       ...base,
       id: 100 + index,
-      sku: `SKU-${index + 1}`
+      sku: "SKU-" + (index + 1)
     }));
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    const first = (await screen.findAllByRole("spinbutton", { name: "本批追加" }))[0];
-    fireEvent.change(first, { target: { value: "4" } });
+    expect(await screen.findAllByRole("button", { name: "指定超收" })).toHaveLength(10);
+    expect(screen.queryByRole("spinbutton", { name: "本批追加" })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByTitle("2")[0]);
-    await waitFor(() => expect(screen.getAllByRole("spinbutton", { name: "本批追加" })).toHaveLength(2));
-    expect(screen.getByRole("button", { name: "按调整重算（1 处）" })).toBeEnabled();
-    fireEvent.click(screen.getAllByTitle("1")[0]);
-    await waitFor(() => expect(screen.getAllByRole("spinbutton", { name: "本批追加" })[0]).toHaveValue("4"));
-    const search = screen.getByRole("textbox", { name: "搜索待处理记录" });
-    fireEvent.change(search, { target: { value: "SKU-12" } });
-    await waitFor(() => expect(screen.getAllByRole("spinbutton", { name: "本批追加" })).toHaveLength(1));
-    expect(screen.getByRole("button", { name: /按调整重算/ })).toBeEnabled();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "指定超收" })).toHaveLength(2));
+    fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), { target: { value: "SKU-12" } });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "指定超收" })).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
     expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "转交货批次" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "放弃修改" }));
-    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
+  });
+
+  it("指定超收打开该行抽屉，保存一次后关闭并刷新批次", async () => {
+    const record = createDetailExceptions()[3];
+    state.exceptions = [record];
+    const originalFetch = fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/inbound-allocation"))
+          return jsonResponse({
+            batch_id: 7,
+            supplier_code: "GYS-023",
+            batch_updated_at: state.batch.updated_at,
+            allowance_limit: record.manual_quantity,
+            items: [
+              {
+                id: "1",
+                inbound_no: "WV-1",
+                po_code: "PO-1",
+                current_quantity: 10,
+                extra_quantity: 0
+              }
+            ]
+          });
+        if (url.endsWith("/adjustments")) {
+          state.batch.status = "queued";
+          return jsonResponse(state.batch);
+        }
+        return originalFetch(input, init);
+      })
+    );
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "指定超收" }));
+    const drawer = within(await screen.findByRole("dialog"));
+    expect(drawer.getByText("处理依据 · " + record.sku)).toBeVisible();
+    fireEvent.change(await drawer.findByRole("spinbutton", { name: "追加超收 PO-1 WV-1" }), { target: { value: "2" } });
+    fireEvent.click(drawer.getByRole("button", { name: "保存并重算" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith("/adjustments"))).toHaveLength(1);
   });
 
   it.each([true, false])("准确展示API锁定和手动来源：%s", async (apiSource) => {
