@@ -2,13 +2,15 @@
 
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 import unittest
 from zipfile import ZipFile
 
 from openpyxl import load_workbook
 
 from delivery_note.inbound.models import INBOUND_TEMPLATE_COLUMNS
+from delivery_note.excel.exports import INBOUND_PENDING_COLUMNS
+from delivery_note.excel.styles import _StyledCell
 
 
 def assert_inbound_exports(
@@ -26,6 +28,13 @@ def assert_inbound_exports(
         number = file_receipt["delivery_numbers"][0]
         remaining = (3 if number.endswith("9026") else 7) if multiple else receivable
         book = load_workbook(BytesIO(data), data_only=True)
+        pending = book["待处理明细"]
+        case.assertEqual(
+            sum(row[9] for row in list(pending.values)[1:]), source["manual_total"]
+        )
+        case.assertTrue(
+            all(row[0] == source["original_name"] for row in list(pending.values)[1:])
+        )
         expected_rows.extend(
             tuple(cell.value for cell in row)
             for row in book.worksheets[0].iter_rows(min_row=2)
@@ -53,6 +62,10 @@ def assert_inbound_exports(
             case.assertEqual(archive.read(name), data)
     book = load_workbook(BytesIO(record["merged"]), data_only=True)
     sheet = book.worksheets[0]
+    case.assertEqual(
+        sum(row[9] for row in list(book["待处理明细"].values)[1:]),
+        sum(source["manual_total"] for source in batch["files"]),
+    )
     case.assertEqual([cell.value for cell in sheet[1]], INBOUND_TEMPLATE_COLUMNS)
     case.assertEqual(
         sorted(tuple(cell.value for cell in row) for row in sheet.iter_rows(min_row=2)),
@@ -76,6 +89,10 @@ def assert_inbound_workbook(
     receivable, total = quantities
     workbook = load_workbook(BytesIO(data), data_only=True)
     sheet = workbook["批量入库"]
+    case.assertEqual(workbook.sheetnames, ["批量入库", "待处理明细"])
+    case.assertIs(workbook.active, sheet)
+    pending = workbook["待处理明细"]
+    case.assertEqual([cell.value for cell in pending[1]], INBOUND_PENDING_COLUMNS)
     case.assertEqual([cell.value for cell in sheet[1]], INBOUND_TEMPLATE_COLUMNS)
     case.assertEqual(sheet.max_row, 2)
     expected = {
@@ -106,3 +123,38 @@ def assert_inbound_workbook(
             case.assertEqual(getattr(cell.border, name).style, "thin")
     case.assertEqual(sheet.row_dimensions[2].height, 26)
     workbook.close()
+
+
+def assert_inbound_progress(
+    case: unittest.TestCase,
+    before: bytes,
+    after: bytes,
+    pending: dict[str, Any],
+    source_name: str,
+) -> None:
+    old = load_workbook(BytesIO(before))
+    new = load_workbook(BytesIO(after))
+    case.assertEqual(new.sheetnames, ["批量入库", "待处理明细"])
+    first, second = old.worksheets[0], new.worksheets[0]
+    case.assertEqual(
+        (first.max_row, first.max_column), (second.max_row, second.max_column)
+    )
+    for old_row, new_row in zip(first, second):
+        for old_cell, new_cell in zip(old_row, new_row):
+            case.assertEqual(old_cell.value, new_cell.value)
+            case.assertEqual(
+                cast(_StyledCell, old_cell)._style, cast(_StyledCell, new_cell)._style
+            )
+    case.assertEqual(old["待处理明细"].max_row, new["待处理明细"].max_row)
+    for old_values, new_values in zip(
+        old["待处理明细"].iter_rows(min_row=2, values_only=True),
+        new["待处理明细"].iter_rows(min_row=2, values_only=True),
+    ):
+        if old_values[0] == source_name:
+            case.assertEqual(
+                new_values[11:15], (pending["manual_quantity"] - 1, 1, None, 0)
+            )
+        else:
+            case.assertEqual(old_values, new_values)
+    old.close()
+    new.close()

@@ -105,7 +105,9 @@ class ManualHandlingTests(ExceptionTransferCase):
             f"/api/batches/{self.batch_id}/exceptions?limit=10", headers=self.headers
         ).json()
         self.assertEqual(page["stats"]["unfinished_quantity"], 5)
+        self.complete_export()
         self.assertEqual(self.offline(8).json()["status"], "resolved")
+        self.complete_export()
         self.assertEqual(self.offline(4).json()["status"], "pending")
         summary = self.client.get(
             f"/api/batches/{self.batch_id}", headers=self.headers
@@ -122,6 +124,7 @@ class ManualHandlingTests(ExceptionTransferCase):
         record = self.records()[0]
         self.assertEqual(record["manual_quantity"], 8)
         self.assertEqual(record["offline_quantity"], 4)
+        self.complete_export()
         self.assertEqual(self.offline(0, "").json()["offline_note"], "")
         with self.app.state.database.session() as session:
             self.assertEqual(
@@ -131,7 +134,7 @@ class ManualHandlingTests(ExceptionTransferCase):
                 [],
             )
 
-    def test_offline_validation_transfer_capacity_and_export_preservation(self):
+    def test_offline_validation_transfer_capacity_and_export_refresh(self):
         for quantity, note in (
             (9, "原因"),
             (True, "原因"),
@@ -141,23 +144,25 @@ class ManualHandlingTests(ExceptionTransferCase):
             self.assertIn(self.offline(quantity, note).status_code, (400, 422))
         self.snapshot()
         self.assertEqual(self.offline(3).status_code, 200)
+        self.assertEqual(self.transfer(1).status_code, 409)
+        self.complete_export()
         self.assertEqual(self.transfer(6).status_code, 400)
         self.assertEqual(self.transfer(5).status_code, 201)
         with self.app.state.database.session() as session:
             export = session.scalar(
                 select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
             )
-            self.assertEqual(export.status, "succeeded")
-            self.assertEqual(export.output_path, "old.xlsx")
+            self.assertEqual(export.status, "queued")
+            self.assertIsNone(export.output_path)
             export.status = "succeeded"
             session.commit()
         self.assertEqual(self.offline(4).status_code, 400)
         self.assertEqual(self.records()[0]["status"], "resolved")
         with self.app.state.database.session() as session:
             batch = session.get(Batch, self.batch_id)
-            self.assertEqual(batch.zip_path, "old.zip")
+            self.assertIsNone(batch.zip_path)
             source = session.get(BatchFile, self.records()[0]["batch_file_id"])
-            self.assertEqual(source.result_path, "old.xlsx")
+            self.assertIsNone(source.result_path)
             export = session.scalar(
                 select(Job).where(Job.batch_id == batch.id, Job.kind == "export")
             )
@@ -171,6 +176,7 @@ class ManualHandlingTests(ExceptionTransferCase):
     ):
         snapshot, receipt = self.snapshot()
         self.offline(4)
+        self.complete_export()
         with patch("delivery_note.gerpgo.GerpgoClient.from_config") as factory:
             result = self.allowance()
         self.assertEqual(result.status_code, 200, result.text)
@@ -219,6 +225,7 @@ class ManualHandlingTests(ExceptionTransferCase):
             ).status = "succeeded"
             session.commit()
         self.assertEqual(self.transfer(1).status_code, 201)
+        self.complete_export()
         self.assertIn("先处理超收再转交", self.allowance().text)
         with self.app.state.database.session() as session:
             session.delete(session.get(SelfOperatedBatch, self.batch_id))

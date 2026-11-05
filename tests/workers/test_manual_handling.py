@@ -2,6 +2,7 @@
 
 from io import BytesIO
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from openpyxl import load_workbook
 from sqlalchemy import select
@@ -11,10 +12,11 @@ from delivery_note.worker import run_once
 from tests.support.receipt_worker import ReceiptWorkerCase
 from tests.support.inbound_inputs import create_ambiguous_product
 from tests.inbound.test_history import inbound_order
+from tests.support.inbound_exports import assert_inbound_progress
 
 
 class ManualHandlingWorkerTests(ReceiptWorkerCase):
-    def test_offline_and_transfer_preserve_all_download_formats(self):
+    def test_offline_and_transfer_refresh_all_download_formats(self):
         batch_id = self.create_receipt_batch(cumulative=50)
         delivery = self.create_self_operated_delivery(
             self.root / "狂飙-第二份.xlsx", 20, "LN2608170002"
@@ -52,12 +54,24 @@ class ManualHandlingWorkerTests(ReceiptWorkerCase):
             self.assertEqual(result.status_code, 200, result.text)
             original.append(result.content)
         pending = self.client.get(path + "/exceptions", headers=self.headers).json()[0]
+        source_name = next(
+            source["original_name"]
+            for source in before["files"]
+            if source["id"] == pending["batch_file_id"]
+        )
         saved = self.client.put(
             f"/api/exceptions/{pending['id']}/offline-handling",
             headers=self.headers,
             json={"quantity": 1},
         )
         self.assertEqual(saved.status_code, 200, saved.text)
+        for download in downloads:
+            self.assertEqual(
+                self.client.get(download, headers=self.headers).status_code, 404
+            )
+        queued = self.client.get(path, headers=self.headers).json()
+        self.assertEqual(queued["jobs"]["export"]["status"], "queued")
+        run_once(self.database_url, self.storage_root)
         transferred = self.client.post(
             path + "/exceptions/transfer-to-delivery",
             headers=self.headers,
@@ -73,12 +87,26 @@ class ManualHandlingWorkerTests(ReceiptWorkerCase):
         )
         self.assertEqual(transferred.status_code, 201, transferred.text)
         after = self.client.get(path, headers=self.headers).json()
-        self.assertEqual(after["jobs"]["export"], before["jobs"]["export"])
+        self.assertEqual(after["jobs"]["export"]["id"], before["jobs"]["export"]["id"])
+        self.assertEqual(after["jobs"]["export"]["status"], "queued")
         self.assertTrue(after["summary"]["conserved"])
+        run_once(self.database_url, self.storage_root)
         for download, content in zip(downloads, original):
             result = self.client.get(download, headers=self.headers)
             self.assertEqual(result.status_code, 200, result.text)
-            self.assertEqual(result.content, content)
+            if download == path + "/download":
+                with (
+                    ZipFile(BytesIO(content)) as old,
+                    ZipFile(BytesIO(result.content)) as new,
+                ):
+                    for name in old.namelist():
+                        assert_inbound_progress(
+                            self, old.read(name), new.read(name), pending, source_name
+                        )
+            else:
+                assert_inbound_progress(
+                    self, content, result.content, pending, source_name
+                )
 
     def test_site_adjustment_reuses_history_and_automatically_computes_and_exports(
         self,
@@ -186,11 +214,11 @@ class ManualHandlingWorkerTests(ReceiptWorkerCase):
         )
         self.assertEqual(saved.status_code, 200, saved.text)
         handled = self.client.get(path, headers=self.headers).json()
-        self.assertEqual(handled["jobs"]["export"]["status"], "succeeded")
+        self.assertEqual(handled["jobs"]["export"]["status"], "queued")
         self.assertEqual(
-            self.client.get(path + "/download", headers=self.headers).content,
-            exported.content,
+            self.client.get(path + "/download", headers=self.headers).status_code, 404
         )
+        run_once(self.database_url, self.storage_root)
         with self.app.state.database.session() as session:
             snapshot = session.get(SelfOperatedBatch, batch_id).receipt_snapshot
             source = session.scalar(
@@ -249,6 +277,11 @@ class ManualHandlingWorkerTests(ReceiptWorkerCase):
         result = self.client.get(path + "/download", headers=self.headers)
         self.assertEqual(result.status_code, 200, result.text)
         book = load_workbook(BytesIO(result.content), data_only=True)
-        # 线下处理只在系统内留痕，积加入库导入文件不新增工作表。
-        self.assertNotIn("待处理明细", book.sheetnames)
+        self.assertEqual(book.sheetnames, ["批量入库", "待处理明细"])
+        pending_sheet = book["待处理明细"]
+        self.assertEqual(
+            pending_sheet.cell(2, 13).value, pending["manual_quantity"] - 3
+        )
+        self.assertEqual(pending_sheet.cell(2, 14).value, "线下登记")
+        self.assertEqual(pending_sheet.cell(2, 15).value, 0)
         book.close()

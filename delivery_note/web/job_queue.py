@@ -1,9 +1,9 @@
 """Web 和 Worker 共用的批次任务排队与自营仓接续规则。"""
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .models import AuditLog, Batch, Job
+from .models import AuditLog, Batch, BatchFile, Job
 from .purchase_snapshot import PURCHASE_SNAPSHOT_KIND
 
 
@@ -38,9 +38,18 @@ def reset_batch_job(
     return existing, True
 
 
-def queue_followup_job(session: Session, batch: Batch, kind: str) -> Job:
-    job, queued = reset_batch_job(session, batch, kind)
+def queue_followup_job(
+    session: Session, batch: Batch, kind: str, *, refresh: bool = False
+) -> Job:
+    job, queued = reset_batch_job(session, batch, kind, refresh=refresh)
     if queued:
+        if refresh and kind == "export":
+            batch.zip_path = None
+            session.execute(
+                update(BatchFile)
+                .where(BatchFile.batch_id == batch.id)
+                .values(result_path=None)
+            )
         session.add(
             AuditLog(
                 user_id=None,

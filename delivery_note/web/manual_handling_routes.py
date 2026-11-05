@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 from .batch_views import batch_json
 from .dependencies import RequestDependencies
 from .exception_views import _exception_json
+from .job_queue import queue_followup_job
 from .job_routes import AuditCallback, JobQueue
 from .manual_handling import prepare_recompute, replace_input, save_offline
-from .models import BatchFile, ExceptionRecord, SelfOperatedBatch, User
+from .models import Batch, BatchFile, ExceptionRecord, SelfOperatedBatch, User
 
 
 class OfflinePayload(BaseModel):
@@ -23,6 +24,14 @@ class OfflinePayload(BaseModel):
     def strip_note(self) -> "OfflinePayload":
         self.note = self.note.strip()
         return self
+
+
+class OfflineBatchItem(OfflinePayload):
+    exception_id: int
+
+
+class OfflineBatchPayload(BaseModel):
+    items: list[OfflineBatchItem] = Field(min_length=1)
 
 
 class AllowancePayload(BaseModel):
@@ -143,6 +152,63 @@ def register_manual_handling_routes(
         session.commit()
         return batch_json(batch, session)
 
+    def save_offline_item(
+        session: Session,
+        batch: Batch,
+        profile: SelfOperatedBatch,
+        exception_id: int,
+        payload: OfflinePayload,
+        user: User,
+        *,
+        queue_export: bool = True,
+    ) -> ExceptionRecord:
+        record = session.scalar(
+            select(ExceptionRecord)
+            .join(BatchFile)
+            .where(ExceptionRecord.id == exception_id, BatchFile.batch_id == batch.id)
+            .with_for_update()
+        )
+        if record is None:
+            raise HTTPException(
+                status_code=409, detail="待处理记录已变化，请刷新后重试"
+            )
+        save_offline(
+            session,
+            batch,
+            record,
+            payload.quantity,
+            payload.note,
+            queue_export=queue_export,
+        )
+        replace_input(
+            profile,
+            "offline",
+            {
+                "batch_file_id": record.batch_file_id,
+                "sku": record.sku,
+                "full_site": record.full_site,
+            },
+            payload.model_dump(),
+            user.id,
+        )
+        audit(
+            session,
+            user.id,
+            "save_offline_handling",
+            "exception",
+            record.id,
+            payload.model_dump(),
+        )
+        return record
+
+    def offline_profile(session: Session, batch: Batch) -> SelfOperatedBatch:
+        profile = session.get(SelfOperatedBatch, batch.id)
+        if profile is None:
+            raise HTTPException(
+                status_code=400, detail="仅自营仓待处理记录可以线下处理"
+            )
+        return profile
+
     @app.put("/api/exceptions/{exception_id}/offline-handling", response_model=None)
     def offline_handling(
         exception_id: int,
@@ -158,39 +224,34 @@ def register_manual_handling_routes(
         if source is None:
             raise HTTPException(status_code=404, detail="待处理记录不存在")
         batch = dependencies.get_batch_or_404(source.batch_id, session, for_update=True)
-        profile = session.get(SelfOperatedBatch, batch.id)
-        if profile is None:
-            raise HTTPException(
-                status_code=400, detail="仅自营仓待处理记录可以线下处理"
-            )
-        record = session.scalar(
-            select(ExceptionRecord)
-            .where(ExceptionRecord.id == exception_id)
-            .with_for_update()
-        )
-        if record is None:
-            raise HTTPException(
-                status_code=409, detail="待处理记录已变化，请刷新后重试"
-            )
-        save_offline(session, batch, record, payload.quantity, payload.note)
-        replace_input(
-            profile,
-            "offline",
-            {
-                "batch_file_id": source.id,
-                "sku": record.sku,
-                "full_site": record.full_site,
-            },
-            payload.model_dump(),
-            user.id,
-        )
-        audit(
-            session,
-            user.id,
-            "save_offline_handling",
-            "exception",
-            record.id,
-            payload.model_dump(),
-        )
+        profile = offline_profile(session, batch)
+        record = save_offline_item(session, batch, profile, exception_id, payload, user)
         session.commit()
         return _exception_json(record, [], self_operated=True)
+
+    @app.put("/api/batches/{batch_id}/offline-handling", response_model=None)
+    def offline_handling_batch(
+        batch_id: int,
+        payload: OfflineBatchPayload,
+        user: Annotated[User, Depends(dependencies.current_user)],
+        session: Annotated[Session, Depends(dependencies.get_session)],
+    ) -> dict[str, object]:
+        """批量线下处理：全部成功才保存，只重新生成一次结果。"""
+        batch = dependencies.get_batch_or_404(batch_id, session, for_update=True)
+        profile = offline_profile(session, batch)
+        ids = [item.exception_id for item in payload.items]
+        if len(ids) != len(set(ids)):
+            raise HTTPException(status_code=400, detail="待处理记录不可重复选择")
+        for item in payload.items:
+            save_offline_item(
+                session,
+                batch,
+                profile,
+                item.exception_id,
+                item,
+                user,
+                queue_export=False,
+            )
+        queue_followup_job(session, batch, "export", refresh=True)
+        session.commit()
+        return batch_json(batch, session)

@@ -14,6 +14,7 @@ from .exception_transfer_state import (
 from .models import Batch, BatchFile, ExceptionRecord, Job, SelfOperatedBatch
 from .receipt_state import require_receipts
 from .compute_state import clear_compute_results
+from .job_queue import queue_followup_job
 
 
 def replace_input(
@@ -80,7 +81,13 @@ def prepare_recompute(session: Session, batch: Batch) -> None:
 
 
 def save_offline(
-    session: Session, batch: Batch, record: ExceptionRecord, quantity: int, note: str
+    session: Session,
+    batch: Batch,
+    record: ExceptionRecord,
+    quantity: int,
+    note: str,
+    *,
+    queue_export: bool = True,
 ) -> None:
     if batch.status != "succeeded":
         raise HTTPException(status_code=409, detail="批次尚未计算成功")
@@ -106,6 +113,9 @@ def save_offline(
         select(remaining_quantity_expression()).where(ExceptionRecord.id == record.id)
     )
     record.status = "resolved" if remaining == 0 else "pending"
+    # 批量保存时由调用方在全部记录保存后只排队一次导出。
+    if queue_export:
+        queue_followup_job(session, batch, "export", refresh=True)
 
 
 def apply_offline_inputs(

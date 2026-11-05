@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from ..excel_io import write_self_operated_inbound_workbook
+from ..excel.exports import INBOUND_PENDING_COLUMNS
 from ..inbound.models import (
     INBOUND_TEMPLATE_COLUMNS,
 )
@@ -56,10 +57,17 @@ def _write_inbound_sources(
         )
         if exported_total != source["import_total"]:
             raise RuntimeError("自营仓单文件导出数量不守恒")
+        pending_rows = pd.DataFrame(
+            source["pending_rows"], columns=INBOUND_PENDING_COLUMNS
+        )
+        pending_total = int(pending_rows["待处理数量"].sum())
+        if source["delivery_total"] != exported_total + pending_total:
+            raise RuntimeError("自营仓单文件导出数量不守恒")
         write_self_operated_inbound_workbook(
             template_path,
             temporary / output_name,
             allocation_rows,
+            pending_rows,
         )
         output_names[source["id"]] = output_name
         merged_frames.append(allocation_rows)
@@ -79,10 +87,20 @@ def _write_merged_inbound(
     merged_total = int(merged_rows["本次入库"].sum()) if not merged_rows.empty else 0
     if merged_total != sum(source["import_total"] for source in source_data):
         raise RuntimeError("自营仓合并导出数量不守恒")
+    pending = sorted(
+        (row for source in source_data for row in source["pending_rows"]),
+        key=lambda row: row["id"],
+    )
+    pending_rows = pd.DataFrame(pending, columns=INBOUND_PENDING_COLUMNS)
+    if sum(source["delivery_total"] for source in source_data) != (
+        merged_total + int(pending_rows["待处理数量"].sum())
+    ):
+        raise RuntimeError("自营仓合并导出数量不守恒")
     write_self_operated_inbound_workbook(
         template_path,
         temporary / merged_name,
         merged_rows,
+        pending_rows,
     )
 
 

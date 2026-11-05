@@ -24,7 +24,8 @@ export default function InboundBulkActions({
     saving.current = true;
     setBusy(true);
     try {
-      const { succeeded, failures } = await saveOfflineHandlingBatch(
+      await saveOfflineHandlingBatch(
+        batch.id,
         records.map((record) => ({
           id: record.id,
           quantity: remainingTransferQuantity(record) + (record.offline_quantity ?? 0),
@@ -32,12 +33,8 @@ export default function InboundBulkActions({
         }))
       );
       await onSaved();
-      const summary = `已线下处理 ${succeeded} 条`;
-      if (failures.length) message.warning(`${summary}，失败 ${failures.length} 条：${failures[0]}`);
-      else {
-        setNote("");
-        message.success(summary);
-      }
+      setNote("");
+      message.success(`已线下处理 ${records.length} 条，正在更新结果`);
     } catch (failure) {
       message.error(failure instanceof Error ? failure.message : "批量处理失败");
     } finally {

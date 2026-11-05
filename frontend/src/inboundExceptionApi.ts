@@ -1,5 +1,5 @@
 import { api, ApiError } from "./api";
-import type { Batch, DeliveryException, Job } from "./types";
+import type { Batch, Job } from "./types";
 
 export type PurchaseOption = {
   id: string;
@@ -115,22 +115,11 @@ export const saveInboundAdjustments = (
   input: { allowances: ManualAllowanceInput[]; sites: SiteAdjustmentInput[] }
 ) => api<Batch>(`/api/batches/${batchId}/adjustments`, { method: "PUT", body: JSON.stringify(input) });
 
-const saveOfflineHandling = (exceptionId: number, input: { quantity: number; note: string }) =>
-  api<DeliveryException>(`/api/exceptions/${exceptionId}/offline-handling`, {
+// 批量线下处理一次提交：全部成功才保存，后端只重新生成一次结果。
+export const saveOfflineHandlingBatch = (batchId: number, inputs: { id: number; quantity: number; note: string }[]) =>
+  api<Batch>(`/api/batches/${batchId}/offline-handling`, {
     method: "PUT",
-    body: JSON.stringify(input)
+    body: JSON.stringify({
+      items: inputs.map((input) => ({ exception_id: input.id, quantity: input.quantity, note: input.note }))
+    })
   });
-
-export async function saveOfflineHandlingBatch(inputs: { id: number; quantity: number; note: string }[]) {
-  let succeeded = 0;
-  const failures: string[] = [];
-  for (const input of inputs) {
-    try {
-      await saveOfflineHandling(input.id, { quantity: input.quantity, note: input.note });
-      succeeded += 1;
-    } catch (failure) {
-      failures.push(failure instanceof Error ? failure.message : "保存失败");
-    }
-  }
-  return { succeeded, failures };
-}

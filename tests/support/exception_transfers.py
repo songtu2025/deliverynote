@@ -1,4 +1,6 @@
-from delivery_note.web.models import Batch, BatchFile, ExceptionRecord
+from sqlalchemy import select
+
+from delivery_note.web.models import Batch, BatchFile, ExceptionRecord, Job
 from tests.support.web_api import WebApiCase
 
 
@@ -68,3 +70,12 @@ class ExceptionTransferCase(WebApiCase):
         return self.client.get(
             f"/api/batches/{self.batch_id}/exceptions", headers=self.headers
         ).json()
+
+    def complete_export(self):
+        with self.app.state.database.session() as session:
+            export = session.scalar(
+                select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
+            )
+            self.assertEqual(export.status, "queued")
+            export.status = "succeeded"
+            session.commit()
