@@ -1,5 +1,4 @@
 import { useContext, type ReactNode } from "react";
-import { Button, Tooltip } from "antd";
 import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import {
@@ -22,20 +21,6 @@ function snapshotTitle(state: BatchPurchaseSnapshotState, busy: boolean) {
   if (data)
     title = `${busy ? "正在刷新，当前" : ""}采购数据更新于：${formatBeijingDateTime(data.completed_at ?? "")}，覆盖 ${data.supplier_count} 家供应商、${data.sku_count} 个 SKU`;
   return title;
-}
-
-export function BatchPurchaseSnapshotNotice() {
-  const state = useContext(PurchaseSnapshotContext);
-  if (!state?.enabled) return null;
-  const { error, loading, metadata } = state;
-  const busy = loading || (!error && isPurchaseSnapshotActive(metadata));
-  return (
-    <Tooltip title={snapshotTitle(state, busy)} trigger={["hover", "focus"]}>
-      <Button loading={busy} onClick={state.refresh}>
-        {error ? "重试整批采购数据" : "刷新整批采购数据"}
-      </Button>
-    </Tooltip>
-  );
 }
 
 export function BatchPurchaseSnapshotMetadata() {

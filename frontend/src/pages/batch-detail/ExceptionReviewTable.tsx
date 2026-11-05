@@ -41,7 +41,7 @@ export default function ExceptionReviewTable({
   onSaved?: () => Promise<unknown>;
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
-  const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch);
+  const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch, onSaved);
   return (
     <div ref={sectionRef} tabIndex={-1} className="review-section-anchor">
       <Card
@@ -81,7 +81,7 @@ export default function ExceptionReviewTable({
           scroll={{ x: selfOperated ? 1175 : 980 }}
           onHeaderRow={() => ({ className: "exception-review-header" })}
           locale={{
-            emptyText: <Empty description={reviewEmptyText(review)} />
+            emptyText: <Empty description={reviewEmptyText(review, selfOperated)} />
           }}
           columns={[
             ...reviewIdentityColumns(selfOperated, fileById),
@@ -100,6 +100,7 @@ export default function ExceptionReviewTable({
                         onTransfer={(row) => transfer.openRow?.(row)}
                         onVersions={onVersions}
                         onSaved={async () => {
+                          transfer.reset();
                           await onSaved?.();
                         }}
                       />
@@ -115,7 +116,12 @@ export default function ExceptionReviewTable({
   );
 }
 
-function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: ExceptionReview) {
+function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: ExceptionReview, selfOperated: boolean) {
+  if (selfOperated) {
+    if (exceptionsLoading) return "正在读取待处理记录";
+    if (!reviewStats.totalCount || reviewScope === "unfinished") return "没有待处理";
+    return "没有匹配的处理记录";
+  }
   if (exceptionsLoading) return "正在读取审校记录";
   if (!reviewStats.totalCount) return "没有待处理，可以直接生成结果";
   return reviewScope === "unfinished" ? "审校已全部完成" : "没有匹配的审校记录";
@@ -208,14 +214,14 @@ function reviewDetailColumns(
       )
     },
     {
-      title: selfOperated ? "异常原因" : "原因",
+      title: selfOperated ? "待处理原因" : "原因",
       dataIndex: "reason",
       width: selfOperated ? 130 : 120,
       render: (reason: string) =>
         selfOperated ? <ExceptionReason reason={reason} /> : <Tag className="exception-reason-tag">{reason}</Tag>
     },
     {
-      title: "审校依据",
+      title: selfOperated ? "处理依据" : "审校依据",
       width: selfOperated ? 250 : 180,
       render: (_, record) => (
         <>

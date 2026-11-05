@@ -7,6 +7,7 @@ import type { TransferOptions } from "../../exceptionTransferApi";
 import { workspacePath } from "../../app/workspaceRoutes";
 import ExceptionTransferModal from "./ExceptionTransferModal";
 import { PurchaseSnapshotContext } from "./useBatchPurchaseSnapshot";
+import InboundBulkActions from "./InboundBulkActions";
 
 function useTransferOptions() {
   const optionsCache = useRef(new Map<number, TransferOptions>());
@@ -37,7 +38,11 @@ function useTransferOptions() {
   return { optionsCache, loadOptions, clearOptions };
 }
 
-export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: number) => void) {
+export function useExceptionTransfer(
+  batch: Batch | undefined,
+  onOpen?: (id: number) => void,
+  onSaved?: () => Promise<unknown>
+) {
   const [selected, setSelected] = useState<DeliveryException[]>([]);
   const [open, setOpen] = useState(false);
   const { optionsCache, loadOptions, clearOptions } = useTransferOptions();
@@ -67,8 +72,18 @@ export function useExceptionTransfer(batch: Batch | undefined, onOpen?: (id: num
     },
     reset: () => setSelected([]),
     action: (
-      <Flex justify="end" align="center" gap="small">
+      <Flex justify="end" align="center" gap="small" wrap>
         <Typography.Text type="secondary">已选 {selected.length} 条</Typography.Text>
+        {onSaved && (
+          <InboundBulkActions
+            batch={batch}
+            records={selected}
+            onSaved={async () => {
+              setSelected([]);
+              await onSaved();
+            }}
+          />
+        )}
         <Button disabled={!selected.length || Boolean(transferDisabledReason(batch))} onClick={() => setOpen(true)}>
           转交货批次
         </Button>

@@ -226,8 +226,9 @@ describe("BatchDetailWorkbench", () => {
     expect(screen.getAllByText("1 处累计实收待核对，处理后即可预检")).toHaveLength(1);
     expect(screen.queryByText("累计实收核对失败")).not.toBeInTheDocument();
     expect(container.querySelector(".ant-alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /预检/ })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "重新取数" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "重新计算" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /更多/ }));
+    expect(await screen.findByRole("menuitem", { name: "重新取数" })).not.toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("button", { name: "累计实收口径" })).toBeInTheDocument();
   });
 });

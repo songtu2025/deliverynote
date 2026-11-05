@@ -36,7 +36,8 @@ class ExceptionTransferTests(ExceptionTransferCase):
             headers=self.headers,
         ).json()
         self.assertEqual(pending, [])
-        self.assertEqual(self.transfer().status_code, 400)
+        self.assertEqual(detail["jobs"]["export"]["status"], "queued")
+        self.assertEqual(self.transfer().status_code, 409)
 
     def test_invalid_quantities_sites_and_duplicate_items_leave_no_results(self):
         for quantity in (0, -1, 9, 1.5, True, "2"):
@@ -191,6 +192,13 @@ class ExceptionTransferTests(ExceptionTransferCase):
         response = self.transfer(full_site="AMAZON:OTHER:US")
         self.assertEqual(response.status_code, 201, response.text)
         target = response.json()["id"]
+        with self.app.state.database.session() as session:
+            source_export = session.scalar(
+                select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
+            )
+            self.assertEqual(source_export.status, "queued")
+            source_export.status = "succeeded"
+            session.commit()
         preflight = self.client.post(
             f"/api/batches/{target}/preflight", headers=self.headers
         )

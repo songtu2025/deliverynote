@@ -52,8 +52,10 @@ function activeTaskKind(batch: Batch, activeJob?: Job) {
 function computedStage(batch: Batch, reviewStats?: ReviewStats) {
   const { needsReview, needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
   const unfinished = reviewStats ? reviewStats.unfinishedCount > 0 : needsReview;
-  if (unfinished) return { label: "待审校", tone: "review" };
+  const selfOperated = batch.workflow === "self_operated_inbound";
+  if (unfinished) return { label: selfOperated ? "待处理" : "待审校", tone: "review" };
   const ready = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
+  if (selfOperated && !ready) return { label: "生成中", tone: "running" };
   return { label: ready ? "已完成" : "可生成结果", tone: "ready" };
 }
 
@@ -99,7 +101,7 @@ function preparedTaskPresentation(batch: Batch) {
         emptyTitle: "还没有质检交货单",
         upload: "上传一份或多份质检交货单，按顺序处理。",
         unit: "份质检交货单",
-        action: "预检"
+        action: "预检并计算"
       }
     : {
         emptyTitle: "还没有交货文件",
@@ -149,17 +151,19 @@ function reviewTaskPresentation(batch: Batch, needsReview: boolean, stats?: Revi
   if (!stats)
     return {
       title: "计算完成",
-      description: "正在读取审校统计…",
+      description: batch.workflow === "self_operated_inbound" ? "正在读取待处理统计…" : "正在读取审校统计…",
       tone: "waiting",
       busy: false
     };
   return {
     title:
       stats.unfinishedCount > 0
-        ? `${stats.unfinishedCount} 条待审校，共 ${stats.unfinishedQuantity} 件`
+        ? `${stats.unfinishedCount} 条${batch.workflow === "self_operated_inbound" ? "待处理" : "待审校"}，共 ${stats.unfinishedQuantity} 件`
         : downloadable
           ? "结果已生成，可以下载"
-          : "审校完成，可以生成结果",
+          : batch.workflow === "self_operated_inbound"
+            ? "正在生成结果"
+            : "审校完成，可以生成结果",
     description: "",
     tone: stats.unfinishedCount > 0 || needsReview ? "review" : "ready",
     busy: false
@@ -169,7 +173,8 @@ function reviewTaskPresentation(batch: Batch, needsReview: boolean, stats?: Revi
 export function batchResultPresentation(batch: Batch, activeJob?: Job) {
   const { needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
   if (activeJob?.kind === "export") return activeJob.status === "queued" ? "结果排队中" : "正在生成结果";
-  if (batch.jobs?.export?.status === "stale") return "审校有更新，需重新生成结果";
+  if (batch.jobs?.export?.status === "stale")
+    return batch.workflow === "self_operated_inbound" ? "处理有更新，需重新生成结果" : "审校有更新，需重新生成结果";
   if (resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles)) return "结果可下载";
   return needsMergedGeneration ? "需生成合并结果" : "尚未生成结果";
 }

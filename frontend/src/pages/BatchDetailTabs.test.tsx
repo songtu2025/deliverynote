@@ -5,8 +5,8 @@ import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
 async function selectAllReviews() {
-  fireEvent.mouseDown(screen.getByRole("combobox", { name: "审校范围" }));
-  fireEvent.click(screen.getAllByText("全部审校").at(-1)!);
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "处理范围" }));
+  fireEvent.click(screen.getAllByText("全部待处理").at(-1)!);
   await waitFor(() =>
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("review_scope=all"), expect.anything())
   );

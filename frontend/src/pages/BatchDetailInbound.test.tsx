@@ -89,8 +89,8 @@ describe("自营仓批次详情", () => {
     expect(task.getByRole("button", { name: /上传自营仓入库单/ })).toBeEnabled();
   });
 
-  it.each(["draft", "failed"])("%s 批次仍独立预检，不自动启动计算", async (status) => {
-    state.batch.status = status;
+  it("草稿只调用预检，由后端接续计算，不显示独立预检或开始审校", async () => {
+    state.batch.status = "draft";
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
@@ -101,18 +101,25 @@ describe("自营仓批次详情", () => {
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
-    const button = task.getByRole("button", { name: /预检/ });
-    expect(button).toHaveTextContent(/^预检$/);
-    expect(task.queryByRole("button", { name: /预检并计算/ })).not.toBeInTheDocument();
-    expect(task.queryByRole("button", { name: /重新计算/ }) !== null).toBe(status === "failed");
-    expect(task.getByRole("status")).toHaveTextContent(
-      status === "draft" ? "2 份质检交货单已上传，确认顺序后预检" : "计算失败"
-    );
+    const button = task.getByRole("button", { name: "预检并计算" });
+    expect(task.queryByRole("button", { name: /^预检$/ })).not.toBeInTheDocument();
+    expect(task.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
     fireEvent.click(button);
-    expect(await screen.findByText("已提交后台预检，正在获取历史并核对累计实收")).toBeInTheDocument();
+    expect(await screen.findByText("已提交预检，通过后自动计算")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([
       ["/api/batches/7/preflight", expect.objectContaining({ method: "POST" })]
     ]);
+  });
+
+  it("失败时保留重新计算，低频取数入口放在更多菜单", async () => {
+    state.batch.status = "failed";
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
+    expect(task.getByRole("button", { name: /重新计算/ })).toBeEnabled();
+    expect(task.queryByRole("button", { name: /预检/ })).not.toBeInTheDocument();
+    expect(task.queryByRole("button", { name: "重新取数" })).not.toBeInTheDocument();
+    fireEvent.click(task.getByRole("button", { name: /更多/ }));
+    expect(await screen.findByRole("menuitem", { name: "重新取数" })).toBeInTheDocument();
   });
 
   it.each([true, false])("区分有效零值与缺失汇总：%s", async (hasSummary) => {

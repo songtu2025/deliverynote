@@ -34,7 +34,7 @@ class ReceiptWorkerTests(ReceiptWorkerCase):
                 order
             ]
             batch = self.preflight(batch_id)
-            self.assertEqual(batch["status"], "preflight_ready")
+            self.assertEqual(batch["status"], "queued")
             self.assertEqual(batch["receipt"]["unconfirmed_count"], 1)
             self.assertEqual(batch["receipt"]["requested_total"], 20)
             result = self.client.post(
@@ -78,7 +78,7 @@ class ReceiptWorkerTests(ReceiptWorkerCase):
                 order
             ]
             batch = self.preflight(batch_id)
-        self.assertEqual(batch["status"], "preflight_ready")
+        self.assertEqual(batch["status"], "queued")
         self.assertEqual(batch["receipt"]["requested_total"], 73)
         self.assertEqual(batch["receipt"]["issue_count"], 0)
         for kind in ("compute", "export"):
@@ -135,7 +135,7 @@ class ReceiptWorkerTests(ReceiptWorkerCase):
                 order
             ]
             batch = self.preflight(batch_id)
-        self.assertEqual(batch["status"], "preflight_ready")
+        self.assertEqual(batch["status"], "queued")
         self.assertEqual(batch["receipt"]["requested_total"], 19)
         for kind in ("compute", "export"):
             queued = self.client.post(
@@ -197,7 +197,7 @@ class ReceiptWorkerTests(ReceiptWorkerCase):
     def test_only_new_quantity_is_exported_and_refresh_invalidates_downloads(self):
         batch_id = self.create_receipt_batch()
         batch = self.preflight(batch_id)
-        self.assertEqual(batch["status"], "preflight_ready")
+        self.assertEqual(batch["status"], "queued")
         self.assertEqual(
             (
                 batch["receipt"]["cumulative_total"],
@@ -241,9 +241,15 @@ class ReceiptWorkerTests(ReceiptWorkerCase):
             ]
             batch = self.preflight(batch_id)
             self.assertEqual(batch["receipt"]["requested_total"], 16)
-            repeated = self.preflight(batch_id)
+            repeated = self.client.post(
+                f"/api/batches/{batch_id}/preflight", headers=self.headers
+            )
+            self.assertEqual(repeated.status_code, 409)
+            current = self.client.get(
+                f"/api/batches/{batch_id}", headers=self.headers
+            ).json()
             self.assertEqual(
-                repeated["receipt"]["captured_at"], batch["receipt"]["captured_at"]
+                current["receipt"]["captured_at"], batch["receipt"]["captured_at"]
             )
             factory.return_value.list_self_operated_inbound_orders.assert_called_once_with(
                 bill_codes=["LN2608179025"]

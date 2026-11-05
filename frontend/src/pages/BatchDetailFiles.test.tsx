@@ -87,7 +87,7 @@ describe("BatchDetailFiles", () => {
 
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("2 份质检交货单已上传，确认顺序后预检")).toBeInTheDocument();
+    expect(await screen.findByText("2 份质检交货单已上传，确认顺序后预检并计算")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
     fireEvent.focus(screen.getByRole("button", { name: "文件顺序说明" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("序号越小，越先扣减待入库余额和超收额度");

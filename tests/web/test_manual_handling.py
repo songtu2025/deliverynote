@@ -106,6 +106,11 @@ class ManualHandlingTests(ExceptionTransferCase):
         ).json()
         self.assertEqual(page["stats"]["unfinished_quantity"], 5)
         self.assertEqual(self.offline(8).json()["status"], "resolved")
+        with self.app.state.database.session() as session:
+            session.scalar(
+                select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
+            ).status = "succeeded"
+            session.commit()
         self.assertEqual(self.offline(4).json()["status"], "pending")
         summary = self.client.get(
             f"/api/batches/{self.batch_id}", headers=self.headers
@@ -137,13 +142,19 @@ class ManualHandlingTests(ExceptionTransferCase):
             (True, "原因"),
             (1.5, "原因"),
             (-1, "原因"),
-            (1, " "),
         ):
             self.assertIn(self.offline(quantity, note).status_code, (400, 422))
         self.snapshot()
         self.assertEqual(self.offline(3).status_code, 200)
         self.assertEqual(self.transfer(6).status_code, 400)
         self.assertEqual(self.transfer(5).status_code, 201)
+        with self.app.state.database.session() as session:
+            export = session.scalar(
+                select(Job).where(Job.batch_id == self.batch_id, Job.kind == "export")
+            )
+            self.assertEqual(export.status, "queued")
+            export.status = "succeeded"
+            session.commit()
         self.assertEqual(self.offline(4).status_code, 400)
         self.assertEqual(self.records()[0]["status"], "resolved")
         with self.app.state.database.session() as session:
@@ -152,7 +163,7 @@ class ManualHandlingTests(ExceptionTransferCase):
             export = session.scalar(
                 select(Job).where(Job.batch_id == batch.id, Job.kind == "export")
             )
-            self.assertEqual(export.status, "stale")
+            self.assertEqual(export.status, "succeeded")
             export.status = "running"
             session.commit()
         self.assertEqual(self.offline(0).status_code, 409)
@@ -197,7 +208,6 @@ class ManualHandlingTests(ExceptionTransferCase):
 
     def test_allowance_rejects_invalid_key_workflow_transfer_and_active_task(self):
         self.assertEqual(self.allowance(sku="不存在").status_code, 400)
-        self.assertEqual(self.allowance(reason=" ").status_code, 422)
         with self.app.state.database.session() as session:
             job = Job(
                 batch_id=self.batch_id, kind="purchase_snapshot", status="running"

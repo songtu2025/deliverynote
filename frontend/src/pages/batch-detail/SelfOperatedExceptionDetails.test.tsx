@@ -4,7 +4,8 @@ import { renderDetail } from "../batchDetailTestSupport";
 import { deferred, jsonResponse } from "../admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions, fixtureJob } from "./detailFixtures";
 import SelfOperatedExceptionDetails from "./SelfOperatedExceptionDetails";
-import BatchPurchaseSnapshot, { BatchPurchaseSnapshotNotice } from "./BatchPurchaseSnapshot";
+import BatchPurchaseSnapshot from "./BatchPurchaseSnapshot";
+import BatchMoreActions from "./BatchMoreActions";
 
 describe("自营仓异常依据", () => {
   const batch = { ...createDetailBatch(), workflow: "self_operated_inbound" as const };
@@ -68,7 +69,7 @@ describe("自营仓异常依据", () => {
   };
   const detail = (record = exception) => (
     <BatchPurchaseSnapshot batch={batch}>
-      <BatchPurchaseSnapshotNotice />
+      <BatchMoreActions disabled={false} refreshHistory={vi.fn()} />
       <SelfOperatedExceptionDetails exception={record} supplierCode="GYS-023" />
     </BatchPurchaseSnapshot>
   );
@@ -109,7 +110,8 @@ describe("自营仓异常依据", () => {
     expect(await screen.findByText("WV-1")).toBeVisible();
     pending.resolve(jsonResponse({ detail: "采购接口暂时不可用" }, 502));
     expect((await screen.findAllByText("采购接口暂时不可用"))[0]).toBeVisible();
-    fireEvent.click(await screen.findByRole("button", { name: "重试整批采购数据" }));
+    fireEvent.click(screen.getByRole("button", { name: /更多/ }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "刷新整批采购数据" }));
     expect(await screen.findByText("PO-US")).toBeVisible();
     expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("inbound-allocation"))).toHaveLength(1);
   });

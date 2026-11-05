@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { beginPurchaseSnapshot, readCompletePurchaseSnapshot, type PurchaseSnapshot } from "./inboundExceptionApi";
+import {
+  beginPurchaseSnapshot,
+  readCompletePurchaseSnapshot,
+  waitForHandlingIdle,
+  type PurchaseSnapshot
+} from "./inboundExceptionApi";
 import { fixtureJob } from "./pages/batch-detail/detailFixtures";
 import { jsonResponse } from "./pages/admin/positionDraftTestSupport";
 
@@ -45,6 +50,26 @@ describe("整批采购快照请求", () => {
     fetcher.mockResolvedValue(jsonResponse({ ...first, job: { ...first.job, status: "failed" } }));
     await beginPurchaseSnapshot(7, false, new AbortController().signal);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("撤销等待计算和自动导出结束，不在任务进行时提交", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(jsonResponse({ jobs: { compute: { status: "running" } } }))
+        .mockResolvedValueOnce(jsonResponse({ jobs: { export: { status: "queued" } } }))
+        .mockResolvedValueOnce(jsonResponse({ jobs: { export: { status: "succeeded" } } }));
+      const completed = vi.fn();
+      const waiting = waitForHandlingIdle(7).then(completed);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(completed).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1500);
+      await waiting;
+      expect(completed).toHaveBeenCalledOnce();
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("固定版本读取所有分页，超过首屏的数据也能使用", async () => {

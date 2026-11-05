@@ -1,4 +1,4 @@
-import ReceiptRefreshButton from "./ReceiptRefreshButton";
+import BatchMoreActions from "./BatchMoreActions";
 import { Tag, Typography } from "antd";
 import { ExclamationCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../../dateTime";
@@ -15,7 +15,7 @@ import BatchExportActions from "./BatchExportActions";
 import BatchPreparationActions from "./BatchPreparationActions";
 import type { ExceptionReview } from "./useExceptionReview";
 import BatchTransferSources from "./BatchTransferSources";
-import { BatchPurchaseSnapshotMetadata, BatchPurchaseSnapshotNotice } from "./BatchPurchaseSnapshot";
+import { BatchPurchaseSnapshotMetadata } from "./BatchPurchaseSnapshot";
 
 type OverviewProps = {
   batch: Batch;
@@ -29,7 +29,7 @@ type OverviewProps = {
 };
 
 export default function BatchOverview(props: OverviewProps) {
-  const { batch, activeJob, reviewStats, reviewError, tasks, action } = props;
+  const { batch, activeJob, reviewStats, reviewError, tasks } = props;
   const { computed } = batchPresentation(batch);
   const stage = batchStagePresentation(batch, activeJob, reviewStats);
   const selfOperated = batch.workflow === "self_operated_inbound";
@@ -50,13 +50,11 @@ export default function BatchOverview(props: OverviewProps) {
       </div>
       <div className="batch-task-actions">
         {selfOperated && (
-          <ReceiptRefreshButton
+          <BatchMoreActions
             disabled={Boolean(activeJob) || !batch.files?.length}
-            loading={action === "refresh-history"}
-            onConfirm={tasks.refreshHistory}
+            refreshHistory={tasks.refreshHistory}
           />
         )}
-        <BatchPurchaseSnapshotNotice />
         {computed ? <BatchExportActions {...props} /> : <BatchPreparationActions {...props} />}
       </div>
     </header>
@@ -80,6 +78,7 @@ function BatchTaskStatus({
 }: Pick<OverviewProps, "batch" | "activeJob" | "reviewStats" | "reviewError">) {
   const { tone } = batchStagePresentation(batch, activeJob, reviewStats);
   const task = batchTaskPresentation(batch, activeJob, reviewStats);
+  const statsName = batch.workflow === "self_operated_inbound" ? "待处理" : "审校";
   return (
     <div className="batch-task-bar">
       <div className={`batch-task-copy batch-task-${tone}`} role="status" aria-live="polite" aria-atomic="true">
@@ -87,8 +86,8 @@ function BatchTaskStatus({
         {tone === "running" && <LoadingOutlined className="batch-task-status-icon batch-task-spinner" aria-hidden />}
         <span>{task.title}</span>
         {tone === "error" && task.description && <p className="batch-failure-reason">{task.description}</p>}
-        {reviewError && <p>审校统计暂不可用，请重试读取批次。</p>}
-        {batchPresentation(batch).computed && !reviewStats && !reviewError && <p>正在读取审校统计…</p>}
+        {reviewError && <p>{statsName}统计暂不可用，请重试读取批次。</p>}
+        {batchPresentation(batch).computed && !reviewStats && !reviewError && <p>正在读取{statsName}统计…</p>}
       </div>
     </div>
   );

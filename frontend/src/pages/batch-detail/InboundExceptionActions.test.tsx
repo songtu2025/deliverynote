@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Batch } from "../../types";
 import { renderDetail } from "../batchDetailTestSupport";
@@ -72,7 +72,7 @@ describe("计算后行内处理", () => {
     );
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
     fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
-    expect(await screen.findByText("将重新核对并重新计算整批，现有结果需要重新生成")).toBeInTheDocument();
+    expect(await screen.findByText("将重新核对并计算整批")).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
@@ -118,41 +118,26 @@ describe("计算后行内处理", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "查看并处理" })).toBeEnabled();
   });
-  it("Modal 复用追加表单及确认，提交后刷新并关闭", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse({}))
-    );
-    const { onSaved } = show();
-    fireEvent.click(screen.getByRole("button", { name: "追加超收" }));
-    const modal = within(await screen.findByRole("dialog"));
-    expect(modal.getByRole("spinbutton")).toHaveValue("5");
-    fireEvent.change(modal.getByLabelText("原因"), { target: { value: "确认实收" } });
-    fireEvent.click(modal.getByRole("button", { name: "追加并重算" }));
-    fireEvent.click(await screen.findByRole("button", { name: "重算整批" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalled());
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/batches/7/manual-allowances",
-      expect.objectContaining({ body: expect.stringContaining('"quantity":5') })
-    );
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-  });
-  it("Modal 复用线下处理表单，成功后刷新", async () => {
+  it.each(["追加超收", "线下处理"])("%s 一键保存全部剩余量，无弹窗并可撤销回原值", async (label) => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse(record))
     );
     const { onSaved } = show();
-    fireEvent.click(screen.getByRole("button", { name: "线下处理" }));
-    const modal = within(await screen.findByRole("dialog"));
-    fireEvent.change(modal.getByLabelText("备注"), { target: { value: "线下入库" } });
-    fireEvent.click(modal.getByRole("button", { name: "修改线下处理" }));
+    fireEvent.click(screen.getByRole("button", { name: label }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    const allowance = label === "追加超收";
     expect(fetch).toHaveBeenCalledWith(
-      `/api/exceptions/${record.id}/offline-handling`,
-      expect.objectContaining({ method: "PUT" })
+      allowance ? "/api/batches/7/manual-allowances" : `/api/exceptions/${record.id}/offline-handling`,
+      expect.objectContaining({ body: expect.stringContaining(allowance ? '"quantity":5' : '"quantity":6') })
     );
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("button", { name: "撤销" }));
+    await waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(2)
+    );
+    // 撤销恢复操作前的数量：追加超收原为 0，线下处理原为 1。
+    expect(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body).toContain(allowance ? '"quantity":0' : '"quantity":1');
   });
   it("单行转交直接使用原 hook 的弹窗并仅选中当前行", async () => {
     vi.stubGlobal(

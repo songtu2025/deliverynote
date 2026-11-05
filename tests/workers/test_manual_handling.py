@@ -30,6 +30,7 @@ class ManualHandlingWorkerTests(ReceiptWorkerCase):
             json={"quantity": pending["manual_quantity"], "note": "线下登记"},
         )
         self.assertEqual(saved.status_code, 200, saved.text)
+        run_once(self.database_url, self.storage_root)
         with self.app.state.database.session() as session:
             snapshot = session.get(SelfOperatedBatch, batch_id).receipt_snapshot
             source = session.scalar(
@@ -68,6 +69,7 @@ class ManualHandlingWorkerTests(ReceiptWorkerCase):
         ]
         self.assertEqual(recomputed["offline_quantity"], pending["manual_quantity"] - 3)
         self.assertEqual(recomputed["status"], "resolved")
+        self.assertEqual(after["jobs"]["export"]["status"], "queued")
         with self.app.state.database.session() as session:
             profile = session.get(SelfOperatedBatch, batch_id)
             source = session.scalar(

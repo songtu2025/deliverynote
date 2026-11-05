@@ -135,8 +135,7 @@ describe("转交选项缓存", () => {
       <PurchaseSnapshotContext value={state}>{children}</PurchaseSnapshotContext>
     );
     const { result, rerender } = renderHook(() => useExceptionTransfer(batch, vi.fn()), { wrapper });
-    act(() => result.current.rowSelection?.onChange?.([record.id], [record], { type: "single" }));
-    act(() => result.current.action?.props.children[1].props.onClick());
+    act(() => result.current.openRow?.(record));
     const load = result.current.modal && result.current.modal.props.loadOptions;
     expect(load).toBeTypeOf("function");
     const oldRequest = load(record.id);

@@ -20,20 +20,11 @@ export default function ExceptionReviewDrawer({
   fileById: Record<number, BatchFile>;
   action: string | null;
 }) {
-  const { splitTarget, setSplitTarget, currentReviewIndex, reviewPage, exceptionTotal } = editor;
+  const { splitTarget, setSplitTarget } = editor;
   const selfOperated = batch.workflow === "self_operated_inbound";
   return (
     <Drawer
-      title={
-        <div className="review-drawer-title">
-          <strong>审校处理 · {splitTarget?.sku ?? ""}</strong>
-          {currentReviewIndex >= 0 && (
-            <span>
-              第 {(reviewPage - 1) * REVIEW_PAGE_SIZE + currentReviewIndex + 1} / {exceptionTotal} 条
-            </span>
-          )}
-        </div>
-      }
+      title={<ReviewDrawerTitle editor={editor} selfOperated={selfOperated} />}
       size={selfOperated ? "min(1280px, 100vw)" : 520}
       open={splitTarget !== null}
       onClose={() => setSplitTarget(null)}
@@ -60,6 +51,22 @@ export default function ExceptionReviewDrawer({
         </>
       )}
     </Drawer>
+  );
+}
+
+function ReviewDrawerTitle({ editor, selfOperated }: { editor: ExceptionEditor; selfOperated: boolean }) {
+  const { splitTarget, currentReviewIndex, reviewPage, exceptionTotal } = editor;
+  return (
+    <div className="review-drawer-title">
+      <strong>
+        {selfOperated ? "处理" : "审校处理"} · {splitTarget?.sku ?? ""}
+      </strong>
+      {currentReviewIndex >= 0 && (
+        <span>
+          第 {(reviewPage - 1) * REVIEW_PAGE_SIZE + currentReviewIndex + 1} / {exceptionTotal} 条
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -92,7 +99,7 @@ function ExceptionSourceSummary({
           </Descriptions.Item>
         </>
       )}
-      <Descriptions.Item label="异常原因">
+      <Descriptions.Item label={selfOperated ? "待处理原因" : "异常原因"}>
         <Tag color="warning">{splitTarget.reason}</Tag>
       </Descriptions.Item>
     </Descriptions>
