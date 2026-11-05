@@ -86,9 +86,13 @@ describe("批次真实阶段", () => {
     const pending = { unfinishedCount: 1, unfinishedQuantity: 5 };
     const resolved = { unfinishedCount: 0, unfinishedQuantity: 0 };
     expect(batchStagePresentation(batch, undefined, pending).label).toBe("待处理");
-    expect(batchTaskPresentation(batch, undefined, pending).title).toBe("正在生成结果");
+    // 没有导出任务（如规则上线前计算的批次）时提示可生成，而不是一直显示生成中。
+    expect(batchTaskPresentation(batch, undefined, pending).title).toBe("可以生成结果 · 还有 1 条待处理");
+    expect(batchStagePresentation(batch, undefined, resolved).label).toBe("可生成结果");
+    batch.jobs = { export: fixtureJob({ kind: "export", status: "running" }) };
     expect(batchStagePresentation(batch, undefined, resolved).label).toBe("生成中");
     expect(batchTaskPresentation(batch, undefined, resolved).title).toBe("正在生成结果");
+    batch.jobs = {};
     batch.download_ready = true;
     batch.merged_download_ready = true;
     expect(batchTaskPresentation(batch, undefined, pending).title).toBe("结果已生成，可以下载 · 还有 1 条待处理");

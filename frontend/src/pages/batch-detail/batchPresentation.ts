@@ -55,7 +55,7 @@ function computedStage(batch: Batch, reviewStats?: ReviewStats) {
   const selfOperated = batch.workflow === "self_operated_inbound";
   if (unfinished) return { label: selfOperated ? "待处理" : "待审校", tone: "review" };
   const ready = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
-  if (selfOperated && !ready) return { label: "生成中", tone: "running" };
+  if (selfOperated && !ready && exportActive(batch)) return { label: "生成中", tone: "running" };
   return { label: ready ? "已完成" : "可生成结果", tone: "ready" };
 }
 
@@ -176,7 +176,9 @@ function inboundResultTask(batch: Batch, downloadable: boolean, stats?: ReviewSt
       ? `结果已生成，可以下载${pending}`
       : batch.jobs?.export?.status === "stale"
         ? "需要重新生成结果"
-        : "正在生成结果",
+        : exportActive(batch)
+          ? "正在生成结果"
+          : `可以生成结果${pending}`,
     description: "",
     tone: downloadable ? "ready" : "waiting",
     busy: false
@@ -198,4 +200,8 @@ function resultDownloadAvailable(batch: Batch, needsMergedGeneration: boolean, h
 
 export function batchFileResultName(originalName: string, selfOperated: boolean) {
   return `${originalName.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`;
+}
+
+export function exportActive(batch: Batch) {
+  return ["queued", "running"].includes(batch.jobs?.export?.status ?? "");
 }
