@@ -61,7 +61,7 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
     runAction("refresh-history", async () => {
       await api(`/api/batches/${batchId}/receipts/refresh`, { method: "POST" });
       await load(true);
-      message.info("已重新排队获取历史，原计算与导出已失效");
+      message.info("已开始同步积加入库记录，完成后自动重新计算");
     });
 
   const retry = () => {

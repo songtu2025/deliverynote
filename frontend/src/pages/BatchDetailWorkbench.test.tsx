@@ -228,7 +228,10 @@ describe("BatchDetailWorkbench", () => {
     expect(container.querySelector(".ant-alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新计算" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /更多/ }));
-    expect(await screen.findByRole("menuitem", { name: "重新取数" })).not.toHaveAttribute("aria-disabled", "true");
+    expect(await screen.findByRole("menuitem", { name: "同步积加入库记录" })).not.toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
     expect(screen.getByRole("button", { name: "累计实收口径" })).toBeInTheDocument();
   });
 });

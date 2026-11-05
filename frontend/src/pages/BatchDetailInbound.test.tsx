@@ -227,9 +227,9 @@ describe("自营仓批次详情", () => {
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(task.getByRole("button", { name: /重新计算/ })).toBeEnabled();
     expect(task.queryByRole("button", { name: /预检/ })).not.toBeInTheDocument();
-    expect(task.queryByRole("button", { name: "重新取数" })).not.toBeInTheDocument();
+    expect(task.queryByRole("button", { name: "同步积加入库记录" })).not.toBeInTheDocument();
     fireEvent.click(task.getByRole("button", { name: /更多/ }));
-    expect(await screen.findByRole("menuitem", { name: "重新取数" })).toBeInTheDocument();
+    expect(await screen.findByRole("menuitem", { name: "同步积加入库记录" })).toBeInTheDocument();
   });
 
   it.each([true, false])("区分有效零值与缺失汇总：%s", async (hasSummary) => {

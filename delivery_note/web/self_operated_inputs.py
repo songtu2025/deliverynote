@@ -106,11 +106,8 @@ async def validated_inbound_source(
         inbound_source_path = temporary_inbound
     else:
         inbound_source_path = Path(cast(InputVersion, files.api_version).storage_path)
+        # API 版本在同步生成时已完整校验，预检也改为向积加取数，创建时只确认文件存在。
         if not await run_in_threadpool(inbound_source_path.is_file):
             raise ValueError("启用的待入库 API 数据文件不存在")
-        await parse_workbook(
-            read_self_operated_inbound_workbook,
-            inbound_source_path,
-        )
 
     return inbound_source_path

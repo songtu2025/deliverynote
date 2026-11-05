@@ -152,7 +152,7 @@ describe("BatchesPage", () => {
     Object.assign(state.batchRows[0], { workflow: "self_operated_inbound", receipt: undefined, download_ready: true });
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByTitle("重新取数并核对")).toBeInTheDocument();
+    expect(within(row).getByTitle("同步积加入库记录并核对")).toBeInTheDocument();
     expect(within(row).getByText("尚未计算")).toBeInTheDocument();
     expect(within(row).queryByText(/可入库 100/)).not.toBeInTheDocument();
   });
@@ -166,7 +166,7 @@ describe("BatchesPage", () => {
     const onOpen = vi.fn();
     render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: AntApp });
     const button = await screen.findByRole("button", { name: "打开 2026-07-21 交货批次" });
-    expect(button).toHaveAttribute("title", "重新取数并核对");
+    expect(button).toHaveAttribute("title", "同步积加入库记录并核对");
     expect(button).toHaveTextContent("去核对");
     fireEvent.click(button);
     expect(onOpen).toHaveBeenCalledWith(7);

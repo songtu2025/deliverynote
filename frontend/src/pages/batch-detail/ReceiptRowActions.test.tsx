@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import ReceiptReview from "./ReceiptReview";
 import ReceiptRowActions from "./ReceiptRowActions";
+import { receiptRefreshConfirmation } from "./ReceiptRefreshButton";
 import type { ReceiptRow } from "./ReceiptReviewDetails";
 import { createDetailBatch, fixtureJob } from "./detailFixtures";
 import { renderDetail } from "../batchDetailTestSupport";
@@ -84,10 +85,10 @@ describe("计算前行内处理", () => {
     expect(onVersions).toHaveBeenCalled();
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
-  it("重新取数沿用页头确认文案，确认后才执行", async () => {
+  it("同步积加入库记录沿用页头确认文案，确认后才执行", async () => {
     const { onRefresh } = show("未找到自营仓入库单");
-    fireEvent.click(await screen.findByRole("button", { name: "重新取数" }));
-    expect(await screen.findByText("会清除当前计算与导出结果，再按本批单号获取最新历史。")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "同步积加入库记录" }));
+    expect(await screen.findByText(receiptRefreshConfirmation.description)).toBeInTheDocument();
     expect(onRefresh).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalled());
@@ -112,7 +113,7 @@ describe("计算前行内处理", () => {
     fireEvent.focus(target);
     expect(await screen.findByRole("tooltip")).toHaveTextContent("当前批次状态不可预检");
   });
-  it("导出运行中重新取数禁用", async () => {
+  it("导出运行中同步积加入库记录禁用", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse({ items: [{ ...row, issue: "供应商不一致" }], total: 1 }))
@@ -126,6 +127,6 @@ describe("计算前行内处理", () => {
         onRefresh={vi.fn()}
       />
     );
-    expect(await screen.findByRole("button", { name: "重新取数" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "同步积加入库记录" })).toBeDisabled();
   });
 });

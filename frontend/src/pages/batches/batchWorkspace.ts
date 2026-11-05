@@ -20,7 +20,7 @@ export const SELF_OPERATED_VERSION_KINDS = [
 
 export function nextAction(batch: Batch, workflow: BatchWorkflow = batch.workflow ?? "delivery"): string {
   if (workflow === "self_operated_inbound" && batch.status === "draft" && batch.receipt?.issue_count)
-    return "重新取数并核对";
+    return "同步积加入库记录并核对";
   if (batch.status === "draft") {
     if (batch.workflow === "self_operated_inbound") {
       return batch.file_count && batch.inbound_file?.uploaded ? "预检" : "上传质检交货单";
@@ -30,7 +30,7 @@ export function nextAction(batch: Batch, workflow: BatchWorkflow = batch.workflo
   if (batch.status === "preflight_ready") return "开始计算";
   if (batch.status === "queued" || batch.status === "running") return "计算中";
   if (batch.status === "failed" || batch.status === "expired") return "查看原因";
-  if (workflow === "self_operated_inbound" && !receiptReady(batch)) return "重新取数并核对";
+  if (workflow === "self_operated_inbound" && !receiptReady(batch)) return "同步积加入库记录并核对";
   if (workflow === "delivery" && (batch.summary?.manual_total ?? 0) > 0) return "审校待处理";
   if (batch.download_ready) return "下载结果";
   if ((batch.summary?.manual_total ?? 0) > 0) return "审校待处理";

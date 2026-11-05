@@ -66,6 +66,36 @@ describe("BatchesPageCreation", () => {
     expect(submittedName).toBe("自营仓手工批次");
   });
 
+  it("创建期间显示处理中并阻止重复提交与关闭", async () => {
+    let finish: (value: Response) => void = () => undefined;
+    const loadFetch = vi.mocked(fetch);
+    const create = vi.fn(() => new Promise<Response>((resolve) => (finish = resolve)));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) =>
+        String(input).endsWith("/api/self-operated-batches") && init.method === "POST"
+          ? create()
+          : loadFetch(input, init)
+      )
+    );
+    const onOpen = vi.fn();
+    render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: AntApp });
+    fireEvent.click(await screen.findByRole("button", { name: /新建批次/ }));
+    const dialog = await screen.findByRole("dialog", { name: "新建自营仓入库批次" });
+    fireEvent.change(dialog.querySelector<HTMLInputElement>('input[type="file"]')!, {
+      target: { files: [new File(["synthetic"], "质检样本.xlsx")] }
+    });
+    const submit = within(dialog).getByRole("button", { name: "创建批次" });
+    await waitFor(() => expect(submit).toBeEnabled());
+    fireEvent.click(submit);
+    const busy = await within(dialog).findByRole("button", { name: /正在校验并创建/ });
+    expect(within(dialog).getByRole("button", { name: /取\s*消/ })).toBeDisabled();
+    fireEvent.click(busy);
+    expect(create).toHaveBeenCalledTimes(1);
+    finish(jsonResponse({ id: 91 }));
+    await waitFor(() => expect(onOpen).toHaveBeenCalledWith(91));
+  });
+
   it("requires a delivery file before creating a delivery batch", async () => {
     render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
 

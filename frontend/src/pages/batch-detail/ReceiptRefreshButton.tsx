@@ -1,8 +1,9 @@
 import { Button, Popconfirm } from "antd";
 
 export const receiptRefreshConfirmation = {
-  title: "重新获取历史？",
-  description: "会清除当前计算与导出结果，再按本批单号获取最新历史。"
+  title: "同步积加入库记录？",
+  description:
+    "将从积加重新获取本批交货单的入库记录，并重新核对、计算整批；现有结果作废，已保存的追加超收、站点选择和线下处理保留。"
 };
 
 export default function ReceiptRefreshButton({
@@ -19,7 +20,7 @@ export default function ReceiptRefreshButton({
   return (
     <Popconfirm {...receiptRefreshConfirmation} onConfirm={onConfirm}>
       <Button color={inline ? "primary" : "default"} variant="outlined" disabled={disabled} loading={loading}>
-        重新取数
+        同步积加入库记录
       </Button>
     </Popconfirm>
   );

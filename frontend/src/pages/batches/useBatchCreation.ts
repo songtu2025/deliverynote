@@ -16,10 +16,12 @@ function todayBatchName(workflow: "delivery" | "self_operated_inbound"): string 
 export function useBatchCreation(workflow: BatchWorkflow, onOpen: (id: number) => void) {
   const { message } = AntApp.useApp();
   const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [deliveryFiles, setDeliveryFiles] = useState<UploadFile[]>([]);
   const [sourceFiles, setSourceFiles] = useState<UploadFile[]>([]);
   const [form] = Form.useForm<{ name: string }>();
   const create = async () => {
+    if (submitting) return;
     try {
       const values = await form.validateFields();
       const selectedFiles = workflow === "self_operated_inbound" ? sourceFiles : deliveryFiles;
@@ -28,6 +30,7 @@ export function useBatchCreation(workflow: BatchWorkflow, onOpen: (id: number) =
         message.warning(workflow === "self_operated_inbound" ? "请至少选择一份质检交货单" : "请至少选择一份交货文件");
         return;
       }
+      setSubmitting(true);
       const batch = await createBatchWithFiles(workflow, values.name, files);
       setCreating(false);
       form.resetFields();
@@ -38,6 +41,8 @@ export function useBatchCreation(workflow: BatchWorkflow, onOpen: (id: number) =
       if (!(error instanceof ApiError && error.status === 401)) {
         message.error(error instanceof Error ? error.message : "创建批次失败");
       }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -67,6 +72,7 @@ export function useBatchCreation(workflow: BatchWorkflow, onOpen: (id: number) =
   return {
     form,
     creating,
+    submitting,
     deliveryFiles,
     sourceFiles,
     create,

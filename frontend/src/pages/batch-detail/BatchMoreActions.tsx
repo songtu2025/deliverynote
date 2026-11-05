@@ -18,7 +18,7 @@ export default function BatchMoreActions({
     <Dropdown
       menu={{
         items: [
-          { key: "history", label: "重新取数", disabled },
+          { key: "history", label: "同步积加入库记录", disabled },
           ...(state?.enabled
             ? [
                 {
@@ -35,7 +35,7 @@ export default function BatchMoreActions({
             modal.confirm({
               title: receiptRefreshConfirmation.title,
               content: receiptRefreshConfirmation.description,
-              okText: "重新取数",
+              okText: "同步",
               cancelText: "取消",
               onOk: refreshHistory
             });
