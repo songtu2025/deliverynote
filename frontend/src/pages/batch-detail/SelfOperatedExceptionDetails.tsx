@@ -4,6 +4,7 @@ import { formatBeijingDateTime } from "../../dateTime";
 import type { Batch, DeliveryException } from "../../types";
 import type { InboundAllocations, PurchaseOption } from "../../inboundExceptionApi";
 import { useInboundExceptionDetails } from "./useInboundExceptionDetails";
+import ReasonGuidance from "./ReasonGuidance";
 import InboundAllocationEditor from "./InboundAllocationEditor";
 import { useInboundRecalculation } from "./useInboundRecalculation";
 import { PURCHASE_LOADING_MESSAGE } from "./BatchPurchaseSnapshot";
@@ -29,6 +30,11 @@ export default function SelfOperatedExceptionDetails({
   const quantities = currentQuantities(exception, allocations.data);
   return (
     <Flex vertical gap="middle">
+      <ReasonGuidance
+        exception={exception}
+        hasOverreceiptRule={Boolean(batch?.self_operated_overreceipt_rule)}
+        selfOperated
+      />
       {recalculation.busy && <Alert type="info" showIcon title="正在重算整批，完成后自动刷新" />}
       {recalculation.feedback && (
         <Alert type={recalculation.feedback.error ? "error" : "success"} showIcon title={recalculation.feedback.text} />

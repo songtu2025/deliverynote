@@ -90,7 +90,7 @@ export default function ExceptionReviewTable({
           }}
           columns={[
             ...reviewIdentityColumns(selfOperated, fileById, onOpen),
-            ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen).map((column) =>
+            ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen, fileById).map((column) =>
               selfOperated && transferBatch && column.title === "操作"
                 ? {
                     ...column,
@@ -209,7 +209,8 @@ function reviewIdentityColumns(
 function reviewDetailColumns(
   selfOperated: boolean,
   hasOverreceiptRule: boolean,
-  onOpen: (record: DeliveryException) => void
+  onOpen: (record: DeliveryException) => void,
+  fileById: Record<number, BatchFile>
 ): TableColumnsType<DeliveryException> {
   return [
     {
@@ -233,7 +234,11 @@ function reviewDetailColumns(
       width: selfOperated ? 250 : 180,
       render: (_, record) => (
         <>
-          <ExceptionEvidence exception={record} hasOverreceiptRule={hasOverreceiptRule} />
+          <ExceptionEvidence
+            exception={record}
+            hasOverreceiptRule={hasOverreceiptRule}
+            documentNote={fileById[record.batch_file_id]?.document_note}
+          />
           {selfOperated && <ExceptionTransfers record={record} />}
         </>
       )

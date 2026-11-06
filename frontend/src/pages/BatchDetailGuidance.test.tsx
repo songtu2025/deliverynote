@@ -7,6 +7,31 @@ import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 describe("BatchDetailGuidance", () => {
   const { state } = setupBatchDetailTest();
 
+  it.each(["delivery", "self_operated_inbound"] as const)("%s 列表展示商品与入库单依据", async (workflow) => {
+    state.batch.workflow = workflow;
+    if (workflow === "self_operated_inbound") {
+      state.batch.inbound_file = { uploaded: true, original_name: "合成待入库.xlsx" };
+      state.batch.receipt = { cumulative_total: 160, history_total: 0, requested_total: 160, issue_count: 0 };
+    }
+    state.batch.files[1].document_note = "LN-1、LN-2";
+    state.exceptions = [
+      { ...state.exceptions[0], reason_code: "product_not_found", reason: "产品信息未匹配" },
+      { ...state.exceptions[1], reason_code: "inbound_order_not_found", reason: "未找到自营仓入库单" }
+    ];
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const productRow = (await screen.findByText("SKU-A")).closest("tr")!;
+    const inboundRow = screen.getByText("SKU-B").closest("tr")!;
+    expect(productRow).toHaveTextContent("原始站点 US：锁定商品资料无此 SKU 的该站点记录");
+    expect(inboundRow).toHaveTextContent("交货单号 LN-1、LN-2 下无此 SKU、站点的入库单");
+    expect(screen.queryByText("查看异常原因后处理")).not.toBeInTheDocument();
+    if (workflow === "self_operated_inbound") {
+      fireEvent.click(within(inboundRow).getByRole("button", { name: "SKU-B" }));
+      const drawer = within(await screen.findByRole("dialog"));
+      expect(drawer.getByText("处理建议")).toBeVisible();
+      expect(drawer.getByRole("region", { name: "原因指导" })).toHaveTextContent("请在积加核对关联交货单和商品站点");
+    }
+  });
+
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
     state.exceptions[2].reason = "候选站点需要确认";
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
