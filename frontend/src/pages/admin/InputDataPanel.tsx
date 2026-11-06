@@ -108,6 +108,14 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
           </div>
 
           <div className="input-data-status-actions">
+            <Button
+              aria-label="下载当前文件"
+              icon={<DownloadOutlined />}
+              disabled={!activeVersion}
+              onClick={() => void downloadCurrent(activeVersion)}
+            >
+              下载当前文件
+            </Button>
             {selectedKind === "position" && activeVersion ? (
               <Button
                 type="primary"
@@ -129,14 +137,6 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
                 {activeVersion ? "更新资料" : "上传首个版本"}
               </Button>
             )}
-            <Button
-              aria-label="下载当前文件"
-              icon={<DownloadOutlined />}
-              disabled={!activeVersion}
-              onClick={() => void downloadCurrent(activeVersion)}
-            >
-              下载当前文件
-            </Button>
           </div>
         </section>
 
@@ -144,16 +144,8 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
           <Alert type="error" showIcon closable title="操作失败" description={actionError.message} />
         )}
 
-        <section className={`input-data-context${contextOpen ? " is-open" : ""}`} aria-label="字段说明">
-          <div className="input-data-context-summary">
-            <div>
-              <Typography.Text strong>字段说明</Typography.Text>
-            </div>
-            <Button type="text" size="small" onClick={() => setContextOpen((value) => !value)}>
-              {contextOpen ? "收起字段说明" : "查看字段说明"}
-            </Button>
-          </div>
-          {contextOpen && (
+        {contextOpen && (
+          <section className="input-data-context" aria-label="字段说明">
             <div className="input-data-context-grid">
               <div className="input-data-required-fields">
                 <Typography.Text type="secondary">必填字段</Typography.Text>
@@ -178,12 +170,17 @@ export function InputDataPanel({ versions, loading, onVersionsChanged, onOpenPos
                 <p>{selectedDefinition.impact}</p>
               </div>
             </div>
-          )}
-        </section>
+          </section>
+        )}
 
         <section className="input-data-workspace" aria-label={`${selectedDefinition.label}资料工作区`}>
           <Tabs
             className="input-data-workspace-tabs"
+            tabBarExtraContent={
+              <Button type="link" size="small" onClick={() => setContextOpen((value) => !value)}>
+                {contextOpen ? "收起字段说明" : "查看字段说明"}
+              </Button>
+            }
             activeKey={workspaceTab}
             onChange={(key) => setWorkspaceTab(key as WorkspaceTab)}
             items={[

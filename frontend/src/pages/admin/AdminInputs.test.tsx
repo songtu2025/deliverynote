@@ -13,7 +13,7 @@ describe("管理员Inputs", () => {
     render(<AdminPage currentUser={admin} />);
 
     await screen.findByText("基础资料目录");
-    fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^MSKU定位/ }));
     const maintenanceEntry = screen.getByRole("button", { name: "开始网页维护" });
     fireEvent.click(maintenanceEntry);
     expect(await screen.findByText("MSKU 定位维护")).toBeInTheDocument();
@@ -32,7 +32,7 @@ describe("管理员Inputs", () => {
 
     try {
       await screen.findByText("基础资料目录");
-      fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^MSKU定位/ }));
       fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
       expect(await screen.findByText("正在创建或恢复服务器草稿")).toBeInTheDocument();
       await waitFor(() => expect(screen.getByRole("button", { name: "返回基础资料" })).toHaveFocus());
@@ -73,7 +73,7 @@ describe("管理员Inputs", () => {
       render(<AdminPage currentUser={admin} />);
 
       await screen.findByText("基础资料目录");
-      fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
+      fireEvent.click(screen.getByRole("radio", { name: /^MSKU定位/ }));
       fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
       fireEvent.click(await screen.findByRole("button", { name: "发布新版本" }));
       fireEvent.change(await screen.findByLabelText("新版本名称"), { target: { value: "position-published" } });
@@ -100,7 +100,7 @@ describe("管理员Inputs", () => {
           expect(screen.queryByText("新库位版本已发布并启用")).not.toBeInTheDocument();
           fireEvent.click(screen.getByRole("button", { name: "重新加载" }));
         }
-        await screen.findByRole("button", { name: /MSKU定位，已就绪，当前版本 position-published/ });
+        await screen.findByRole("radio", { name: /MSKU定位，已就绪，当前版本 position-published/ });
         await waitFor(() => expect(screen.getByRole("heading", { name: "基础资料目录" })).toHaveFocus());
       }
       window.removeEventListener(apiModule.AUTH_EXPIRED_EVENT, authExpired);

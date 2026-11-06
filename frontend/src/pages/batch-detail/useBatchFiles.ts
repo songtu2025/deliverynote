@@ -27,15 +27,6 @@ export function useBatchFiles({
     });
   };
 
-  const uploadInboundFile: NonNullable<UploadProps["customRequest"]> = async (options) => {
-    await runAction("upload-inbound", async () => {
-      await uploadBatchFile(batchId, options.file as File, "inbound");
-      options.onSuccess?.({});
-      await load(true);
-      message.success("自营仓入库单已上传，预检状态已更新");
-    });
-  };
-
   const removeFile = async (file: BatchFile) => {
     await runAction(`delete:${file.id}`, async () => {
       await deleteBatchFile(batchId, file.id);
@@ -57,6 +48,6 @@ export function useBatchFiles({
     });
   };
 
-  return { uploadFile, uploadInboundFile, removeFile, move };
+  return { uploadFile, removeFile, move };
 }
 export type BatchFiles = ReturnType<typeof useBatchFiles>;

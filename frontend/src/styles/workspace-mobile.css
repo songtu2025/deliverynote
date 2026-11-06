@@ -29,7 +29,7 @@
     margin-bottom: 16px;
   }
   .page-heading h2 {
-    font-size: 26px !important;
+    font-size: 24px;
   }
   .batch-list-page .page-heading > .ant-btn {
     width: 100%;
@@ -132,13 +132,6 @@
   }
   .split-conservation > .anticon {
     display: none;
-  }
-  .overreceipt-scope-switcher {
-    grid-template-columns: 1fr;
-  }
-  .overreceipt-scope-switcher button {
-    min-height: 44px;
-    padding: 8px 12px;
   }
   .overreceipt-effect-notice {
     align-items: flex-start;

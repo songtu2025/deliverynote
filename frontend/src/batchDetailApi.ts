@@ -55,12 +55,10 @@ export function startBatchJob(batchId: number, kind: "compute" | "export") {
   return api<Job>(`/api/batches/${batchId}/${kind}`, { method: "POST" });
 }
 
-export function uploadBatchFile(batchId: number, file: File, kind: "delivery" | "inbound" = "delivery") {
+export function uploadBatchFile(batchId: number, file: File) {
   const body = new FormData();
   body.append("file", file);
-  const path =
-    kind === "inbound" ? `/api/self-operated-batches/${batchId}/inbound-file` : `/api/batches/${batchId}/files`;
-  return api<Batch | BatchFile>(path, { method: "POST", body });
+  return api<Batch | BatchFile>(`/api/batches/${batchId}/files`, { method: "POST", body });
 }
 
 export function deleteBatchFile(batchId: number, fileId: number) {

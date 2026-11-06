@@ -41,6 +41,7 @@ export default function AdminPage({ currentUser, active = true }: AdminPageProps
       <div className="page-heading admin-maintenance-heading">
         <div>
           <Typography.Title level={2}>管理员维护</Typography.Title>
+          <Typography.Text type="secondary">维护批次锁定使用的基础资料、接口配置与账号。</Typography.Text>
         </div>
       </div>
 

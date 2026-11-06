@@ -27,7 +27,7 @@ describe("OverreceiptRulesPage", () => {
     expect(screen.getByText("暂无历史版本")).toBeInTheDocument();
     expect(screen.getByText("发布新版本后，原版本会移到这里。")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     expect(screen.getAllByText("2026-07 短尾放宽")).toHaveLength(1);
     expect(screen.getByText("0 个历史版本")).toBeInTheDocument();
   });
@@ -60,7 +60,7 @@ describe("OverreceiptRulesPage", () => {
     expect(await screen.findByText("自营仓历史规则新名称")).toBeInTheDocument();
     expect(screen.getAllByText("+3 件").length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     fireEvent.click(screen.getByRole("button", { name: "重命名 2026-07 短尾放宽" }));
     const deliveryDialog = await screen.findByRole("dialog", { name: "修改版本名称" });
     fireEvent.change(within(deliveryDialog).getByLabelText("版本名称"), {
@@ -101,7 +101,7 @@ describe("OverreceiptRulesPage", () => {
     );
     render(<OverreceiptRulesPage />);
     await screen.findByText(selfOperatedRule.name);
-    if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    if (scope === "delivery") fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     const button = () =>
       screen.getByLabelText(`重新启用 ${scope === "delivery" ? previousRule.name : previousSelfOperatedRule.name}`);
     fireEvent.click(button());
@@ -119,7 +119,7 @@ describe("OverreceiptRulesPage", () => {
     await screen.findByText(selfOperatedRule.name);
     const previous = scope === "delivery" ? previousRule : previousSelfOperatedRule;
     const current = scope === "delivery" ? firstRule : selfOperatedRule;
-    if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    if (scope === "delivery") fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     fireEvent.click(screen.getByRole("button", { name: `重新启用 ${previous.name}` }));
     const table = () =>
       screen.getByRole("table", { name: scope === "delivery" ? "超收规则不可变版本" : "自营仓超收规则历史版本" });

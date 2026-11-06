@@ -12,7 +12,12 @@ export default function App() {
         token: {
           colorPrimary: "#055247",
           colorInfo: "#2d5c94",
-          colorSuccess: "#1f6b52",
+          colorLink: "#055247",
+          colorLinkHover: "#055247",
+          colorLinkActive: "#055247",
+          fontSizeHeading2: 24,
+          fontWeightStrong: 600,
+          colorSuccess: "#055247",
           colorWarning: "#b4381f",
           colorError: "#a3162b",
           // 深色种子色自动派生的浅底偏灰，显式指定选中、提示和标签的底色与边框。
@@ -39,6 +44,22 @@ export default function App() {
         },
         components: {
           Button: { primaryShadow: "none", defaultShadow: "none" },
+          Card: { borderRadiusLG: 10 },
+          Tag: { borderRadiusSM: 4 },
+          Table: { headerBg: "#f8fafc", headerColor: "#667085", headerSplitColor: "transparent" },
+          Segmented: {
+            trackBg: "#f1f4f8",
+            itemSelectedBg: "#ffffff",
+            itemSelectedColor: "#182230",
+            borderRadius: 6,
+            borderRadiusSM: 6
+          },
+          Alert: {
+            colorWarning: "#8a5a12",
+            colorWarningText: "#8a5a12",
+            colorWarningBg: "#fdf4e3",
+            colorWarningBorder: "#f1dfb6"
+          },
           Layout: { siderBg: "#f8fafc" },
           Menu: {
             itemHeight: 44,

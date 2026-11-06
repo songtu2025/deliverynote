@@ -9,17 +9,17 @@ describe("BatchDetailReview", () => {
 
   it("shows quantity conservation and prevents an invalid split", async () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     await screen.findByText("交货 160 = 可导入 100 + 待处理 60");
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
     fireEvent.focus(screen.getByRole("button", { name: "文件顺序说明" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("序号越小，越先扣减采购余额");
-    fireEvent.click(screen.getByRole("tab", { name: /^待办/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
     const task = within(screen.getByRole("region", { name: "批次任务状态" }));
-    expect(await task.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    await waitFor(() => expect(task.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件"));
     expect(screen.queryByText(/当前阶段/)).not.toBeInTheDocument();
-    expect(task.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    expect(task.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件");
     expect(task.getByRole("button", { name: "开始审校" })).toBeInTheDocument();
     const reviewTable = within(container.querySelector(".exception-review-card") as HTMLElement);
     expect(reviewTable.getByRole("columnheader", { name: "定位", hidden: true })).toBeInTheDocument();
@@ -33,7 +33,7 @@ describe("BatchDetailReview", () => {
     expect(screen.queryByText("短尾超收 V1")).not.toBeInTheDocument();
     fireEvent.click(lockedData.getByRole("button", { name: "查看锁定版本" }));
     expect(screen.getByText("短尾超收 V1")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: /^待办/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^待处理/ }));
     expect(container.querySelector(".exception-review-card .ant-pagination")).not.toBeInTheDocument();
     const reviewButton = reviewTable.getByRole("button", { name: "审校 SKU-A", hidden: true });
     expect(reviewButton).toHaveTextContent("审校");
@@ -56,7 +56,7 @@ describe("BatchDetailReview", () => {
 
   it("filters pending rows by site, scale position, and stocking position", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     await screen.findByText("SKU-A");
     expect(screen.getByText("SKU-B")).toBeInTheDocument();
@@ -89,9 +89,9 @@ describe("BatchDetailReview", () => {
   it("keeps review navigation working across server pages", async () => {
     state.exceptions = pagedExceptions();
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    expect(await screen.findByRole("button", { name: "全部 12" })).toBeInTheDocument();
+    expect(await screen.findByRole("radio", { name: "全部 12" })).toBeInTheDocument();
     fireEvent.click(screen.getByTitle("2"));
     expect(await screen.findByText("SKU-11")).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: /^审校 SKU-/, hidden: true })[0]);
@@ -115,9 +115,9 @@ describe("BatchDetailReview", () => {
   it("returns to the first review page when searching from a later page", async () => {
     state.exceptions = pagedExceptions();
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    await screen.findByRole("button", { name: "全部 12" });
+    await screen.findByRole("radio", { name: "全部 12" });
     fireEvent.click(screen.getByTitle("2"));
     await screen.findByText("SKU-11");
     fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), {
@@ -142,27 +142,28 @@ describe("BatchDetailReview", () => {
       full_site: "AMAZON:SEEKWAY:US"
     };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const sku = await screen.findByText("SKU-EXCESS-LONG");
     const row = sku.closest("tr");
     expect(row).not.toBeNull();
     const site = within(row!).getByText("AMAZON:SEEKWAY:US");
 
-    expect(sku).toHaveClass("exception-sku-value");
+    // SKU 是打开处理抽屉的链接，交货与自营仓一致。
+    expect(sku.closest("button")).toHaveClass("exception-sku-link");
     expect(site).toHaveClass("exception-site-value");
     expect(site.closest("td")).not.toHaveClass("ant-table-cell-ellipsis");
   }, 30_000);
 
   it("summarizes unfinished work and saves directly into the next exception", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const overview = await screen.findByRole("region", { name: "审校概览" });
-    expect(within(overview).getByRole("button", { name: "待审校 4" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(overview).getByRole("button", { name: "已处理 0" })).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "全部 4" })).toBeInTheDocument();
-    expect(screen.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    expect(within(overview).getByRole("radio", { name: "未完成 4" })).toBeChecked();
+    expect(within(overview).getByRole("radio", { name: "已处理 0" })).toBeInTheDocument();
+    expect(within(overview).getByRole("radio", { name: "全部 4" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件");
 
     const excessRow = (await screen.findByText("SKU-A")).closest("tr");
     expect(excessRow).not.toBeNull();
@@ -182,11 +183,11 @@ describe("BatchDetailReview", () => {
     drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByText("审校处理 · SKU-B")).toBeInTheDocument();
     expect(within(drawer).getByText("第 1 / 3 条")).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "待审校 3" })).toBeInTheDocument();
-    expect(within(overview).getByRole("button", { name: "已处理 1" })).toBeInTheDocument();
-    expect(screen.getByText("3 条待审校，共 47 件")).toBeInTheDocument();
+    expect(within(overview).getByRole("radio", { name: "未完成 3" })).toBeInTheDocument();
+    expect(within(overview).getByRole("radio", { name: "已处理 1" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("3 条待审校，共 47 件");
     fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
-    fireEvent.click(within(overview).getByRole("button", { name: "已处理 1" }));
+    fireEvent.click(within(overview).getByRole("radio", { name: "已处理 1" }));
     const modify = await screen.findByRole("button", { name: "修改 SKU-A", hidden: true });
     expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toContain(
       "/api/batches/7/exceptions?offset=0&limit=10&review_scope=resolved"
@@ -205,7 +206,7 @@ describe("BatchDetailReview", () => {
       conserved: true
     };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
     const row = (await screen.findByText("SKU-A")).closest("tr");
     expect(row).not.toBeNull();
@@ -217,4 +218,16 @@ describe("BatchDetailReview", () => {
     expect(within(drawer).queryByRole("button", { name: "下一条" })).not.toBeInTheDocument();
     expect(within(drawer).getByRole("button", { name: "保存" })).toBeInTheDocument();
   }, 30_000);
+  it("原因与依据同列，文件序号位于 SKU 下，审校为文字按钮", async () => {
+    renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
+    const row = (await screen.findByText("SKU-A")).closest("tr")!;
+    const cause = within(row).getByText("超出采购未交量").closest("td")!;
+    expect(within(cause).getByLabelText("已分配 20")).toBeInTheDocument();
+    expect(within(cause).getByLabelText("超出 60")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "原因与依据" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "文件" })).not.toBeInTheDocument();
+    expect(within(row).getByText("文件 2").closest("td")).toBe(within(row).getByText("SKU-A").closest("td"));
+    expect(within(row).getByRole("button", { name: "审校 SKU-A" })).toHaveClass("ant-btn-link");
+    expect(within(row).getByText("待审校")).toHaveClass("batch-stage-review");
+  });
 });

@@ -41,7 +41,7 @@ describe("InputDataPanel 资料类型与工作区", () => {
     expect(screen.queryByRole("region", { name: "公共基础资料" })).not.toBeInTheDocument();
     expect(screen.getByText("2/5 已启用")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "商品信息资料状态" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /，(已就绪|未启用)，/ })).toHaveLength(5);
+    expect(screen.getAllByRole("radio", { name: /，(已就绪|未启用)，/ })).toHaveLength(5);
     expect(screen.getByRole("tab", { name: /数据预览/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: /版本记录/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /质量检查/ })).toBeInTheDocument();
@@ -139,14 +139,14 @@ describe("InputDataPanel 资料类型与工作区", () => {
 
     const productButton = getCatalogButton("商品信息");
     const supplierButton = getCatalogButton("供应商资料");
-    expect(productButton).toHaveAttribute("aria-pressed", "true");
+    expect(productButton).toBeChecked();
     expect(productButton).toHaveAccessibleName("商品信息，已就绪，当前版本 product-current");
-    expect(supplierButton).toHaveAttribute("aria-pressed", "false");
+    expect(supplierButton).not.toBeChecked();
     expect(supplierButton).toHaveAccessibleName("供应商资料，未启用，等待上传");
 
     fireEvent.click(supplierButton);
-    expect(productButton).toHaveAttribute("aria-pressed", "false");
-    expect(supplierButton).toHaveAttribute("aria-pressed", "true");
+    expect(productButton).not.toBeChecked();
+    expect(supplierButton).toBeChecked();
   });
   it("keeps the current data status concise and moves repeated details out of the header", () => {
     render(

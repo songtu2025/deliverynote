@@ -99,7 +99,7 @@ export function render(ui: ReactElement) {
 }
 
 export const getCatalogButton = (label: string) =>
-  screen.getByRole("button", {
+  screen.getByRole("radio", {
     name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`)
   });
 

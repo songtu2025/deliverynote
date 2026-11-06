@@ -8,19 +8,26 @@ function siteKey(record: DeliveryException) {
   return JSON.stringify([record.batch_file_id, record.sku, record.original_site]);
 }
 
-export function useInboundAdjustments(batch: Batch | undefined, onSaved?: () => Promise<unknown>) {
-  const [sites, setSites] = useState<Record<string, SiteAdjustmentInput>>({});
+export function useInboundAdjustments(batch: Batch | null | undefined, onSaved?: () => Promise<unknown>) {
+  const [draft, setDraft] = useState<{
+    batchId?: number;
+    sites: Record<string, SiteAdjustmentInput>;
+  }>({ batchId: batch?.id, sites: {} });
+  const sites = draft.batchId === batch?.id ? draft.sites : {};
   const { busy, save } = useSaveInboundAdjustments(batch?.id, onSaved);
-  const discard = () => setSites({});
+  const discard = () => setDraft({ batchId: batch?.id, sites: {} });
   const disabledReason = batch ? allowanceDisabledReason(batch) : "批次尚未计算成功";
   const setSite = (record: DeliveryException, fullSite: string) => {
-    setSites((current) => ({
-      ...current,
-      [siteKey(record)]: {
-        file_id: record.batch_file_id,
-        sku: record.sku,
-        original_site: record.original_site,
-        full_site: fullSite
+    setDraft((current) => ({
+      batchId: batch?.id,
+      sites: {
+        ...(current.batchId === batch?.id ? current.sites : {}),
+        [siteKey(record)]: {
+          file_id: record.batch_file_id,
+          sku: record.sku,
+          original_site: record.original_site,
+          full_site: fullSite
+        }
       }
     }));
   };

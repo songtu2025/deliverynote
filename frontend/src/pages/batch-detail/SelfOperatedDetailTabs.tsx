@@ -11,8 +11,6 @@ type DetailTabsProps = {
   activeKey?: string;
   onChange: (key: string) => void;
   reviewStats?: ExceptionReview["reviewStats"];
-  reviewState: ExceptionReview;
-  onReset: () => void;
   files: ReactNode;
   versions: ReactNode;
   receipts: ReactNode;
@@ -21,23 +19,16 @@ type DetailTabsProps = {
 };
 
 export default function SelfOperatedDetailTabs(props: DetailTabsProps) {
-  const { batch, activeKey, onChange, reviewState, onReset } = props;
+  const { batch, activeKey, onChange } = props;
   const { computed } = batchPresentation(batch);
   const importCount = useImportRowCount(batch, computed);
   const selected = activeKey ?? "review";
-  const select = (key: string) => {
-    if (key === "review" || key === "resolved") {
-      reviewState.changeScope(key === "resolved" ? "resolved" : "unfinished");
-      onReset();
-    }
-    onChange(key);
-  };
   return (
     <Card className="self-operated-detail-tabs" classNames={{ body: "delivery-detail-tabs-body" }}>
       <Tabs
         classNames={{ header: "batch-workspace-tabs-nav" }}
         activeKey={selected}
-        onChange={select}
+        onChange={onChange}
         items={workspaceItems(props, computed, importCount)}
       />
     </Card>
@@ -52,24 +43,11 @@ function workspaceItems(props: DetailTabsProps, computed: boolean, importCount?:
       key: "review",
       label: (
         <span>
-          待办 <span className="pending-value">{counts.todo}</span>
+          待处理 <span className="pending-value">{counts.todo}</span>
         </span>
       ),
       destroyOnHidden: true,
       children: computed ? review : receiptTodoContent(batch, receiptTodos)
-    },
-    {
-      key: "resolved",
-      label: `已处理 ${counts.resolved}`,
-      destroyOnHidden: true,
-      children: computed ? review : <Empty description="计算后显示已处理记录" />
-    },
-    {
-      key: "receipts",
-      label: (
-        <span>累计实收核对{counts.receipts ? <span className="pending-value"> {counts.receipts}</span> : null}</span>
-      ),
-      children: receipts
     },
     {
       key: "imports",
@@ -79,6 +57,13 @@ function workspaceItems(props: DetailTabsProps, computed: boolean, importCount?:
       ) : (
         <Empty description="计算后显示可入库明细" />
       )
+    },
+    {
+      key: "receipts",
+      label: (
+        <span>累计实收核对{counts.receipts ? <span className="pending-value"> {counts.receipts}</span> : null}</span>
+      ),
+      children: receipts
     },
     { key: "files", label: `来源文件 ${counts.files}`, children: files },
     { key: "versions", label: "锁定资料", children: versions }
@@ -91,7 +76,6 @@ function workspaceCounts(batch: Batch, stats: DetailTabsProps["reviewStats"], co
   const receipts = batch.receipt?.issue_count ?? 0;
   return {
     todo: computed ? reviewCounts.unfinishedCount : receipts,
-    resolved: reviewCounts.resolvedCount,
     receipts,
     files: batch.files?.length ?? 0
   };

@@ -1,5 +1,4 @@
-.overreceipt-effect-notice,
-.input-data-context {
+.overreceipt-effect-notice {
   background: var(--dn-surface-muted);
   border-color: var(--dn-border);
 }
@@ -9,7 +8,6 @@
 }
 .import-value,
 .conservation-ok,
-.input-data-kind-button .anticon,
 .audit-action-processing,
 .overreceipt-allowance-value {
   color: var(--dn-primary);
@@ -18,30 +16,15 @@
 .audit-action-warning {
   color: var(--dn-warning);
 }
-.overreceipt-scope-switcher,
 .overreceipt-current-card,
 .overreceipt-history-card,
 .admin-panel-card,
 .position-maintenance > .ant-card {
   border-color: var(--dn-border);
 }
-.overreceipt-scope-switcher button.is-active {
-  color: var(--dn-primary);
-  border-color: var(--dn-primary-border);
-  background: var(--dn-primary-soft);
-}
-.overreceipt-scope-switcher button:hover {
-  border-color: var(--dn-primary-border);
-  background: var(--dn-primary-soft);
-}
-.overreceipt-metric,
 .overreceipt-impact-preview,
 .admin-panel-intro,
-.audit-log-toolbar,
-.input-data-workspace-tabs > .ant-tabs-nav {
-  background: var(--dn-surface-muted);
-}
-.overreceipt-metric.is-accent {
+.audit-log-toolbar {
   background: var(--dn-surface-muted);
 }
 .overreceipt-metric.is-accent > strong {
@@ -51,21 +34,6 @@
 .overreceipt-history-card .ant-card-head {
   border-bottom-color: var(--dn-border);
 }
-.input-data-layout .input-data-kind-button {
-  border-color: var(--dn-border);
-  background: var(--dn-surface-muted);
-}
-.input-data-layout .input-data-kind-button:not(.ant-btn-primary):hover {
-  border-color: var(--dn-primary-border);
-  background: var(--dn-primary-soft);
-}
-.input-data-layout .input-data-kind-button.is-selected {
-  color: var(--dn-primary);
-  border-color: var(--dn-primary-border);
-  background: var(--dn-primary-soft);
-  box-shadow: inset 0 -3px 0 var(--dn-primary);
-}
-.input-data-status-header.is-ready,
 .purchase-sync-result,
 .purchase-sync-result.is-active {
   border-color: var(--dn-primary-border);
@@ -73,9 +41,6 @@
 }
 .purchase-sync-progress-track span {
   background: var(--dn-primary);
-}
-.input-data-context-summary .ant-btn {
-  color: var(--dn-primary);
 }
 .input-data-active-version-row > td {
   background: var(--dn-primary-soft) !important;
@@ -86,15 +51,15 @@
 }
 
 .ant-alert-warning {
-  border-color: #f1dfb6;
-  background: #fffaf0;
+  border-color: var(--dn-review-border);
+  background: var(--dn-review-soft);
 }
 .ant-alert-error .ant-alert-message,
 .audit-action-error {
   color: var(--dn-danger);
 }
 .ant-alert-warning .ant-alert-message {
-  color: var(--dn-warning);
+  color: var(--dn-review);
 }
 .ant-tag {
   border-radius: 4px;
@@ -108,4 +73,39 @@
   color: var(--dn-primary);
   background: var(--dn-primary-soft);
   border-color: var(--dn-primary-border);
+}
+
+.batch-stage {
+  border: 0;
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 4px;
+}
+.batch-stage-waiting {
+  color: var(--dn-muted);
+  background: var(--dn-surface-muted);
+}
+.batch-stage-review {
+  color: var(--dn-warning);
+  background: var(--dn-warning-soft);
+}
+.batch-stage-running {
+  color: var(--dn-info);
+  background: var(--dn-info-soft);
+}
+.batch-stage-ready {
+  color: var(--dn-primary);
+  background: var(--dn-primary-soft);
+}
+.batch-stage-error {
+  color: var(--dn-surface);
+  background: var(--dn-danger);
+}
+
+.review-notice {
+  color: var(--dn-review);
+  background: var(--dn-review-soft);
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
 }

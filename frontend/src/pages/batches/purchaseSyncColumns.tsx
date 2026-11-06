@@ -13,7 +13,8 @@ export const purchasePreviewColumns: NonNullable<TableProps<PurchasePreviewRow>[
     dataIndex: "平台站点",
     width: 200,
     ellipsis: true,
-    render: (value: string | null) => (value === "共享" ? <Tag color="warning">共享 · 不可自动匹配</Tag> : value || "—")
+    render: (value: string | null) =>
+      value === "共享" ? <Tag className="review-notice">共享 不可自动匹配</Tag> : value || "—"
   },
   { title: "目的仓", dataIndex: "目的仓", width: 150, ellipsis: true },
   { title: "未交量", dataIndex: "未交量", width: 90, align: "right" }

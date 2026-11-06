@@ -47,6 +47,7 @@ export function InputVersionPreviewPanel({
         dataIndex: "__excelRow",
         key: "__excelRow",
         width: 84,
+        align: "right",
         fixed: "left",
         render: (value: InputVersionPreviewValue) => formatPreviewValue(value)
       },
@@ -130,8 +131,9 @@ export function InputVersionPreviewPanel({
         </div>
         <Typography.Text className="input-data-preview-summary" type="secondary">
           <span>
-            当前展示前 {preview.rows.length} 行，共 {preview.total} 行 · {summary.columns.length} 个字段
+            当前展示前 {preview.rows.length} 行，共 {preview.total} 行
           </span>
+          <span>{summary.columns.length} 个字段</span>
           {metricItems.map((item) => (
             <span className="input-data-preview-metric" key={item}>
               {item}

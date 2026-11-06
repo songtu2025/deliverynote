@@ -7,7 +7,7 @@ export default function BatchTransferSources({ batch, fileId }: { batch: Batch; 
   const sources = batch.transfer_sources?.filter((source) => fileId === undefined || source.file_ids.includes(fileId));
   if (!sources?.length) return null;
   return (
-    <div className="muted">
+    <div className="batch-heading-meta">
       {fileId === undefined && "转自 "}
       {sources.map((source, index) => (
         <Fragment key={source.batch_id}>
@@ -16,7 +16,11 @@ export default function BatchTransferSources({ batch, fileId }: { batch: Batch; 
           <Typography.Link href={workspacePath({ page: "self-operated", batchId: source.batch_id })}>
             #{source.batch_id}
           </Typography.Link>
-          {fileId === undefined && ` · ${source.record_count} 条 ${source.quantity} 件`}
+          {fileId === undefined && (
+            <span>
+              {source.record_count} 条 {source.quantity} 件
+            </span>
+          )}
         </Fragment>
       ))}
     </div>

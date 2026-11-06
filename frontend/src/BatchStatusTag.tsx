@@ -13,21 +13,18 @@ const STATUS_LABELS: Record<string, string> = {
   expired: "已过期"
 };
 
-const STAGE_COLORS: Record<string, string> = {
-  waiting: "default",
-  ready: "success",
-  running: "processing",
-  review: "warning",
-  error: "error"
-};
-
 export const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }));
-export default function BatchStatusTag({ batch }: { batch: Batch }) {
-  const { stage } = batchStage(batch);
+export default function BatchStatusTag({
+  batch,
+  options
+}: {
+  batch: Batch;
+  options?: Parameters<typeof batchStage>[1];
+}) {
+  const { stage } = batchStage(batch, options);
   return (
     <Tag
-      color={STAGE_COLORS[stage.tone]}
-      variant={stage.tone === "error" ? "solid" : undefined}
+      className={`batch-stage batch-stage-${stage.tone}`}
       icon={stage.tone === "error" ? <ExclamationCircleFilled /> : undefined}
     >
       {stage.label}

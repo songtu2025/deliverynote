@@ -1,5 +1,5 @@
 import { Button, Empty, Popconfirm, Table } from "antd";
-import { DeleteOutlined, LoadingOutlined } from "@ant-design/icons";
+import { LoadingOutlined } from "@ant-design/icons";
 import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import StatusTag from "../../BatchStatusTag";
@@ -30,6 +30,7 @@ export default function BatchListTable({
       className="batch-list-table"
       rowKey="id"
       tableLayout="fixed"
+      scroll={{ x: 1000 }}
       rowSelection={
         canDeleteBatches
           ? {
@@ -132,40 +133,6 @@ export default function BatchListTable({
           }
         },
         {
-          title: "下一步",
-          width: 140,
-          render: (_, batch) => {
-            const { next, stage, pending } = batchStage(batch);
-            return (
-              <div className="batch-table-value">
-                <span className="batch-cell-label">下一步</span>
-                {next.key === "busy" ? (
-                  <span className="batch-computing">
-                    <LoadingOutlined /> {next.listLabel}
-                  </span>
-                ) : (
-                  <Button
-                    size="small"
-                    type={next.primary ? "primary" : "default"}
-                    danger={stage.tone === "error" || next.key === "expired"}
-                    aria-label={"打开 " + batch.name}
-                    title={next.listLabel}
-                    onClick={() => onOpen(batch.id)}
-                  >
-                    {next.listLabel}
-                  </Button>
-                )}
-                {!delivery && pending > 0 && next.key === "download" && (
-                  <span className="batch-result-availability">待处理 {pending}</span>
-                )}
-                {delivery && batch.download_ready && next.key === "review" && (
-                  <span className="batch-result-availability">结果可下载</span>
-                )}
-              </div>
-            );
-          }
-        },
-        {
           title: "更新时间",
           dataIndex: "updated_at",
           width: 168,
@@ -176,13 +143,32 @@ export default function BatchListTable({
             </div>
           )
         },
-        ...(canDeleteBatches
-          ? [
-              {
-                title: "操作",
-                width: 64,
-                render: (_: unknown, batch: Batch) => (
-                  <div className="batch-row-actions">
+        {
+          title: "操作",
+          fixed: "right",
+          width: canDeleteBatches ? 190 : 140,
+          render: (_, batch) => {
+            const { next, pending } = batchStage(batch);
+            return (
+              <div className="batch-table-value">
+                <span className="batch-cell-label">操作</span>
+                <div className="batch-row-actions">
+                  {next.key === "busy" ? (
+                    <span className="batch-computing">
+                      <LoadingOutlined /> {next.listLabel}
+                    </span>
+                  ) : (
+                    <Button
+                      size="small"
+                      type="link"
+                      aria-label={"打开 " + batch.name}
+                      title={next.listLabel}
+                      onClick={() => onOpen(batch.id)}
+                    >
+                      {next.listLabel}
+                    </Button>
+                  )}
+                  {canDeleteBatches && (
                     <Popconfirm
                       title={`永久删除“${batch.name}”？`}
                       description="将删除批次记录、上传文件和结果文件，无法恢复。"
@@ -194,19 +180,28 @@ export default function BatchListTable({
                     >
                       <Button
                         className="batch-delete-action"
-                        type="text"
-                        icon={<DeleteOutlined />}
+                        type="link"
+                        danger
                         aria-label={`删除批次 ${batch.name}`}
                         disabled={!canDeleteBatch(batch)}
                         loading={deletingBatchIds.includes(batch.id)}
                         title={canDeleteBatch(batch) ? "删除批次" : "运行中的批次不能删除"}
-                      />
+                      >
+                        删除
+                      </Button>
                     </Popconfirm>
-                  </div>
-                )
-              }
-            ]
-          : [])
+                  )}
+                </div>
+                {!delivery && pending > 0 && next.key === "download" && (
+                  <span className="batch-result-availability">待处理 {pending}</span>
+                )}
+                {delivery && batch.download_ready && next.key === "review" && (
+                  <span className="batch-result-availability">结果可下载</span>
+                )}
+              </div>
+            );
+          }
+        }
       ]}
     />
   );

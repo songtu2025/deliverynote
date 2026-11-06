@@ -1,23 +1,20 @@
 import InboundExceptionActions from "./InboundExceptionActions";
 import { REVIEW_PAGE_SIZE } from "../../batchDetailApi";
-import { Button, Card, Empty, Flex, Table, Tag, Typography } from "antd";
-import type { TableColumnsType } from "antd";
+import { Card, Empty, Flex, Table } from "antd";
 import type { Ref } from "react";
 import type { Batch, BatchFile, DeliveryException } from "../../types";
-import { remainingTransferQuantity } from "../../exceptionTransferApi";
 import { useExceptionTransfer } from "./useExceptionTransfer";
-import ExceptionTransfers from "./ExceptionTransfers";
 import type { ExceptionReview } from "./useExceptionReview";
-import { ExceptionReason, ExceptionEvidence, ExceptionStatusTag, formatPositionValue } from "./ExceptionEvidence";
-import { candidateSites } from "./reviewDraft";
+import { reviewIdentityColumns, reviewDetailColumns } from "./exceptionReviewColumns";
 import ExceptionReviewToolbar from "./ExceptionReviewToolbar";
-import { useInboundAdjustments } from "./useInboundAdjustments";
+import type { InboundAdjustments } from "./useInboundAdjustments";
 import InboundAdjustmentActions from "./InboundAdjustmentActions";
 import BatchManualAllowances from "./BatchManualAllowances";
 
 export default function ExceptionReviewTable({
   selfOperated,
   review,
+  adjustments,
   fileById,
   hasOverreceiptRule,
   onOpen,
@@ -30,6 +27,7 @@ export default function ExceptionReviewTable({
 }: {
   selfOperated: boolean;
   review: ExceptionReview;
+  adjustments: InboundAdjustments;
   fileById: Record<number, BatchFile>;
   hasOverreceiptRule: boolean;
   onOpen: (record: DeliveryException) => void;
@@ -42,7 +40,6 @@ export default function ExceptionReviewTable({
 }) {
   const { exceptionTotal, exceptionsLoading, exceptions, reviewPage, setReviewPage } = review;
   const transfer = useExceptionTransfer(transferBatch, onOpenDeliveryBatch, onSaved);
-  const adjustments = useInboundAdjustments(transferBatch, onSaved);
   const actions = selfOperated && (adjustments.count > 0 || transfer.action) && (
     <Flex className="table-toolbar" justify="end" align="center" gap="small" wrap>
       <InboundAdjustmentActions adjustments={adjustments} />
@@ -89,16 +86,17 @@ export default function ExceptionReviewTable({
             emptyText: <Empty description={reviewEmptyText(review, selfOperated)} />
           }}
           columns={[
-            ...reviewIdentityColumns(selfOperated, fileById, onOpen),
+            ...reviewIdentityColumns(selfOperated, fileById, onOpen, adjustments, onVersions),
             ...reviewDetailColumns(selfOperated, hasOverreceiptRule, onOpen, fileById).map((column) =>
               selfOperated && transferBatch && column.title === "操作"
                 ? {
                     ...column,
-                    title: "本批调整",
-                    width: 230,
+                    title: "操作",
+                    width: 130,
                     fixed: "right" as const,
                     render: (_: unknown, record: DeliveryException) => (
                       <InboundExceptionActions
+                        placement="actions"
                         record={record}
                         onOpen={onOpen}
                         adjustments={adjustments}
@@ -126,146 +124,4 @@ function reviewEmptyText({ reviewStats, reviewScope, exceptionsLoading }: Except
   if (exceptionsLoading) return "正在读取审校记录";
   if (!reviewStats.totalCount) return "没有待处理，可以直接生成结果";
   return reviewScope === "unfinished" ? "审校已全部完成" : "没有匹配的审校记录";
-}
-
-function reviewIdentityColumns(
-  selfOperated: boolean,
-  fileById: Record<number, BatchFile>,
-  onOpen: (record: DeliveryException) => void
-): TableColumnsType<DeliveryException> {
-  return [
-    {
-      title: selfOperated ? "来源文件" : "文件",
-      dataIndex: "batch_file_id",
-      width: selfOperated ? 130 : 56,
-      ellipsis: true,
-      render: (fileId: number) => {
-        const file = fileById[fileId];
-        const name = file?.original_name ?? `文件 #${fileId}`;
-        return selfOperated ? (
-          name
-        ) : (
-          <span title={name}>{file?.file_order != null ? String(file.file_order).padStart(2, "0") : name}</span>
-        );
-      }
-    },
-    {
-      title: selfOperated ? "SKU" : "SKU / 站点",
-      dataIndex: "sku",
-      width: selfOperated ? 130 : 160,
-      render: (value: string, record: DeliveryException) => (
-        <>
-          {selfOperated ? (
-            <Button type="link" onClick={() => onOpen(record)}>
-              {value || "—"}
-            </Button>
-          ) : (
-            <span className="exception-identifier-value exception-sku-value">{value || "—"}</span>
-          )}
-          {!selfOperated && (
-            <span
-              className="exception-identifier-value exception-site-value exception-site-secondary"
-              title={record.full_site}
-            >
-              {record.full_site.includes("、")
-                ? `${candidateSites(record.full_site).length} 个候选站点`
-                : record.full_site || "—"}
-            </span>
-          )}
-        </>
-      )
-    },
-    ...(selfOperated
-      ? [
-          {
-            title: "站点",
-            dataIndex: "full_site",
-            width: 190,
-            render: (value: string) => (
-              <span className="exception-identifier-value exception-site-value">{value || "—"}</span>
-            )
-          }
-        ]
-      : []),
-    { title: selfOperated ? "入库仓" : "目的仓", dataIndex: "destination", width: 100, ellipsis: true },
-    ...(!selfOperated
-      ? [
-          {
-            title: "定位",
-            dataIndex: "scale_position",
-            width: 100,
-            render: (value: string | number, record: DeliveryException) => (
-              <div className="exception-position-cell">
-                <span>{formatPositionValue(value)}</span>
-                <span>{formatPositionValue(record.stocking_position)}</span>
-              </div>
-            )
-          }
-        ]
-      : [])
-  ];
-}
-
-function reviewDetailColumns(
-  selfOperated: boolean,
-  hasOverreceiptRule: boolean,
-  onOpen: (record: DeliveryException) => void,
-  fileById: Record<number, BatchFile>
-): TableColumnsType<DeliveryException> {
-  return [
-    {
-      title: selfOperated ? "待处理量" : "待处理",
-      dataIndex: "manual_quantity",
-      width: 75,
-      align: selfOperated ? undefined : "right",
-      render: (value: number, record) => (
-        <strong className="pending-value">{selfOperated ? remainingTransferQuantity(record) : value}</strong>
-      )
-    },
-    {
-      title: selfOperated ? "待处理原因" : "原因",
-      dataIndex: "reason",
-      width: selfOperated ? 130 : 120,
-      render: (reason: string) =>
-        selfOperated ? <ExceptionReason reason={reason} /> : <Tag className="exception-reason-tag">{reason}</Tag>
-    },
-    {
-      title: selfOperated ? "处理依据" : "审校依据",
-      width: selfOperated ? 250 : 180,
-      render: (_, record) => (
-        <>
-          <ExceptionEvidence
-            exception={record}
-            hasOverreceiptRule={hasOverreceiptRule}
-            documentNote={fileById[record.batch_file_id]?.document_note}
-          />
-          {selfOperated && <ExceptionTransfers record={record} />}
-        </>
-      )
-    },
-    {
-      title: "状态",
-      dataIndex: "status",
-      width: selfOperated ? 70 : 80,
-      render: (value: string) => <ExceptionStatusTag status={value} selfOperated={selfOperated} />
-    },
-    {
-      title: "操作",
-      width: selfOperated ? 100 : 80,
-      render: (_, record) =>
-        selfOperated ? null : record.allowed_actions.length === 0 ? (
-          <Typography.Text type="secondary">待处理</Typography.Text>
-        ) : (
-          <Button
-            type={record.status === "resolved" ? "text" : "primary"}
-            size="small"
-            autoInsertSpace={false}
-            aria-label={`${record.status === "resolved" ? "修改" : "审校"} ${record.sku}`}
-            onClick={() => onOpen(record)}
-          >
-            {record.status === "resolved" ? "修改" : "审校"}
-          </Button>
-        )
-    }
-  ];
 }

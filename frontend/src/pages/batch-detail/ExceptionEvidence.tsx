@@ -3,21 +3,21 @@ import { getReasonDefinition } from "./reasonCatalog";
 import type { DeliveryException } from "../../types";
 
 const EXCEPTION_STATUS: Record<string, { label: string; color: string }> = {
-  pending: { label: "未处理", color: "warning" },
-  partial: { label: "部分处理", color: "processing" },
-  resolved: { label: "已处理", color: "success" }
+  pending: { label: "未处理", color: "review" },
+  partial: { label: "部分处理", color: "review" },
+  resolved: { label: "已处理", color: "ready" }
 };
 
 export function ExceptionStatusTag({ status, selfOperated = false }: { status: string; selfOperated?: boolean }) {
   const item = EXCEPTION_STATUS[status] ?? { label: status, color: "default" };
   const label = status === "pending" && !selfOperated ? "待审校" : item.label;
-  return <Tag color={item.color}>{label}</Tag>;
+  return <Tag className={`batch-stage batch-stage-${item.color}`}>{label}</Tag>;
 }
 
 export function ExceptionReason({ reason }: { reason: string }) {
   return (
     <div className="exception-reason-cell">
-      <strong>{reason}</strong>
+      <span>{reason}</span>
     </div>
   );
 }

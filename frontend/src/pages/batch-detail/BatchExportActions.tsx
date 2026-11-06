@@ -12,7 +12,8 @@ export default function BatchExportActions({
   action,
   tasks,
   focusReview,
-  reviewStats
+  reviewStats,
+  hasAdjustmentDraft
 }: {
   batch: Batch;
   activeJob?: Job;
@@ -20,8 +21,9 @@ export default function BatchExportActions({
   tasks: ReturnType<typeof useBatchTasks>;
   focusReview: () => void;
   reviewStats?: ExceptionReview["reviewStats"];
+  hasAdjustmentDraft?: boolean;
 }) {
-  const { next, disabledReason } = batchStage(batch, { activeJob, action, reviewStats });
+  const { next, disabledReason } = batchStage(batch, { activeJob, action, reviewStats, hasAdjustmentDraft });
   const run = () => {
     if (next.key === "review") return focusReview();
     if (next.key !== "download") return void tasks.startExport();
@@ -31,6 +33,7 @@ export default function BatchExportActions({
   return (
     <div className="batch-result-actions">
       <BatchPrimaryButton
+        type={next.primary ? "primary" : "default"}
         icon={next.key === "download" ? <DownloadOutlined /> : <ExportOutlined />}
         reason={disabledReason}
         loading={Boolean(action)}

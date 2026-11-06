@@ -7,8 +7,7 @@ import { useBatchList } from "./batches/useBatchList";
 import { useBatchCreation } from "./batches/useBatchCreation";
 import { useBatchDeletion } from "./batches/useBatchDeletion";
 import { useMemo } from "react";
-import { Button, Form, Popconfirm, Skeleton, Space, Typography } from "antd";
-import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
+import { Form, Skeleton, Typography } from "antd";
 import PurchaseSyncPanel from "./PurchaseSyncPanel";
 import InboundSyncPanel from "./batches/InboundSyncPanel";
 import { useInboundSync } from "./batches/useInboundSync";
@@ -33,7 +32,6 @@ export default function BatchesPage({
     selfOperatedRules,
     loading,
     initialized,
-    emptyDraftCount,
     syncStatus,
     setSyncStatus,
     load,
@@ -42,7 +40,6 @@ export default function BatchesPage({
   const creation = useBatchCreation(workflow, onOpen);
   const { form, openCreate } = creation;
   const deletion = useBatchDeletion(workflow, active, list);
-  const { cleanEmptyBatches, cleaningEmpty } = deletion;
   const inboundSync = useInboundSync({ workflow, active, status: syncStatus, setStatus: setSyncStatus, reload: load });
   const activeVersions = useMemo(
     () => Object.fromEntries(versions.filter((version) => version.active).map((version) => [version.kind, version])),
@@ -89,34 +86,6 @@ export default function BatchesPage({
               : "按文件顺序扣减采购余额，批次创建时锁定资料版本。"}
           </Typography.Text>
         </div>
-        <Space>
-          {emptyDraftCount > 0 && (
-            <Popconfirm
-              title={`删除 ${emptyDraftCount} 个空批次？`}
-              description={
-                workflow === "self_operated_inbound"
-                  ? "仅删除未上传质检交货单和收货入库单的草稿，无法恢复。"
-                  : "仅删除未上传任何交货文件的草稿，无法恢复。"
-              }
-              okText="删除"
-              cancelText="取消"
-              onConfirm={() => void cleanEmptyBatches()}
-            >
-              <Button danger icon={<DeleteOutlined />} loading={cleaningEmpty}>
-                清理 {emptyDraftCount} 个空批次
-              </Button>
-            </Popconfirm>
-          )}
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            disabled={!ready}
-            title={ready ? "新建批次" : "请先补齐启用版本"}
-            onClick={openCreate}
-          >
-            新建批次
-          </Button>
-        </Space>
       </div>
 
       <section className="batch-materials" aria-label="运行状态">
@@ -138,6 +107,8 @@ export default function BatchesPage({
         canDeleteBatches={canDeleteBatches}
         list={list}
         deletion={deletion}
+        ready={ready}
+        onCreate={openCreate}
       />
       <BatchListTable
         workflow={workflow}

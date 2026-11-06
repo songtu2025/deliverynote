@@ -19,7 +19,7 @@ describe("BatchesPageInboundSync", () => {
     expect(within(status).getByRole("button", { name: /同步待入库数据/ })).toBeInTheDocument();
     expect(screen.getByText("待入库 + 部分入库")).toBeInTheDocument();
     expect(screen.getByText("数据已启用")).toBeInTheDocument();
-    expect(screen.getByText("含 2 条“共享”站点数据，请展开复核")).toBeInTheDocument();
+    expect(screen.getByText("2 条共享站点需复核")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "查看同步详情" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("候选剩余应收总量")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "查看同步详情" }));
@@ -43,7 +43,7 @@ describe("BatchesPageInboundSync", () => {
     expect(within(issues).getByText("12")).toBeInTheDocument();
     expect(within(issues).getByRole("button", { name: /下载完整清单/ })).toBeInTheDocument();
     expect(within(issues).queryByText("关联采购单为空")).not.toBeInTheDocument();
-    fireEvent.click(within(issues).getByRole("button", { name: "映射错误" }));
+    fireEvent.click(within(issues).getByRole("radio", { name: /^映射错误 / }));
     expect(within(issues).getByText("关联采购单为空")).toBeInTheDocument();
     expect(within(issues).queryByText("共享站点数据不能自动匹配")).not.toBeInTheDocument();
     expect(within(issues).queryByText("IN-1")).not.toBeInTheDocument();

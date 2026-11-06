@@ -20,7 +20,7 @@ export function batchMoreActionsProps(batch: Batch) {
     action: null,
     disabled: false,
     refreshHistory: vi.fn(),
-    fileActions: { uploadFile: vi.fn(), uploadInboundFile: vi.fn(), removeFile: vi.fn(), move: vi.fn() }
+    fileActions: { uploadFile: vi.fn(), removeFile: vi.fn(), move: vi.fn() }
   };
 }
 
