@@ -5,6 +5,9 @@ import { renderDetail, setupBatchDetailTest } from "./batchDetailTestSupport";
 import { createDetailExceptions, fixtureJob, fixtureVersion } from "./batch-detail/detailFixtures";
 import { deferred, jsonResponse } from "./admin/positionDraftTestSupport";
 
+// 整页渲染较重，翻页与搜索后的列表刷新在负载高时可能超过默认 1 秒。
+const SLOW_PAGE = { timeout: 5000 };
+
 describe("自营仓批次详情", () => {
   const { state } = setupBatchDetailTest();
   beforeEach(() => {
@@ -73,12 +76,12 @@ describe("自营仓批次详情", () => {
       sku: "SKU-" + (index + 1)
     }));
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findAllByRole("button", { name: "指定超收" })).toHaveLength(10);
+    expect(await screen.findAllByRole("button", { name: "指定超收" }, SLOW_PAGE)).toHaveLength(10);
     expect(screen.queryByRole("spinbutton", { name: "本批追加" })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByTitle("2")[0]);
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "指定超收" })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "指定超收" })).toHaveLength(2), SLOW_PAGE);
     fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), { target: { value: "SKU-12" } });
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "指定超收" })).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "指定超收" })).toHaveLength(1), SLOW_PAGE);
     expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("checkbox").at(-1)!);
     expect(screen.getByRole("button", { name: "线下处理" })).toBeEnabled();

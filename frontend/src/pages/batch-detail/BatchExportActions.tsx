@@ -29,7 +29,12 @@ export default function BatchExportActions({
     <div className="batch-result-actions">
       <div className="export-action-buttons">
         {batch.download_ready && !needsMergedGeneration ? (
-          <ResultDownloadButtons batch={batch} primary={selfOperated || !reviewing} downloadResult={downloadResult} />
+          <ResultDownloadButtons
+            batch={batch}
+            action={action}
+            primary={selfOperated || !reviewing}
+            downloadResult={downloadResult}
+          />
         ) : canRetry ? (
           <ExportGenerationButton
             exportJob={exportJob}
@@ -63,20 +68,25 @@ function exportActionState(batch: Batch, stats?: ExceptionReview["reviewStats"])
 
 function ResultDownloadButtons({
   batch,
+  action,
   primary,
   downloadResult
 }: {
   batch: Batch;
+  action: string | null;
   primary: boolean;
   downloadResult: (path: string, filename: string) => Promise<void>;
 }) {
   const { hasMultipleFiles } = batchPresentation(batch);
   const files = batch.files ?? [];
   const selfOperated = batch.workflow === "self_operated_inbound";
+  // 下载要先取回整个文件，期间在对应按钮上显示处理中并防止重复点击。
+  const state = (path: string) => ({ loading: action === `download:${path}`, disabled: Boolean(action) });
   return hasMultipleFiles ? (
     <>
       <Button
         icon={<DownloadOutlined />}
+        {...state(`/api/batches/${batch.id}/download`)}
         onClick={() => void downloadResult(`/api/batches/${batch.id}/download`, `${batch.name}_分文件.zip`)}
       >
         下载分文件 ZIP
@@ -84,6 +94,7 @@ function ResultDownloadButtons({
       <Button
         type={primary ? "primary" : "default"}
         icon={<DownloadOutlined />}
+        {...state(`/api/batches/${batch.id}/download-merged`)}
         onClick={() =>
           void downloadResult(
             `/api/batches/${batch.id}/download-merged`,
@@ -99,6 +110,7 @@ function ResultDownloadButtons({
       <Button
         type={primary ? "primary" : "default"}
         icon={<DownloadOutlined />}
+        {...state(`/api/batch-files/${files[0].id}/download`)}
         onClick={() =>
           void downloadResult(
             `/api/batch-files/${files[0].id}/download`,

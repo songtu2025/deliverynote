@@ -19,11 +19,13 @@ export default function BatchFileTable({
   computed,
   canEditFiles,
   actions,
+  action,
   downloadResult
 }: {
   batch: Batch;
   files: BatchFile[];
   loading: boolean;
+  action: string | null;
   computed: boolean;
   canEditFiles: boolean;
   actions: BatchFiles;
@@ -61,7 +63,16 @@ export default function BatchFileTable({
             <Empty description={selfOperated ? "请先上传一份或多份质检交货单" : "请先上传一个或多个交货 Excel"} />
           )
         }}
-        columns={batchFileColumns({ batch, files, selfOperated, canEditFiles, computed, actions, downloadResult })}
+        columns={batchFileColumns({
+          batch,
+          files,
+          selfOperated,
+          canEditFiles,
+          computed,
+          actions,
+          action,
+          downloadResult
+        })}
       />
     </Card>
   );
@@ -74,10 +85,12 @@ function batchFileColumns({
   canEditFiles,
   computed,
   actions,
+  action,
   downloadResult
 }: {
   batch: Batch;
   files: BatchFile[];
+  action: string | null;
   selfOperated: boolean;
   canEditFiles: boolean;
   computed: boolean;
@@ -86,6 +99,8 @@ function batchFileColumns({
 }) {
   const { move, removeFile } = actions;
   const showFileActions = canEditFiles || files.some((file) => file.download_ready);
+  // 详情页任一操作进行中时锁定文件行操作，并在对应按钮上显示处理中。
+  const busy = Boolean(action);
   return [
     {
       title: "顺序",
@@ -148,7 +163,8 @@ function batchFileColumns({
                         aria-label={`上移 ${file.original_name}`}
                         size="small"
                         icon={<ArrowUpOutlined />}
-                        disabled={index === 0}
+                        disabled={index === 0 || busy}
+                        loading={action === `order:${file.id}:-1`}
                         onClick={() => void move(file.id, -1)}
                       />
                     </Tooltip>
@@ -157,20 +173,24 @@ function batchFileColumns({
                         aria-label={`下移 ${file.original_name}`}
                         size="small"
                         icon={<ArrowDownOutlined />}
-                        disabled={index === files.length - 1}
+                        disabled={index === files.length - 1 || busy}
+                        loading={action === `order:${file.id}:1`}
                         onClick={() => void move(file.id, 1)}
                       />
                     </Tooltip>
                     <Popconfirm
                       title="删除此交货文件？"
                       description="其余文件会自动重新编号。"
-                      onConfirm={() => void removeFile(file)}
+                      onConfirm={() => removeFile(file)}
+                      disabled={busy}
                     >
                       <Tooltip title="删除错传文件">
                         <Button
                           aria-label={`删除 ${file.original_name}`}
                           danger
                           size="small"
+                          disabled={busy}
+                          loading={action === `delete:${file.id}`}
                           icon={<DeleteOutlined />}
                         />
                       </Tooltip>
@@ -181,6 +201,8 @@ function batchFileColumns({
                   <Button
                     aria-label="下载单文件结果"
                     size="small"
+                    disabled={busy}
+                    loading={action === `download:/api/batch-files/${file.id}/download`}
                     icon={<DownloadOutlined />}
                     onClick={() =>
                       void downloadResult(

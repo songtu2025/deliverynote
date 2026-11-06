@@ -37,7 +37,7 @@ export function useBatchFiles({
   };
 
   const removeFile = async (file: BatchFile) => {
-    await runAction("delete", async () => {
+    await runAction(`delete:${file.id}`, async () => {
       await deleteBatchFile(batchId, file.id);
       await load(true);
       message.success(`${file.original_name} 已删除，其余文件已重新编号`);
@@ -50,7 +50,7 @@ export function useBatchFiles({
     const next = index + offset;
     if (index < 0 || next < 0 || next >= ids.length) return;
     [ids[index], ids[next]] = [ids[next], ids[index]];
-    await runAction("order", async () => {
+    await runAction(`order:${fileId}:${offset}`, async () => {
       await reorderBatchFiles(batchId, ids);
       await load(true);
       message.info("顺序已调整，需要重新预检");

@@ -38,12 +38,11 @@ describe("BatchDetailFiles", () => {
     expect(container.querySelector(".export-card")).not.toBeInTheDocument();
 
     fireEvent.click(mergedButton);
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/batches/7/download-merged", expect.any(Object)));
+    // 一次只下载一个文件：前一个下载结束后才能点下一个。
+    await waitFor(() => expect(zipButton).toBeEnabled());
     fireEvent.click(zipButton);
-
-    await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith("/api/batches/7/download-merged", expect.any(Object));
-      expect(fetch).toHaveBeenCalledWith("/api/batches/7/download", expect.any(Object));
-    });
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith("/api/batches/7/download", expect.any(Object)));
   }, 30_000);
 
   it("shows a download error when the file request fails", async () => {
