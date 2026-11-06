@@ -56,8 +56,13 @@ describe("BatchesPage", () => {
     expect(screen.getByText("去审校 60")).toBeInTheDocument();
     expect(screen.getByText("2 个文件")).toBeInTheDocument();
     expect(screen.getByText("批次 #7")).toBeInTheDocument();
-    expect(screen.getByText(/可导入 100/)).toHaveTextContent("可导入 100 / 待处理 60");
-    expect(screen.getByRole("img", { name: "可导入 100，待处理 60" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "可导入" })).toBeInTheDocument();
+    expect(screen.getByText("100").parentElement).toHaveTextContent("100 / 160");
+    expect(screen.getByText("待处理 60")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /可导入 100 \/ 160 件，占比 62.5%.*待处理 60 件/ })).toHaveAttribute(
+      "width",
+      "28"
+    );
     expect(screen.getByRole("button", { name: "2026-07-21 交货批次" })).toHaveAttribute("title", "2026-07-21 交货批次");
     expect(screen.getAllByText("短尾超收 V1").length).toBeGreaterThan(0);
     expect(container.querySelector(".ant-pagination")).not.toBeInTheDocument();
@@ -88,7 +93,8 @@ describe("BatchesPage", () => {
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
     expect(within(row).getByText("去审校 60")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" })).toHaveClass("ant-btn-link");
-    expect(within(row).getByText(/可导入 100/)).toHaveTextContent("待处理 60");
+    expect(within(row).getByText("100").parentElement).toHaveTextContent("100 / 160");
+    expect(within(row).getByText("待处理 60", { selector: ".batch-list-quantity-pending" })).toBeInTheDocument();
     expect(within(row).queryByText("结果可下载") !== null).toBe(downloadReady);
     expect(within(row).queryByText(/等待人工审校|未完成审校|条待审校/)).not.toBeInTheDocument();
     expect(within(screen.getByRole("table", { name: "交货批次列表" })).getAllByRole("columnheader")).toHaveLength(5);
@@ -144,7 +150,8 @@ describe("BatchesPage", () => {
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
     expect(within(row).getByText(downloadReady ? "去下载" : "去生成")).toBeInTheDocument();
     expect(within(row).getByText("待处理")).toBeInTheDocument();
-    if (downloadReady) expect(within(row).getByText("待处理 60")).toBeInTheDocument();
+    if (downloadReady)
+      expect(within(row).getByText("待处理 60", { selector: ".batch-list-quantity-pending" })).toBeInTheDocument();
     expect(within(row).queryByText("去审校 60")).not.toBeInTheDocument();
     expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
   });
@@ -194,13 +201,18 @@ describe("BatchesPage", () => {
   );
 
   it.each([undefined, { delivery_total: 0, import_total: 0, manual_total: 0, conserved: true }])(
-    "omits the quantity bar for missing or zero results: %s",
+    "distinguishes missing quantities from a zero-value track: %s",
     async (summary) => {
       state.batchRows[0].summary = summary;
       render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
       const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-      expect(within(row).queryByRole("img", { name: /可导入/ })).not.toBeInTheDocument();
-      if (summary) expect(within(row).getByText(/可导入 0/)).toHaveTextContent("可导入 0 / 待处理 0");
+      if (summary) {
+        expect(within(row).getByRole("img", { name: /可导入 0 \/ 0 件，占比 0.0%/ })).toBeInTheDocument();
+        expect(within(row).queryByText("待处理 0")).not.toBeInTheDocument();
+      } else {
+        expect(within(row).queryByRole("img", { name: /可导入/ })).not.toBeInTheDocument();
+        expect(within(row).getByText("尚未计算")).toBeInTheDocument();
+      }
     }
   );
 

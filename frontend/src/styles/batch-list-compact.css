@@ -114,13 +114,6 @@
   color: var(--dn-muted);
   font-size: 12px;
 }
-.batch-list-page--compact .batch-allocation {
-  display: block;
-  margin-top: 3px;
-  color: var(--dn-muted);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
 .batch-list-page--compact .batch-row-actions {
   flex-wrap: nowrap;
 }

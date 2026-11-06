@@ -1,0 +1,101 @@
+.quantity-rings {
+  flex: none;
+  border-radius: 50%;
+  outline-offset: 4px;
+}
+.quantity-rings:focus-visible {
+  outline: 2px solid var(--dn-primary);
+}
+.batch-detail--compact .batch-quantity-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  padding: 16px 24px;
+  border: 1px solid var(--dn-border);
+  border-radius: 10px;
+  background: var(--dn-surface);
+}
+.quantity-summary-values {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.quantity-summary-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--dn-muted);
+}
+.quantity-summary-line strong {
+  color: var(--dn-ink);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.quantity-summary-label {
+  margin-left: 4px;
+  color: var(--dn-primary);
+  font-size: 13px;
+}
+.quantity-dot {
+  align-self: center;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.quantity-dot-import {
+  background: #1f8a72;
+}
+.quantity-dot-review {
+  background: #e0603f;
+}
+.quantity-summary-pending {
+  margin-left: 17px;
+  color: var(--dn-muted);
+  font-size: 12px;
+}
+.quantity-derivation-trigger {
+  align-self: flex-end;
+  height: auto;
+  min-height: 24px;
+  margin-left: auto;
+  padding: 0;
+  font-size: 12px;
+}
+.quantity-derivation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.batch-list-quantity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.batch-list-quantity-numbers {
+  white-space: nowrap;
+}
+.batch-list-quantity-numbers strong {
+  font-weight: 600;
+}
+.batch-list-quantity-numbers > span {
+  color: var(--dn-muted);
+}
+.batch-list-quantity-pending {
+  display: block;
+  color: var(--dn-warning);
+  font-size: 12px;
+}
+.batch-list-quantity + .batch-volume {
+  display: block;
+  margin: 3px 0 0 38px;
+}
+@media (max-width: 767px) {
+  .batch-detail--compact .batch-quantity-summary {
+    gap: 12px 16px;
+    padding: 16px;
+  }
+}

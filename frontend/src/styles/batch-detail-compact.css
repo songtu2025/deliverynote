@@ -70,82 +70,6 @@
 .batch-task-actions {
   max-width: 56%;
 }
-.batch-detail--compact .batch-quantity-summary {
-  padding: 20px 24px;
-  border: 1px solid var(--dn-border);
-  border-radius: 10px;
-  background: var(--dn-surface);
-}
-.batch-quantity-metrics {
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 24px;
-  margin-bottom: 20px;
-}
-.batch-quantity-equation,
-.batch-equation-term,
-.inbound-result-totals {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-}
-.batch-quantity-metric {
-  min-width: 64px;
-}
-.batch-quantity-metric > span {
-  display: block;
-  color: var(--dn-muted);
-  font-size: 12px;
-}
-.batch-quantity-metric > strong {
-  display: block;
-  margin-top: 4px;
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.batch-equation-operator {
-  color: var(--dn-muted);
-  font-size: 20px;
-}
-.metric-import > strong {
-  color: var(--dn-primary);
-}
-.metric-pending > strong {
-  color: var(--dn-warning);
-}
-.quantity-unknown > strong {
-  color: var(--dn-muted);
-}
-.batch-detail--compact .batch-quantity-bar {
-  height: 6px;
-  border-radius: 3px;
-}
-.batch-detail--compact .batch-quantity-segment {
-  min-width: 4px;
-}
-.quantity-review-marker {
-  flex: 0 0 4px;
-}
-.quantity-uncomputed {
-  background: var(--dn-surface-muted);
-  border: 1px dashed var(--dn-border-strong);
-}
-.batch-detail--compact .batch-quantity-legend {
-  color: var(--dn-muted);
-  font-size: 12px;
-}
-.batch-detail--compact .batch-quantity-legend strong {
-  color: inherit;
-  font-size: 12px;
-  font-weight: 500;
-}
-.batch-detail--compact .conservation-ok {
-  color: var(--dn-muted);
-  font-size: 12px;
-  font-weight: 400;
-}
 .batch-detail--compact .delivery-detail-tabs,
 .batch-detail--compact .self-operated-detail-tabs {
   min-width: 0;
@@ -212,20 +136,6 @@
   .batch-result-actions,
   .export-action-buttons {
     justify-content: flex-start;
-  }
-  .batch-detail--compact .batch-quantity-summary {
-    padding: 16px;
-  }
-  .batch-quantity-equation,
-  .batch-equation-term,
-  .inbound-result-totals {
-    gap: 12px;
-  }
-  .batch-quantity-metric {
-    min-width: 48px;
-  }
-  .batch-quantity-metric > strong {
-    font-size: 24px;
   }
   .delivery-detail-tabs-body {
     padding-inline: 12px;

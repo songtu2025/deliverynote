@@ -119,7 +119,7 @@ export default function BatchDetail({
         hasAdjustmentDraft={adjustments.count > 0}
       />
 
-      <BatchSummary batch={batch} />
+      <BatchSummary batch={batch} reviewStats={availableReviewStats(data)} />
     </>
   );
 

@@ -19,7 +19,6 @@
   --dn-warning-soft: #fbeee9;
   --dn-info-soft: #edf3fa;
   --dn-danger-soft: #faedf0;
-  --dn-pending-bar: #e8735a;
   color: var(--dn-ink);
   background: var(--dn-canvas);
   font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;

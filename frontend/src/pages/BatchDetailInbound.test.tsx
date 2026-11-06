@@ -39,8 +39,13 @@ describe("自营仓批次详情", () => {
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     expect(await screen.findByRole("tab", { name: "待处理 1" })).toBeInTheDocument();
-    expect(task.getByText("本次申请")).toBeInTheDocument();
-    expect(task.getByLabelText("入库数量摘要")).toHaveTextContent("累计实收 163 − 历史已入库 3 = 本次申请 160");
+    expect(task.getByRole("img", { name: /可入库 100 \/ 160 件/ })).toHaveAccessibleName(
+      /本次申请 160 = 可入库 100 \+ 待处理 60/
+    );
+    fireEvent.click(task.getByRole("button", { name: "累计实收 − 历史已入库" }));
+    expect((await screen.findByText("累计实收", { exact: true })).parentElement).toHaveTextContent("累计实收 163");
+    expect(screen.getByText("历史已入库", { exact: true }).parentElement).toHaveTextContent("历史已入库 3");
+    fireEvent.click(task.getByRole("button", { name: "累计实收 − 历史已入库" }));
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
     const page = within(container);
     expect(page.queryByLabelText("规模定位筛选")).not.toBeInTheDocument();
@@ -247,7 +252,7 @@ describe("自营仓批次详情", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     const summary = task.getByLabelText("入库数量摘要");
-    expect(summary).toHaveTextContent(hasSummary ? "可入库 0" : "可入库 —");
-    expect(summary).toHaveTextContent(hasSummary ? "待处理 0" : "待处理 —");
+    expect(within(summary).getByRole("img")).toHaveAccessibleName(hasSummary ? /可入库 0 \/ 0 件/ : /可入库 — \/ — 件/);
+    expect(summary).toHaveTextContent(hasSummary ? "待处理 0 件" : "尚未计算");
   });
 });

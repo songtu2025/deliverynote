@@ -172,9 +172,9 @@ describe("交货批次任务状态条", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
     await waitFor(() => expect(task.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件"));
-    const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
-    expect(bar.children).toHaveLength(2);
-    expect(bar.children[1]).toHaveStyle({ flexGrow: "60" });
+    const rings = screen.getByRole("img", { name: /可导入 100 \/ 160 件，占比 62.5%/ });
+    expect(rings).toHaveAccessibleName(/待处理已审校 0 \/ 4 条/);
+    expect(rings).toHaveAccessibleName(/交货 160 = 可导入 100 \+ 待处理 60/);
     expect(screen.queryByText(/保留待处理/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), { target: { value: "SKU-B" } });
     await waitFor(() => expect(screen.queryByText("SKU-A")).not.toBeInTheDocument());

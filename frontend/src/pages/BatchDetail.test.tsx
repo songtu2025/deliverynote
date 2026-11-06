@@ -32,7 +32,7 @@ describe("BatchDetail", () => {
     expect(onBack).toHaveBeenCalledOnce();
     failing = false;
     fireEvent.click(screen.getByRole("button", { name: /重试/ }));
-    await screen.findByText("交货 160 = 可导入 100 + 待处理 60");
+    await screen.findByRole("img", { name: /交货 160 = 可导入 100 \+ 待处理 60/ });
     expect(screen.queryByText("读取批次失败")).not.toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.every(([, init]) => !init?.method || init.method === "GET")).toBe(true);
   });
@@ -151,7 +151,7 @@ describe("BatchDetail", () => {
 
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("交货 160 = 可导入 100 + 待处理 60")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /交货 160 = 可导入 100 \+ 待处理 60/ })).toBeInTheDocument();
     expect(screen.queryByText("SKU-A")).not.toBeInTheDocument();
 
     finishExceptions(
@@ -196,7 +196,7 @@ describe("BatchDetail", () => {
 
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
 
-    expect(await screen.findByText("交货 160 = 可导入 100 + 待处理 60")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /交货 160 = 可导入 100 \+ 待处理 60/ })).toBeInTheDocument();
     await waitFor(() => expect(exceptionRequests).toBe(2));
     await waitFor(() => {
       expect(container.querySelector(".exception-review-card .ant-spin-spinning")).toBeInTheDocument();

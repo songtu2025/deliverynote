@@ -14,14 +14,14 @@ async function selectAllReviews() {
 describe("交货批次详情标签页", () => {
   const { state } = setupBatchDetailTest();
 
-  it("计算后默认显示待处理，数量条按汇总显示两段", async () => {
+  it("计算后默认显示待处理，双环按汇总显示可导入和审校进度", async () => {
     state.exceptions = [state.exceptions[0]];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("tab", { name: "可导入 2" })).toBeInTheDocument();
-    const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
-    expect(bar.children).toHaveLength(2);
-    expect(screen.getByText("交货 160 = 可导入 100 + 待处理 60")).toHaveClass("conservation-ok");
+    const bar = screen.getByRole("img", { name: /可导入 100 \/ 160 件，占比 62.5%/ });
+    expect(bar.querySelectorAll("circle")).toHaveLength(3);
+    expect(bar).toHaveAccessibleName(/交货 160 = 可导入 100 \+ 待处理 60/);
     expect(screen.getByText("2 个来源文件")).toBeInTheDocument();
     expect(screen.getByText(/^更新于/)).toBeInTheDocument();
   });
@@ -32,7 +32,7 @@ describe("交货批次详情标签页", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("tab", { name: "待处理 —" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "可导入 —" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "尚未计算" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /可导入 — \/ — 件，占比 —.*尚未计算/ })).toBeInTheDocument();
     expect(screen.getByText("预检并计算后显示待处理")).toBeVisible();
     fireEvent.click(screen.getByRole("tab", { name: "可导入 —" }));
     expect(screen.getByText("计算后显示可导入明细")).toBeVisible();
@@ -122,7 +122,7 @@ describe("交货批次详情标签页", () => {
     expect(screen.queryByText(/转自/)).not.toBeInTheDocument();
   });
 
-  it("读取审校统计失败时仅显示两段待处理数量", async () => {
+  it("读取审校统计失败时保留可导入数量和未知审校进度", async () => {
     const originalFetch = fetch;
     vi.stubGlobal(
       "fetch",
@@ -134,7 +134,9 @@ describe("交货批次详情标签页", () => {
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByText("读取批次失败");
-    expect(screen.getByRole("img", { name: "可导入 100，待处理 60" }).children).toHaveLength(2);
+    expect(screen.getByRole("img", { name: /可导入 100 \/ 160 件，占比 62.5%/ })).toHaveAccessibleName(
+      /待处理已审校 — \/ — 条/
+    );
     expect(screen.queryByText("保留待处理")).not.toBeInTheDocument();
   });
 });
@@ -236,7 +238,8 @@ describe("自营仓详情工作区", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(5);
     expect(screen.queryByRole("tab", { name: /^已处理/ })).not.toBeInTheDocument();
     const summary = screen.getByLabelText("入库数量摘要");
-    expect(within(summary).getAllByText("—")).toHaveLength(4);
+    expect(within(summary).getAllByText("—")).toHaveLength(2);
+    expect(within(summary).getByRole("img")).toHaveAccessibleName(/可入库 — \/ 160 件.*待处理已处理 — \/ — 条/);
     expect(screen.queryByText("计算后生成")).not.toBeInTheDocument();
     expect(screen.queryByText("没有待处理，可以直接生成结果")).not.toBeInTheDocument();
   });

@@ -64,10 +64,11 @@ describe("累计实收核对", () => {
     expect(screen.queryByRole("switch", { name: "仅显示待核对" })).not.toBeInTheDocument();
     expect(screen.queryByText(/仅显示待核对/)).not.toBeInTheDocument();
     expect(screen.getByText("已核对")).toHaveClass("ant-typography-secondary");
-    const summary = within(screen.getByLabelText("入库数量摘要"));
-    expect(summary.getByText("19")).toBeInTheDocument();
-    expect(summary.getByText("3")).toBeInTheDocument();
-    expect(summary.getByText("16")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^可入库/ })).toHaveAccessibleName(/可入库 — \/ 16 件/);
+    fireEvent.click(screen.getByRole("button", { name: "累计实收 − 历史已入库" }));
+    expect(await screen.findByText("19", { selector: ".quantity-derivation strong" })).toBeInTheDocument();
+    expect(screen.getByText("3", { selector: ".quantity-derivation strong" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "累计实收 − 历史已入库" }));
     fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
     const drawer = await screen.findByRole("dialog");
     expect(within(drawer).getByText("交货单号（1）")).toBeInTheDocument();
@@ -131,7 +132,9 @@ describe("累计实收核对", () => {
         <ReceiptReview {...props} />
       </>
     );
-    expect(screen.getAllByText("0")).toHaveLength(2);
+    expect(screen.getByRole("img", { name: /^可入库/ })).toHaveAccessibleName(/可入库 — \/ 0 件/);
+    fireEvent.click(screen.getByRole("button", { name: "累计实收 − 历史已入库" }));
+    expect(await screen.findAllByText("0", { selector: ".quantity-derivation strong" })).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "同步积加入库记录" })).not.toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
   });

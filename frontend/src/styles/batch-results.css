@@ -23,10 +23,6 @@
   color: #a35f08;
   font-weight: 700;
 }
-.conservation-ok {
-  color: #176b5b;
-  font-weight: 700;
-}
 .conservation-bad {
   color: var(--dn-danger);
   font-weight: 700;

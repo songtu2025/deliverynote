@@ -3,7 +3,7 @@ import { LoadingOutlined } from "@ant-design/icons";
 import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import StatusTag from "../../BatchStatusTag";
-import { receiptReady } from "../../receipt";
+import BatchQuantity from "./BatchQuantity";
 import { canDeleteBatch } from "./batchWorkspace";
 import { batchStage } from "../../batchStage";
 import type { BatchWorkflow } from "./batchWorkspace";
@@ -95,42 +95,9 @@ export default function BatchListTable({
           )
         },
         {
-          title: "数量",
+          title: "可导入",
           width: 186,
-          render: (_, batch) => {
-            const summary = delivery || receiptReady(batch) ? batch.summary : undefined;
-            return (
-              <div className="batch-table-value">
-                <span className="batch-cell-label">数量</span>
-                <span className="batch-volume">
-                  {!delivery ? `${batch.file_count} 份质检单` : `${batch.file_count} 个文件`}
-                </span>
-                {summary && summary.delivery_total > 0 && (
-                  <div
-                    className="batch-quantity-bar batch-list-quantity-bar"
-                    role="img"
-                    aria-label={`${delivery ? "可导入" : "可入库"} ${summary.import_total}，待处理 ${summary.manual_total}`}
-                  >
-                    <span
-                      className="batch-quantity-segment quantity-import"
-                      style={{ flexGrow: summary.import_total }}
-                    />
-                    <span
-                      className="batch-quantity-segment quantity-pending"
-                      style={{ flexGrow: summary.manual_total }}
-                    />
-                  </div>
-                )}
-                {summary ? (
-                  <span className="batch-allocation">
-                    {delivery ? "可导入" : "可入库"} {summary.import_total} / 待处理 <span>{summary.manual_total}</span>
-                  </span>
-                ) : !delivery ? (
-                  <span className="batch-allocation">尚未计算</span>
-                ) : null}
-              </div>
-            );
-          }
+          render: (_, batch) => <BatchQuantity batch={batch} />
         },
         {
           title: "更新时间",
@@ -148,7 +115,7 @@ export default function BatchListTable({
           fixed: "right",
           width: canDeleteBatches ? 190 : 140,
           render: (_, batch) => {
-            const { next, pending } = batchStage(batch);
+            const { next } = batchStage(batch);
             return (
               <div className="batch-table-value">
                 <span className="batch-cell-label">操作</span>
@@ -192,9 +159,6 @@ export default function BatchListTable({
                     </Popconfirm>
                   )}
                 </div>
-                {!delivery && pending > 0 && next.key === "download" && (
-                  <span className="batch-result-availability">待处理 {pending}</span>
-                )}
                 {delivery && batch.download_ready && next.key === "review" && (
                   <span className="batch-result-availability">结果可下载</span>
                 )}
