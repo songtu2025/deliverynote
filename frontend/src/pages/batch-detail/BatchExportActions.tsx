@@ -1,9 +1,10 @@
-import { Button } from "antd";
 import { DownloadOutlined, ExportOutlined } from "@ant-design/icons";
 import type { Batch, Job } from "../../types";
 import type { useBatchTasks } from "./useBatchTasks";
-import { batchPresentation, batchFileResultName, exportActive } from "./batchPresentation";
 import type { ExceptionReview } from "./useExceptionReview";
+import { batchStage } from "../../batchStage";
+import { batchResultDownload } from "./batchPresentation";
+import BatchPrimaryButton from "./BatchPrimaryButton";
 
 export default function BatchExportActions({
   batch,
@@ -20,136 +21,23 @@ export default function BatchExportActions({
   focusReview: () => void;
   reviewStats?: ExceptionReview["reviewStats"];
 }) {
-  const { needsMergedGeneration } = batchPresentation(batch);
-  const exportJob = batch.jobs?.export;
-  const selfOperated = batch.workflow === "self_operated_inbound";
-  const { canRetry, reviewing } = exportActionState(batch, reviewStats);
-  const { downloadResult, startExport } = tasks;
+  const { next, disabledReason } = batchStage(batch, { activeJob, action, reviewStats });
+  const run = () => {
+    if (next.key === "review") return focusReview();
+    if (next.key !== "download") return void tasks.startExport();
+    const target = batchResultDownload(batch);
+    if (target) return void tasks.downloadResult(target.path, target.filename);
+  };
   return (
     <div className="batch-result-actions">
-      <div className="export-action-buttons">
-        {batch.download_ready && !needsMergedGeneration ? (
-          <ResultDownloadButtons
-            batch={batch}
-            action={action}
-            primary={selfOperated || !reviewing}
-            downloadResult={downloadResult}
-          />
-        ) : canRetry ? (
-          <ExportGenerationButton
-            exportJob={exportJob}
-            activeJob={activeJob}
-            action={action}
-            needsMergedGeneration={needsMergedGeneration}
-            startExport={startExport}
-            primary={selfOperated || !reviewing}
-            disabled={!selfOperated && !reviewStats}
-          />
-        ) : null}
-      </div>
-      {reviewing && !selfOperated && (
-        <Button aria-label="开始审校" type="primary" disabled={Boolean(activeJob)} onClick={focusReview}>
-          开始审校
-        </Button>
-      )}
+      <BatchPrimaryButton
+        icon={next.key === "download" ? <DownloadOutlined /> : <ExportOutlined />}
+        reason={disabledReason}
+        loading={Boolean(action)}
+        onClick={run}
+      >
+        {next.label}
+      </BatchPrimaryButton>
     </div>
-  );
-}
-
-function exportActionState(batch: Batch, stats?: ExceptionReview["reviewStats"]) {
-  const { needsReview } = batchPresentation(batch);
-  const exportStatus = batch.jobs?.export?.status;
-  const unfinished = stats ? stats.unfinishedCount > 0 : needsReview;
-  const reviewing = exportStatus !== "failed" && unfinished;
-  if (batch.workflow !== "self_operated_inbound") return { reviewing, canRetry: true };
-  // 自营仓自动生成结果；无导出任务（如旧批次）、失败或失效时允许手动生成。
-  return { reviewing, canRetry: !exportActive(batch) };
-}
-
-function ResultDownloadButtons({
-  batch,
-  action,
-  primary,
-  downloadResult
-}: {
-  batch: Batch;
-  action: string | null;
-  primary: boolean;
-  downloadResult: (path: string, filename: string) => Promise<void>;
-}) {
-  const { hasMultipleFiles } = batchPresentation(batch);
-  const files = batch.files ?? [];
-  const selfOperated = batch.workflow === "self_operated_inbound";
-  // 下载要先取回整个文件，期间在对应按钮上显示处理中并防止重复点击。
-  const state = (path: string) => ({ loading: action === `download:${path}`, disabled: Boolean(action) });
-  return hasMultipleFiles ? (
-    <>
-      <Button
-        icon={<DownloadOutlined />}
-        {...state(`/api/batches/${batch.id}/download`)}
-        onClick={() => void downloadResult(`/api/batches/${batch.id}/download`, `${batch.name}_分文件.zip`)}
-      >
-        下载分文件 ZIP
-      </Button>
-      <Button
-        type={primary ? "primary" : "default"}
-        icon={<DownloadOutlined />}
-        {...state(`/api/batches/${batch.id}/download-merged`)}
-        onClick={() =>
-          void downloadResult(
-            `/api/batches/${batch.id}/download-merged`,
-            `${batch.name}_${selfOperated ? "合并积加入库" : "合并处理"}.xlsx`
-          )
-        }
-      >
-        下载合并结果
-      </Button>
-    </>
-  ) : (
-    files[0]?.download_ready && (
-      <Button
-        type={primary ? "primary" : "default"}
-        icon={<DownloadOutlined />}
-        {...state(`/api/batch-files/${files[0].id}/download`)}
-        onClick={() =>
-          void downloadResult(
-            `/api/batch-files/${files[0].id}/download`,
-            batchFileResultName(files[0].original_name, selfOperated)
-          )
-        }
-      >
-        下载结果
-      </Button>
-    )
-  );
-}
-
-function ExportGenerationButton({
-  exportJob,
-  activeJob,
-  action,
-  needsMergedGeneration,
-  startExport,
-  primary,
-  disabled
-}: {
-  exportJob?: Job;
-  activeJob?: Job;
-  action: string | null;
-  needsMergedGeneration: boolean;
-  startExport: () => Promise<void>;
-  primary: boolean;
-  disabled: boolean;
-}) {
-  return (
-    <Button
-      icon={<ExportOutlined />}
-      type={primary ? "primary" : "default"}
-      disabled={Boolean(activeJob) || disabled}
-      loading={action === "export" || activeJob?.kind === "export"}
-      onClick={() => void startExport()}
-    >
-      {exportJob?.status === "stale" ? "重新生成结果" : needsMergedGeneration ? "生成合并结果" : "生成结果"}
-    </Button>
   );
 }

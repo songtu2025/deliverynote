@@ -77,6 +77,7 @@ describe("BatchesPage", () => {
 
   it.each([true, false])("keeps pending quantities visible when download readiness is %s", async (downloadReady) => {
     state.batchRows[0].download_ready = downloadReady;
+    state.batchRows[0].merged_download_ready = downloadReady;
     const onOpen = vi.fn();
     render(<BatchesPage onOpen={onOpen} />, { wrapper: AntApp });
 
@@ -92,13 +93,13 @@ describe("BatchesPage", () => {
   });
 
   it.each([
-    ["succeeded", 0, true, "下载结果"],
-    ["succeeded", 0, false, "生成结果"],
-    ["draft", 60, true, "预检"],
-    ["preflight_ready", 60, true, "开始计算"],
+    ["succeeded", 0, true, "去下载"],
+    ["succeeded", 0, false, "去生成"],
+    ["draft", 60, false, "去预检并计算"],
+    ["preflight_ready", 60, false, "去计算"],
     ["queued", 60, true, "计算中"],
     ["running", 60, true, "计算中"],
-    ["failed", 60, true, "查看原因"],
+    ["failed", 60, false, "查看原因"],
     ["expired", 60, true, "查看原因"]
   ] as const)(
     "preserves the action for %s with pending quantity %s and download readiness %s",
@@ -106,6 +107,7 @@ describe("BatchesPage", () => {
       Object.assign(state.batchRows[0], {
         status,
         download_ready: downloadReady,
+        merged_download_ready: downloadReady,
         summary: { delivery_total: 160, import_total: 160 - pending, manual_total: pending, conserved: true }
       });
       render(<BatchesPage onOpen={vi.fn()} />, { wrapper: AntApp });
@@ -117,18 +119,9 @@ describe("BatchesPage", () => {
       } else {
         const button = within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" });
         expect(button).toHaveAttribute("title", action);
-        const labels: Record<string, string> = {
-          下载结果: "去下载",
-          生成结果: "去生成",
-          预检: "去预检",
-          开始计算: "去计算",
-          查看原因: "查看原因"
-        };
-        expect(button).toHaveTextContent(labels[action]);
+        expect(button).toHaveTextContent(action);
         expect(button.classList.contains("ant-btn-dangerous")).toBe(action === "查看原因");
-        expect(button.classList.contains("ant-btn-primary")).toBe(
-          ["开始计算", "生成结果", "下载结果"].includes(action)
-        );
+        expect(button.classList.contains("ant-btn-primary")).toBe(["去计算", "去生成", "去下载"].includes(action));
       }
       expect(within(row).queryByText("去审校 60")).not.toBeInTheDocument();
       expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
@@ -139,20 +132,29 @@ describe("BatchesPage", () => {
     Object.assign(state.batchRows[0], {
       workflow: "self_operated_inbound",
       download_ready: downloadReady,
+      merged_download_ready: downloadReady,
       receipt: { cumulative_total: 163, history_total: 3, requested_total: 160, issue_count: 0 }
     });
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByText(downloadReady ? "去下载" : "去审校 60")).toBeInTheDocument();
+    expect(within(row).getByText(downloadReady ? "去下载" : "去生成")).toBeInTheDocument();
+    expect(within(row).getByText("待处理")).toBeInTheDocument();
+    if (downloadReady) expect(within(row).getByText("待处理 60")).toBeInTheDocument();
+    expect(within(row).queryByText("去审校 60")).not.toBeInTheDocument();
     expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
   });
 
   it("requires a new history snapshot before using old self-operated results", async () => {
-    Object.assign(state.batchRows[0], { workflow: "self_operated_inbound", receipt: undefined, download_ready: true });
+    Object.assign(state.batchRows[0], {
+      workflow: "self_operated_inbound",
+      receipt: undefined,
+      download_ready: true,
+      inbound_file: { uploaded: true, original_name: "合成.xlsx" }
+    });
     render(<BatchesPage workflow="self_operated_inbound" onOpen={vi.fn()} />, { wrapper: AntApp });
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByTitle("同步积加入库记录并核对")).toBeInTheDocument();
+    expect(within(row).getByTitle("去核对")).toBeInTheDocument();
     expect(within(row).getByText("尚未计算")).toBeInTheDocument();
     expect(within(row).queryByText(/可入库 100/)).not.toBeInTheDocument();
   });
@@ -166,7 +168,7 @@ describe("BatchesPage", () => {
     const onOpen = vi.fn();
     render(<BatchesPage workflow="self_operated_inbound" onOpen={onOpen} />, { wrapper: AntApp });
     const button = await screen.findByRole("button", { name: "打开 2026-07-21 交货批次" });
-    expect(button).toHaveAttribute("title", "同步积加入库记录并核对");
+    expect(button).toHaveAttribute("title", "去核对");
     expect(button).toHaveTextContent("去核对");
     fireEvent.click(button);
     expect(onOpen).toHaveBeenCalledWith(7);
@@ -180,7 +182,7 @@ describe("BatchesPage", () => {
       render(<BatchesPage workflow={workflow} onOpen={onOpen} />, { wrapper: AntApp });
       const button = await screen.findByRole("button", { name: "打开 2026-07-21 交货批次" });
       expect(button).toHaveTextContent("去上传");
-      expect(button).toHaveAttribute("title", workflow === "delivery" ? "上传交货文件" : "上传质检交货单");
+      expect(button).toHaveAttribute("title", "去上传");
       expect(button).not.toHaveClass("ant-btn-primary");
       fireEvent.click(button);
       expect(onOpen).toHaveBeenCalledWith(7);

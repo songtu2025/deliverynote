@@ -141,7 +141,10 @@ describe("交货批次任务状态条", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
     expect(await task.findByText("1 条待审校，共 60 件")).toBeInTheDocument();
-    expect(task.getByRole("button", { name: /下载结果/ })).toBeEnabled();
+    expect(task.getByRole("button", { name: "开始审校" })).toBeEnabled();
+    expect(task.queryByRole("button", { name: /下载结果/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "来源文件 1" }));
+    expect(screen.getByRole("button", { name: "下载单文件结果" })).toBeEnabled();
     expect(task.queryByRole("button", { name: /下载合并结果|下载分文件 ZIP/ })).not.toBeInTheDocument();
     expect(task.getByText("结果可下载")).toBeInTheDocument();
   });

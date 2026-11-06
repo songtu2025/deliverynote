@@ -214,7 +214,7 @@ describe("自营仓批次详情", () => {
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
-    const button = task.getByRole("button", { name: "预检并计算" });
+    const button = task.getByRole("button", { name: /预检并计算/ });
     expect(task.queryByRole("button", { name: /^预检$/ })).not.toBeInTheDocument();
     expect(task.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
     fireEvent.click(button);
@@ -224,11 +224,12 @@ describe("自营仓批次详情", () => {
     ]);
   });
 
-  it("失败时保留重新计算，低频取数入口放在更多菜单", async () => {
+  it("失败时保留重试，低频取数入口放在更多菜单", async () => {
     state.batch.status = "failed";
+    state.batch.receipt!.captured_at = "2026-11-04T00:00:00Z";
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
-    expect(task.getByRole("button", { name: /重新计算/ })).toBeEnabled();
+    expect(task.getByRole("button", { name: /重试/ })).toBeEnabled();
     expect(task.queryByRole("button", { name: /预检/ })).not.toBeInTheDocument();
     expect(task.queryByRole("button", { name: "同步积加入库记录" })).not.toBeInTheDocument();
     fireEvent.click(task.getByRole("button", { name: /更多/ }));

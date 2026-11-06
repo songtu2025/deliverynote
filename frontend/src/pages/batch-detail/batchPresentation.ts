@@ -1,68 +1,16 @@
 import type { Batch, Job } from "../../types";
 import type { ExceptionReview } from "./useExceptionReview";
-import { receiptReady } from "../../receipt";
 
-export function batchPresentation(batch: Batch) {
-  const totals = batch.summary ?? { delivery_total: 0, import_total: 0, manual_total: 0, conserved: true };
-  const computed = computedBatch(batch);
-  const needsReview = computed && totals.manual_total > 0;
-  const hasMultipleFiles = (batch.files?.length ?? 0) > 1;
-  const mergedDownloadReady = hasMultipleFiles && batch.merged_download_ready;
-  return {
-    totals,
-    computed,
-    needsReview,
-    hasMultipleFiles,
-    canPreflight: ["draft", "failed"].includes(batch.status),
-    canCompute: ["preflight_ready", "failed"].includes(batch.status) && receiptReady(batch),
-    canEditFiles: ["draft", "preflight_ready", "failed"].includes(batch.status),
-    needsMergedGeneration: batch.download_ready && hasMultipleFiles && !mergedDownloadReady
-  };
-}
-
-function computedBatch(batch: Batch) {
-  return (batch.status === "succeeded" || batch.download_ready) && receiptReady(batch);
-}
+export { batchCapabilities as batchPresentation } from "../../batchStage";
+import { activeBatchTask, batchCapabilities as batchPresentation, resultDownloadAvailable } from "../../batchStage";
 
 type ReviewStats = Pick<ExceptionReview["reviewStats"], "unfinishedCount" | "unfinishedQuantity">;
-
-export function batchStagePresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats) {
-  const { computed } = batchPresentation(batch);
-  const runningKind = activeTaskKind(batch, activeJob);
-  if (runningKind) return { label: RUNNING_STAGE_LABELS[runningKind] ?? "计算中", tone: "running" };
-  const failure = failureTaskPresentation(batch);
-  if (failure) return { label: failure.tone === "review" ? "待核对" : "失败", tone: failure.tone };
-  if (computed) return computedStage(batch, reviewStats);
-  return batch.status === "preflight_ready" && receiptReady(batch)
-    ? { label: "可计算", tone: "ready" }
-    : { label: "准备文件", tone: "waiting" };
-}
-
-const RUNNING_STAGE_LABELS: Record<string, string> = { prepare: "核对中", compute: "计算中", export: "生成中" };
-
-// 返回正在进行的任务类型；整批采购数据任务不改变批次阶段。
-function activeTaskKind(batch: Batch, activeJob?: Job) {
-  const active = (status: string) => ["queued", "running"].includes(status);
-  const jobs = activeJob ? [activeJob] : Object.values(batch.jobs ?? {});
-  const job = jobs.find((item) => item.kind !== "purchase_snapshot" && active(item.status));
-  if (job) return job.kind;
-  return active(batch.status) ? "compute" : null;
-}
-
-function computedStage(batch: Batch, reviewStats?: ReviewStats) {
-  const { needsReview, needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
-  const unfinished = reviewStats ? reviewStats.unfinishedCount > 0 : needsReview;
-  const selfOperated = batch.workflow === "self_operated_inbound";
-  if (unfinished) return { label: selfOperated ? "待处理" : "待审校", tone: "review" };
-  const ready = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
-  if (selfOperated && !ready && exportActive(batch)) return { label: "生成中", tone: "running" };
-  return { label: ready ? "已完成" : "可生成结果", tone: "ready" };
-}
 
 export function batchTaskPresentation(batch: Batch, activeJob?: Job, reviewStats?: ReviewStats, elapsedSeconds = 0) {
   const { computed, needsReview } = batchPresentation(batch);
   const selfOperated = batch.workflow === "self_operated_inbound";
-  if (activeJob) return jobTaskPresentation(activeJob, selfOperated, elapsedSeconds);
+  const running = activeBatchTask(batch, activeJob);
+  if (running) return jobTaskPresentation(running, selfOperated, elapsedSeconds);
   const failure = failureTaskPresentation(batch);
   if (failure) return failure;
   if (batch.status === "queued" || batch.status === "running")
@@ -167,8 +115,7 @@ function inboundJobTask(job: Pick<Job, "kind" | "status" | "queue_position">, el
 }
 
 function reviewTaskPresentation(batch: Batch, needsReview: boolean, stats?: ReviewStats) {
-  const { needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
-  const downloadable = resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles);
+  const downloadable = resultDownloadAvailable(batch);
   if (batch.workflow === "self_operated_inbound") return inboundResultTask(batch, Boolean(downloadable), stats);
   if (!stats)
     return {
@@ -207,22 +154,30 @@ function inboundResultTask(batch: Batch, downloadable: boolean, stats?: ReviewSt
 }
 
 export function batchResultPresentation(batch: Batch, activeJob?: Job) {
-  const { needsMergedGeneration, hasMultipleFiles } = batchPresentation(batch);
+  const { needsMergedGeneration } = batchPresentation(batch);
   if (activeJob?.kind === "export") return activeJob.status === "queued" ? "结果排队中" : "正在生成结果";
   if (batch.jobs?.export?.status === "stale")
     return batch.workflow === "self_operated_inbound" ? "处理有更新，需重新生成结果" : "审校有更新，需重新生成结果";
-  if (resultDownloadAvailable(batch, needsMergedGeneration, hasMultipleFiles)) return "结果可下载";
+  if (resultDownloadAvailable(batch)) return "结果可下载";
   return needsMergedGeneration ? "需生成合并结果" : "尚未生成结果";
-}
-
-function resultDownloadAvailable(batch: Batch, needsMergedGeneration: boolean, hasMultipleFiles: boolean) {
-  return batch.download_ready && !needsMergedGeneration && (hasMultipleFiles || batch.files?.[0]?.download_ready);
 }
 
 export function batchFileResultName(originalName: string, selfOperated: boolean) {
   return `${originalName.replace(/\.(xls|xlsx)$/i, "")}_${selfOperated ? "积加入库" : "交货处理"}.xlsx`;
 }
 
-export function exportActive(batch: Batch) {
+export function batchResultDownload(batch: Batch) {
+  const file = batch.files?.[0];
+  if (!file) return null;
+  const selfOperated = batch.workflow === "self_operated_inbound";
+  return batchPresentation(batch).hasMultipleFiles
+    ? {
+        path: `/api/batches/${batch.id}/download-merged`,
+        filename: `${batch.name}_${selfOperated ? "合并积加入库" : "合并处理"}.xlsx`
+      }
+    : { path: `/api/batch-files/${file.id}/download`, filename: batchFileResultName(file.original_name, selfOperated) };
+}
+
+function exportActive(batch: Batch) {
   return ["queued", "running"].includes(batch.jobs?.export?.status ?? "");
 }

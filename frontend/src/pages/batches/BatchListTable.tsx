@@ -4,21 +4,11 @@ import type { Batch } from "../../types";
 import { formatBeijingDateTime } from "../../dateTime";
 import StatusTag from "../../BatchStatusTag";
 import { receiptReady } from "../../receipt";
-import { canDeleteBatch, nextAction } from "./batchWorkspace";
+import { canDeleteBatch } from "./batchWorkspace";
+import { batchStage } from "../../batchStage";
 import type { BatchWorkflow } from "./batchWorkspace";
 import type { useBatchList } from "./useBatchList";
 import type { useBatchDeletion } from "./useBatchDeletion";
-const actionLabels: Record<string, string> = {
-  开始计算: "去计算",
-  生成结果: "去生成",
-  下载结果: "去下载",
-  预检: "去预检",
-  上传交货文件: "去上传",
-  上传质检交货单: "去上传",
-  同步积加入库记录并核对: "去核对",
-  查看原因: "查看原因"
-};
-const primaryActions = ["审校待处理", "开始计算", "生成结果", "下载结果"];
 export default function BatchListTable({
   workflow,
   onOpen,
@@ -96,10 +86,10 @@ export default function BatchListTable({
           title: "状态",
           dataIndex: "status",
           width: 104,
-          render: (value: string) => (
+          render: (_: string, batch) => (
             <div className="batch-table-value">
               <span className="batch-cell-label">状态</span>
-              <StatusTag status={value} />
+              <StatusTag batch={batch} />
             </div>
           )
         },
@@ -145,27 +135,30 @@ export default function BatchListTable({
           title: "下一步",
           width: 140,
           render: (_, batch) => {
-            const action = nextAction(batch, workflow);
+            const { next, stage, pending } = batchStage(batch);
             return (
               <div className="batch-table-value">
                 <span className="batch-cell-label">下一步</span>
-                {action === "计算中" ? (
+                {next.key === "busy" ? (
                   <span className="batch-computing">
-                    <LoadingOutlined /> 计算中
+                    <LoadingOutlined /> {next.listLabel}
                   </span>
                 ) : (
                   <Button
                     size="small"
-                    type={primaryActions.includes(action) ? "primary" : "default"}
-                    danger={action === "查看原因"}
+                    type={next.primary ? "primary" : "default"}
+                    danger={stage.tone === "error" || next.key === "expired"}
                     aria-label={"打开 " + batch.name}
-                    title={action}
+                    title={next.listLabel}
                     onClick={() => onOpen(batch.id)}
                   >
-                    {action === "审校待处理" ? `去审校 ${batch.summary?.manual_total}` : actionLabels[action]}
+                    {next.listLabel}
                   </Button>
                 )}
-                {delivery && batch.download_ready && action === "审校待处理" && (
+                {!delivery && pending > 0 && next.key === "download" && (
+                  <span className="batch-result-availability">待处理 {pending}</span>
+                )}
+                {delivery && batch.download_ready && next.key === "review" && (
                   <span className="batch-result-availability">结果可下载</span>
                 )}
               </div>

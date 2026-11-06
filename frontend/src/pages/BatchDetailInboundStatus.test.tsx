@@ -74,7 +74,7 @@ describe("自营仓进度和重试", () => {
     );
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("status")).toHaveTextContent("合成失败原因");
-    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    fireEvent.click(screen.getByRole("button", { name: kind === "export" ? /生成结果/ : /重试/ }));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("排队中"));
     const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts).toHaveLength(1);

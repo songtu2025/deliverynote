@@ -11,6 +11,8 @@ import DetailHelp from "./DetailHelp";
 import type { Batch, BatchFile } from "../../types";
 import type { BatchFiles } from "./useBatchFiles";
 import BatchTransferSources from "./BatchTransferSources";
+import BatchSourceActions from "./BatchSourceActions";
+import type { ExceptionReview } from "./useExceptionReview";
 
 export default function BatchFileTable({
   batch,
@@ -20,7 +22,9 @@ export default function BatchFileTable({
   canEditFiles,
   actions,
   action,
-  downloadResult
+  downloadResult,
+  startExport,
+  reviewStats
 }: {
   batch: Batch;
   files: BatchFile[];
@@ -30,6 +34,8 @@ export default function BatchFileTable({
   canEditFiles: boolean;
   actions: BatchFiles;
   downloadResult: (path: string, filename: string) => Promise<void>;
+  startExport: () => Promise<void>;
+  reviewStats?: ExceptionReview["reviewStats"];
 }) {
   const selfOperated = batch.workflow === "self_operated_inbound";
   return (
@@ -39,16 +45,26 @@ export default function BatchFileTable({
       className="section-card file-order-card"
       classNames={{ body: "batch-detail-panel-body" }}
       extra={
-        <span className="order-hint">
-          <DetailHelp
-            label="文件顺序说明"
-            title={
-              selfOperated
-                ? "序号越小，越先扣减待入库余额和超收额度。调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
-                : "序号越小，越先扣减采购余额。调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
-            }
+        <Space>
+          <BatchSourceActions
+            batch={batch}
+            actions={actions}
+            action={action}
+            downloadResult={downloadResult}
+            startExport={startExport}
+            reviewStats={reviewStats}
           />
-        </span>
+          <span className="order-hint">
+            <DetailHelp
+              label="文件顺序说明"
+              title={
+                selfOperated
+                  ? "序号越小，越先扣减待入库余额和超收额度。调整顺序会改变各质检单获得的待入库余额和超收额度；修改后必须重新预检。"
+                  : "序号越小，越先扣减采购余额。调整顺序会改变各来源文件获得的采购余额；修改后必须重新预检。"
+              }
+            />
+          </span>
+        </Space>
       }
     >
       {selfOperated && <InboundFileStatus batch={batch} />}

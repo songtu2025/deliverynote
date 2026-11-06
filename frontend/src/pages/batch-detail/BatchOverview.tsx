@@ -1,22 +1,20 @@
 import BatchMoreActions from "./BatchMoreActions";
 import { useEffect, useState } from "react";
-import { Button, Tag, Typography } from "antd";
+import { Tag, Typography } from "antd";
 import { ExclamationCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime, parseApiDateTime } from "../../dateTime";
 import type { Batch, Job } from "../../types";
 import type { BatchFiles } from "./useBatchFiles";
 import type { useBatchTasks } from "./useBatchTasks";
-import {
-  batchPresentation,
-  batchResultPresentation,
-  batchStagePresentation,
-  batchTaskPresentation
-} from "./batchPresentation";
+import { batchPresentation, batchResultPresentation, batchTaskPresentation } from "./batchPresentation";
 import BatchExportActions from "./BatchExportActions";
 import BatchPreparationActions from "./BatchPreparationActions";
 import type { ExceptionReview } from "./useExceptionReview";
 import BatchTransferSources from "./BatchTransferSources";
 import { BatchPurchaseSnapshotMetadata } from "./BatchPurchaseSnapshot";
+import { batchStage } from "../../batchStage";
+import { receiptInputBusy } from "../../receipt";
+import BatchInboundUpload from "./BatchInboundUpload";
 
 type OverviewProps = {
   batch: Batch;
@@ -32,8 +30,9 @@ type OverviewProps = {
 export default function BatchOverview(props: OverviewProps) {
   const { batch, activeJob, reviewStats, reviewError, tasks } = props;
   const { computed } = batchPresentation(batch);
-  const stage = batchStagePresentation(batch, activeJob, reviewStats);
+  const { stage } = batchStage(batch, { activeJob, reviewStats });
   const selfOperated = batch.workflow === "self_operated_inbound";
+  const inputDisabled = Boolean(props.action || activeJob) || receiptInputBusy(batch);
   return (
     <header className="batch-heading" role="region" aria-label="批次任务状态">
       <div className="batch-heading-copy">
@@ -43,14 +42,14 @@ export default function BatchOverview(props: OverviewProps) {
           </Typography.Title>
           <Tag className={`batch-stage batch-stage-${stage.tone}`}>{stage.label}</Tag>
         </div>
-        <BatchTaskStatus
-          batch={batch}
-          activeJob={activeJob}
-          reviewStats={reviewStats}
-          reviewError={reviewError}
-          retry={tasks.retry}
-          retrying={Boolean(props.action)}
-        />
+        <BatchTaskStatus batch={batch} activeJob={activeJob} reviewStats={reviewStats} reviewError={reviewError} />
+        {selfOperated && !batch.inbound_file?.uploaded && (
+          <BatchInboundUpload
+            upload={props.fileActions.uploadInboundFile}
+            disabled={inputDisabled}
+            loading={props.action === "upload-inbound"}
+          />
+        )}
         <BatchMetadata batch={batch} />
         <BatchPurchaseSnapshotMetadata />
         {computed && <div className="batch-heading-meta">{batchResultPresentation(batch, activeJob)}</div>}
@@ -59,8 +58,11 @@ export default function BatchOverview(props: OverviewProps) {
       <div className="batch-task-actions">
         {selfOperated && (
           <BatchMoreActions
-            disabled={Boolean(activeJob) || !batch.files?.length}
+            disabled={inputDisabled}
             refreshHistory={tasks.refreshHistory}
+            batch={batch}
+            fileActions={props.fileActions}
+            action={props.action}
           />
         )}
         {computed ? <BatchExportActions {...props} /> : <BatchPreparationActions {...props} />}
@@ -82,14 +84,11 @@ function BatchTaskStatus({
   batch,
   activeJob,
   reviewStats,
-  reviewError,
-  retry,
-  retrying
-}: Pick<OverviewProps, "batch" | "activeJob" | "reviewStats" | "reviewError"> & {
-  retry: () => Promise<void>;
-  retrying: boolean;
-}) {
-  const { tone } = batchStagePresentation(batch, activeJob, reviewStats);
+  reviewError
+}: Pick<OverviewProps, "batch" | "activeJob" | "reviewStats" | "reviewError">) {
+  const {
+    stage: { tone }
+  } = batchStage(batch, { activeJob, reviewStats });
   const elapsed = useJobElapsed(batch.workflow === "self_operated_inbound" ? activeJob : undefined);
   const task = batchTaskPresentation(batch, activeJob, reviewStats, elapsed);
   return (
@@ -101,11 +100,6 @@ function BatchTaskStatus({
         {tone === "error" && task.description && <p className="batch-failure-reason">{task.description}</p>}
         <ReviewStatisticsNotice batch={batch} reviewStats={reviewStats} reviewError={reviewError} />
       </div>
-      {batch.workflow === "self_operated_inbound" && tone === "error" && (
-        <Button aria-label="重试" loading={retrying} onClick={() => void retry()}>
-          重试
-        </Button>
-      )}
     </div>
   );
 }
