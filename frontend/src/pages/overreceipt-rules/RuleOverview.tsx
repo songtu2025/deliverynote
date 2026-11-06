@@ -1,4 +1,4 @@
-import { Button, Card, Empty, Space, Tag, Typography } from "antd";
+import { Button, Card, Empty, Segmented, Space, Tag, Typography } from "antd";
 import { CheckCircleFilled, EditOutlined, PlusOutlined } from "@ant-design/icons";
 import type { OverreceiptRuleVersion, SelfOperatedOverreceiptRuleVersion } from "../../types";
 import type { RuleScope } from "../../overreceiptRuleApi";
@@ -13,46 +13,17 @@ export function RuleLimits({ rule }: { rule: OverreceiptRuleVersion }) {
   );
 }
 
-export function RuleScopeSwitcher({
-  scope,
-  activeDeliveryRuleName,
-  activeSelfOperatedAllowance,
-  onChange
-}: {
-  scope: RuleScope;
-  activeDeliveryRuleName?: string;
-  activeSelfOperatedAllowance?: number;
-  onChange: (scope: RuleScope) => void;
-}) {
+export function RuleScopeSwitcher({ scope, onChange }: { scope: RuleScope; onChange: (scope: RuleScope) => void }) {
   return (
-    <div className="overreceipt-scope-switcher" aria-label="超收规则范围">
-      <button
-        type="button"
-        className={scope === "delivery" ? "is-active" : ""}
-        aria-pressed={scope === "delivery"}
-        onClick={() => onChange("delivery")}
-      >
-        <span className="overreceipt-scope-copy">
-          <strong>交货超收</strong>
-        </span>
-        <span className={`overreceipt-scope-badge ${activeDeliveryRuleName ? "" : "is-disabled"}`}>
-          {activeDeliveryRuleName ? `当前版本 ${activeDeliveryRuleName}` : "未启用"}
-        </span>
-      </button>
-      <button
-        type="button"
-        className={scope === "self_operated" ? "is-active" : ""}
-        aria-pressed={scope === "self_operated"}
-        onClick={() => onChange("self_operated")}
-      >
-        <span className="overreceipt-scope-copy">
-          <strong>自营仓入库</strong>
-        </span>
-        <span className={`overreceipt-scope-badge ${activeSelfOperatedAllowance !== undefined ? "" : "is-disabled"}`}>
-          {activeSelfOperatedAllowance !== undefined ? `每键 +${activeSelfOperatedAllowance} 件` : "未启用"}
-        </span>
-      </button>
-    </div>
+    <Segmented
+      aria-label="超收规则范围"
+      value={scope}
+      onChange={onChange}
+      options={[
+        { value: "delivery", label: "交货超收" },
+        { value: "self_operated", label: "自营仓入库" }
+      ]}
+    />
   );
 }
 
@@ -84,7 +55,7 @@ function CurrentRuleHeading({
       </div>
       <Space>
         {name !== undefined ? (
-          <Button icon={<EditOutlined />} aria-label={`重命名 ${name}`} onClick={onRename}>
+          <Button type="link" icon={<EditOutlined />} aria-label={`重命名 ${name}`} onClick={onRename}>
             重命名
           </Button>
         ) : null}

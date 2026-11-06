@@ -33,15 +33,18 @@ function Editor({
   return (
     <>
       <InboundAdjustmentActions adjustments={adjustments} />
-      {rows.map((row) => (
-        <InboundExceptionActions
-          key={row.id}
-          record={row}
-          onOpen={opened}
-          adjustments={adjustments}
-          onVersions={vi.fn()}
-        />
-      ))}
+      {rows.flatMap((row) =>
+        (["site", "actions"] as const).map((placement) => (
+          <InboundExceptionActions
+            key={`${row.id}:${placement}`}
+            placement={placement}
+            record={row}
+            onOpen={opened}
+            adjustments={adjustments}
+            onVersions={vi.fn()}
+          />
+        ))
+      )}
       <BatchManualAllowances batch={currentBatch} onSaved={saved} />
     </>
   );
@@ -154,5 +157,13 @@ describe("计算后行内调整", () => {
     );
     expect(screen.getByRole("button", { name: "查看锁定资料" })).toBeInTheDocument();
     expect(screen.queryByRole("spinbutton")).not.toBeInTheDocument();
+  });
+  it("切换批次清空原批次的调整草稿", () => {
+    const { rerender } = renderDetail(<Editor rows={[siteRecord]} />);
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "选择站点" }));
+    fireEvent.click(screen.getAllByText("AMAZON:OTHER:US").at(-1)!);
+    expect(screen.getByRole("button", { name: /按调整重算/ })).toBeEnabled();
+    rerender(<Editor rows={[siteRecord]} currentBatch={{ ...batch, id: 8 }} />);
+    expect(screen.queryByRole("button", { name: /按调整重算/ })).not.toBeInTheDocument();
   });
 });

@@ -101,13 +101,13 @@ describe("管理员Loading", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("button", {
+        screen.getByRole("radio", {
           name: /MSKU定位，已就绪，当前版本 position-fresh/
         })
       ).toBeInTheDocument()
     );
     expect(
-      screen.queryByRole("button", {
+      screen.queryByRole("radio", {
         name: /MSKU定位，已就绪，当前版本 position-stale/
       })
     ).not.toBeInTheDocument();

@@ -24,7 +24,7 @@ describe("离开超收规则页后的写响应", () => {
     );
     const view = render(<OverreceiptRulesPage />);
     await screen.findByText(selfOperatedRule.name);
-    if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    if (scope === "delivery") fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     const previous = scope === "delivery" ? previousRule : previousSelfOperatedRule;
     if (action === "activate") {
       fireEvent.click(screen.getByRole("button", { name: `重新启用 ${previous.name}` }));

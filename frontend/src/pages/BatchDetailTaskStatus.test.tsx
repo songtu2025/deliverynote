@@ -140,7 +140,7 @@ describe("交货批次任务状态条", () => {
     state.exceptions = [state.exceptions[0]];
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
-    expect(await task.findByText("1 条待审校，共 60 件")).toBeInTheDocument();
+    await waitFor(() => expect(task.getByRole("status")).toHaveTextContent("1 条待审校，共 60 件"));
     expect(task.getByRole("button", { name: "开始审校" })).toBeEnabled();
     expect(task.queryByRole("button", { name: /下载结果/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 1" }));
@@ -161,24 +161,24 @@ describe("交货批次任务状态条", () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
     expect(task.getByText("正在读取审校统计…")).toBeInTheDocument();
-    expect(task.queryByText(/0 条待审校/)).not.toBeInTheDocument();
+    expect(task.getByRole("status")).not.toHaveTextContent(/0 条待审校/);
     pending.resolve(new Response(JSON.stringify({ detail: "统计读取失败" }), { status: 500 }));
     expect(await screen.findByText("统计读取失败")).toBeInTheDocument();
     expect(task.getByText("审校统计暂不可用，请重试读取批次。")).toBeInTheDocument();
-    expect(task.queryByText(/0 条待审校/)).not.toBeInTheDocument();
+    expect(task.getByRole("status")).not.toHaveTextContent(/0 条待审校/);
   });
 
   it("筛选审校记录不改变顶部的全批次统计", async () => {
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "批次任务状态" }));
-    expect(await task.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    await waitFor(() => expect(task.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件"));
     const bar = screen.getByRole("img", { name: "可导入 100，待处理 60" });
     expect(bar.children).toHaveLength(2);
     expect(bar.children[1]).toHaveStyle({ flexGrow: "60" });
     expect(screen.queryByText(/保留待处理/)).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "搜索待处理记录" }), { target: { value: "SKU-B" } });
     await waitFor(() => expect(screen.queryByText("SKU-A")).not.toBeInTheDocument());
-    expect(task.getByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    expect(task.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件");
   });
 
   it("计算任务完成后更新审校状态并停止加载标记", async () => {

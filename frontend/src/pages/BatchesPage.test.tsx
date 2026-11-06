@@ -41,7 +41,11 @@ describe("BatchesPage", () => {
     expect(within(status).getByText("采购数据")).toBeInTheDocument();
     expect(within(status).getByText("purchase-v1")).toBeInTheDocument();
     expect(within(status).getByText("超收规则")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /新建批次/ })).toBeEnabled();
+    const create = screen.getByRole("button", { name: /新建批次/ });
+    expect(create).toBeEnabled();
+    expect(create.closest(".batch-list-toolbar")).toBeInTheDocument();
+    expect(container.querySelector(".page-heading button")).not.toBeInTheDocument();
+    expect(within(status).getByRole("button", { name: /同步采购数据/ })).toHaveClass("ant-btn-default");
     expect(screen.getByLabelText("搜索")).toHaveAttribute("placeholder", "搜索批次名称");
     expect(screen.getByLabelText("状态")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "交货批次列表" })).toBeInTheDocument();
@@ -72,7 +76,7 @@ describe("BatchesPage", () => {
     render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />, { wrapper: AntApp });
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
-    expect(within(row).getByText("失败").closest(".ant-tag")).toHaveClass("ant-tag-error", "ant-tag-solid");
+    expect(within(row).getByText("失败").closest(".ant-tag")).toHaveClass("batch-stage-error");
   });
 
   it.each([true, false])("keeps pending quantities visible when download readiness is %s", async (downloadReady) => {
@@ -83,7 +87,7 @@ describe("BatchesPage", () => {
 
     const row = (await screen.findByRole("button", { name: "2026-07-21 交货批次" })).closest("tr")!;
     expect(within(row).getByText("去审校 60")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" })).toHaveClass("ant-btn-primary");
+    expect(within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" })).toHaveClass("ant-btn-link");
     expect(within(row).getByText(/可导入 100/)).toHaveTextContent("待处理 60");
     expect(within(row).queryByText("结果可下载") !== null).toBe(downloadReady);
     expect(within(row).queryByText(/等待人工审校|未完成审校|条待审校/)).not.toBeInTheDocument();
@@ -120,8 +124,8 @@ describe("BatchesPage", () => {
         const button = within(row).getByRole("button", { name: "打开 2026-07-21 交货批次" });
         expect(button).toHaveAttribute("title", action);
         expect(button).toHaveTextContent(action);
-        expect(button.classList.contains("ant-btn-dangerous")).toBe(action === "查看原因");
-        expect(button.classList.contains("ant-btn-primary")).toBe(["去计算", "去生成", "去下载"].includes(action));
+        expect(button).toHaveClass("ant-btn-link");
+        expect(button).not.toHaveClass("ant-btn-primary");
       }
       expect(within(row).queryByText("去审校 60")).not.toBeInTheDocument();
       expect(within(row).queryByText("结果可下载")).not.toBeInTheDocument();
@@ -183,7 +187,7 @@ describe("BatchesPage", () => {
       const button = await screen.findByRole("button", { name: "打开 2026-07-21 交货批次" });
       expect(button).toHaveTextContent("去上传");
       expect(button).toHaveAttribute("title", "去上传");
-      expect(button).not.toHaveClass("ant-btn-primary");
+      expect(button).toHaveClass("ant-btn-link");
       fireEvent.click(button);
       expect(onOpen).toHaveBeenCalledWith(7);
     }
@@ -227,7 +231,12 @@ describe("BatchesPage", () => {
         )
       );
       render(<BatchesPage workflow={workflow} onOpen={vi.fn()} />, { wrapper: AntApp });
-      expect(await screen.findByRole("button", { name: /新建批次/ })).toBeDisabled();
+      const create = await screen.findByRole("button", { name: /新建批次/ });
+      expect(create).toBeDisabled();
+      const trigger = create.parentElement!;
+      expect(trigger).toHaveAttribute("tabindex", "0");
+      fireEvent.focus(trigger);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent("请先补齐启用版本");
       expect(screen.getByText(/缺少：/)).toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     }

@@ -38,10 +38,10 @@ export default function DeliveryDetailTabs({
             key: "review",
             label: (
               <span>
-                待办 <span className="pending-value">{computed ? (reviewStats?.unfinishedCount ?? "—") : "—"}</span>
+                待处理 <span className="pending-value">{computed ? (reviewStats?.unfinishedCount ?? "—") : "—"}</span>
               </span>
             ),
-            children: computed ? review : <Empty description="预检并计算后显示待办" />
+            children: computed ? review : <Empty description="预检并计算后显示待处理" />
           },
           {
             key: "imports",

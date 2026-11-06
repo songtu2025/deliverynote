@@ -1,15 +1,13 @@
 .input-data-workspace {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #d8e2df;
-  border-radius: 10px;
   background: #fff;
 }
 
 .input-data-workspace-tabs > .ant-tabs-nav {
   padding: 0 20px;
   margin: 0;
-  background: #fbfcfc;
+  background: var(--dn-surface);
 }
 
 .input-data-workspace-tabs > .ant-tabs-nav .ant-tabs-tab {
@@ -71,12 +69,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 2px 0;
-}
-
-.input-data-preview-metric::before {
-  content: "·";
-  margin: 0 6px;
+  gap: 4px 14px;
 }
 
 .input-data-loading {
@@ -152,7 +145,6 @@
   background: var(--dn-primary-soft) !important;
 }
 
-.input-data-layout .ant-table-wrapper,
 .admin-panel-card .ant-table-wrapper,
 .position-maintenance .ant-table-wrapper {
   overflow: hidden;

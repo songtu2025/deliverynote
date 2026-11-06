@@ -1,5 +1,6 @@
 import { Button, Input, Popconfirm, Select, Typography } from "antd";
-import { CheckCircleFilled, DeleteOutlined, SearchOutlined } from "@ant-design/icons";
+import { CheckCircleFilled, DeleteOutlined, PlusOutlined, SearchOutlined } from "@ant-design/icons";
+import BatchPrimaryButton from "../batch-detail/BatchPrimaryButton";
 import { STATUS_OPTIONS } from "../../BatchStatusTag";
 import type { BatchWorkflow } from "./batchWorkspace";
 import type { useBatchList } from "./useBatchList";
@@ -9,11 +10,15 @@ export default function BatchListToolbar({
   active,
   canDeleteBatches,
   list,
-  deletion
+  deletion,
+  ready,
+  onCreate
 }: {
   workflow: BatchWorkflow;
   active: boolean;
   canDeleteBatches: boolean;
+  ready: boolean;
+  onCreate: () => void;
   list: ReturnType<typeof useBatchList>;
   deletion: ReturnType<typeof useBatchDeletion>;
 }) {
@@ -28,7 +33,9 @@ export default function BatchListToolbar({
     bulkDeleteCancelProps,
     cancelBulkDelete,
     deleteSelectedBatches,
-    deleting
+    deleting,
+    cleanEmptyBatches,
+    cleaningEmpty
   } = deletion;
   return (
     <div
@@ -110,6 +117,29 @@ export default function BatchListToolbar({
             setStatusFilter(value);
           }}
         />
+      </div>
+      <div className="batch-list-toolbar-actions">
+        {list.emptyDraftCount > 0 && (
+          <Popconfirm
+            title={`删除 ${list.emptyDraftCount} 个空批次？`}
+            description={
+              workflow === "self_operated_inbound"
+                ? "仅删除未上传质检交货单和收货入库单的草稿，无法恢复。"
+                : "仅删除未上传任何交货文件的草稿，无法恢复。"
+            }
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => void cleanEmptyBatches()}
+          >
+            <Button danger icon={<DeleteOutlined />} loading={cleaningEmpty}>
+              清理 {list.emptyDraftCount} 个空批次
+            </Button>
+          </Popconfirm>
+        )}
+        <BatchPrimaryButton reason={ready ? null : "请先补齐启用版本"} icon={<PlusOutlined />} onClick={onCreate}>
+          新建批次
+        </BatchPrimaryButton>
       </div>
     </div>
   );

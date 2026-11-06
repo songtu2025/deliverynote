@@ -20,10 +20,6 @@
   .audit-search-field {
     grid-column: 1 / -1;
   }
-  .input-data-kind-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .input-data-status-header,
   .input-data-context-grid,
   .integration-config-workspace {
     grid-template-columns: minmax(0, 1fr);
@@ -53,7 +49,7 @@
 }
 
 @container admin-workspace (max-width: 480px) {
-  .input-data-kind-list,
+  .input-data-status-header,
   .audit-log-toolbar,
   .integration-config-credentials {
     grid-template-columns: minmax(0, 1fr);

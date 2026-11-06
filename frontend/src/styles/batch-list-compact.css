@@ -24,9 +24,8 @@
   grid-template-areas: "copy action";
   align-items: center;
   gap: 8px;
-  padding: 0 0 0 16px;
+  padding: 0;
   border: 0;
-  border-left: 1px solid var(--dn-border);
   border-radius: 0;
   background: transparent;
 }
@@ -51,19 +50,22 @@
   display: block;
 }
 .batch-list-page--compact .batch-list-toolbar {
-  grid-template-columns: minmax(0, 1fr) 280px 176px;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   margin-bottom: -12px;
   padding: 12px 16px;
-  border-radius: 6px 6px 0 0;
+  border-radius: 10px 10px 0 0;
 }
 .batch-list-page--compact .batch-list-toolbar-heading {
-  grid-column: auto;
+  flex: 1 1 auto;
   padding: 0;
   white-space: normal;
 }
 .batch-list-page--compact .table-filter-field {
+  flex: 0 1 180px;
+  width: 180px;
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -74,7 +76,7 @@
   width: 100%;
 }
 .batch-list-page--compact .batch-list-table .ant-table {
-  border-radius: 0 0 6px 6px;
+  border-radius: 0 0 10px 10px;
 }
 .batch-list-page--compact .batch-list-table .ant-table-cell {
   padding: 12px 10px;
@@ -83,6 +85,7 @@
 .batch-list-page--compact .batch-list-table .ant-table-thead > tr > th {
   color: var(--dn-muted);
   font-weight: 500;
+  font-size: 12px;
 }
 .batch-list-page--compact .batch-identity {
   display: flex;
@@ -118,28 +121,12 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
-.batch-list-page--compact .purchase-sync-warning-summary {
-  color: var(--dn-warning);
-}
 .batch-list-page--compact .batch-row-actions {
   flex-wrap: nowrap;
 }
 .batch-list-page--compact .batch-row-actions .ant-btn {
   padding-inline: 4px;
   font-size: 13px;
-}
-.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-warning {
-  color: #895d16;
-}
-.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-error:not(.ant-tag-solid) {
-  color: #b52c35;
-}
-.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-cyan {
-  color: #176572;
-}
-.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-blue,
-.batch-list-page--compact .batch-list-table .ant-tag.ant-tag-processing {
-  color: #1759a3;
 }
 .batch-list-page--compact .ant-btn-dangerous:not(:disabled) {
   color: var(--dn-danger);
@@ -164,17 +151,8 @@
     border-left: 0;
     padding-left: 0;
   }
-  .batch-list-page--compact .batch-list-toolbar {
-    grid-template-columns: minmax(0, 1fr) 240px 150px;
-  }
 }
 @media (max-width: 700px) {
-  .batch-list-page--compact .batch-list-toolbar {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .batch-list-page--compact .batch-list-toolbar-heading {
-    grid-column: 1 / -1;
-  }
   .batch-list-page--compact .purchase-sync-progress {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -223,4 +201,20 @@
   .batch-list-page--compact .batch-cell-label {
     color: var(--dn-muted);
   }
+}
+
+.batch-list-toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+.batch-list-page--compact .purchase-sync-result.is-collapsed .purchase-sync-result-copy > div {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
 }

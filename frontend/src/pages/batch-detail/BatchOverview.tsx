@@ -1,6 +1,7 @@
+import BatchStatusTag from "../../BatchStatusTag";
 import BatchMoreActions from "./BatchMoreActions";
 import { useEffect, useState } from "react";
-import { Tag, Typography } from "antd";
+import { Typography } from "antd";
 import { ExclamationCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime, parseApiDateTime } from "../../dateTime";
 import type { Batch, Job } from "../../types";
@@ -14,7 +15,6 @@ import BatchTransferSources from "./BatchTransferSources";
 import { BatchPurchaseSnapshotMetadata } from "./BatchPurchaseSnapshot";
 import { batchStage } from "../../batchStage";
 import { receiptInputBusy } from "../../receipt";
-import BatchInboundUpload from "./BatchInboundUpload";
 
 type OverviewProps = {
   batch: Batch;
@@ -25,12 +25,12 @@ type OverviewProps = {
   focusReview: () => void;
   reviewStats?: ExceptionReview["reviewStats"];
   reviewError: boolean;
+  hasAdjustmentDraft: boolean;
 };
 
 export default function BatchOverview(props: OverviewProps) {
   const { batch, activeJob, reviewStats, reviewError, tasks } = props;
   const { computed } = batchPresentation(batch);
-  const { stage } = batchStage(batch, { activeJob, reviewStats });
   const selfOperated = batch.workflow === "self_operated_inbound";
   const inputDisabled = Boolean(props.action || activeJob) || receiptInputBusy(batch);
   return (
@@ -40,16 +40,9 @@ export default function BatchOverview(props: OverviewProps) {
           <Typography.Title level={2} title={batch.name}>
             {batch.name}
           </Typography.Title>
-          <Tag className={`batch-stage batch-stage-${stage.tone}`}>{stage.label}</Tag>
+          <BatchStatusTag batch={batch} options={{ activeJob, reviewStats }} />
         </div>
         <BatchTaskStatus batch={batch} activeJob={activeJob} reviewStats={reviewStats} reviewError={reviewError} />
-        {selfOperated && !batch.inbound_file?.uploaded && (
-          <BatchInboundUpload
-            upload={props.fileActions.uploadInboundFile}
-            disabled={inputDisabled}
-            loading={props.action === "upload-inbound"}
-          />
-        )}
         <BatchMetadata batch={batch} />
         <BatchPurchaseSnapshotMetadata />
         {computed && <div className="batch-heading-meta">{batchResultPresentation(batch, activeJob)}</div>}
@@ -57,13 +50,7 @@ export default function BatchOverview(props: OverviewProps) {
       </div>
       <div className="batch-task-actions">
         {selfOperated && (
-          <BatchMoreActions
-            disabled={inputDisabled}
-            refreshHistory={tasks.refreshHistory}
-            batch={batch}
-            fileActions={props.fileActions}
-            action={props.action}
-          />
+          <BatchMoreActions disabled={inputDisabled} refreshHistory={tasks.refreshHistory} batch={batch} />
         )}
         {computed ? <BatchExportActions {...props} /> : <BatchPreparationActions {...props} />}
       </div>
@@ -74,8 +61,9 @@ export default function BatchOverview(props: OverviewProps) {
 function BatchMetadata({ batch }: { batch: Batch }) {
   return (
     <div className="batch-heading-meta">
-      {batch.files?.length ?? 0} 个来源文件 · 更新于 {formatBeijingDateTime(batch.updated_at)}
-      {batch.receipt?.captured_at && <> · 历史快照 {formatBeijingDateTime(batch.receipt.captured_at)}</>}
+      <span>{batch.files?.length ?? 0} 个来源文件</span>
+      <span>更新于 {formatBeijingDateTime(batch.updated_at)}</span>
+      {batch.receipt?.captured_at && <span>历史快照 {formatBeijingDateTime(batch.receipt.captured_at)}</span>}
     </div>
   );
 }
@@ -96,7 +84,17 @@ function BatchTaskStatus({
       <div className={`batch-task-copy batch-task-${tone}`} role="status" aria-live="polite" aria-atomic="true">
         {tone === "error" && <ExclamationCircleOutlined className="batch-task-status-icon" aria-hidden />}
         {tone === "running" && <LoadingOutlined className="batch-task-status-icon batch-task-spinner" aria-hidden />}
-        <span>{task.title}</span>
+        <span>
+          {task.title.split(/(\d+(?:,\d{3})*(?:\.\d+)?)(?=\s*(?:条待|处累计))/).map((part, index) =>
+            index % 2 ? (
+              <span className="pending-value" key={index}>
+                {part}
+              </span>
+            ) : (
+              part
+            )
+          )}
+        </span>
         {tone === "error" && task.description && <p className="batch-failure-reason">{task.description}</p>}
         <ReviewStatisticsNotice batch={batch} reviewStats={reviewStats} reviewError={reviewError} />
       </div>

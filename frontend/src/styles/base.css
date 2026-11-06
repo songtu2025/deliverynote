@@ -10,9 +10,12 @@
   --dn-primary-soft: #e6f1ee;
   --dn-primary-border: #cfe4df;
   --dn-info: #2d5c94;
-  --dn-success: #1f6b52;
+  --dn-success: #055247;
   --dn-warning: #b4381f;
   --dn-danger: #a3162b;
+  --dn-review: #8a5a12;
+  --dn-review-soft: #fdf4e3;
+  --dn-review-border: #f1dfb6;
   --dn-warning-soft: #fbeee9;
   --dn-info-soft: #edf3fa;
   --dn-danger-soft: #faedf0;

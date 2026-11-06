@@ -69,7 +69,8 @@ describe("InputVersionPreviewPanel", () => {
     for (const text of ["2", "SYNTHETIC-SKU", "0", "是", "否", "—"]) {
       expect(within(row).getByText(text)).toBeInTheDocument();
     }
-    expect(screen.getByText("当前展示前 1 行，共 123 行 · 5 个字段")).toBeInTheDocument();
+    expect(screen.getByText("当前展示前 1 行，共 123 行")).toBeInTheDocument();
+    expect(screen.getByText("5 个字段")).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     expect(screen.queryByTitle("2")).not.toBeInTheDocument();
   });
@@ -113,7 +114,8 @@ describe("InputVersionPreviewPanel", () => {
     activeProps.inspection!.summary.row_count = 0;
     rerender(previewView(activeProps));
     expect(screen.getByText("当前版本没有可预览的数据")).toBeInTheDocument();
-    expect(screen.getByText("当前展示前 0 行，共 0 行 · 5 个字段")).toBeInTheDocument();
+    expect(screen.getByText("当前展示前 0 行，共 0 行")).toBeInTheDocument();
+    expect(screen.getByText("5 个字段")).toBeInTheDocument();
   });
 
   it("delegates retry without fetching or clearing the parent's error locally", () => {

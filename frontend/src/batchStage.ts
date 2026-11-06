@@ -5,7 +5,12 @@ type ReviewStats = { unfinishedCount: number; unfinishedQuantity: number };
 type Stage = { label: string; tone: "running" | "review" | "error" | "ready" | "waiting" };
 type ActionKey = "preflight" | "compute" | "retry" | "review" | "generate" | "download" | "busy" | "expired";
 type NextAction = { key: ActionKey; label: string; listLabel: string; primary: boolean };
-type StageOptions = { activeJob?: Job; reviewStats?: ReviewStats; action?: string | null };
+type StageOptions = {
+  activeJob?: Job;
+  reviewStats?: ReviewStats;
+  action?: string | null;
+  hasAdjustmentDraft?: boolean;
+};
 
 function fileCount(batch: Batch) {
   return batch.files?.length ?? batch.file_count;
@@ -45,6 +50,7 @@ export function batchStage(batch: Batch, options: StageOptions = {}) {
   const pending = options.reviewStats?.unfinishedCount ?? batch.summary?.manual_total ?? 0;
   const stage = stagePresentation(batch, running, pending);
   const next = nextPresentation(batch, stage, pending);
+  if (options.hasAdjustmentDraft) next.primary = false;
   const disabledReason = busy
     ? "后台任务进行中"
     : options.action

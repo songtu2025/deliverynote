@@ -115,7 +115,7 @@ describe("管理员页面生命周期", () => {
     state.positionFlow = true;
     const view = render(<AdminPage currentUser={admin} />);
     await screen.findByText("基础资料目录");
-    fireEvent.click(screen.getByRole("button", { name: /^MSKU定位/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^MSKU定位/ }));
     fireEvent.click(screen.getByRole("button", { name: "开始网页维护" }));
     fireEvent.click(await screen.findByRole("button", { name: "返回基础资料" }));
     view.unmount();

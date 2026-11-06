@@ -35,9 +35,9 @@ describe("BatchDetailGuidance", () => {
   it("shows reason-specific review guidance and uses candidate sites as choices", async () => {
     state.exceptions[2].reason = "候选站点需要确认";
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    await screen.findByRole("tab", { name: /^待办 \d/ });
+    await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    expect(await screen.findByRole("columnheader", { name: "审校依据" })).toBeInTheDocument();
+    expect(await screen.findByRole("columnheader", { name: "原因与依据" })).toBeInTheDocument();
 
     const excessRow = (await screen.findByText("SKU-A")).closest("tr");
     expect(excessRow).not.toBeNull();
@@ -69,7 +69,7 @@ describe("BatchDetailGuidance", () => {
     const ambiguousRow = screen.getByText("SKU-C").closest("tr");
     expect(ambiguousRow).not.toBeNull();
     expect(within(ambiguousRow!).getByText("2 个候选站点")).toHaveAttribute("title", state.exceptions[2].full_site);
-    expect(within(ambiguousRow!).getByText("02")).toHaveAttribute("title", state.batch.files[1].original_name);
+    expect(within(ambiguousRow!).getByText("文件 2")).toHaveAttribute("title", state.batch.files[1].original_name);
     expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("候选站点");
     expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("AMAZON:OTHER:US");
     expect(ambiguousRow!.querySelector(".exception-evidence-cell")).toHaveTextContent("AMAZON:SEEKWAY:US");

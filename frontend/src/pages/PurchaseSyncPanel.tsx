@@ -1,6 +1,6 @@
 import SyncDifference from "./batches/SyncDifference";
 import { type ReactNode, useState } from "react";
-import { Alert, Button, Popconfirm, Space, Skeleton, Typography } from "antd";
+import { Alert, Button, Popconfirm, Space, Skeleton, Tag, Typography } from "antd";
 import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../dateTime";
 import { getPurchaseSyncPreview, getPurchaseSyncIssues } from "../syncApi";
@@ -76,7 +76,6 @@ export default function PurchaseSyncPanel({
             {!compact && <Typography.Text type="secondary">同步未交清采购单；启用后用于新批次。</Typography.Text>}
           </div>
           <Button
-            type="primary"
             icon={<SyncOutlined />}
             loading={syncStarting}
             disabled={!configured || running || syncActivating}
@@ -150,9 +149,7 @@ export default function PurchaseSyncPanel({
                     : `保留 ${syncJob.eligible_detail_count} 行 / ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
                 </Typography.Text>
                 {compact && !detailsOpen && syncJob.warning_count > 0 && (
-                  <Typography.Text className="purchase-sync-warning-summary">
-                    含 {syncJob.warning_count} 条“共享”站点数据，请展开复核
-                  </Typography.Text>
+                  <Tag className="review-notice">{syncJob.warning_count} 条共享站点需复核</Tag>
                 )}
               </div>
             </div>
@@ -193,7 +190,7 @@ export default function PurchaseSyncPanel({
                   disabled={!syncCandidate}
                   onConfirm={() => void activateCandidate()}
                 >
-                  <Button type="primary" loading={syncActivating} disabled={!syncCandidate}>
+                  <Button loading={syncActivating} disabled={!syncCandidate}>
                     启用最新数据
                   </Button>
                 </Popconfirm>

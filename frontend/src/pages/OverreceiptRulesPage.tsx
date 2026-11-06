@@ -45,9 +45,6 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
           <Typography.Title level={2}>超收规则</Typography.Title>
           <Typography.Text type="secondary">设置新批次的超收额度和适用仓库。</Typography.Text>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>
-          刷新
-        </Button>
       </div>
 
       {error ? (
@@ -61,12 +58,12 @@ export default function OverreceiptRulesPage({ active = true }: { active?: boole
         />
       ) : null}
 
-      <RuleScopeSwitcher
-        scope={scope}
-        activeDeliveryRuleName={activeRule?.name}
-        activeSelfOperatedAllowance={activeSelfOperatedRule?.allowance}
-        onChange={setScope}
-      />
+      <div className="overreceipt-toolbar">
+        <RuleScopeSwitcher scope={scope} onChange={setScope} />
+        <Button icon={<ReloadOutlined />} onClick={refresh} loading={loading}>
+          刷新
+        </Button>
+      </div>
 
       <div className="overreceipt-effect-notice">
         <LockOutlined />

@@ -66,7 +66,7 @@ export function PositionDraftRecords({
         </span>
       }
       extra={
-        <Button aria-label="新增记录" type="primary" icon={<PlusOutlined />} disabled={disabled} onClick={onNewRow}>
+        <Button aria-label="新增记录" icon={<PlusOutlined />} disabled={disabled} onClick={onNewRow}>
           新增记录
         </Button>
       }

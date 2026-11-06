@@ -37,7 +37,7 @@
   color: #fff;
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 .brand-name {
   color: var(--dn-ink);
@@ -162,9 +162,9 @@
   margin-top: 0;
   margin-bottom: 8px !important;
   color: var(--dn-ink);
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 600;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
   line-height: 1.4;
 }
 .muted,

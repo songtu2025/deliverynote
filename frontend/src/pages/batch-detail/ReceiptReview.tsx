@@ -106,8 +106,8 @@ export default function ReceiptReview({
 function ReceiptTitle({ captured }: { captured?: string }) {
   return (
     <div className="receipt-review-title">
-      累计实收核对{" "}
-      <span>本次申请 = 累计实收 − 历史已入库{captured && ` · 快照 ${formatBeijingDateTime(captured)}`}</span>
+      累计实收核对 <span>本次申请 = 累计实收 − 历史已入库</span>
+      {captured && <span>快照 {formatBeijingDateTime(captured)}</span>}
     </div>
   );
 }

@@ -129,7 +129,7 @@ describe("PurchaseSyncPanel", () => {
       />,
       { wrapper: AntApp }
     );
-    expect(await screen.findByText("含 1 条“共享”站点数据，请展开复核")).toBeInTheDocument();
+    expect(await screen.findByText("1 条共享站点需复核")).toBeInTheDocument();
     const toggle = screen.getByRole("button", { name: "查看同步详情" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("button", { name: /预览候选数据/ })).not.toBeInTheDocument();

@@ -54,6 +54,10 @@ export function inboundPreviewColumns(preview: SelfOperatedInboundSyncPreview | 
       width: previewColumnWidths[column],
       ellipsis: true,
       render: (value: string | number | null) =>
-        column === "平台站点" && value === "共享" ? <Tag color="warning">共享 · 不可自动匹配</Tag> : (value ?? "—")
+        column === "平台站点" && value === "共享" ? (
+          <Tag className="review-notice">共享 不可自动匹配</Tag>
+        ) : (
+          (value ?? "—")
+        )
     }));
 }

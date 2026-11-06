@@ -1,17 +1,12 @@
 .input-data-status-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 156px;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 24px;
   min-height: 96px;
   padding: 16px 18px;
-  border: 1px solid #d8e2df;
-  border-radius: 10px;
+  border-bottom: 1px solid var(--dn-border);
   background: #fff;
-}
-
-.input-data-status-header.is-ready {
-  border-color: #c7ddd7;
 }
 
 .input-data-status-copy {
@@ -28,7 +23,7 @@
 .input-data-status-copy h3 {
   margin: 0 !important;
   color: #17211f;
-  font-size: 22px !important;
+  font-size: 16px;
 }
 
 .input-data-status-copy > .ant-typography {
@@ -74,68 +69,26 @@
 }
 
 .input-data-status-time {
-  padding-left: 14px;
-  border-left: 1px solid #dfe8e5;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .input-data-status-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .input-data-status-actions .ant-btn {
-  width: 100%;
+  width: auto;
 }
 
 .input-data-context {
   position: relative;
   overflow: hidden;
-  border: 1px solid #dce7e3;
-  border-radius: 9px;
-  background: #f5f9f7;
-}
-
-.input-data-context-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 48px;
-  padding: 8px 14px 8px 18px;
-}
-
-.input-data-context-summary > div {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.input-data-context-summary > div > .ant-typography:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.input-data-context-summary .ant-btn {
-  flex: 0 0 auto;
-  color: #176b5b;
-}
-
-.input-data-context.is-open .input-data-context-summary {
-  position: absolute;
-  z-index: 1;
-  top: 7px;
-  right: 8px;
-  min-height: 0;
-  padding: 0;
-}
-
-.input-data-context.is-open .input-data-context-summary > div {
-  display: none;
+  border-bottom: 1px solid var(--dn-border);
+  background: var(--dn-surface);
 }
 
 .input-data-context-grid {
@@ -144,8 +97,8 @@
   gap: 20px;
   align-items: center;
   min-height: 78px;
-  padding: 12px 128px 12px 18px;
-  background: #fbfcfc;
+  padding: 12px 18px;
+  background: var(--dn-surface);
 }
 
 .input-data-impact {

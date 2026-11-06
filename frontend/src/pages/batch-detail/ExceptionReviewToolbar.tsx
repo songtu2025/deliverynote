@@ -1,4 +1,4 @@
-import { Button, Input, Popover, Select } from "antd";
+import { Button, Input, Popover, Segmented, Select } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import type { ExceptionReview } from "./useExceptionReview";
 
@@ -62,43 +62,30 @@ export default function ExceptionReviewToolbar({
   );
   return (
     <div className="table-toolbar exception-toolbar">
-      {selfOperated && reviewScope !== "resolved" && (
-        <Select
+      <section className="review-scope-switch" aria-label={selfOperated ? "处理范围" : "审校概览"}>
+        <Segmented
           aria-label="处理范围"
           value={reviewScope}
-          options={[
-            { value: "unfinished", label: "未完成" },
-            { value: "all", label: "全部待处理" }
-          ]}
+          options={(
+            [
+              ["unfinished", "未完成", reviewStats.unfinishedCount],
+              ["resolved", "已处理", reviewStats.resolvedCount],
+              ["all", "全部", reviewStats.totalCount]
+            ] as const
+          ).map(([value, label, count]) => ({
+            value,
+            label: (
+              <span>
+                {label} <span className={value === "unfinished" ? "pending-value" : undefined}>{count}</span>
+              </span>
+            )
+          }))}
           onChange={(scope) => {
             changeScope(scope);
             onReset();
           }}
         />
-      )}
-      {!selfOperated && (
-        <section className="review-scope-switch" aria-label="审校概览">
-          {(
-            [
-              ["unfinished", "待审校", reviewStats.unfinishedCount],
-              ["resolved", "已处理", reviewStats.resolvedCount],
-              ["all", "全部", reviewStats.totalCount]
-            ] as const
-          ).map(([scope, label, count]) => (
-            <button
-              key={scope}
-              type="button"
-              aria-pressed={reviewScope === scope}
-              onClick={() => {
-                changeScope(scope);
-                onReset();
-              }}
-            >
-              {label} <strong>{count}</strong>
-            </button>
-          ))}
-        </section>
-      )}
+      </section>
       <div className="exception-filter-field exception-search-field">
         <Input
           id="exception-search"

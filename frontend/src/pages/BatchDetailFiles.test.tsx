@@ -147,34 +147,16 @@ describe("BatchDetailFiles", () => {
     }
   );
 
-  it.each([false, true])("改用本地入库单确认后才选文件，确认：%s", async (confirm) => {
+  it("更多菜单不再提供改用本地入库单，页头没有入库单上传", async () => {
     state.batch.workflow = "self_operated_inbound";
     state.batch.status = "draft";
     state.batch.inbound_file = { uploaded: true, original_name: "合成.xlsx" };
-    acceptUpload("/api/self-operated-batches/7/inbound-file");
-    const picker = vi.spyOn(HTMLInputElement.prototype, "click");
+    state.batch.receipt = { ...state.batch.receipt, captured_at: "2026-11-06T00:00:00Z" } as typeof state.batch.receipt;
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /更多/ }));
-    expect(screen.queryByRole("menuitem", { name: "同步积加入库记录" })).not.toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("menuitem", { name: "改用本地入库单" }));
-    const dialog = within(await screen.findByRole("dialog"));
-    expect(dialog.getByText("将停止从积加实时取数，以上传文件为准，并作废当前核对与计算结果。")).toBeInTheDocument();
-    expect(picker).not.toHaveBeenCalled();
-    expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
-    fireEvent.click(dialog.getByRole("button", { name: confirm ? "选择本地入库单" : /取\s*消/ }));
-    if (!confirm) {
-      expect(picker).not.toHaveBeenCalled();
-      return;
-    }
-    await waitFor(() => expect(picker).toHaveBeenCalledOnce());
-    const input = container.querySelector<HTMLInputElement>('.batch-task-actions input[type="file"]')!;
-    fireEvent.change(input, { target: { files: [new File(["synthetic"], "合成入库.xlsx")] } });
-    await waitFor(() =>
-      expect(fetch).toHaveBeenCalledWith(
-        "/api/self-operated-batches/7/inbound-file",
-        expect.objectContaining({ method: "POST", body: expect.any(FormData) })
-      )
-    );
+    expect(await screen.findByRole("menuitem", { name: "同步积加入库记录" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "改用本地入库单" })).not.toBeInTheDocument();
+    expect(container.querySelector('.batch-task-actions input[type="file"]')).toBeNull();
   });
 
   it.each(["delivery", "self_operated_inbound"] as const)("%s 禁用预检可用键盘聚焦查看原因", async (workflow) => {
@@ -198,7 +180,7 @@ describe("BatchDetailFiles", () => {
     acceptUpload("/api/batches/7/export");
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const header = within(await screen.findByRole("region", { name: "批次任务状态" }));
-    expect(await header.findByText("4 条待审校，共 107 件")).toBeInTheDocument();
+    await waitFor(() => expect(header.getByRole("status")).toHaveTextContent("4 条待审校，共 107 件"));
     expect(header.getByRole("button", { name: "开始审校" })).toBeEnabled();
     expect(header.queryByRole("button", { name: /生成结果/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));

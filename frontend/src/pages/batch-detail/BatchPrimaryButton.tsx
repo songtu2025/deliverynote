@@ -7,8 +7,8 @@ export default function BatchPrimaryButton({ reason, ...props }: ButtonProps & {
       <span tabIndex={reason ? 0 : undefined} aria-label={reason ?? undefined}>
         <Button
           aria-label={typeof props.children === "string" ? props.children : undefined}
-          {...props}
           type="primary"
+          {...props}
           disabled={Boolean(reason)}
         />
       </span>

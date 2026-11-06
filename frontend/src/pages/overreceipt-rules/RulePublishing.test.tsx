@@ -55,7 +55,7 @@ describe("OverreceiptRulesPage", () => {
     render(<OverreceiptRulesPage />);
 
     await screen.findAllByText("Windows验收-每键超收5件");
-    fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     expect(screen.getAllByText("2026-07 短尾放宽").length).toBeGreaterThan(0);
     expect(screen.getAllByText("短尾 +50").length).toBeGreaterThan(0);
     expect(screen.getAllByText("中尾 +20").length).toBeGreaterThan(0);
@@ -117,7 +117,7 @@ describe("OverreceiptRulesPage", () => {
     render(<OverreceiptRulesPage />);
 
     await screen.findAllByText("Windows验收-每键超收5件");
-    fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     fireEvent.click(screen.getByRole("button", { name: /发布新版本/ }));
     fireEvent.change(screen.getByLabelText("规则版本名称"), {
       target: { value: "2026-08 重试规则" }
@@ -157,7 +157,7 @@ describe("OverreceiptRulesPage", () => {
     const staticSuccess = vi.spyOn(message, "success");
     render(<OverreceiptRulesPage />);
     await screen.findByText(selfOperatedRule.name);
-    if (scope === "delivery") fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    if (scope === "delivery") fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     fireEvent.click(screen.getByRole("button", { name: /发布新版本/ }));
     fireEvent.change(screen.getByLabelText("规则版本名称"), { target: { value: "规则<&>" } });
     fireEvent.click(screen.getByRole("button", { name: /确\s*认/ }));
@@ -181,7 +181,7 @@ describe("OverreceiptRulesPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /确\s*认/ }));
     fireEvent.click(await screen.findByRole("button", { name: "确认发布" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "发布自营仓新版本" })).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: /^交货超收/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /^交货超收/ }));
     fireEvent.click(screen.getByRole("button", { name: /发布新版本/ }));
     expect(screen.getByRole("spinbutton", { name: "短尾允许超收" })).toHaveValue("50");
     expect(screen.getByRole("spinbutton", { name: "中尾允许超收" })).toHaveValue("20");

@@ -46,7 +46,7 @@ describe("BatchDetailWorkbench", () => {
     state.batch.file_count = 0;
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("button", { name: /预检/ })).toBeDisabled();
-    expect(screen.getByRole("tab", { name: "待办 —" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "待处理 —" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 0" }));
     expect(container.querySelector('.file-order-card input[type="file"]')).toHaveAttribute("multiple");
     expect(screen.getByText("请先上传一个或多个交货 Excel")).toBeInTheDocument();
@@ -127,8 +127,8 @@ describe("BatchDetailWorkbench", () => {
     expect(task.queryByRole("button", { name: /下载合并结果/ }) !== null).toBe(!pending);
     expect(task.queryByRole("button", { name: /下载分文件 ZIP/ })).not.toBeInTheDocument();
     if (pending) {
-      expect(await task.findByText("1 条待审校，共 60 件")).toBeInTheDocument();
-      expect(task.getByText("1 条待审校，共 60 件")).toBeInTheDocument();
+      await waitFor(() => expect(task.getByRole("status")).toHaveTextContent("1 条待审校，共 60 件"));
+      expect(task.getByRole("status")).toHaveTextContent("1 条待审校，共 60 件");
       const scroll = vi.fn();
       Object.defineProperty(container.querySelector(".review-section-anchor"), "scrollIntoView", { value: scroll });
       fireEvent.click(task.getByRole("button", { name: "开始审校" }));
@@ -211,7 +211,7 @@ describe("BatchDetailWorkbench", () => {
     expect(screen.queryByText(/原因见下方/)).not.toBeInTheDocument();
   });
 
-  it("累计实收待核对显示真实阶段和待办，不重复状态提示", async () => {
+  it("累计实收待核对显示真实阶段和待处理，不重复状态提示", async () => {
     state.batch.workflow = "self_operated_inbound";
     state.batch.status = "failed";
     state.batch.error_message = "累计实收核对失败";
@@ -224,9 +224,10 @@ describe("BatchDetailWorkbench", () => {
     };
     state.batch.inbound_file = { uploaded: true, original_name: "合成待入库.xlsx" };
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("tab", { name: "待办 1" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("tab", { name: "待处理 1" })).toHaveAttribute("aria-selected", "true");
     expect(container.querySelector(".batch-stage-review")).toHaveTextContent("待核对");
-    expect(screen.getAllByText("1 处累计实收待核对，处理后即可预检")).toHaveLength(1);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent("1 处累计实收待核对，处理后即可预检");
     expect(screen.queryByText("累计实收核对失败")).not.toBeInTheDocument();
     expect(container.querySelector(".ant-alert")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重试" })).toBeDisabled();

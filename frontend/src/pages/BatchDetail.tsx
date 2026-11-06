@@ -21,6 +21,7 @@ import { useBatchJob } from "./batch-detail/useBatchJob";
 import { useBatchTasks } from "./batch-detail/useBatchTasks";
 import ReceiptReview from "./batch-detail/ReceiptReview";
 import SelfOperatedDetailTabs from "./batch-detail/SelfOperatedDetailTabs";
+import { useInboundAdjustments } from "./batch-detail/useInboundAdjustments";
 import BatchPurchaseSnapshot from "./batch-detail/BatchPurchaseSnapshot";
 
 export default function BatchDetail({
@@ -42,6 +43,7 @@ export default function BatchDetail({
   const data = useBatchDetailData(batchId, Boolean(canRefreshSupplierVersion), setSplitTarget);
   const { batch, activeSupplierVersion, loading, loadError, review, load } = data;
   const activeJob = useBatchJob(batch, load);
+  const adjustments = useInboundAdjustments(batch, () => load(true));
 
   const files = useMemo(() => batch?.files ?? [], [batch?.files]);
   const fileById = useMemo(() => Object.fromEntries(files.map((file) => [file.id, file])), [files]);
@@ -114,6 +116,7 @@ export default function BatchDetail({
         focusReview={focusReview}
         reviewStats={availableReviewStats(data)}
         reviewError={Boolean(loadError)}
+        hasAdjustmentDraft={adjustments.count > 0}
       />
 
       <BatchSummary batch={batch} />
@@ -153,6 +156,7 @@ export default function BatchDetail({
         onOpenDeliveryBatch={onOpenDeliveryBatch}
         selfOperated={selfOperated}
         review={review}
+        adjustments={adjustments}
         fileById={fileById}
         hasOverreceiptRule={Boolean(selfOperated ? batch.self_operated_overreceipt_rule : batch.overreceipt_rule)}
         onOpen={openSplit}
@@ -175,8 +179,6 @@ export default function BatchDetail({
             activeKey={detailTabs[batchId]}
             onChange={selectDetailTab}
             reviewStats={availableReviewStats(data)}
-            reviewState={review}
-            onReset={() => setSplitTarget(null)}
             files={fileContent}
             versions={versionContent}
             receipts={<ReceiptReview key={receiptKey} batch={batch} runAction={runAction} load={load} />}

@@ -138,7 +138,7 @@ function reviewTaskPresentation(batch: Batch, needsReview: boolean, stats?: Revi
 }
 
 function inboundResultTask(batch: Batch, downloadable: boolean, stats?: ReviewStats) {
-  const pending = stats?.unfinishedCount ? ` · 还有 ${stats.unfinishedCount} 条待处理` : "";
+  const pending = stats?.unfinishedCount ? `，还有 ${stats.unfinishedCount} 条待处理` : "";
   return {
     title: downloadable
       ? `结果已生成，可以下载${pending}`

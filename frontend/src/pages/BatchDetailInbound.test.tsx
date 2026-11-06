@@ -38,7 +38,7 @@ describe("自营仓批次详情", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
-    expect(await screen.findByRole("tab", { name: "待办 1" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "待处理 1" })).toBeInTheDocument();
     expect(task.getByText("本次申请")).toBeInTheDocument();
     expect(task.getByLabelText("入库数量摘要")).toHaveTextContent("累计实收 163 − 历史已入库 3 = 本次申请 160");
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
@@ -192,14 +192,14 @@ describe("自营仓批次详情", () => {
     }
   });
 
-  it("缺少待入库数据时保留上传能力并禁止预检", async () => {
+  it("缺少待入库数据时禁止预检且不提供本地上传", async () => {
     state.batch.status = "draft";
     state.batch.inbound_file = { uploaded: false, original_name: "" };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     const task = within(await screen.findByRole("region", { name: "当前批次任务" }));
     expect(task.getByRole("status")).toHaveTextContent("待入库数据尚未就绪");
     expect(task.getByRole("button", { name: /预检/ })).toBeDisabled();
-    expect(task.getByRole("button", { name: /上传自营仓入库单/ })).toBeEnabled();
+    expect(task.queryByRole("button", { name: /上传自营仓入库单/ })).not.toBeInTheDocument();
   });
 
   it("草稿只调用预检，由后端接续计算，不显示独立预检或开始审校", async () => {

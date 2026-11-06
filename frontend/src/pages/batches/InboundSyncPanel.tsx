@@ -1,6 +1,6 @@
 import SyncDifference from "./SyncDifference";
 import { type ReactNode, useState } from "react";
-import { Alert, Button, Popconfirm, Space, Typography } from "antd";
+import { Alert, Button, Popconfirm, Space, Tag, Typography } from "antd";
 import { CheckCircleFilled, EyeOutlined, SyncOutlined } from "@ant-design/icons";
 import { formatBeijingDateTime } from "../../dateTime";
 import { getInboundSyncPreview, getInboundSyncIssues } from "../../syncApi";
@@ -54,7 +54,6 @@ export default function InboundSyncPanel({
             </Space>
           </div>
           <Button
-            type="primary"
             icon={<SyncOutlined />}
             loading={syncStarting}
             disabled={!syncStatus?.configured || syncRunning}
@@ -116,9 +115,7 @@ export default function InboundSyncPanel({
                     : `保留 ${syncJob.eligible_detail_count} 行 / ${formatBeijingDateTime(syncJob.finished_at ?? syncJob.created_at)}`}
                 </Typography.Text>
                 {!syncDetailsOpen && syncJob.warning_count > 0 && (
-                  <Typography.Text className="purchase-sync-warning-summary">
-                    含 {syncJob.warning_count} 条“共享”站点数据，请展开复核
-                  </Typography.Text>
+                  <Tag className="review-notice">{syncJob.warning_count} 条共享站点需复核</Tag>
                 )}
               </div>
             </div>
@@ -160,9 +157,7 @@ export default function InboundSyncPanel({
                   cancelText="取消"
                   onConfirm={() => void activateInboundSync()}
                 >
-                  <Button type="primary" loading={syncActivating}>
-                    启用最新数据
-                  </Button>
+                  <Button loading={syncActivating}>启用最新数据</Button>
                 </Popconfirm>
               )}
             </Space>

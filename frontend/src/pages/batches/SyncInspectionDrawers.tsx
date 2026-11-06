@@ -1,7 +1,7 @@
-import { Alert, Button, Drawer, Space, Table, Typography } from "antd";
+import { Alert, Button, Drawer, Segmented, Table, Typography } from "antd";
 import { DownloadOutlined } from "@ant-design/icons";
 import type { TableProps } from "antd";
-import type { SyncInspectionState, SyncIssueFilter } from "./useSyncInspection";
+import type { SyncInspectionState } from "./useSyncInspection";
 
 type PreviewConfig<Row> = {
   title: string;
@@ -92,25 +92,21 @@ export default function SyncInspectionDrawers<
           <Typography.Text type="secondary">
             共 {issues.length} 条，显示 {filteredIssues.length} 条。
           </Typography.Text>
-          <Space size={6} wrap>
-            <Typography.Text type="secondary">筛选：</Typography.Text>
-            {(
+          <Segmented
+            aria-label="同步问题筛选"
+            value={issueFilter}
+            onChange={setIssueFilter}
+            options={(
               [
                 ["warning", "共享站点提醒"],
                 ["error", "映射错误"],
                 ["all", "全部"]
-              ] as Array<[SyncIssueFilter, string]>
-            ).map(([value, label]) => (
-              <Button
-                key={value}
-                size="small"
-                type={issueFilter === value ? "primary" : "default"}
-                onClick={() => setIssueFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
-          </Space>
+              ] as const
+            ).map(([value, label]) => ({
+              value,
+              label: `${label} ${issues.filter((issue) => value === "all" || issue.severity === value).length}`
+            }))}
+          />
         </div>
         {issuesError ? (
           <Alert type="error" showIcon title="无法读取异常数据" description={issuesError} />

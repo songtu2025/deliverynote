@@ -32,31 +32,6 @@
   font-weight: 600;
   overflow-wrap: anywhere;
 }
-.batch-stage {
-  flex-shrink: 0;
-  margin: 0;
-  border-radius: 4px;
-}
-.batch-stage-waiting {
-  color: var(--dn-muted);
-  background: var(--dn-surface-muted);
-}
-.batch-stage-review {
-  color: var(--dn-warning);
-  background: var(--dn-warning-soft);
-}
-.batch-stage-running {
-  color: var(--dn-info);
-  background: var(--dn-info-soft);
-}
-.batch-stage-ready {
-  color: var(--dn-primary);
-  background: var(--dn-primary-soft);
-}
-.batch-stage-error {
-  color: var(--dn-surface);
-  background: var(--dn-danger);
-}
 .batch-task-bar {
   margin: 8px 0;
 }
@@ -67,9 +42,6 @@
 .batch-task-status-icon {
   margin-right: 8px;
 }
-.batch-task-review {
-  color: var(--dn-warning);
-}
 .batch-task-error {
   color: var(--dn-danger);
 }
@@ -77,6 +49,9 @@
   margin: 4px 0 0;
 }
 .batch-heading-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
   color: var(--dn-muted);
   font-size: 12px;
   overflow-wrap: anywhere;
