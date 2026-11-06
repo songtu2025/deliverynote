@@ -6,9 +6,20 @@ import json
 from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence, TypeVar, cast
-from urllib.request import Request, urlopen
 
 from scripts.backup.runtime import DEFAULT_LOCK_FILE, BackupError, Runner, compose
+from scripts.ci_evidence import (
+    EVIDENCE_PREFIX,
+    WORKFLOW_PATH,
+    EvidenceError,
+    Reader,
+    api_reader,
+    commit_tree,
+    is_reuse_job,
+    pr_run_problem,
+    run_jobs,
+    verified_pr_run,
+)
 from scripts.backup.services import REQUIRED_SERVICES
 from scripts.check_deployment import add_deployment_arguments, retained_versions
 from scripts.deployment_sources import REVISION_LABEL
@@ -32,32 +43,61 @@ class ReleaseConfig:
 ConfigT = TypeVar("ConfigT", bound=ReleaseConfig)
 
 
-def verify_ci(revision: str, run_id: int) -> None:
-    base = f"https://api.github.com/repos/songtu2025/deliverynote/actions/runs/{run_id}"
+def verify_ci(revision: str, run_id: int, read: Reader | None = None) -> None:
+    """要求 master 推送 CI 全部成功，或有测试过相同代码指纹且全部成功的 PR CI。"""
+    read = read or api_reader()
+    run = read(f"/actions/runs/{run_id}")
+    if run.get("path") != WORKFLOW_PATH or run.get("status") != "completed":
+        raise BackupError("指定的 CI 运行尚未完成")
+    if run.get("event") == "push":
+        if run.get("head_sha") != revision or run.get("conclusion") != "success":
+            raise BackupError("指定提交的 master 推送 CI 尚未全部成功")
+        jobs = run_jobs(read, run_id)
+        if len(jobs) >= 3 and all(job.get("conclusion") == "success" for job in jobs):
+            return
+        if not _reused(jobs):
+            raise BackupError("CI 包含未完成、失败或跳过的任务，拒绝发布")
+    elif run.get("event") != "pull_request":
+        raise BackupError("CI 运行类型不支持发布")
+    _verify_pr_evidence(read, revision, None if run.get("event") == "push" else run_id)
 
-    def read(url: str) -> dict[str, Any]:
-        request = Request(url, headers={"User-Agent": "DeliveryNote-release"})
-        with urlopen(request, timeout=15) as response:
-            return cast(dict[str, Any], json.load(response))
 
-    run = read(base)
-    expected = {
-        "head_sha": revision,
-        "status": "completed",
-        "conclusion": "success",
-        "path": ".github/workflows/ci.yml",
-        "event": "push",
-    }
-    if any(run.get(key) != value for key, value in expected.items()):
-        raise BackupError("指定提交的 master 推送 CI 尚未全部成功")
-    jobs = read(base + "/jobs?per_page=100")
-    entries = jobs.get("jobs", [])
-    if (
-        len(entries) < 3
-        or len(entries) != jobs.get("total_count")
-        or any(job.get("conclusion") != "success" for job in entries)
-    ):
-        raise BackupError("CI 包含未完成、失败或跳过的任务，拒绝发布")
+def _reused(jobs: list[dict[str, Any]]) -> bool:
+    reuse = [job for job in jobs if is_reuse_job(str(job.get("name", "")))]
+    others = [job for job in jobs if job not in reuse]
+    return (
+        len(reuse) == 1
+        and reuse[0].get("conclusion") == "success"
+        and all(job.get("conclusion") == "skipped" for job in others)
+    )
+
+
+def _verify_pr_evidence(read: Reader, revision: str, run_id: int | None) -> None:
+    # 复用 PR 结果时，要求待发布提交已在 master 上且代码指纹与 PR 测试的代码一致。
+    try:
+        compare = read(f"/compare/{revision}...master")
+        if compare.get("status") not in {"identical", "ahead"}:
+            raise BackupError("待发布提交不在 master 上")
+        tree = commit_tree(read, revision)
+        if run_id is None:
+            verified_pr_run(read, tree)
+            return
+        problem = pr_run_problem(read, run_id)
+        if problem is not None:
+            raise BackupError(problem)
+        if not _has_evidence(read, run_id, tree):
+            raise BackupError("指定的 PR CI 没有测试过待发布的代码")
+    except EvidenceError as error:
+        raise BackupError(str(error)) from error
+
+
+def _has_evidence(read: Reader, run_id: int, tree: str) -> bool:
+    artifacts = read(f"/actions/runs/{run_id}/artifacts?per_page=100")
+    return any(
+        artifact.get("name") == f"{EVIDENCE_PREFIX}{tree}"
+        and not artifact.get("expired")
+        for artifact in artifacts.get("artifacts", [])
+    )
 
 
 def image_record(runner: Runner, image: str) -> dict[str, Any]:
