@@ -118,7 +118,10 @@ describe("BatchDetail", () => {
         renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
         await screen.findByText(state.batch.name);
         if (phase === "operation" || phase === "refresh") fireEvent.click(screen.getByRole("button", { name: /预检/ }));
-        if (phase === "download") fireEvent.click(screen.getAllByRole("button", { name: /下载结果/ })[0]);
+        if (phase === "download") {
+          fireEvent.click(screen.getByRole("tab", { name: "来源文件 1" }));
+          fireEvent.click(screen.getByRole("button", { name: /下载结果/ }));
+        }
         await waitFor(() => expect(expired).toHaveBeenCalledOnce());
         await waitFor(() => expect(document.querySelector(".ant-btn-loading")).not.toBeInTheDocument());
         expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument();

@@ -10,6 +10,7 @@ function show(workflow: "delivery" | "self_operated_inbound", status?: string, u
   const batch = {
     ...createDetailBatch(),
     workflow,
+    receipt: { requested_total: 160 },
     jobs: status ? { export: fixtureJob({ kind: "export", status }) } : {}
   };
   renderDetail(
@@ -48,7 +49,7 @@ describe("下载处理中反馈", () => {
       />
     );
     expect(screen.getByRole("button", { name: /下载合并结果/ })).toHaveClass("ant-btn-loading");
-    expect(screen.getByRole("button", { name: /下载分文件 ZIP/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /下载分文件 ZIP/ })).not.toBeInTheDocument();
   });
 });
 
@@ -58,6 +59,7 @@ describe("自营仓自动生成与重试入口", () => {
     const batch = {
       ...original,
       workflow: "self_operated_inbound" as const,
+      receipt: { requested_total: 160 },
       download_ready: true,
       merged_download_ready: multiple,
       files: original.files.slice(0, multiple ? 2 : 1).map((file) => ({ ...file, download_ready: true }))
@@ -76,11 +78,11 @@ describe("自营仓自动生成与重试入口", () => {
     expect(button).toHaveClass("ant-btn-primary");
     fireEvent.click(button);
     expect(download).toHaveBeenCalledOnce();
-    if (multiple) expect(screen.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
   });
   it.each(["queued", "running"])("自营仓导出 %s 时不要求手动生成", (status) => {
     show("self_operated_inbound", status);
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成中" })).toBeDisabled();
   });
   it("自营仓没有导出任务（旧批次）时可手动生成", () => {
     const start = show("self_operated_inbound", undefined, 1);
@@ -98,9 +100,9 @@ describe("自营仓自动生成与重试入口", () => {
     expect(start).toHaveBeenCalledOnce();
     expect(screen.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
   });
-  it("交货批次保留开始审校和生成结果", () => {
+  it("交货批次有待审校时只保留当前审校主操作", () => {
     show("delivery", undefined, 1);
     expect(screen.getByRole("button", { name: "开始审校" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /生成结果/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /生成结果/ })).not.toBeInTheDocument();
   });
 });

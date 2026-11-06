@@ -22,8 +22,8 @@ describe("BatchDetailWorkbench", () => {
   it.each([
     ["draft", true, false],
     ["preflight_ready", false, true],
-    ["queued", true, false],
-    ["running", true, false],
+    ["queued", false, false],
+    ["running", false, false],
     ["failed", true, false],
     ["succeeded", false, false]
   ] as const)("preserves actions in %s", async (status, preflight, compute) => {
@@ -34,9 +34,7 @@ describe("BatchDetailWorkbench", () => {
     const task = screen.getByRole("region", { name: "当前批次任务" });
     expect(within(task).queryByRole("button", { name: /预检并计算/ }) !== null).toBe(preflight);
     expect(within(task).queryByRole("button", { name: /开始计算|重新计算/ }) !== null).toBe(compute);
-    expect(within(task).queryByRole("button", { name: /上传交货文件/ }) !== null).toBe(
-      ["draft", "preflight_ready", "failed"].includes(status)
-    );
+    expect(within(task).queryByRole("button", { name: /上传交货文件/ })).not.toBeInTheDocument();
     expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
     expect(within(task).queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
     if (status !== "succeeded") expect(within(task).queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
@@ -48,9 +46,9 @@ describe("BatchDetailWorkbench", () => {
     state.batch.file_count = 0;
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     expect(await screen.findByRole("button", { name: /预检/ })).toBeDisabled();
-    expect(container.querySelector('.batch-primary-actions input[type="file"]')).toHaveAttribute("multiple");
     expect(screen.getByRole("tab", { name: "待办 —" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 0" }));
+    expect(container.querySelector('.file-order-card input[type="file"]')).toHaveAttribute("multiple");
     expect(screen.getByText("请先上传一个或多个交货 Excel")).toBeInTheDocument();
   });
 
@@ -125,8 +123,9 @@ describe("BatchDetailWorkbench", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByText(state.batch.name);
     const task = within(screen.getByRole("region", { name: "当前批次任务" }));
-    expect(task.getByRole("button", { name: /下载合并结果/ })).toBeEnabled();
-    expect(task.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
+    await waitFor(() => expect(task.queryByText("正在读取审校统计…")).not.toBeInTheDocument());
+    expect(task.queryByRole("button", { name: /下载合并结果/ }) !== null).toBe(!pending);
+    expect(task.queryByRole("button", { name: /下载分文件 ZIP/ })).not.toBeInTheDocument();
     if (pending) {
       expect(await task.findByText("1 条待审校，共 60 件")).toBeInTheDocument();
       expect(task.getByText("1 条待审校，共 60 件")).toBeInTheDocument();
@@ -140,6 +139,9 @@ describe("BatchDetailWorkbench", () => {
       expect(task.queryByRole("button", { name: "开始审校" })).not.toBeInTheDocument();
     }
     expect(task.getByText("结果可下载")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
+    expect(screen.getByRole("button", { name: /下载分文件 ZIP/ })).toBeEnabled();
+    if (pending) expect(screen.getByRole("button", { name: /下载合并结果/ })).toBeEnabled();
     expect(container.querySelector(".batch-task-spinner")).not.toBeInTheDocument();
   });
 
@@ -148,6 +150,7 @@ describe("BatchDetailWorkbench", () => {
     [true, false, false, "生成合并结果"],
     [false, false, true, "重新生成结果"]
   ] as const)("describes the export generation action %s/%s/%s accurately", async (ready, merged, stale, label) => {
+    state.exceptions = [];
     state.batch.download_ready = ready;
     state.batch.merged_download_ready = merged;
     state.batch.summary = { delivery_total: 160, import_total: 160, manual_total: 0, conserved: true };
@@ -176,7 +179,7 @@ describe("BatchDetailWorkbench", () => {
   it("shows a running export and prevents another generation request", async () => {
     state.batch.jobs = { export: fixtureJob({ kind: "export" }) };
     renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
-    expect(await screen.findByRole("button", { name: /生成结果/ })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "生成中" })).toBeDisabled();
     expect(screen.getByRole("status")).toHaveTextContent("正在生成结果");
     expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
@@ -226,7 +229,7 @@ describe("BatchDetailWorkbench", () => {
     expect(screen.getAllByText("1 处累计实收待核对，处理后即可预检")).toHaveLength(1);
     expect(screen.queryByText("累计实收核对失败")).not.toBeInTheDocument();
     expect(container.querySelector(".ant-alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "重新计算" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "重试" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /更多/ }));
     expect(await screen.findByRole("menuitem", { name: "同步积加入库记录" })).not.toHaveAttribute(
       "aria-disabled",

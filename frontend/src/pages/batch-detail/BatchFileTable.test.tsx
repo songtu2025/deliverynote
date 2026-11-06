@@ -19,6 +19,7 @@ function show(action: string | null) {
       actions={actions}
       action={action}
       downloadResult={vi.fn()}
+      startExport={vi.fn()}
     />
   );
   return files;

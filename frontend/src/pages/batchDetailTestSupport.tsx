@@ -2,7 +2,7 @@ import { render as renderComponent } from "@testing-library/react";
 import { App as AntApp, ConfigProvider } from "antd";
 import type { ReactElement } from "react";
 import { beforeEach, afterEach, vi } from "vitest";
-import type { SplitPart } from "../types";
+import type { Batch, SplitPart } from "../types";
 import { jsonResponse } from "./admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions, fixtureVersion } from "./batch-detail/detailFixtures";
 export const renderDetail = (ui: ReactElement) =>
@@ -13,6 +13,16 @@ export const renderDetail = (ui: ReactElement) =>
       </ConfigProvider>
     )
   });
+
+export function batchMoreActionsProps(batch: Batch) {
+  return {
+    batch,
+    action: null,
+    disabled: false,
+    refreshHistory: vi.fn(),
+    fileActions: { uploadFile: vi.fn(), uploadInboundFile: vi.fn(), removeFile: vi.fn(), move: vi.fn() }
+  };
+}
 
 export function setupBatchDetailTest() {
   const state = { batch: createDetailBatch(), exceptions: createDetailExceptions() };

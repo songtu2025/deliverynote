@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderDetail } from "../batchDetailTestSupport";
+import { batchMoreActionsProps, renderDetail } from "../batchDetailTestSupport";
 import { deferred, jsonResponse } from "../admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions, fixtureJob } from "./detailFixtures";
 import SelfOperatedExceptionDetails from "./SelfOperatedExceptionDetails";
@@ -69,7 +69,7 @@ describe("自营仓异常依据", () => {
   };
   const detail = (record = exception) => (
     <BatchPurchaseSnapshot batch={batch}>
-      <BatchMoreActions disabled={false} refreshHistory={vi.fn()} />
+      <BatchMoreActions {...batchMoreActionsProps(batch)} />
       <SelfOperatedExceptionDetails exception={record} supplierCode="GYS-023" />
     </BatchPurchaseSnapshot>
   );

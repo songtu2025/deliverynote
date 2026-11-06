@@ -130,6 +130,8 @@ export default function BatchDetail({
       actions={fileActions}
       action={action}
       downloadResult={downloadResult}
+      startExport={tasks.startExport}
+      reviewStats={availableReviewStats(data)}
     />
   );
   const versionContent = (

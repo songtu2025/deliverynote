@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { batchStagePresentation, batchTaskPresentation } from "./batchPresentation";
+import { batchTaskPresentation } from "./batchPresentation";
+import { batchStage } from "../../batchStage";
+import type { Batch, Job } from "../../types";
+
+const batchStagePresentation = (
+  batch: Batch,
+  activeJob?: Job,
+  reviewStats?: { unfinishedCount: number; unfinishedQuantity: number }
+) => batchStage(batch, { activeJob, reviewStats }).stage;
+
 import { createDetailBatch, fixtureJob } from "./detailFixtures";
 
 describe("批次真实阶段", () => {
@@ -118,7 +127,7 @@ describe("批次真实阶段", () => {
     expect(batchStagePresentation(batch, undefined, resolved).label).toBe("可生成结果");
     batch.jobs = { export: fixtureJob({ kind: "export", status: "running" }) };
     expect(batchStagePresentation(batch, undefined, resolved).label).toBe("生成中");
-    expect(batchTaskPresentation(batch, undefined, resolved).title).toBe("正在生成结果");
+    expect(batchTaskPresentation(batch, undefined, resolved).title).toBe("正在生成结果（3/3）");
     batch.jobs = {};
     batch.download_ready = true;
     batch.merged_download_ready = true;

@@ -1,5 +1,7 @@
 import { Tag } from "antd";
 import { ExclamationCircleFilled } from "@ant-design/icons";
+import type { Batch } from "./types";
+import { batchStage } from "./batchStage";
 
 const STATUS_LABELS: Record<string, string> = {
   draft: "准备文件",
@@ -11,25 +13,24 @@ const STATUS_LABELS: Record<string, string> = {
   expired: "已过期"
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  draft: "default",
-  preflight_ready: "success",
-  queued: "processing",
+const STAGE_COLORS: Record<string, string> = {
+  waiting: "default",
+  ready: "success",
   running: "processing",
-  succeeded: "success",
-  failed: "error",
-  expired: "default"
+  review: "warning",
+  error: "error"
 };
 
 export const STATUS_OPTIONS = Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label }));
-export default function BatchStatusTag({ status }: { status: string }) {
+export default function BatchStatusTag({ batch }: { batch: Batch }) {
+  const { stage } = batchStage(batch);
   return (
     <Tag
-      color={STATUS_COLORS[status]}
-      variant={status === "failed" ? "solid" : undefined}
-      icon={status === "failed" ? <ExclamationCircleFilled /> : undefined}
+      color={STAGE_COLORS[stage.tone]}
+      variant={stage.tone === "error" ? "solid" : undefined}
+      icon={stage.tone === "error" ? <ExclamationCircleFilled /> : undefined}
     >
-      {STATUS_LABELS[status] ?? status}
+      {stage.label}
     </Tag>
   );
 }

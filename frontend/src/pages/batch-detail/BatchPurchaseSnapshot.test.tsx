@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { renderDetail } from "../batchDetailTestSupport";
+import { batchMoreActionsProps, renderDetail } from "../batchDetailTestSupport";
 import { jsonResponse } from "../admin/positionDraftTestSupport";
 import { createDetailBatch, createDetailExceptions, fixtureJob } from "./detailFixtures";
 import BatchPurchaseSnapshot, { BatchPurchaseSnapshotMetadata } from "./BatchPurchaseSnapshot";
@@ -34,7 +34,7 @@ function Workbench() {
   const [open, setOpen] = useState(true);
   return (
     <BatchPurchaseSnapshot batch={batch}>
-      <BatchMoreActions disabled={false} refreshHistory={vi.fn()} />
+      <BatchMoreActions {...batchMoreActionsProps(batch)} />
       <BatchPurchaseSnapshotMetadata />
       <button onClick={() => setSku("SKU-B")}>切换 SKU</button>
       <button onClick={() => setOpen((value) => !value)}>开关详情</button>
