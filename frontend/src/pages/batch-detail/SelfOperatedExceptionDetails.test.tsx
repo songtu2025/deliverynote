@@ -83,6 +83,19 @@ describe("自营仓异常依据", () => {
     );
   });
 
+  it.each([
+    ["product_not_found", "在基础资料补充后需新建批次才会生效"],
+    ["inbound_order_not_found", "请在积加核对关联交货单和商品站点"],
+    ["supplier_mismatch", "请核对供应商资料及积加入库单的供应商名称"],
+    ["po_name_missing", "请在积加补充关联采购单"],
+    ["receivable_invalid", "请在积加核对应收货字段"],
+    ["receivable_exceeded", "请核对入库单应收货数量和前序文件分配"]
+  ] as const)("%s 显示处理建议", async (reason_code, message) => {
+    renderDetail(detail({ ...exception, reason_code }));
+    expect(screen.getByRole("region", { name: "原因指导" })).toHaveTextContent(message);
+    expect(await screen.findByText("WV-1")).toBeVisible();
+  });
+
   it("同时展示各站点采购快照和当前文件分配，移除逐行采购刷新", async () => {
     renderDetail(detail());
     expect(await screen.findByText("PO-US")).toBeInTheDocument();
