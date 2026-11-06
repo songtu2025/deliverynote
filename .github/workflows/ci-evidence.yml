@@ -1,0 +1,52 @@
+name: CI 代码指纹
+
+on:
+  workflow_call:
+    outputs:
+      pr_run:
+        description: 测试过相同代码且全部成功的 PR CI 运行号；为空时完整执行
+        value: ${{ jobs.reuse.outputs.pr_run }}
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  reuse:
+    name: 复用 PR 验证结果
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      pr_run: ${{ steps.evidence.outputs.pr_run }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: 查找测试过相同代码的成功 PR CI
+        id: evidence
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        # 合并提交与 PR 测试的代码逐文件一致（Git tree 相同）时，其余任务全部跳过；查不到则完整执行。
+        run: python3 -m scripts.ci_evidence --tree "$(git rev-parse HEAD^{tree})"
+
+  fingerprint:
+    name: 记录代码指纹
+    needs: reuse
+    if: ${{ !cancelled() && needs.reuse.outputs.pr_run == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: 计算本次测试代码的 Git tree
+        id: tree
+        run: echo "tree=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+      - name: 写入指纹记录
+        run: |
+          echo "tree=${{ steps.tree.outputs.tree }}" > ci-evidence.txt
+          echo "sha=$GITHUB_SHA" >> ci-evidence.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-tree-${{ steps.tree.outputs.tree }}
+          path: ci-evidence.txt
+          retention-days: 30
