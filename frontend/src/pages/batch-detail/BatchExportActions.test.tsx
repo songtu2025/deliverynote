@@ -29,6 +29,29 @@ function show(workflow: "delivery" | "self_operated_inbound", status?: string, u
   return startExport;
 }
 
+describe("下载处理中反馈", () => {
+  it("正在下载的按钮显示处理中，其他下载按钮暂不可点", () => {
+    const original = createDetailBatch();
+    const batch = {
+      ...original,
+      download_ready: true,
+      merged_download_ready: true,
+      files: original.files.slice(0, 2).map((file) => ({ ...file, download_ready: true }))
+    };
+    renderDetail(
+      <BatchExportActions
+        batch={batch}
+        action={`download:/api/batches/${batch.id}/download-merged`}
+        tasks={{ downloadResult: vi.fn(), startExport: vi.fn() } as unknown as ReturnType<typeof useBatchTasks>}
+        focusReview={vi.fn()}
+        reviewStats={{ unfinishedCount: 0, unfinishedQuantity: 0, totalCount: 0, resolvedCount: 0 }}
+      />
+    );
+    expect(screen.getByRole("button", { name: /下载合并结果/ })).toHaveClass("ant-btn-loading");
+    expect(screen.getByRole("button", { name: /下载分文件 ZIP/ })).toBeDisabled();
+  });
+});
+
 describe("自营仓自动生成与重试入口", () => {
   it.each([false, true])("有待处理时下载仍是主按钮，多文件：%s", (multiple) => {
     const original = createDetailBatch();

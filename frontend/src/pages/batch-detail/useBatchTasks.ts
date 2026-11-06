@@ -55,7 +55,8 @@ export function useBatchTasks(batchId: number, data: BatchDetailData, runAction:
       message.info("正在生成结果");
     });
 
-  const downloadResult = (path: string, filename: string) => runAction("download", () => download(path, filename));
+  const downloadResult = (path: string, filename: string) =>
+    runAction(`download:${path}`, () => download(path, filename));
 
   const refreshHistory = () =>
     runAction("refresh-history", async () => {

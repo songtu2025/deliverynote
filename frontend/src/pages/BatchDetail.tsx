@@ -128,6 +128,7 @@ export default function BatchDetail({
       computed={computed}
       canEditFiles={canEditFiles}
       actions={fileActions}
+      action={action}
       downloadResult={downloadResult}
     />
   );
