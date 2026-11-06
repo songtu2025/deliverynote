@@ -11,7 +11,7 @@ describe("BatchDetailReview", () => {
     const { container } = renderDetail(<BatchDetail batchId={7} onBack={vi.fn()} />);
     await screen.findByRole("tab", { name: /^待处理 \d/ });
 
-    await screen.findByText("交货 160 = 可导入 100 + 待处理 60");
+    await screen.findByRole("img", { name: /交货 160 = 可导入 100 \+ 待处理 60/ });
     fireEvent.click(screen.getByRole("tab", { name: "来源文件 2" }));
     fireEvent.focus(screen.getByRole("button", { name: "文件顺序说明" }));
     expect(await screen.findByRole("tooltip")).toHaveTextContent("序号越小，越先扣减采购余额");

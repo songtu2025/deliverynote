@@ -37,7 +37,8 @@ describe("BatchDetailWorkbench", () => {
     expect(within(task).queryByRole("button", { name: /上传交货文件/ })).not.toBeInTheDocument();
     expect(within(task).getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
     expect(within(task).queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
-    if (status !== "succeeded") expect(within(task).queryByRole("img", { name: /^可导入/ })).not.toBeInTheDocument();
+    if (status !== "succeeded")
+      expect(within(task).getByRole("img", { name: /^可导入/ })).toHaveAccessibleName(/可导入 — \/ — 件/);
   });
 
   it("keeps empty-file preflight disabled and upload multiple", async () => {
@@ -58,7 +59,7 @@ describe("BatchDetailWorkbench", () => {
     await screen.findByText(state.batch.name);
     expect(container.querySelector(".batch-detail--compact")).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "当前批次任务" })).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "当前批次任务" })).getByText("本次申请")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^可入库/ })).toHaveAccessibleName(/可入库 — \/ — 件/);
     expect(screen.queryByRole("group", { name: "批次处理流程" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "批次任务状态" })).toBeInTheDocument();
   });

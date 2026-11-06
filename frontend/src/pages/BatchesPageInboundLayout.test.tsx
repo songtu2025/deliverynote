@@ -23,9 +23,10 @@ describe("自营仓紧凑列表", () => {
     expect(within(row).getByText(/批次 #7/)).toHaveTextContent("待入库数据已就绪");
     expect(within(row).getByTitle("锁定待入库版本 V1")).toBeInTheDocument();
     expect(within(row).getByText("2 份质检单")).toBeInTheDocument();
-    expect(within(row).getByText(/可入库 100/)).toHaveTextContent("待处理 60");
-    expect(within(row).getByRole("img", { name: "可入库 100，待处理 60" })).toBeInTheDocument();
-    expect(within(row).queryByText(/可导入|交货 160/)).not.toBeInTheDocument();
+    expect(within(row).getByText("100").parentElement).toHaveTextContent("100 / 160");
+    expect(within(row).getByText("待处理 60")).toBeInTheDocument();
+    expect(within(row).getByRole("img", { name: /可入库 100 \/ 160 件，占比 62.5%/ })).toBeInTheDocument();
+    expect(within(row).queryByText(/交货 160/)).not.toBeInTheDocument();
     expect(within(row).getByText("去生成")).toBeInTheDocument();
     expect(within(row).getByText("待处理")).toBeInTheDocument();
     expect(within(row).queryByText("去审校 60")).not.toBeInTheDocument();
@@ -43,12 +44,12 @@ describe("自营仓紧凑列表", () => {
 
     expect(within(row).getByText(/批次 #7/)).toHaveTextContent("待入库数据未就绪");
     if (computed) {
-      expect(within(row).queryByRole("img", { name: /可入库/ })).not.toBeInTheDocument();
-      expect(within(row).getByText(/可入库 0/)).toHaveTextContent("待处理 0");
+      expect(within(row).getByRole("img", { name: /可入库 0 \/ 0 件，占比 0.0%/ })).toBeInTheDocument();
+      expect(within(row).queryByText("待处理 0")).not.toBeInTheDocument();
       expect(within(row).queryByText("尚未计算")).not.toBeInTheDocument();
     } else {
       expect(within(row).getByText("尚未计算")).toBeInTheDocument();
-      expect(within(row).queryByText(/可入库 0/)).not.toBeInTheDocument();
+      expect(within(row).queryByRole("img", { name: /可入库/ })).not.toBeInTheDocument();
     }
   });
 

@@ -7,7 +7,6 @@
   border-color: var(--dn-border);
 }
 .import-value,
-.conservation-ok,
 .audit-action-processing,
 .overreceipt-allowance-value {
   color: var(--dn-primary);
