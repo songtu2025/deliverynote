@@ -25,6 +25,7 @@ from delivery_note.purchase_detail_cache import (
     purchase_cache_source_identity,
     purchase_detail_cache_path,
 )
+from delivery_note.purchase_entry import validate_template as validate_purchase_template
 from delivery_note.web.input_versions import BUILTIN_TEMPLATES
 from delivery_note.web.models import InputVersion
 from scripts.backup.archive import sha256
@@ -122,11 +123,11 @@ def inspect_resource(
         )
     try:
         if builtin:
-            validator = (
-                validate_template_workbook
-                if builtin.kind == "template"
-                else validate_self_operated_template_workbook
-            )
+            validator = {
+                "template": validate_template_workbook,
+                "inbound_template": validate_self_operated_template_workbook,
+                "purchase_template": validate_purchase_template,
+            }[builtin.kind]
             validator(path)
             details["sha256"] = sha256(path)
         elif path == gerpgo_config_path(root):
