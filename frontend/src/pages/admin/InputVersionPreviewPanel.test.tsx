@@ -75,6 +75,18 @@ describe("InputVersionPreviewPanel", () => {
     expect(screen.queryByTitle("2")).not.toBeInTheDocument();
   });
 
+  it("商品预览展示服务端返回的国家和 MSKU 列", () => {
+    const props = previewProps();
+    props.inspection!.preview.columns = ["SKU", "国家", "店铺/站点", "MSKU"];
+    props.inspection!.preview.rows = [{ SKU: "SKU-A", 国家: "美国", "店铺/站点": "SEEKWAY:US", MSKU: "MSKU-A" }];
+    render(previewView(props));
+    const table = screen.getByRole("table", { name: "商品信息数据预览" });
+    for (const column of ["国家", "MSKU"])
+      expect(within(table).getByRole("columnheader", { name: column })).toBeInTheDocument();
+    expect(within(table).getByText("美国")).toBeInTheDocument();
+    expect(within(table).getByText("MSKU-A")).toBeInTheDocument();
+  });
+
   it("keeps source row order and adds the server offset to Excel row numbers without mutating data", () => {
     const props = previewProps();
     const inspection = props.inspection!;

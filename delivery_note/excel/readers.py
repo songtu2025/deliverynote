@@ -13,6 +13,7 @@ PURCHASE_COLUMNS = ["单据状态", "供应商", "SKU", "平台站点", "目的�
 
 
 PRODUCT_COLUMNS = ["SKU", "店铺/站点", "品类A", "锁仓MKSU"]
+PRODUCT_OPTIONAL_COLUMNS = ["国家", "MSKU"]
 
 
 SUPPLIER_REQUIRED_COLUMNS = ["供应商编号", "供应商名称", "状态"]
@@ -51,9 +52,23 @@ def read_self_operated_inbound_workbook(path: Path) -> pd.DataFrame:
 
 
 def read_product_workbook(path: Path) -> pd.DataFrame:
-    """按原字段选择读取商品资料。"""
+    """保留原四列的读取语义，存在采购可选列时额外按文本读取。"""
 
-    return pd.read_excel(path, usecols=PRODUCT_COLUMNS)
+    selected = {*PRODUCT_COLUMNS, *PRODUCT_OPTIONAL_COLUMNS}
+    with pd.ExcelFile(path) as workbook:
+        rows = pd.read_excel(workbook, usecols=lambda column: column in selected)
+        missing = [column for column in PRODUCT_COLUMNS if column not in rows]
+        if missing:
+            raise ValueError(f"商品资料缺少必要字段：{', '.join(missing)}")
+        optional = [column for column in PRODUCT_OPTIONAL_COLUMNS if column in rows]
+        if optional:
+            # 仅新列禁用 NA 识别，避免 MSKU 前导零和国家 NA 丢失，也不改变旧 SKU 推断。
+            values = pd.read_excel(
+                workbook, usecols=optional, dtype=str, keep_default_na=False
+            )
+            for column in optional:
+                rows[column] = values[column].where(values[column].ne(""), None)
+    return rows
 
 
 def read_purchase_workbook(path: Path) -> pd.DataFrame:

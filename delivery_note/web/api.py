@@ -49,6 +49,8 @@ from .inbound_exception_routes import register_inbound_exception_routes
 from .exception_transfer_routes import register_exception_transfer_routes
 from .exception_transfers import ExceptionTransferService
 from .purchase_snapshot_routes import register_purchase_snapshot_routes
+from .purchase_entry_routes import register_purchase_entry_routes
+from .purchase_entry_service import PurchaseEntryService
 from .input_version_read_routes import register_input_version_read_routes
 from .models import AuditLog
 from .sync.commands import SyncCommands
@@ -130,6 +132,12 @@ def create_app(
 
     register_input_version_routes(
         app, dependencies, storage, parse_uploaded_workbook, _audit
+    )
+    register_purchase_entry_routes(
+        app,
+        dependencies,
+        PurchaseEntryService(app, storage, parse_uploaded_workbook),
+        _audit,
     )
 
     register_gerpgo_routes(app, dependencies, storage, _audit)

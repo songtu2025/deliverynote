@@ -80,11 +80,16 @@ describe("InputVersionUploadDrawer", () => {
     ["supplier", ".xls,.xlsx", "仅支持 .xls、.xlsx 文件"],
     ["position", ".xls,.xlsx", "仅支持 .xls、.xlsx 文件"],
     ["template", ".xlsx", "导出模板仅支持 .xlsx 文件"],
-    ["inbound_template", ".xlsx", "积加入库模板仅支持 .xlsx 文件"]
+    ["inbound_template", ".xlsx", "积加入库模板仅支持 .xlsx 文件"],
+    ["sku_warehouse", ".xlsx", "采购仓库仅支持 .xlsx 文件"],
+    ["purchase_template", ".xlsx", "采购单录入模板仅支持 .xlsx 文件"]
   ] as const)("uses the supported formats and hint for %s", (kind, accept, hint) => {
     const { container } = render(<DrawerView {...drawerProps()} kind={kind} />);
     expect(container.querySelector('input[type="file"]')).toHaveAttribute("accept", accept);
     expect(screen.getByText(`${hint}；选择后不会立即生效`)).toBeInTheDocument();
+    expect(screen.queryByText("仅用于新批次；已有批次不变。") !== null).toBe(
+      !["sku_warehouse", "purchase_template"].includes(kind)
+    );
   });
 
   it("reflects parent-owned files and errors without clearing the name", () => {

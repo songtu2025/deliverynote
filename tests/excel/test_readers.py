@@ -8,14 +8,78 @@ import pandas as pd
 from openpyxl import Workbook
 
 from delivery_note.excel_io import (
+    PRODUCT_COLUMNS,
     read_delivery_workbook,
     read_position_workbook,
+    read_product_workbook,
     read_supplier_workbook,
 )
 from delivery_note.processing.models import POSITION_SOURCE_COLUMNS
 
 
 class ExcelInputTests(unittest.TestCase):
+    def test_product_optional_columns_keep_text_and_source_order(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "product.xlsx"
+            frame = pd.DataFrame(
+                [
+                    ["NA", "0007", "店铺:US", "水鞋", "锁", "忽略", "000123"],
+                    ["US", "0008", "店铺:US", "配件", "", "忽略", "NA"],
+                ],
+                columns=[
+                    "国家",
+                    "SKU",
+                    "店铺/站点",
+                    "品类A",
+                    "锁仓MKSU",
+                    "其他",
+                    "MSKU",
+                ],
+            )
+            for columns in (
+                list(frame.columns),
+                [*PRODUCT_COLUMNS, "其他", "MSKU", "国家"],
+            ):
+                with self.subTest(columns=columns):
+                    frame[columns].to_excel(path, index=False)
+                    result = read_product_workbook(path)
+                    self.assertEqual(
+                        list(result.columns),
+                        [column for column in columns if column != "其他"],
+                    )
+                    self.assertEqual(result["MSKU"].tolist(), ["000123", "NA"])
+                    self.assertEqual(result["国家"].tolist(), ["NA", "US"])
+                    self.assertEqual(result["SKU"].tolist(), [7, 8])
+                    self.assertTrue(pd.isna(result.iloc[1]["锁仓MKSU"]))
+
+    def test_product_original_four_columns_remain_compatible(self) -> None:
+        source = Path(__file__).parents[1] / "fixtures" / "product_minimal.xls"
+        native = read_product_workbook(source)
+        self.assertEqual(list(native.columns), PRODUCT_COLUMNS)
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "product.xlsx"
+            native.to_excel(path, index=False)
+            result = read_product_workbook(path)
+        pd.testing.assert_frame_equal(result, native)
+
+    def test_product_optional_columns_do_not_replace_required_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "product.xlsx"
+            for missing in PRODUCT_COLUMNS:
+                columns = [
+                    column
+                    for column in [*PRODUCT_COLUMNS, "国家", "MSKU"]
+                    if column != missing
+                ]
+                pd.DataFrame([["示例"] * len(columns)], columns=columns).to_excel(
+                    path, index=False
+                )
+                with (
+                    self.subTest(missing=missing),
+                    self.assertRaisesRegex(ValueError, missing),
+                ):
+                    read_product_workbook(path)
+
     def test_read_delivery_workbook_uses_detail_even_with_summary(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "明细交货单.xlsx"

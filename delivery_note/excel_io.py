@@ -7,6 +7,7 @@ from .excel.exports import (
 )
 from .excel.readers import (
     PRODUCT_COLUMNS,
+    PRODUCT_OPTIONAL_COLUMNS,
     PURCHASE_COLUMNS,
     read_delivery_workbook,
     read_position_workbook,
@@ -23,6 +24,7 @@ from .excel.templates import (
 
 __all__ = [
     "PRODUCT_COLUMNS",
+    "PRODUCT_OPTIONAL_COLUMNS",
     "PURCHASE_COLUMNS",
     "read_delivery_workbook",
     "read_self_operated_delivery_workbook",

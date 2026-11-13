@@ -129,9 +129,11 @@ export function InputVersionUploadDrawer({
             校验并启用新版本
           </Button>
         </Form>
-        <Typography.Paragraph className="input-data-upload-impact" type="secondary">
-          仅用于新批次；已有批次不变。
-        </Typography.Paragraph>
+        {definition.impact && (
+          <Typography.Paragraph className="input-data-upload-impact" type="secondary">
+            仅用于新批次；已有批次不变。
+          </Typography.Paragraph>
+        )}
       </div>
     </Drawer>
   );

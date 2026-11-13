@@ -5,7 +5,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
-from ..excel_io import PRODUCT_COLUMNS, PURCHASE_COLUMNS
+from ..excel_io import PRODUCT_COLUMNS, PRODUCT_OPTIONAL_COLUMNS, PURCHASE_COLUMNS
 from . import frames
 
 _STREAMING_COLUMNS = {
@@ -30,6 +30,7 @@ def _stream_xlsx_inspection(
         selected_columns = _stream_selected_columns(
             expected_columns,
             next(values, ()),
+            PRODUCT_OPTIONAL_COLUMNS if kind == "product" else [],
         )
 
         page_rows: list[tuple[int, dict[str, Any]]] = []
@@ -83,11 +84,12 @@ def _stream_xlsx_inspection(
 def _stream_selected_columns(
     expected_columns: list[str],
     header: tuple[Any, ...],
+    optional_columns: list[str] | None = None,
 ) -> list[tuple[int, str]]:
-    """按源列顺序选取必要字段，并报告缺失字段。"""
+    """按源列顺序选取必填和实际存在的可选字段。"""
 
     header_names = ["" if value is None else str(value) for value in header]
-    expected_set = set(expected_columns)
+    expected_set = set(expected_columns) | set(optional_columns or [])
     selected_columns = [
         (index, name) for index, name in enumerate(header_names) if name in expected_set
     ]
@@ -128,6 +130,7 @@ def _stream_xlsx_preview(
         selected_columns = _stream_selected_columns(
             _STREAMING_COLUMNS[kind],
             next(values, ()),
+            PRODUCT_OPTIONAL_COLUMNS if kind == "product" else [],
         )
         for row_offset, row in enumerate(values):
             if row_offset < offset:
@@ -157,6 +160,10 @@ def _preview_row(
     """共用摘要扫描和分页读取的预览字段序列化。"""
 
     return {
-        name: frames._stream_json_safe(value)
+        name: frames._stream_json_safe(
+            str(value)
+            if name in PRODUCT_OPTIONAL_COLUMNS and value not in (None, "")
+            else value
+        )
         for (_index, name), value in zip(selected_columns, selected_values)
     }

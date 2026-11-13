@@ -213,7 +213,7 @@ class WebApiTests(WebApiCase):
         versions = self.client.get("/api/input-versions", headers=admin_headers).json()
         self.assertEqual(
             [version["kind"] for version in versions],
-            ["inbound_template", "template"],
+            ["inbound_template", "purchase_template", "template"],
         )
         purchase_root = self.app.state.storage_root / "master" / "purchase"
         self.assertEqual(list(purchase_root.glob("*")), [])

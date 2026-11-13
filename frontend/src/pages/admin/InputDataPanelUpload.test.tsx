@@ -40,7 +40,9 @@ describe("InputDataPanel 上传校验", () => {
     ["inbound_template", "积加入库模板", "unsupported.xls", "valid.xlsx", "积加入库模板仅支持 .xlsx 文件"],
     ["product", "商品信息", "unsupported.csv", "valid.XLS", "仅支持 .xls、.xlsx 文件"],
     ["supplier", "供应商资料", "unsupported.xlsm", "valid.xls", "仅支持 .xls、.xlsx 文件"],
-    ["position", "MSKU定位", "unsupported", "valid.XLSX", "仅支持 .xls、.xlsx 文件"]
+    ["position", "MSKU定位", "unsupported", "valid.XLSX", "仅支持 .xls、.xlsx 文件"],
+    ["sku_warehouse", "采购仓库", "unsupported.xls", "valid.xlsx", "采购仓库仅支持 .xlsx 文件"],
+    ["purchase_template", "采购单录入模板", "unsupported.xls", "valid.xlsx", "采购单录入模板仅支持 .xlsx 文件"]
   ] as const)(
     "rejects unsupported %s files and retains the name when corrected",
     async (kind, label, invalidName, validName, error) => {
@@ -59,6 +61,9 @@ describe("InputDataPanel 上传校验", () => {
           onOpenPositionDraft={vi.fn()}
         />
       );
+      if (["sku_warehouse", "purchase_template"].includes(kind)) {
+        fireEvent.click(screen.getByRole("radio", { name: "采购单录入资料" }));
+      }
       fireEvent.click(getCatalogButton(label));
       fireEvent.click(screen.getByRole("button", { name: "上传首个版本" }));
       const name = `${kind}-version`;

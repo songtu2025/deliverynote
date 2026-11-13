@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, api, download } from "./api";
+import { AUTH_EXPIRED_EVENT, ApiError, api, download } from "./api";
 
 describe("browser API authentication", () => {
   beforeEach(() => {
@@ -49,6 +49,42 @@ describe("browser API authentication", () => {
     const [, init] = vi.mocked(fetch).mock.calls[0];
     expect(init).toEqual(expect.objectContaining({ credentials: "include" }));
     expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+  });
+
+  it("downloads an uploaded form using POST without overriding multipart headers", async () => {
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:purchase"), revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("xlsx"))
+    );
+    const body = new FormData();
+    body.append("file", new File(["synthetic"], "purchase.xlsx"));
+    await download("/api/purchase-entry/export", "采购单录入.xlsx", { method: "POST", body });
+    const [, init] = vi.mocked(fetch).mock.calls[0];
+    expect(init).toEqual(expect.objectContaining({ method: "POST", body, credentials: "include" }));
+    expect(new Headers(init?.headers).has("Content-Type")).toBe(false);
+    expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("preserves Chinese download errors and expires a POST download session", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{}"))
+    );
+    await api("/api/auth/me");
+    const expired = vi.fn();
+    window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ detail: "采购模板缺失" }), { status: 400 }));
+    await expect(
+      download("/api/purchase-entry/export", "purchase.xlsx", { method: "POST", body: new FormData() })
+    ).rejects.toMatchObject({ status: 400, message: "采购模板缺失" });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ detail: "登录已过期" }), { status: 401 }));
+    await expect(
+      download("/api/purchase-entry/export", "purchase.xlsx", { method: "POST", body: new FormData() })
+    ).rejects.toMatchObject({ status: 401 });
+    expect(expired).toHaveBeenCalledOnce();
+    window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
   });
 
   it("explains login throttling when the gateway returns HTML", async () => {
