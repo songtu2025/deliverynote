@@ -20,6 +20,61 @@ from tests.support.inspection import InputInspectionCase
 
 
 class InputInspectionTests(InputInspectionCase):
+    def test_product_optional_columns_are_visible_in_summary_and_pages(self) -> None:
+        columns = ["MSKU", "其他", "锁仓MKSU", "SKU", "店铺/站点", "品类A", "国家"]
+        path = self.root / "product.xlsx"
+        pd.DataFrame(
+            [
+                ["000123", "忽略", "锁", "SKU-A", "店铺:US", "水鞋", "NA"],
+                ["NA", "忽略", "锁", "SKU-B", "店铺:US", "配件", "US"],
+                [123, "忽略", "锁", "SKU-C", "店铺:US", "配件", "US"],
+                [None, "忽略", "锁", "SKU-D", "店铺:US", "配件", None],
+            ],
+            columns=columns,
+        ).to_excel(path, index=False)
+        inspection = inspect_input_version_with_preview("product", path, 0, 1)
+        expected = [column for column in columns if column != "其他"]
+        self.assertEqual(inspection["summary"]["columns"], expected)
+        self.assertEqual(inspection["preview"]["columns"], expected)
+        self.assertEqual(inspection["preview"]["rows"][0]["MSKU"], "000123")
+        self.assertEqual(inspection["preview"]["rows"][0]["国家"], "NA")
+        page = preview_input_version_page("product", path, 1, 1, inspection["summary"])
+        self.assertEqual(page["columns"], expected)
+        self.assertEqual(page["rows"][0]["MSKU"], "NA")
+        self.assertEqual(inspection["summary"], inspect_input_version("product", path))
+        rest = preview_input_version_page("product", path, 2, 2, inspection["summary"])
+        self.assertEqual(rest["rows"][0]["MSKU"], "123")
+        self.assertIsNone(rest["rows"][1]["MSKU"])
+        self.assertIsNone(rest["rows"][1]["国家"])
+        with patch.dict(
+            "delivery_note.inspection.streaming._STREAMING_COLUMNS",
+            {"purchase": PURCHASE_COLUMNS},
+            clear=True,
+        ):
+            non_streaming = inspect_input_version_with_preview("product", path, 0, 1)
+            rest_non_streaming = preview_input_version_page(
+                "product", path, 2, 2, non_streaming["summary"]
+            )
+        self.assertEqual(non_streaming, inspection)
+        self.assertEqual(rest_non_streaming, rest)
+
+    def test_product_streaming_still_requires_original_columns(self) -> None:
+        path = self.root / "product.xlsx"
+        for missing in PRODUCT_COLUMNS:
+            columns = [
+                column
+                for column in [*PRODUCT_COLUMNS, "国家", "MSKU"]
+                if column != missing
+            ]
+            pd.DataFrame([["示例"] * len(columns)], columns=columns).to_excel(
+                path, index=False
+            )
+            with (
+                self.subTest(missing=missing),
+                self.assertRaisesRegex(ValueError, missing),
+            ):
+                inspect_input_version_with_preview("product", path, 0, 20)
+
     def test_combined_product_inspection_streams_only_required_columns(self) -> None:
         path = self.root / "product.xlsx"
         source_columns = [

@@ -5,6 +5,7 @@ let authExpirationReported = false;
 
 type ApiOptions = {
   notifyUnauthorized?: boolean;
+  preserveErrorDetails?: boolean;
 };
 
 export class ApiError extends Error {
@@ -38,7 +39,12 @@ export function expireSession(message = "登录已过期，请重新登录"): vo
   window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT, { detail: { message } }));
 }
 
-export async function api<T>(path: string, init: RequestInit = {}, options: ApiOptions = {}): Promise<T> {
+async function request(
+  path: string,
+  init: RequestInit,
+  options: ApiOptions,
+  failureMessage?: string
+): Promise<Response> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
@@ -55,14 +61,14 @@ export async function api<T>(path: string, init: RequestInit = {}, options: ApiO
     let message =
       response.status === 429 && path === "/api/auth/login"
         ? "登录尝试过于频繁，请稍后再试"
-        : `请求失败（${response.status}）`;
+        : (failureMessage ?? `请求失败（${response.status}）`);
     let code: string | null = null;
     if (response.status === 413 && init.body instanceof FormData) {
       message = "本次上传请求不能超过 200 MiB，请减少文件或分批上传。";
     }
     try {
       const payload = (await response.json()) as { detail?: unknown; code?: unknown };
-      if (typeof payload.detail === "string") {
+      if (typeof payload.detail === "string" && options.preserveErrorDetails !== false) {
         message = payload.detail;
       }
       if (typeof payload.code === "string") {
@@ -76,24 +82,24 @@ export async function api<T>(path: string, init: RequestInit = {}, options: ApiO
   if (path === "/api/auth/login" || path === "/api/auth/me") {
     authExpirationReported = false;
   }
+  return response;
+}
+
+export async function api<T>(path: string, init: RequestInit = {}, options: ApiOptions = {}): Promise<T> {
+  const response = await request(path, init, options);
   if (response.status === 204) {
     return undefined as T;
   }
   return (await response.json()) as T;
 }
 
-export async function download(path: string, filename: string): Promise<void> {
-  const headers = new Headers();
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers,
-    credentials: "include"
-  });
-  if (!response.ok) {
-    if (response.status === 401) {
-      expireSession();
-    }
-    throw new ApiError(response.status, "下载失败");
-  }
+export async function download(path: string, filename: string, init: RequestInit = {}): Promise<void> {
+  const response = await request(
+    path,
+    init,
+    { preserveErrorDetails: (init.method ?? "GET").toUpperCase() !== "GET" },
+    "下载失败"
+  );
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

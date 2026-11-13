@@ -61,6 +61,8 @@ def register_input_version_routes(
         template_label = {
             "template": "导出模板",
             "inbound_template": "积加入库模板",
+            "purchase_template": "采购导出模板",
+            "sku_warehouse": "SKU仓库资料",
         }.get(kind)
         if template_label is not None and suffix != ".xlsx":
             raise HTTPException(

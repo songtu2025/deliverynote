@@ -4,6 +4,28 @@ from delivery_note.pipeline import process_data
 
 
 class AllocationTests(AllocationCase):
+    def test_extra_product_country_and_msku_do_not_duplicate_delivery(self) -> None:
+        products = self.products(
+            [
+                {
+                    "SKU": "SKU-A",
+                    "店铺/站点": "SEEKWAY:US",
+                    "品类A": "水鞋",
+                    "锁仓MKSU": "锁",
+                    "国家": "US",
+                    "MSKU": msku,
+                }
+                for msku in ("MSKU-A", "MSKU-B")
+            ]
+        )
+        result = process_data(
+            self.delivery(20), products, self.purchases(), "KuangBiao"
+        )
+        self.assertEqual(result.delivery_total, 20)
+        self.assertEqual(result.import_total, 20)
+        self.assertEqual(result.manual_total, 0)
+        self.assertEqual(len(result.import_rows), 1)
+
     def test_partial_delivery_is_fully_importable(self):
         result = process_data(
             self.delivery(100), self.products(), self.purchases(), "KuangBiao"

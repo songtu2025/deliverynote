@@ -111,7 +111,18 @@ class BackupDockerTests(unittest.TestCase):
         resources = metadata["resources"]
         self.assertEqual(resources["status"], "passed")
         self.assertEqual(resources["source"], resources["restored"])
-        self.assertEqual(len(resources["restored"]), 4)
+        registered_templates = self.fixture.database_query(
+            "SELECT storage_path FROM input_versions "
+            "WHERE kind IN ('template', 'inbound_template', 'purchase_template')"
+        ).splitlines()
+        self.assertEqual(
+            set(resources["restored"]),
+            {
+                "/data/storage/config/gerpgo.json",
+                "/data/storage/cache/purchase-details-v1.json",
+                *registered_templates,
+            },
+        )
         self.assertTrue(
             all(
                 entry["validation"] == "passed"

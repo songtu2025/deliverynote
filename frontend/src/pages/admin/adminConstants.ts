@@ -1,4 +1,12 @@
-export type InputKind = "purchase" | "product" | "supplier" | "position" | "template" | "inbound_template";
+export type InputKind =
+  | "purchase"
+  | "product"
+  | "supplier"
+  | "position"
+  | "template"
+  | "inbound_template"
+  | "sku_warehouse"
+  | "purchase_template";
 
 export interface InputKindDefinition {
   value: InputKind;
@@ -25,7 +33,8 @@ export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
     uploadExtensions: [".xls", ".xlsx"],
     purpose: "补充商品站点、品类和锁仓标识，用于确认交货商品的匹配关系。",
     impact: "锁仓标识用于解决同一 SKU、站点的歧义，不改变采购余额规则。",
-    requiredFields: ["SKU", "店铺/站点", "品类A", "锁仓MKSU"]
+    requiredFields: ["SKU", "店铺/站点", "品类A", "锁仓MKSU"],
+    optionalFields: ["国家", "MSKU"]
   },
   {
     value: "supplier",
@@ -59,6 +68,22 @@ export const INPUT_KIND_DEFINITIONS: readonly InputKindDefinition[] = [
     purpose: "定义自营仓批次最终生成的积加批量入库文件字段和样式。",
     impact: "新建自营仓入库批次会锁定当前启用版本，不影响原交货处理的 A:G 导出模板。",
     requiredFields: ["入库单号", "入库仓", "SKU", "平台站点", "关联采购单", "关联交货单/调拨单", "本次入库", "入库库位"]
+  },
+  {
+    value: "sku_warehouse",
+    label: "采购仓库",
+    uploadExtensions: [".xlsx"],
+    purpose: "",
+    impact: "",
+    requiredFields: ["SKU", "仓库"]
+  },
+  {
+    value: "purchase_template",
+    label: "采购单录入模板",
+    uploadExtensions: [".xlsx"],
+    purpose: "",
+    impact: "",
+    requiredFields: []
   }
 ];
 

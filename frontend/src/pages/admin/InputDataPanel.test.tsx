@@ -7,6 +7,46 @@ import { InputDataPanel } from "./InputDataPanel";
 setupInputDataPanelTests();
 
 describe("InputDataPanel 资料类型与工作区", () => {
+  it.each([true, false])("采购资料仅维护仓库和模板，忽略旧映射和未知类型（启用=%s）", (active) => {
+    const legacyVersions = ["purchase_mapping", "unknown_kind"].map((kind, index) => ({
+      ...versions[6],
+      id: 91 + index,
+      kind,
+      name: `旧资料-${kind}`,
+      active
+    }));
+    render(
+      <InputDataPanel
+        versions={legacyVersions}
+        loading={false}
+        onVersionsChanged={vi.fn()}
+        onOpenPositionDraft={vi.fn()}
+      />
+    );
+    expect(screen.getByText("0/5 已启用")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "采购单录入资料" }));
+    expect(screen.getByRole("heading", { name: "采购仓库" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^采购仓库，/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^采购单录入模板，/ })).toBeInTheDocument();
+    expect(screen.queryByText("采购站点映射")).not.toBeInTheDocument();
+    expect(screen.queryByText(/旧资料-/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /^商品信息，/ })).not.toBeInTheDocument();
+    expect(screen.getByText("0/2 已启用")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: /版本记录/ }));
+    expect(screen.getByText("暂无采购仓库版本")).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("radio", { name: "基础资料" }));
+    expect(screen.getByRole("heading", { name: "商品信息" })).toBeInTheDocument();
+  });
+  it("商品字段说明保留原必填列并列出国家和 MSKU 为可选字段", () => {
+    render(<InputDataPanel versions={[]} loading={false} onVersionsChanged={vi.fn()} onOpenPositionDraft={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "查看字段说明" }));
+    const fields = screen.getByRole("region", { name: "字段说明" });
+    expect(within(fields).getByText("可选字段")).toBeInTheDocument();
+    for (const field of ["SKU", "店铺/站点", "品类A", "锁仓MKSU", "国家", "MSKU"]) {
+      expect(within(fields).getByText(field)).toBeInTheDocument();
+    }
+  });
   it("shows a type-specific position explanation, metrics, preview, and maintenance entry", async () => {
     const onOpenPositionDraft = vi.fn();
     render(

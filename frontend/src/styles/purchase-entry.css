@@ -1,0 +1,29 @@
+.purchase-entry-page {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.purchase-entry-page > * {
+  min-width: 0;
+}
+
+.purchase-entry-page .page-header {
+  margin-bottom: 0;
+}
+
+.purchase-entry-toolbar {
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.purchase-entry-summary {
+  margin-bottom: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.input-data-kind-groups {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}

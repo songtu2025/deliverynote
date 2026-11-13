@@ -18,6 +18,10 @@ from ..excel_io import (
     read_supplier_workbook,
 )
 from ..processing.models import POSITION_SOURCE_COLUMNS
+from ..purchase_entry import (
+    read_template_frame,
+    read_warehouse_frame,
+)
 
 
 def _read_template_workbook(path: Path) -> pd.DataFrame:
@@ -44,6 +48,8 @@ def _read_frame(kind: str, path: Path) -> pd.DataFrame:
         "position": read_position_workbook,
         "template": _read_template_workbook,
         "inbound_template": _read_self_operated_template_workbook,
+        "sku_warehouse": read_warehouse_frame,
+        "purchase_template": read_template_frame,
     }
     try:
         reader = readers[kind]

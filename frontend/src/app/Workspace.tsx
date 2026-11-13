@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { Button, Layout, Menu, Skeleton } from "antd";
 import {
   ApartmentOutlined,
+  FileAddOutlined,
   InboxOutlined,
   LogoutOutlined,
   SafetyCertificateOutlined,
@@ -16,6 +17,7 @@ const loadAdminPage = () => import("../pages/AdminPage");
 const loadBatchDetail = () => import("../pages/BatchDetail");
 
 const loadBatchesPage = () => import("../pages/BatchesPage");
+const loadPurchaseEntryPage = () => import("../pages/PurchaseEntryPage");
 
 const loadOverreceiptRulesPage = () => import("../pages/OverreceiptRulesPage");
 
@@ -24,11 +26,13 @@ const AdminPage = lazy(loadAdminPage);
 const BatchDetail = lazy(loadBatchDetail);
 
 const BatchesPage = lazy(loadBatchesPage);
+const PurchaseEntryPage = lazy(loadPurchaseEntryPage);
 
 const OverreceiptRulesPage = lazy(loadOverreceiptRulesPage);
 
 const WORKSPACE_LOADERS: Record<WorkspacePage, () => Promise<unknown>> = {
   batches: loadBatchesPage,
+  "purchase-entry": loadPurchaseEntryPage,
   "self-operated": loadBatchesPage,
   overreceipt: loadOverreceiptRulesPage,
   admin: loadAdminPage
@@ -77,6 +81,11 @@ function WorkspacePages({
             canDeleteBatches={user.role === "admin"}
             onOpen={(id) => navigate({ page: "batches", batchId: id })}
           />
+        </div>
+      )}
+      {visitedPages.has("purchase-entry") && (
+        <div hidden={activePage !== "purchase-entry"}>
+          <PurchaseEntryPage />
         </div>
       )}
       {visitedPages.has("self-operated") && (
@@ -153,6 +162,7 @@ export default function Workspace({ user, onLogout }: { user: User; onLogout: ()
     <span onMouseEnter={() => void WORKSPACE_LOADERS[targetPage]()}>{label}</span>
   );
   const menuItems = [
+    { key: "purchase-entry", icon: <FileAddOutlined />, label: menuLabel("purchase-entry", "采购单录入") },
     { key: "batches", icon: <ApartmentOutlined />, label: menuLabel("batches", "交货批次") },
     { key: "self-operated", icon: <InboxOutlined />, label: menuLabel("self-operated", "自营仓入库") },
     { key: "overreceipt", icon: <SafetyCertificateOutlined />, label: menuLabel("overreceipt", "超收规则") },

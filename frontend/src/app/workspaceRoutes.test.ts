@@ -6,6 +6,8 @@ import type { WorkspaceRoute } from "./workspaceRoutes";
 const cases: Array<[string, WorkspaceRoute, string]> = [
   ["/", { page: "batches", batchId: null }, "/batches"],
   ["/batches", { page: "batches", batchId: null }, "/batches"],
+  ["/purchase-entry", { page: "purchase-entry", batchId: null }, "/purchase-entry"],
+  ["/purchase-entry///", { page: "purchase-entry", batchId: null }, "/purchase-entry"],
   ["/batches/7", { page: "batches", batchId: 7 }, "/batches/7"],
   ["/self-operated", { page: "self-operated", batchId: null }, "/self-operated"],
   ["/self-operated/7", { page: "self-operated", batchId: 7 }, "/self-operated/7"],

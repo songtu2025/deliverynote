@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import validate_supplier_frame
+from ..purchase_entry import validate_template, validate_warehouses
 from ..excel_io import (
     read_position_workbook,
     read_product_workbook,
@@ -22,7 +23,12 @@ from .models import InputVersion, User
 
 INPUT_KINDS = ("purchase", "product", "supplier", "position", "template")
 SELF_OPERATED_INPUT_KINDS = ("product", "supplier", "inbound_template")
-UPLOAD_INPUT_KINDS = (*INPUT_KINDS, "inbound_template")
+UPLOAD_INPUT_KINDS = (
+    *INPUT_KINDS,
+    "inbound_template",
+    "sku_warehouse",
+    "purchase_template",
+)
 POSITION_DRAFT_WORKFLOW_REQUIRED_DETAIL = (
     "库位资料已有正式版本，请使用“开始网页维护”通过草稿流程发布新版本"
 )
@@ -52,6 +58,12 @@ BUILTIN_TEMPLATES = (
         "积加批量入库模板.xlsx",
         ASSET_ROOT / "default_inbound_template.xlsx",
     ),
+    BuiltinTemplate(
+        "purchase_template",
+        "系统内置采购导出模板",
+        "采购单录入模板.xlsx",
+        ASSET_ROOT / "default_purchase_template.xlsx",
+    ),
 )
 
 
@@ -76,12 +88,16 @@ def _validate_input_version(kind: str, path: Path) -> None:
         validate_template_workbook(path)
     elif kind == "inbound_template":
         validate_self_operated_template_workbook(path)
+    elif kind == "sku_warehouse":
+        validate_warehouses(path)
+    elif kind == "purchase_template":
+        validate_template(path)
     else:
         raise ValueError(f"不支持的输入资料类型：{kind}")
 
 
 def bootstrap_builtin_templates(database: Database) -> None:
-    """首次启动时依次注册交货和待入库模板。"""
+    """首次启动时注册各流程的内置模板。"""
     for template in BUILTIN_TEMPLATES:
         with database.session() as session:
             existing_id = session.scalar(

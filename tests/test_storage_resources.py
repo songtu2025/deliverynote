@@ -19,8 +19,10 @@ from delivery_note.web.input_versions import BUILTIN_TEMPLATES, BuiltinTemplate
 from delivery_note.web.models import InputVersion
 from scripts.audit_storage import AuditEntry, audit_storage
 from scripts.backup.archive import validate_data_archive
+from scripts.backup.resource_probe import inspect_resources
 from scripts.quarantine_files import inventory
 from scripts.storage_quarantine import prepare_quarantine
+from scripts.storage_resources import inspect_resource
 from tests.support.storage_audit import StorageAuditCase
 
 
@@ -45,8 +47,10 @@ class StorageResourceTests(StorageAuditCase):
             if entry["path"] == relative
         )
 
-    def register_builtin(self, path: Path) -> BuiltinTemplate:
-        template = next(t for t in BUILTIN_TEMPLATES if t.kind == "inbound_template")
+    def register_builtin(
+        self, path: Path, kind: str = "inbound_template"
+    ) -> BuiltinTemplate:
+        template = next(t for t in BUILTIN_TEMPLATES if t.kind == kind)
         shutil.copyfile(template.path, path)
         with self.app.state.database.session() as session:
             version = session.scalar(
@@ -122,19 +126,37 @@ class StorageResourceTests(StorageAuditCase):
         self.assertEqual(self.entry("config/gerpgo.json")["category"], "unknown")
 
     def test_builtin_template_is_validated_and_missing_reference_is_reported(self):
-        path = self.root / "builtin.xlsx"
-        template = self.register_builtin(path)
+        for builtin in BUILTIN_TEMPLATES:
+            with self.subTest(kind=builtin.kind):
+                path = self.root / f"{builtin.kind}.xlsx"
+                template = self.register_builtin(path, builtin.kind)
+                with patch("scripts.storage_resources.BUILTIN_TEMPLATES", (template,)):
+                    entry = self.entry(path.as_posix())
+                    self.assertEqual(entry["category"], "builtin_resource")
+                    self.assertEqual(entry["recovery_source"], "application_image")
+                    self.assertEqual(len(entry["sha256"]), 64)
+                    path.write_bytes(b"broken")
+                    self.assertEqual(self.entry(path.as_posix())["category"], "unknown")
+                    path.unlink()
+                    self.assertEqual(
+                        self.entry(path.as_posix())["category"], "missing_reference"
+                    )
+
+    def test_purchase_template_is_accepted_by_resource_inspection_and_backup(
+        self,
+    ) -> None:
+        path = self.root / "purchase-template.xlsx"
+        template = self.register_builtin(path, "purchase_template")
+        before = self.snapshot_files()
         with patch("scripts.storage_resources.BUILTIN_TEMPLATES", (template,)):
-            entry = self.entry(path.as_posix())
-            self.assertEqual(entry["category"], "builtin_resource")
-            self.assertEqual(entry["recovery_source"], "application_image")
-            self.assertEqual(len(entry["sha256"]), 64)
-            path.write_bytes(b"broken")
-            self.assertEqual(self.entry(path.as_posix())["category"], "unknown")
-            path.unlink()
-            self.assertEqual(
-                self.entry(path.as_posix())["category"], "missing_reference"
-            )
+            result = inspect_resource(path, self.storage, frozenset({path}))
+            assert result is not None
+            self.assertEqual(result[0], "builtin_resource")
+            self.assertEqual(result[2]["validation"], "passed")
+            report = inspect_resources(self.storage, [(template.kind, str(path))])
+            self.assertEqual(report[str(path)]["validation"], "passed")
+            self.assertEqual(report[str(path)]["recovery_source"], "application_image")
+        self.assertEqual(self.snapshot_files(), before)
 
     def test_wrong_template_kind_and_other_external_paths_remain_unknown(self):
         path = self.root / "builtin.xlsx"

@@ -45,7 +45,7 @@ describe("BatchesPage", () => {
     expect(create).toBeEnabled();
     expect(create.closest(".batch-list-toolbar")).toBeInTheDocument();
     expect(container.querySelector(".page-heading button")).not.toBeInTheDocument();
-    expect(within(status).getByRole("button", { name: /同步采购数据/ })).toHaveClass("ant-btn-default");
+    expect(await within(status).findByRole("button", { name: /同步采购数据/ })).toHaveClass("ant-btn-default");
     expect(screen.getByLabelText("搜索")).toHaveAttribute("placeholder", "搜索批次名称");
     expect(screen.getByLabelText("状态")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "交货批次列表" })).toBeInTheDocument();

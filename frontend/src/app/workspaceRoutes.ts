@@ -1,4 +1,4 @@
-export type WorkspacePage = "batches" | "self-operated" | "overreceipt" | "admin";
+export type WorkspacePage = "batches" | "purchase-entry" | "self-operated" | "overreceipt" | "admin";
 
 export type WorkspaceRoute = {
   page: WorkspacePage;
@@ -18,6 +18,9 @@ export function readWorkspaceRoute(pathname: string): WorkspaceRoute {
   if (normalizedPath === "/self-operated") {
     return { page: "self-operated", batchId: null };
   }
+  if (normalizedPath === "/purchase-entry") {
+    return { page: "purchase-entry", batchId: null };
+  }
   if (normalizedPath === "/overreceipt") {
     return { page: "overreceipt", batchId: null };
   }
@@ -32,6 +35,7 @@ export function workspacePath(route: WorkspaceRoute): string {
     return route.page === "self-operated" ? `/self-operated/${route.batchId}` : `/batches/${route.batchId}`;
   }
   if (route.page === "self-operated") return "/self-operated";
+  if (route.page === "purchase-entry") return "/purchase-entry";
   if (route.page === "overreceipt") return "/overreceipt";
   if (route.page === "admin") return "/admin";
   return "/batches";

@@ -5,7 +5,25 @@ import App from "../App";
 
 describe("AppNavigation", () => {
   const state = setupAppTests();
+  it("操作员可从采购单录入直接刷新并通过菜单和浏览器历史返回", async () => {
+    state.authenticatedUser = operatorUser;
+    window.history.replaceState({}, "", "/purchase-entry");
+    const view = render(<App />);
+    await screen.findByRole("heading", { name: "采购单录入" });
+    expect(screen.getByRole("menuitem", { name: /采购单录入/ })).toHaveClass("ant-menu-item-selected");
+    expect(vi.mocked(fetch).mock.calls.map(([input]) => String(input))).toEqual(["/api/auth/me"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: /交货批次/ }));
+    await screen.findByRole("heading", { name: "交货批次" });
+    window.history.back();
+    await waitFor(() => expect(screen.getByRole("heading", { name: "采购单录入" })).toBeVisible());
+    expect(window.location.pathname).toBe("/purchase-entry");
+    view.unmount();
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "采购单录入" })).toBeVisible();
+  });
   it.each(["/batches/7", "/self-operated/7"])("直接进入 %s 只请求详情首屏所需数据一次", async (path) => {
+    // 预先完成开发期模块转换，避免首屏请求断言依赖动态导入的编译耗时。
+    await import("../pages/BatchDetail");
     state.authenticatedUser = adminUser;
     window.history.replaceState({}, "", path);
     const originalFetch = fetch;
